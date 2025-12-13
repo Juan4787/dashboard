@@ -1,0 +1,637 @@
+<script lang="ts">
+	import Modal from '$lib/components/Modal.svelte';
+	import { CLINICAL_ENTRY_TYPES } from '$lib/constants';
+	import { formatDate, formatDateTime } from '$lib/utils/format';
+
+	let { data, form } = $props<{
+		data: { patient: any; entries: any[] };
+		form: { message?: string };
+	}>();
+
+	let showEntryModal = $state(false);
+	let showEditModal = $state(false);
+	let tab = $state<'historial' | 'datos'>('historial');
+	let filterType = $state<'Todos' | 'Consulta' | 'Tratamiento'>('Todos');
+	let onlyWithNote = $state(false);
+	let timelineSearch = $state('');
+	let expandedId = $state<string | null>(null);
+	const fmtTime = (dateStr: string) =>
+		new Intl.DateTimeFormat('es-AR', {
+			hour: '2-digit',
+			minute: '2-digit',
+			hour12: false
+		}).format(new Date(dateStr));
+	const mainTitle = (entry: any) => entry.title ?? entry.description ?? entry.entry_type;
+	const isDuplicateDescription = (entry: any) =>
+		entry.description ? entry.description.trim().toLowerCase() === mainTitle(entry).trim().toLowerCase() : false;
+	const hasDistinctNote = (entry: any) =>
+		entry.internal_note &&
+		entry.internal_note.trim() &&
+		entry.internal_note.trim().toLowerCase() !== (entry.description ?? '').trim().toLowerCase();
+
+	const copyToClipboard = (text?: string) => {
+		if (!text) return;
+		if (navigator?.clipboard) {
+			navigator.clipboard.writeText(text).catch(() => {});
+		}
+	};
+
+	const lastVisit = $derived(data.entries?.[0]?.created_at ?? null);
+	const chips = $derived(
+		(
+			[
+				lastVisit
+					? {
+							label: 'Última visita',
+							value: formatDate(lastVisit),
+							intent: 'neutral' as const
+					  }
+					: null,
+				data.patient.allergies
+					? {
+							label: 'Alergias',
+							value: data.patient.allergies,
+							intent: 'alert' as const
+					  }
+					: null,
+				data.patient.insurance
+					? {
+							label: 'Obra social',
+							value: data.patient.insurance,
+							intent: 'neutral' as const
+					  }
+					: null
+			].filter((c): c is { label: string; value: string; intent: 'neutral' | 'alert' } => Boolean(c))
+		)
+	);
+
+	const entryMatches = (entry: any) => {
+		if (filterType !== 'Todos' && entry.entry_type !== filterType) return false;
+		if (onlyWithNote && !entry.internal_note) return false;
+		if (timelineSearch.trim()) {
+			const q = timelineSearch.toLowerCase();
+			const haystack = `${entry.entry_type} ${entry.description ?? ''} ${entry.internal_note ?? ''} ${entry.teeth ?? ''}`.toLowerCase();
+			if (!haystack.includes(q)) return false;
+		}
+		return true;
+	};
+</script>
+
+<div class="flex flex-col gap-5">
+	<div class="rounded-2xl border border-neutral-100 bg-white/90 p-6 shadow-card dark:border-[#1f3554] dark:bg-[#152642]">
+		<div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+			<div class="space-y-1">
+				<h1 class="text-3xl font-semibold text-neutral-900 dark:text-white">{data.patient.full_name}</h1>
+			</div>
+			<div class="flex flex-wrap items-center gap-3">
+				<form method="post" action="?/archive_patient" class="contents">
+					<button
+						type="submit"
+						class="hidden rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 transition hover:-translate-y-0.5 hover:bg-neutral-100 hover:shadow-card dark:border-[#1f3554] dark:text-[#eaf1ff] dark:hover:bg-[#0f1f36] md:inline-flex"
+						onclick={(event: MouseEvent) => {
+							event.preventDefault();
+							if (confirm('¿Archivar paciente? Podés recuperarlo desde "Archivados".')) {
+								(event.target as HTMLButtonElement).closest('form')?.submit();
+							}
+						}}
+					>
+						Archivar
+					</button>
+				</form>
+				<button
+					class="hidden rounded-full bg-[#7c3aed] px-5 py-2 text-sm font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed] md:inline-flex"
+					type="button"
+					onclick={() => (showEntryModal = true)}
+				>
+					+ Nueva entrada
+				</button>
+			</div>
+		</div>
+		<div class="mt-4 flex gap-3 text-sm">
+			<a
+				href="/odonto/pacientes"
+				class="flex items-center gap-2 rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 transition hover:-translate-y-0.5 hover:bg-neutral-100 hover:shadow-card dark:border-[#1f3554] dark:text-[#eaf1ff] dark:hover:bg-[#122641]"
+			>
+				<svg
+					aria-hidden="true"
+					class="h-4 w-4"
+					fill="none"
+					viewBox="0 0 24 24"
+					stroke="currentColor"
+					stroke-width="2"
+				>
+					<path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+				</svg>
+				Atrás
+			</a>
+			<button
+				class={`rounded-full px-4 py-2 font-semibold transition ${
+					tab === 'historial'
+						? 'bg-[#7c3aed] text-white shadow-sm'
+						: 'text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-[#0f1f36]'
+				}`}
+				onclick={() => (tab = 'historial')}
+			>
+				Historial
+			</button>
+			<button
+				class={`rounded-full px-4 py-2 font-semibold transition ${
+					tab === 'datos'
+						? 'bg-[#7c3aed] text-white shadow-sm'
+						: 'text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-[#0f1f36]'
+				}`}
+				onclick={() => (tab = 'datos')}
+			>
+				Datos
+			</button>
+			<button
+				class="ml-auto flex h-10 w-10 items-center justify-center rounded-full border border-neutral-200 text-neutral-600 transition hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-100 dark:hover:bg-[#122641] md:hidden"
+				type="button"
+				onclick={() => {
+					if (confirm('¿Archivar paciente? Podés recuperarlo desde "Archivados".')) {
+						(document.querySelector('form[action=\"?/archive_patient\"]') as HTMLFormElement | null)?.submit();
+					}
+				}}
+				aria-label="Más acciones"
+				title="Archivar"
+			>
+				<span aria-hidden="true">⋯</span>
+			</button>
+		</div>
+		<div class="mt-4 flex flex-wrap gap-3">
+			{#each chips as chip}
+				<div
+					class={`flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold ${
+						{
+							neutral: 'bg-white/60 text-neutral-800 dark:bg-white/10 dark:text-neutral-100',
+							alert: 'bg-amber-100 text-amber-900 dark:bg-amber-500/15 dark:text-amber-100',
+							warn: 'bg-indigo-100 text-indigo-900 dark:bg-indigo-500/15 dark:text-indigo-100'
+						}[chip.intent]
+					}`}
+				>
+					<span class="text-[11px] uppercase tracking-wide">{chip.label}:</span>
+					<span>{chip.value}</span>
+				</div>
+			{/each}
+		</div>
+	</div>
+
+	{#if tab === 'historial'}
+		<div class="rounded-2xl border border-neutral-100 bg-white/90 p-6 shadow-card dark:border-[#1f3554] dark:bg-[#152642]">
+			<div class="flex flex-col gap-3 text-sm sm:flex-row sm:items-center">
+				<select
+					bind:value={filterType}
+					class="w-full rounded-full border border-neutral-200 bg-white px-3 py-2 text-sm dark:border-[#1f3554] dark:bg-[#0f1f36]"
+				>
+					<option value="Todos">Tipo: Todos</option>
+					<option value="Consulta">Consulta</option>
+					<option value="Diagnóstico">Diagnóstico</option>
+					<option value="Tratamiento">Tratamiento</option>
+				</select>
+				<input
+					type="search"
+					placeholder="Buscar (zona, palabra, fecha)"
+					class="w-full rounded-full border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-700 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-neutral-50"
+					bind:value={timelineSearch}
+				/>
+			</div>
+			<div class="mt-4">
+				{#if data.entries.length === 0}
+					<p class="rounded-xl border border-dashed border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-neutral-200">
+						Sin entradas todavía. Cargá la primera desde “Nueva entrada”.
+					</p>
+				{:else}
+					<div class="relative pl-8">
+						<span class="absolute left-2 top-0 h-full w-px bg-neutral-200 dark:bg-[#1f3554]/60"></span>
+						<div class="space-y-3">
+							{#each data.entries as entry (entry.id ?? entry.created_at)}
+								{#if entryMatches(entry)}
+									{#key entry.id ?? entry.created_at}
+										<div
+											role="button"
+											tabindex="0"
+											onclick={() => (expandedId = expandedId === (entry.id ?? entry.created_at) ? null : entry.id ?? entry.created_at)}
+											onkeydown={(e) => e.key === 'Enter' && (expandedId = expandedId === (entry.id ?? entry.created_at) ? null : entry.id ?? entry.created_at)}
+											class="group relative overflow-hidden rounded-xl border border-neutral-100 bg-white px-4 py-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed] dark:border-[#1f3554] dark:bg-[#0f1f36]"
+										>
+											<span class="absolute left-[-14px] top-5 h-3 w-3 rounded-full border-2 border-white bg-[#7c3aed] shadow dark:border-[#0f1f36]"></span>
+											<div class="flex items-center justify-between gap-3">
+												<div class="flex items-center gap-3">
+													<span class="rounded-full bg-[#7c3aed]/15 px-3 py-1 text-xs font-bold uppercase tracking-wide text-[#5b21b6] dark:bg-[#7c3aed]/20 dark:text-[#d9c5ff]">
+														{entry.entry_type}
+													</span>
+													<p class="text-[15px] font-semibold text-neutral-900 dark:text-white line-clamp-1">
+														{mainTitle(entry)}
+													</p>
+												</div>
+												{#if entry.amount}
+													<span class="text-sm font-semibold text-neutral-800 dark:text-neutral-100"> ${entry.amount} </span>
+												{/if}
+											</div>
+											{#if entry.description && !isDuplicateDescription(entry)}
+												<p class="mt-1 text-[13px] font-medium text-neutral-700 opacity-85 line-clamp-1 dark:text-neutral-200">
+													{entry.description}
+												</p>
+											{/if}
+											<p class="mt-2 text-[12px] font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
+												{formatDate(entry.created_at)} · {fmtTime(entry.created_at)}
+												{entry.teeth ? ` · Zona ${entry.teeth}` : ''}
+											</p>
+											{#if hasDistinctNote(entry)}
+												<p class="mt-1 text-[12px] font-semibold text-neutral-700 dark:text-neutral-200 line-clamp-1">
+													Nota: {entry.internal_note}
+												</p>
+											{/if}
+											{#if expandedId === (entry.id ?? entry.created_at)}
+												<div class="mt-3 space-y-2 text-sm text-neutral-800 dark:text-neutral-100">
+													{#if entry.amount}
+														<p><span class="font-semibold">Importe:</span> ${entry.amount}</p>
+													{/if}
+													{#if entry.internal_note}
+														<p><span class="font-semibold">Nota completa:</span> {entry.internal_note}</p>
+													{/if}
+												</div>
+											{/if}
+										</div>
+									{/key}
+								{/if}
+							{/each}
+						</div>
+					</div>
+				{/if}
+			</div>
+		</div>
+	{:else}
+		<div class="rounded-2xl border border-neutral-100 bg-white p-5 shadow-sm dark:border-[#1f3554] dark:bg-[#122641]">
+			<h2 class="text-lg font-semibold text-neutral-900 dark:text-white">Datos del paciente</h2>
+			<div class="mt-4 space-y-4">
+				<div class="rounded-xl border border-neutral-100 bg-white/60 p-4 dark:border-[#1f3554] dark:bg-[#0f1f36]">
+					<div class="mb-3 flex items-center justify-between">
+						<p class="text-[13px] font-bold uppercase tracking-wide text-neutral-600 dark:text-neutral-300">Alertas médicas</p>
+						<button
+							type="button"
+							class="rounded-full border border-neutral-200 px-3 py-1 text-xs font-semibold text-neutral-700 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-50 dark:hover:bg-[#122641]"
+							onclick={() => (showEditModal = true)}
+						>
+							Editar
+						</button>
+					</div>
+					<div class="space-y-3">
+						<div class="flex items-start justify-between gap-3 rounded-lg bg-amber-100/30 px-3 py-2 dark:bg-amber-500/10">
+							<div class="flex items-center gap-2 text-xs font-semibold text-amber-700 dark:text-amber-200">
+								<svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M4.93 19h14.14a1 1 0 0 0 .9-1.45L12.9 4.55a1 1 0 0 0-1.8 0L4.03 17.55A1 1 0 0 0 4.93 19Z" />
+								</svg>
+								Alergias
+							</div>
+							<p
+								class={`text-[15px] font-semibold ${
+									data.patient.allergies ? 'text-amber-900 dark:text-amber-100' : 'text-amber-700/70 dark:text-amber-200/70'
+								}`}
+							>
+								{data.patient.allergies ?? 'Sin registrar'}
+							</p>
+						</div>
+						<div class="flex items-start justify-between gap-3">
+							<div class="flex items-center gap-2 text-xs font-semibold text-neutral-500 dark:text-neutral-300">
+								<svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" d="M6.75 6.75 17.25 17.25M9 5.25 5.25 9 9 12.75 12.75 9 9 5.25Z" />
+									<path stroke-linecap="round" stroke-linejoin="round" d="M15 11.25 11.25 15 15 18.75 18.75 15 15 11.25Z" />
+								</svg>
+								Medicación
+							</div>
+							<p
+								class={`text-[15px] font-semibold ${
+									data.patient.medication ? 'text-white dark:text-white' : 'text-neutral-400 dark:text-neutral-500'
+								}`}
+							>
+								{data.patient.medication ?? 'Sin registrar'}
+							</p>
+						</div>
+						<div class="flex items-start justify-between gap-3">
+							<div class="flex items-center gap-2 text-xs font-semibold text-neutral-500 dark:text-neutral-300">
+								<svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" d="M6.75 4.5h10.5a1.5 1.5 0 0 1 1.5 1.5v12.75l-4.5-2.25L9.75 18.75 5.25 21V6A1.5 1.5 0 0 1 6.75 4.5Z" />
+								</svg>
+								Antecedentes
+							</div>
+							<p
+								class={`text-[15px] font-semibold whitespace-pre-wrap ${
+									data.patient.background ? 'text-white dark:text-white' : 'text-neutral-400 dark:text-neutral-500'
+								}`}
+							>
+								{data.patient.background ?? 'Sin registrar'}
+							</p>
+						</div>
+					</div>
+				</div>
+
+				<div class="rounded-xl border border-neutral-100 bg-white/60 p-4 dark:border-[#1f3554] dark:bg-[#0f1f36]">
+					<div class="mb-3 flex items-center justify-between">
+						<p class="text-[13px] font-bold uppercase tracking-wide text-neutral-600 dark:text-neutral-300">Contacto</p>
+						<button
+							type="button"
+							class="rounded-full border border-neutral-200 px-3 py-1 text-xs font-semibold text-neutral-700 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-50 dark:hover:bg-[#122641]"
+							onclick={() => (showEditModal = true)}
+						>
+							Editar
+						</button>
+					</div>
+					<div class="grid gap-3 md:grid-cols-2">
+						<div class="space-y-1">
+							<p class="text-xs font-semibold text-neutral-500 dark:text-neutral-300">Teléfono</p>
+							<div class="flex items-center gap-2">
+								<p class={`text-[15px] font-semibold ${data.patient.phone ? 'text-white' : 'text-neutral-400 dark:text-neutral-500'}`}>
+									{data.patient.phone ?? 'Sin registrar'}
+								</p>
+								{#if data.patient.phone}
+									<button
+										type="button"
+										class="grid h-8 w-8 place-items-center rounded-full border border-neutral-200 text-xs text-neutral-600 dark:border-[#1f3554] dark:text-neutral-200"
+										onclick={() => copyToClipboard(data.patient.phone)}
+										title="Copiar"
+									>
+										⧉
+									</button>
+								{/if}
+							</div>
+						</div>
+						<div class="space-y-1">
+							<p class="text-xs font-semibold text-neutral-500 dark:text-neutral-300">Email</p>
+							<div class="flex items-center gap-2">
+								<p class={`text-[15px] font-semibold break-all ${data.patient.email ? 'text-white' : 'text-neutral-400 dark:text-neutral-500'}`}>
+									{data.patient.email ?? 'Sin registrar'}
+								</p>
+								{#if data.patient.email}
+									<button
+										type="button"
+										class="grid h-8 w-8 place-items-center rounded-full border border-neutral-200 text-xs text-neutral-600 dark:border-[#1f3554] dark:text-neutral-200"
+										onclick={() => copyToClipboard(data.patient.email)}
+										title="Copiar"
+									>
+										⧉
+									</button>
+								{/if}
+							</div>
+						</div>
+						<div class="space-y-1 md:col-span-2">
+							<p class="text-xs font-semibold text-neutral-500 dark:text-neutral-300">Dirección</p>
+							<div class="flex items-center gap-2">
+								<p class={`text-[15px] font-semibold ${data.patient.address ? 'text-white' : 'text-neutral-400 dark:text-neutral-500'}`}>
+									{data.patient.address ?? 'Sin registrar'}
+								</p>
+								{#if data.patient.address}
+									<button
+										type="button"
+										class="grid h-8 w-8 place-items-center rounded-full border border-neutral-200 text-xs text-neutral-600 dark:border-[#1f3554] dark:text-neutral-200"
+										onclick={() => copyToClipboard(data.patient.address)}
+										title="Copiar"
+									>
+										⧉
+									</button>
+								{/if}
+							</div>
+						</div>
+					</div>
+				</div>
+
+				<div class="rounded-xl border border-neutral-100 bg-white/60 p-4 dark:border-[#1f3554] dark:bg-[#0f1f36]">
+					<div class="mb-3 flex items-center justify-between">
+						<p class="text-[13px] font-bold uppercase tracking-wide text-neutral-600 dark:text-neutral-300">Administrativo</p>
+						<button
+							type="button"
+							class="rounded-full border border-neutral-200 px-3 py-1 text-xs font-semibold text-neutral-700 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-50 dark:hover:bg-[#122641]"
+							onclick={() => (showEditModal = true)}
+						>
+							Editar
+						</button>
+					</div>
+					<div class="grid gap-3 md:grid-cols-2">
+						<div class="space-y-1">
+							<p class="text-xs font-semibold text-neutral-500 dark:text-neutral-300">Obra social</p>
+							<p class={`text-[15px] font-semibold ${data.patient.insurance ? 'text-white' : 'text-neutral-400 dark:text-neutral-500'}`}>
+								{data.patient.insurance ?? 'Sin registrar'}
+							</p>
+						</div>
+						<div class="space-y-1">
+							<p class="text-xs font-semibold text-neutral-500 dark:text-neutral-300">Nacimiento</p>
+							<p class={`text-[15px] font-semibold ${data.patient.birth_date ? 'text-white' : 'text-neutral-400 dark:text-neutral-500'}`}>
+								{data.patient.birth_date ? formatDate(data.patient.birth_date) : 'Sin registrar'}
+							</p>
+						</div>
+					</div>
+				</div>
+			</div>
+			<details class="mt-4 text-[11px] text-[#65738d] dark:text-[#7b8aa5]">
+				<summary class="cursor-pointer text-neutral-600 dark:text-neutral-200">Ver detalles</summary>
+				<p class="mt-1">
+					Creado: {formatDate(data.patient.created_at)} • Última actualización: {formatDateTime(data.patient.updated_at)}
+				</p>
+			</details>
+		</div>
+	{/if}
+</div>
+
+<!-- FAB móvil para nueva entrada -->
+<button
+	class="fixed bottom-20 right-4 z-20 flex h-14 w-14 items-center justify-center rounded-full bg-[#7c3aed] text-2xl font-bold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed] md:hidden"
+	onclick={() => (showEntryModal = true)}
+	aria-label="Nueva entrada"
+>
+	+
+</button>
+
+<Modal open={showEntryModal} title="Nueva entrada" on:close={() => (showEntryModal = false)}>
+	<form method="post" action="?/add_entry" class="space-y-4">
+		<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+			<div class="space-y-2">
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="entry_type">Tipo</label>
+				<select
+					id="entry_type"
+					name="entry_type"
+					required
+					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+				>
+					<option value="">Seleccionar</option>
+					{#each CLINICAL_ENTRY_TYPES as type}
+						<option value={type}>{type}</option>
+					{/each}
+				</select>
+			</div>
+			<div class="space-y-2">
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="created_at">Fecha y hora</label>
+				<input
+					id="created_at"
+					name="created_at"
+					type="datetime-local"
+					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+				/>
+			</div>
+		</div>
+		<div class="space-y-2">
+			<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="description">Descripción</label>
+			<textarea
+				id="description"
+				name="description"
+				required
+				rows="4"
+				class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+				placeholder="Motivo de consulta, hallazgos, indicaciones..."
+			></textarea>
+		</div>
+		<div class="grid grid-cols-1 gap-3 md:grid-cols-3">
+			<div class="space-y-2">
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="teeth">Dientes / zona</label>
+				<input
+					id="teeth"
+					name="teeth"
+					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+					placeholder="Ej: 11-12"
+				/>
+			</div>
+			<div class="space-y-2">
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="amount">Importe</label>
+				<input
+					id="amount"
+					name="amount"
+					type="number"
+					step="0.01"
+					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+					placeholder="Ej: 12000"
+				/>
+			</div>
+			<div class="space-y-2">
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="internal_note">Nota interna</label>
+				<input
+					id="internal_note"
+					name="internal_note"
+					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+					placeholder="Opcional"
+				/>
+			</div>
+		</div>
+		{#if form?.message}
+			<p class="rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{form.message}</p>
+		{/if}
+		<div class="flex items-center justify-end gap-2">
+			<button
+				type="button"
+				onclick={() => (showEntryModal = false)}
+				class="rounded-xl px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:text-white dark:hover:bg-[#1b2d4b]"
+			>
+				Cancelar
+			</button>
+			<button
+				type="submit"
+				class="rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+			>
+				Guardar
+			</button>
+		</div>
+	</form>
+</Modal>
+
+<Modal open={showEditModal} title="Editar datos" on:close={() => (showEditModal = false)}>
+	<form method="post" action="?/update_patient" class="space-y-3">
+		<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+			<div class="space-y-1">
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="email">Email</label>
+				<input
+					id="email"
+					name="email"
+					type="email"
+					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+					value={data.patient.email ?? ''}
+				/>
+			</div>
+			<div class="space-y-1">
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="phone">Teléfono</label>
+				<input
+					id="phone"
+					name="phone"
+					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+					value={data.patient.phone ?? ''}
+				/>
+			</div>
+		</div>
+		<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+			<div class="space-y-1">
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="birth_date">Fecha de nacimiento</label>
+				<input
+					id="birth_date"
+					name="birth_date"
+					type="date"
+					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+					value={data.patient.birth_date ?? ''}
+				/>
+			</div>
+			<div class="space-y-1">
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="address">Dirección</label>
+				<input
+					id="address"
+					name="address"
+					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+					value={data.patient.address ?? ''}
+				/>
+			</div>
+		</div>
+		<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+			<div class="space-y-1">
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="insurance">Obra social</label>
+				<input
+					id="insurance"
+					name="insurance"
+					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+					value={data.patient.insurance ?? ''}
+				/>
+			</div>
+			<div class="space-y-1">
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="allergies">Alergias</label>
+				<input
+					id="allergies"
+					name="allergies"
+					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+					value={data.patient.allergies ?? ''}
+				/>
+			</div>
+		</div>
+		<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+			<div class="space-y-1">
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="medication">Medicación</label>
+				<textarea
+					id="medication"
+					name="medication"
+					rows="2"
+					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+				>{data.patient.medication ?? ''}</textarea>
+			</div>
+			<div class="space-y-1">
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="background">Antecedentes</label>
+				<textarea
+					id="background"
+					name="background"
+					rows="2"
+					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+				>{data.patient.background ?? ''}</textarea>
+			</div>
+		</div>
+		{#if form?.message}
+			<p class="rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{form.message}</p>
+		{/if}
+		<div class="flex items-center justify-end gap-2">
+			<button
+				type="button"
+				class="rounded-xl px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:text-white dark:hover:bg-[#1b2d4b]"
+				onclick={() => (showEditModal = false)}
+			>
+				Cancelar
+			</button>
+			<button
+				type="submit"
+				class="rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+			>
+				Guardar cambios
+			</button>
+		</div>
+	</form>
+</Modal>

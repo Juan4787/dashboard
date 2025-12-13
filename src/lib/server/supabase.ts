@@ -1,0 +1,74 @@
+import { env } from '$env/dynamic/private';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+
+export type Module = 'odonto' | 'administrativo';
+
+export type AuthTokens = {
+	access_token: string;
+	refresh_token: string;
+};
+
+const moduleEmails: Record<Module, string | undefined> = {
+	odonto: env.SABRINA_EMAIL,
+	administrativo: env.ADMIN_EMAIL
+};
+
+const moduleConfig: Record<
+	Module,
+	{
+		url?: string;
+		key?: string;
+	}
+> = {
+	odonto: {
+		url: env.ODONTO_SUPABASE_URL,
+		key: env.ODONTO_SUPABASE_ANON_KEY
+	},
+	administrativo: {
+		url: env.ADMIN_SUPABASE_URL,
+		key: env.ADMIN_SUPABASE_ANON_KEY
+	}
+};
+
+export const resolveModuleByEmail = (email: string): Module | null => {
+	const normalized = email.trim().toLowerCase();
+	return (Object.entries(moduleEmails).find(([, value]) => value?.toLowerCase() === normalized)?.[0] ??
+		null) as Module | null;
+};
+
+export const getModuleEntryRoute = (module: Module) =>
+	module === 'odonto' ? '/odonto/pacientes' : '/administrativo/expedientes';
+
+export const createSupabaseServerClient = async (
+	module: Module,
+	tokens?: AuthTokens | null,
+	fetchImpl?: typeof fetch
+): Promise<SupabaseClient> => {
+	if (env.DEMO_MODE === 'true') {
+		throw new Error('Demo mode: Supabase deshabilitado');
+	}
+	const config = moduleConfig[module];
+	if (!config.url || !config.key) {
+		throw new Error(`Faltan variables de entorno de Supabase para el módulo ${module}`);
+	}
+
+	const supabase = createClient(config.url, config.key, {
+		auth: {
+			persistSession: false,
+			autoRefreshToken: true
+		},
+		global: {
+			headers: { 'X-App-Module': module },
+			fetch: fetchImpl
+		}
+	});
+
+	if (tokens?.access_token && tokens?.refresh_token) {
+		await supabase.auth.setSession({
+			access_token: tokens.access_token,
+			refresh_token: tokens.refresh_token
+		});
+	}
+
+	return supabase;
+};
