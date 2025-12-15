@@ -91,13 +91,36 @@ let editingEntry: any | null = $state(null);
 let editEntryType = $state('');
 let editEntryDescription = $state('');
 let editEntryTeeth = $state('');
-let editEntryAmount = $state('');
 let editEntryNote = $state('');
 let editEntryCreatedAt = $state('');
+let amountDisplay = $state('');
+let amountRaw = $state('');
+let editAmountDisplay = $state('');
+let editAmountRaw = $state('');
 let archiveForm: HTMLFormElement | null = null;
 let unarchiveForm: HTMLFormElement | null = null;
 let deleteForm: HTMLFormElement | null = null;
 	const isArchived = $derived(Boolean(data.patient.archived_at));
+
+const formatAmountInput = (value: string) => {
+	const digits = value.replace(/\D/g, '');
+	if (!digits) return { digits: '', formatted: '' };
+	const formatted = digits.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+	return { digits, formatted };
+};
+
+const handleAmountChange = (event: Event, type: 'new' | 'edit') => {
+	const target = event.currentTarget as HTMLInputElement;
+	const { digits, formatted } = formatAmountInput(target.value);
+	target.value = formatted;
+	if (type === 'new') {
+		amountDisplay = formatted;
+		amountRaw = digits;
+	} else {
+		editAmountDisplay = formatted;
+		editAmountRaw = digits;
+	}
+};
 
 	const handleEntrySubmit = (event: SubmitEvent) => {
 		showEntryErrors = true;
@@ -131,11 +154,21 @@ const openEditEntry = (entry: any) => {
 	editEntryType = entry.entry_type ?? '';
 	editEntryDescription = entry.description ?? '';
 	editEntryTeeth = entry.teeth ?? '';
-	editEntryAmount = entry.amount ?? '';
+	const initialAmount = entry.amount != null ? String(entry.amount) : '';
+	const { digits, formatted } = formatAmountInput(initialAmount);
+	editAmountDisplay = formatted;
+	editAmountRaw = digits;
 	editEntryNote = entry.internal_note ?? '';
 	editEntryCreatedAt = entry.created_at ?? '';
 	showEditEntryErrors = false;
 	showEditEntryModal = true;
+};
+
+const openNewEntryModal = () => {
+	amountDisplay = '';
+	amountRaw = '';
+	showEntryErrors = false;
+	showEntryModal = true;
 };
 
 const preventEnterSubmit = (event: KeyboardEvent) => {
@@ -177,7 +210,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				<button
 					class="hidden rounded-full bg-[#7c3aed] px-5 py-2 text-sm font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed] md:inline-flex"
 					type="button"
-					onclick={() => (showEntryModal = true)}
+					onclick={openNewEntryModal}
 				>
 					+ Registrar consulta
 				</button>
@@ -279,7 +312,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 			<div class="mt-4">
 				{#if data.entries.length === 0}
 					<p class="rounded-xl border border-dashed border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-neutral-200">
-						Sin entradas todavía. Cargá la primera desde “Registrar consulta”.
+						Sin consultas registradas. Cargá la primera desde “Registrar consulta”.
 					</p>
 				{:else}
 					<div class="relative pl-8">
@@ -528,18 +561,18 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 <!-- FAB móvil para nueva entrada -->
 <button
 	class="fixed bottom-20 right-4 z-20 flex h-14 w-14 items-center justify-center rounded-full bg-[#7c3aed] text-2xl font-bold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed] md:hidden"
-	onclick={() => (showEntryModal = true)}
+	onclick={openNewEntryModal}
 aria-label="Registrar consulta"
 >
 	+
 </button>
 
-<Modal open={showEntryModal} title="Registrar consulta" on:close={() => (showEntryModal = false)}>
+<Modal open={showEntryModal} title={`Registrar consulta - ${data.patient.full_name}`} on:close={() => (showEntryModal = false)}>
 	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 	<form method="post" action="?/add_entry" class="space-y-4" onkeydown={preventEnterSubmit} onsubmit={handleEntrySubmit}>
-		<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+		<div class="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-5">
 			<div class="space-y-2">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="entry_type">Tipo</label>
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="entry_type">Tipo de consulta</label>
 				<select
 					id="entry_type"
 					name="entry_type"
@@ -570,7 +603,7 @@ aria-label="Registrar consulta"
 		</div>
 		<div class="grid grid-cols-1 gap-3 md:grid-cols-3">
 			<div class="space-y-2">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="teeth">Dientes / zona</label>
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="teeth">Dientes / zona (opcional)</label>
 				<input
 					id="teeth"
 					name="teeth"
@@ -579,23 +612,26 @@ aria-label="Registrar consulta"
 				/>
 			</div>
 			<div class="space-y-2">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="amount">Importe</label>
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="amount">Importe (opcional)</label>
+				<input type="hidden" name="amount" value={amountRaw} />
 				<input
 					id="amount"
-					name="amount"
-					type="number"
-					step="0.01"
+					name="amount_display"
+					type="text"
+					inputmode="numeric"
 					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
-					placeholder="Ej: 12000"
+					placeholder="Ej: 18.000"
+					value={amountDisplay}
+					oninput={(event) => handleAmountChange(event, 'new')}
 				/>
 			</div>
 			<div class="space-y-2">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="internal_note">Nota interna</label>
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="internal_note">Nota interna (opcional)</label>
 				<input
 					id="internal_note"
 					name="internal_note"
 					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
-					placeholder="Opcional"
+					placeholder="Ej: recordar control"
 				/>
 			</div>
 		</div>
@@ -620,7 +656,7 @@ aria-label="Registrar consulta"
 	</form>
 </Modal>
 
-<Modal open={showArchiveConfirm} title={isArchived ? 'Desarchivar paciente' : 'Archivar paciente'} on:close={() => (showArchiveConfirm = false)}>
+<Modal open={showArchiveConfirm} title={isArchived ? 'Desarchivar paciente' : 'Archivar paciente'} on:close={() => (showArchiveConfirm = false)} dismissible>
 	<div class="space-y-4 text-sm text-neutral-800 dark:text-neutral-100">
 		{#if isArchived}
 			<p>El paciente volverá a la lista de activos.</p>
@@ -653,7 +689,7 @@ aria-label="Registrar consulta"
 		</div>
 	</Modal>
 
-<Modal open={showDeleteConfirm} title="Eliminar paciente" on:close={() => (showDeleteConfirm = false)}>
+<Modal open={showDeleteConfirm} title="Eliminar paciente" on:close={() => (showDeleteConfirm = false)} dismissible>
 	<div class="space-y-4 text-sm text-neutral-800 dark:text-neutral-100">
 		<p class="text-base font-semibold text-red-600 dark:text-red-400">Esta acción eliminará al paciente y su historial. No se puede deshacer.</p>
 		<div class="space-y-2">
@@ -704,9 +740,9 @@ aria-label="Registrar consulta"
 	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 	<form method="post" action="?/update_entry" class="space-y-4" onkeydown={preventEnterSubmit} onsubmit={handleEditEntrySubmit}>
 		<input type="hidden" name="entry_id" value={editingEntry?.id ?? ''} />
-		<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+		<div class="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-5">
 			<div class="space-y-2">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="edit_entry_type">Tipo</label>
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="edit_entry_type">Tipo de consulta</label>
 				<select
 					id="edit_entry_type"
 					name="entry_type"
@@ -739,7 +775,7 @@ aria-label="Registrar consulta"
 		</div>
 		<div class="grid grid-cols-1 gap-3 md:grid-cols-3">
 			<div class="space-y-2">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="edit_teeth">Dientes / zona</label>
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="edit_teeth">Dientes / zona (opcional)</label>
 				<input
 					id="edit_teeth"
 					name="teeth"
@@ -749,25 +785,27 @@ aria-label="Registrar consulta"
 				/>
 			</div>
 			<div class="space-y-2">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="edit_amount">Importe</label>
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="edit_amount">Importe (opcional)</label>
+				<input type="hidden" name="amount" value={editAmountRaw} />
 				<input
 					id="edit_amount"
-					name="amount"
-					type="number"
-					step="0.01"
+					name="amount_display"
+					type="text"
+					inputmode="numeric"
 					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
-					bind:value={editEntryAmount}
-					placeholder="Ej: 12000"
+					value={editAmountDisplay}
+					oninput={(event) => handleAmountChange(event, 'edit')}
+					placeholder="Ej: 18.000"
 				/>
 			</div>
 			<div class="space-y-2">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="edit_internal_note">Nota interna</label>
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="edit_internal_note">Nota interna (opcional)</label>
 				<input
 					id="edit_internal_note"
 					name="internal_note"
 					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
 					bind:value={editEntryNote}
-					placeholder="Opcional"
+					placeholder="Ej: recordar control"
 				/>
 			</div>
 		</div>

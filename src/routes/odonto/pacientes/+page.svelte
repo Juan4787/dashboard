@@ -168,70 +168,124 @@ const normalize = (value: string) =>
 						</div>
 					</div>
 
-			<div class="table-row-group">
-				{#each filteredPatients as patient}
-					<div
-						class="table-row border-b border-white/10 last:border-b-0 hover:bg-neutral-50 dark:hover:bg-[#0f1f36] cursor-pointer"
-						role="button"
-								tabindex="0"
-								onclick={() => goto(`/odonto/pacientes/${patient.id}`)}
-								onkeydown={(event) => {
-									if (event.key === 'Enter' || event.key === ' ') {
-										event.preventDefault();
-										goto(`/odonto/pacientes/${patient.id}`);
-									}
-								}}
-							>
-								<div class="table-cell align-middle px-6 py-5">
-									<div class="flex items-center gap-4">
-										<div class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-primary-100 text-primary-700 font-semibold dark:bg-primary-800/40 dark:text-primary-100">
-											{(patient.full_name || '?')
-												.split(' ')
-												.filter(Boolean)
-												.slice(0, 2)
-												.map((p: string) => p[0]?.toUpperCase())
-												.join('')}
-										</div>
-										<div>
-											<p class="text-sm font-semibold text-neutral-900 dark:text-white hover:underline">
-												{patient.full_name}
-											</p>
-											<div class="text-xs text-neutral-500 dark:text-neutral-300 mt-2">
-												{#if patient.archived_at}
-													<span class="rounded-full bg-neutral-200 px-2 py-1 text-[11px] font-semibold text-neutral-700 dark:bg-[#1f3554] dark:text-neutral-100">Archivado</span>
-												{:else}
-													<span class="rounded-full bg-green-100 px-2 py-1 text-[11px] font-semibold text-green-800 dark:bg-green-800/40 dark:text-green-100">Activo</span>
-												{/if}
+					<div class="table-row-group">
+						{#each filteredPatients as patient}
+							{#if data.showArchived}
+								<div class="table-row border-b border-white/10 last:border-b-0 hover:bg-neutral-50 dark:hover:bg-[#0f1f36]">
+									<div class="table-cell align-middle px-6 py-5">
+										<div class="flex items-center gap-4">
+											<div class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-primary-100 text-primary-700 font-semibold dark:bg-primary-800/40 dark:text-primary-100">
+												{(patient.full_name || '?')
+													.split(' ')
+													.filter(Boolean)
+													.slice(0, 2)
+													.map((p: string) => p[0]?.toUpperCase())
+													.join('')}
+											</div>
+											<div>
+												<p class="text-sm font-semibold text-neutral-900 dark:text-white hover:underline">
+													{patient.full_name}
+												</p>
+												<div class="text-xs text-neutral-500 dark:text-neutral-300 mt-2">
+													{#if patient.archived_at}
+														<span class="rounded-full bg-neutral-200 px-2 py-1 text-[11px] font-semibold text-neutral-700 dark:bg-[#1f3554] dark:text-neutral-100">Archivado</span>
+													{:else}
+														<span class="rounded-full bg-green-100 px-2 py-1 text-[11px] font-semibold text-green-800 dark:bg-green-800/40 dark:text-green-100">Activo</span>
+													{/if}
+												</div>
 											</div>
 										</div>
 									</div>
+									<div class="table-cell align-middle px-6 py-5 text-sm text-neutral-600 dark:text-neutral-200 text-left">
+										{patient.dni ?? 'Sin DNI'}
+										{patient.phone ? ` • ${patient.phone}` : ''}
+									</div>
+									<div class="table-cell align-middle px-6 py-5 text-sm text-neutral-600 dark:text-neutral-200 text-left">
+										{patient.last_entry_at ? formatDate(patient.last_entry_at) : '—'}
+									</div>
+									<div class="table-cell align-middle px-6 py-5 text-right">
+										<a
+											href={`/odonto/pacientes/${patient.id}`}
+											class="rounded-full px-4 py-2 text-xs font-semibold text-white bg-[#7c3aed] shadow-sm transition hover:-translate-y-0.5 hover:shadow-card"
+										>
+											Abrir paciente
+										</a>
+										{#if patient.archived_at}
+											<form method="post" action={`/odonto/pacientes/${patient.id}?/unarchive_patient`} class="mt-5">
+												<button
+													type="submit"
+													class="rounded-full border border-neutral-300 px-4 py-2 text-xs font-semibold text-neutral-800 transition hover:-translate-y-0.5 hover:bg-neutral-200 dark:border-[#8fb3ff] dark:text-white dark:hover:bg-[#1b2d4b]"
+												>
+													Desarchivar paciente
+												</button>
+											</form>
+										{/if}
+									</div>
 								</div>
-								<div class="table-cell align-middle px-6 py-5 text-sm text-neutral-600 dark:text-neutral-200 text-left">
-									{patient.dni ?? 'Sin DNI'}
-									{patient.phone ? ` • ${patient.phone}` : ''}
+							{:else}
+								<div
+									class="table-row border-b border-white/10 last:border-b-0 hover:bg-neutral-50 dark:hover:bg-[#0f1f36] cursor-pointer"
+									role="button"
+									tabindex="0"
+									onclick={() => goto(`/odonto/pacientes/${patient.id}`)}
+									onkeydown={(event) => {
+										if (event.key === 'Enter' || event.key === ' ') {
+											event.preventDefault();
+											goto(`/odonto/pacientes/${patient.id}`);
+										}
+									}}
+								>
+									<div class="table-cell align-middle px-6 py-5">
+										<div class="flex items-center gap-4">
+											<div class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-primary-100 text-primary-700 font-semibold dark:bg-primary-800/40 dark:text-primary-100">
+												{(patient.full_name || '?')
+													.split(' ')
+													.filter(Boolean)
+													.slice(0, 2)
+													.map((p: string) => p[0]?.toUpperCase())
+													.join('')}
+											</div>
+											<div>
+												<p class="text-sm font-semibold text-neutral-900 dark:text-white hover:underline">
+													{patient.full_name}
+												</p>
+												<div class="text-xs text-neutral-500 dark:text-neutral-300 mt-2">
+													{#if patient.archived_at}
+														<span class="rounded-full bg-neutral-200 px-2 py-1 text-[11px] font-semibold text-neutral-700 dark:bg-[#1f3554] dark:text-neutral-100">Archivado</span>
+													{:else}
+														<span class="rounded-full bg-green-100 px-2 py-1 text-[11px] font-semibold text-green-800 dark:bg-green-800/40 dark:text-green-100">Activo</span>
+													{/if}
+												</div>
+											</div>
+										</div>
+									</div>
+									<div class="table-cell align-middle px-6 py-5 text-sm text-neutral-600 dark:text-neutral-200 text-left">
+										{patient.dni ?? 'Sin DNI'}
+										{patient.phone ? ` • ${patient.phone}` : ''}
+									</div>
+									<div class="table-cell align-middle px-6 py-5 text-sm text-neutral-600 dark:text-neutral-200 text-left">
+										{patient.last_entry_at ? formatDate(patient.last_entry_at) : '—'}
+									</div>
+									<div class="table-cell align-middle px-6 py-5 text-right">
+										<a
+											href={`/odonto/pacientes/${patient.id}`}
+											class="rounded-full px-4 py-2 text-xs font-semibold text-white bg-[#7c3aed] shadow-sm transition hover:-translate-y-0.5 hover:shadow-card"
+										>
+											Abrir paciente
+										</a>
+										{#if patient.archived_at}
+											<form method="post" action={`/odonto/pacientes/${patient.id}?/unarchive_patient`} class="mt-5">
+												<button
+													type="submit"
+													class="rounded-full border border-neutral-300 px-4 py-2 text-xs font-semibold text-neutral-800 transition hover:-translate-y-0.5 hover:bg-neutral-200 dark:border-[#8fb3ff] dark:text-white dark:hover:bg-[#1b2d4b]"
+												>
+													Desarchivar paciente
+												</button>
+											</form>
+										{/if}
+									</div>
 								</div>
-								<div class="table-cell align-middle px-6 py-5 text-sm text-neutral-600 dark:text-neutral-200 text-left">
-									{patient.last_entry_at ? formatDate(patient.last_entry_at) : '—'}
-								</div>
-								<div class="table-cell align-middle px-6 py-5 text-right">
-									<a
-										href={`/odonto/pacientes/${patient.id}`}
-										class="rounded-full px-4 py-2 text-xs font-semibold text-white bg-[#7c3aed] shadow-sm transition hover:-translate-y-0.5 hover:shadow-card"
-									>
-										Abrir paciente
-									</a>
-									{#if patient.archived_at}
-										<form method="post" action={`/odonto/pacientes/${patient.id}?/unarchive_patient`} class="mt-3">
-											<button
-												type="submit"
-												class="rounded-full border border-neutral-200 px-4 py-2 text-xs font-semibold text-neutral-700 transition hover:bg-neutral-100 dark:border-[#1f3554] dark:text-[#eaf1ff] dark:hover:bg-[#0f1f36]"
-											>
-												Desarchivar
-											</button>
-										</form>
-									{/if}
-								</div>
-							</div>
+							{/if}
 						{/each}
 					</div>
 				</div>
@@ -240,45 +294,76 @@ const normalize = (value: string) =>
 			<!-- Mobile cards -->
 			<div class="space-y-3 p-3 md:hidden">
 				{#each filteredPatients as patient}
-					<div
-						class="rounded-xl border border-neutral-100 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-card dark:border-[#1f3554] dark:bg-[#0f1f36]"
-						role="button"
-						tabindex="0"
-						onclick={() => goto(`/odonto/pacientes/${patient.id}`)}
-						onkeydown={(event) => {
-							if (event.key === 'Enter' || event.key === ' ') {
-								event.preventDefault();
-								goto(`/odonto/pacientes/${patient.id}`);
-							}
-						}}
-					>
-						<div class="flex items-center gap-3">
-							<div class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-primary-100 text-primary-700 font-semibold dark:bg-primary-800/40 dark:text-primary-100">
-								{(patient.full_name || '?')
-									.split(' ')
-									.filter(Boolean)
-									.slice(0, 2)
-									.map((p: string) => p[0]?.toUpperCase())
-									.join('')}
-							</div>
-							<div class="flex-1">
-								<div class="flex items-center gap-2">
-									<p class="text-base font-semibold text-neutral-900 dark:text-white">{patient.full_name}</p>
-									{#if patient.archived_at}
-										<span class="rounded-full bg-neutral-200 px-2 py-1 text-[11px] font-semibold text-neutral-700 dark:bg-[#1f3554] dark:text-neutral-100">Archivado</span>
-									{:else}
-										<span class="rounded-full bg-green-100 px-2 py-1 text-[11px] font-semibold text-green-800 dark:bg-green-800/40 dark:text-green-100">Activo</span>
-									{/if}
+					{#if data.showArchived}
+						<div class="rounded-xl border border-neutral-100 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-card dark:border-[#1f3554] dark:bg-[#0f1f36]">
+							<div class="flex items-center gap-3">
+								<div class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-primary-100 text-primary-700 font-semibold dark:bg-primary-800/40 dark:text-primary-100">
+									{(patient.full_name || '?')
+										.split(' ')
+										.filter(Boolean)
+										.slice(0, 2)
+										.map((p: string) => p[0]?.toUpperCase())
+										.join('')}
 								</div>
-								<p class="mt-1 text-[12px] text-neutral-600 dark:text-neutral-300">
-									DNI {patient.dni ?? 'Sin DNI'}{patient.phone ? ` · Tel ${patient.phone}` : ''}
-								</p>
-								<p class="mt-1 text-[12px] text-neutral-600 dark:text-neutral-300">
-									Últ. visita {patient.last_entry_at ? formatDate(patient.last_entry_at) : '—'}
-								</p>
+								<div class="flex-1">
+									<div class="flex items-center gap-2">
+										<p class="text-base font-semibold text-neutral-900 dark:text-white">{patient.full_name}</p>
+										{#if patient.archived_at}
+											<span class="rounded-full bg-neutral-200 px-2 py-1 text-[11px] font-semibold text-neutral-700 dark:bg-[#1f3554] dark:text-neutral-100">Archivado</span>
+										{:else}
+											<span class="rounded-full bg-green-100 px-2 py-1 text-[11px] font-semibold text-green-800 dark:bg-green-800/40 dark:text-green-100">Activo</span>
+										{/if}
+									</div>
+									<p class="mt-1 text-[12px] text-neutral-600 dark:text-neutral-300">
+										DNI {patient.dni ?? 'Sin DNI'}{patient.phone ? ` · Tel ${patient.phone}` : ''}
+									</p>
+									<p class="mt-1 text-[12px] text-neutral-600 dark:text-neutral-300">
+										Últ. visita {patient.last_entry_at ? formatDate(patient.last_entry_at) : '—'}
+									</p>
+								</div>
 							</div>
 						</div>
-					</div>
+					{:else}
+						<div
+							class="rounded-xl border border-neutral-100 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-card dark:border-[#1f3554] dark:bg-[#0f1f36] cursor-pointer"
+							role="button"
+							tabindex="0"
+							onclick={() => goto(`/odonto/pacientes/${patient.id}`)}
+							onkeydown={(event) => {
+								if (event.key === 'Enter' || event.key === ' ') {
+									event.preventDefault();
+									goto(`/odonto/pacientes/${patient.id}`);
+								}
+							}}
+						>
+							<div class="flex items-center gap-3">
+								<div class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-primary-100 text-primary-700 font-semibold dark:bg-primary-800/40 dark:text-primary-100">
+									{(patient.full_name || '?')
+										.split(' ')
+										.filter(Boolean)
+										.slice(0, 2)
+										.map((p: string) => p[0]?.toUpperCase())
+										.join('')}
+								</div>
+								<div class="flex-1">
+									<div class="flex items-center gap-2">
+										<p class="text-base font-semibold text-neutral-900 dark:text-white">{patient.full_name}</p>
+										{#if patient.archived_at}
+											<span class="rounded-full bg-neutral-200 px-2 py-1 text-[11px] font-semibold text-neutral-700 dark:bg-[#1f3554] dark:text-neutral-100">Archivado</span>
+										{:else}
+											<span class="rounded-full bg-green-100 px-2 py-1 text-[11px] font-semibold text-green-800 dark:bg-green-800/40 dark:text-green-100">Activo</span>
+										{/if}
+									</div>
+									<p class="mt-1 text-[12px] text-neutral-600 dark:text-neutral-300">
+										DNI {patient.dni ?? 'Sin DNI'}{patient.phone ? ` · Tel ${patient.phone}` : ''}
+									</p>
+									<p class="mt-1 text-[12px] text-neutral-600 dark:text-neutral-300">
+										Últ. visita {patient.last_entry_at ? formatDate(patient.last_entry_at) : '—'}
+									</p>
+								</div>
+							</div>
+						</div>
+					{/if}
 				{/each}
 			</div>
 			{/if}
