@@ -22,8 +22,9 @@ const normalize = (value: string) =>
 		.replace(/\p{Diacritic}/gu, '')
 		.toLowerCase();
 
-	let search = $state('');
-	let showCreate = $state($page.url.searchParams.has('nuevo'));
+let search = $state('');
+let showCreate = $state($page.url.searchParams.has('nuevo'));
+let showReport = $state(false);
 
 	$effect(() => {
 		if ($page.url.searchParams.has('nuevo')) {
@@ -366,6 +367,24 @@ const normalize = (value: string) =>
 					{/if}
 				{/each}
 			</div>
+			{/if}
+		</div>
+	</div>
+
+	<div class="mt-4 flex justify-end">
+		<div class="flex flex-col items-end gap-2">
+			<button
+				type="button"
+				class="rounded-full bg-[#991b1b] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed]"
+				onclick={() => (showReport = !showReport)}
+			>
+				Reportar problema
+			</button>
+			{#if showReport}
+				<div class="max-w-md rounded-xl border border-red-200 bg-[#5c0d0d] p-4 text-sm text-white shadow-sm dark:border-red-400/40 dark:bg-[#430a0a] dark:text-white">
+					<p class="font-semibold mb-1">¿Encontraste un problema?</p>
+					<p>Para reportar cualquier problema, error o bug de esta app, enviar un correo a <span class="font-semibold">juanpabloaltamira@protonmail.com</span>.</p>
+				</div>
 			{/if}
 		</div>
 	</div>
