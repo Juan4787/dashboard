@@ -1,6 +1,6 @@
 import { env } from '$env/dynamic/private';
 import { CASE_STATUS } from '$lib/constants';
-import { createSupabaseServerClient } from '$lib/server/supabase';
+import { createSupabaseServerClient, getUserIdFromAccessToken } from '$lib/server/supabase';
 import { normalizePhone } from '$lib/utils/format';
 import { fail, redirect, error as kitError } from '@sveltejs/kit';
 import { demoCases } from '$lib/server/demo-data';
@@ -46,6 +46,10 @@ export const actions: Actions = {
 			return fail(400, { message: 'Modo demo: no se guardan cambios' });
 		}
 		const supabase = await createSupabaseServerClient('administrativo', locals.auth, fetch);
+		const ownerId = getUserIdFromAccessToken(locals.auth.access_token);
+		if (!ownerId) {
+			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
+		}
 
 		const form = await request.formData();
 		const person_name = String(form.get('person_name') ?? '').trim();
@@ -78,6 +82,7 @@ export const actions: Actions = {
 			const { data: personInsert, error: personError } = await supabase
 				.from('people')
 				.insert({
+					owner_id: ownerId,
 					full_name: person_name,
 					dni: person_dni || null,
 					phone: person_phone || null,
@@ -96,6 +101,7 @@ export const actions: Actions = {
 		const { data: caseInsert, error } = await supabase
 			.from('cases')
 			.insert({
+				owner_id: ownerId,
 				person_id: personId,
 				person_name,
 				person_dni: person_dni || null,

@@ -72,3 +72,20 @@ export const createSupabaseServerClient = async (
 
 	return supabase;
 };
+
+export const getUserIdFromAccessToken = (accessToken?: string | null): string | null => {
+	if (!accessToken) return null;
+	const parts = accessToken.split('.');
+	if (parts.length < 2) return null;
+	const payload = parts[1];
+	const normalized = payload
+		.replace(/-/g, '+')
+		.replace(/_/g, '/')
+		.padEnd(Math.ceil(payload.length / 4) * 4, '=');
+	try {
+		const decoded = JSON.parse(Buffer.from(normalized, 'base64').toString('utf8')) as { sub?: unknown };
+		return typeof decoded.sub === 'string' ? decoded.sub : null;
+	} catch {
+		return null;
+	}
+};

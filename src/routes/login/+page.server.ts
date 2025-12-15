@@ -1,5 +1,6 @@
 import { env } from '$env/dynamic/private';
 import { createSupabaseServerClient, getModuleEntryRoute, resolveModuleByEmail } from '$lib/server/supabase';
+import { dev } from '$app/environment';
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -29,7 +30,7 @@ export const actions: Actions = {
 		const cookieOptions = {
 			path: '/',
 			httpOnly: true,
-			secure: true,
+			secure: !dev,
 			sameSite: 'lax' as const,
 			maxAge: 60 * 60 * 24 * 7
 		};
@@ -43,6 +44,24 @@ export const actions: Actions = {
 		const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
 		if (error || !data.session) {
+			console.error('Error login Supabase', { module, email, error });
+			const msg = error?.message?.toLowerCase() ?? '';
+			if ((error as any)?.code === 'email_provider_disabled' || msg.includes('email logins are disabled')) {
+				return fail(400, {
+					message:
+						'En Supabase está desactivado el login por email. Activá "Email" en Authentication → Providers → Email.',
+					email
+				});
+			}
+			if (msg.includes('email not confirmed')) {
+				return fail(400, {
+					message: 'Tu email no está confirmado en Supabase. Confirmalo o desactivá la confirmación de email.',
+					email
+				});
+			}
+			if (msg.includes('invalid api key') || msg.includes('invalid jwt') || msg.includes('jwt')) {
+				return fail(400, { message: 'Configuración de Supabase inválida. Revisá URL y ANON KEY.', email });
+			}
 			return fail(400, { message: 'Credenciales inválidas', email });
 		}
 
@@ -50,7 +69,7 @@ export const actions: Actions = {
 		const cookieOptions = {
 			path: '/',
 			httpOnly: true,
-			secure: true,
+			secure: !dev,
 			sameSite: 'lax' as const,
 			maxAge: 60 * 60 * 24 * 7 // 7 días
 		};

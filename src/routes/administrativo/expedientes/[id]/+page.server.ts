@@ -1,6 +1,6 @@
 import { env } from '$env/dynamic/private';
 import { CASE_EVENT_TYPES, CASE_STATUS } from '$lib/constants';
-import { createSupabaseServerClient } from '$lib/server/supabase';
+import { createSupabaseServerClient, getUserIdFromAccessToken } from '$lib/server/supabase';
 import { fail, redirect, error as kitError } from '@sveltejs/kit';
 import {
 	demoCaseEvents,
@@ -70,19 +70,52 @@ export const actions: Actions = {
 			return fail(400, { message: 'Modo demo: no se guardan cambios' });
 		}
 		const supabase = await createSupabaseServerClient('administrativo', locals.auth, fetch);
+		const ownerId = getUserIdFromAccessToken(locals.auth.access_token);
+		if (!ownerId) {
+			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
+		}
 
 		const form = await request.formData();
 		const event_type = String(form.get('event_type') ?? '').trim() as (typeof CASE_EVENT_TYPES)[number];
 		const detail = String(form.get('detail') ?? '').trim();
-		const created_at = form.get('created_at')
-			? new Date(String(form.get('created_at'))).toISOString()
-			: new Date().toISOString();
+		const createdAtRaw = String(form.get('created_at') ?? '').trim();
+		if (!createdAtRaw) {
+			return fail(400, { message: 'Completá la fecha y hora.' });
+		}
+
+		const createdAtMatch = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(createdAtRaw);
+		if (!createdAtMatch) {
+			return fail(400, { message: 'Revisá la fecha y hora. Formato esperado: Año/Mes/Día y Hora.' });
+		}
+
+		const y = Number(createdAtMatch[1]);
+		const m = Number(createdAtMatch[2]);
+		const d = Number(createdAtMatch[3]);
+		const hh = Number(createdAtMatch[4]);
+		const mm = Number(createdAtMatch[5]);
+
+		if (!Number.isInteger(y) || y < 2000 || y > 2045) {
+			return fail(400, { message: 'Revisá el año: debe estar entre 2000 y 2045.' });
+		}
+		if (!Number.isInteger(m) || m < 1 || m > 12) {
+			return fail(400, { message: 'Revisá el mes: debe ir del 1 al 12.' });
+		}
+		const maxDay = new Date(y, m, 0).getDate();
+		if (!Number.isInteger(d) || d < 1 || d > maxDay) {
+			return fail(400, { message: `Revisá el día: para ese mes debe ir del 1 al ${maxDay}.` });
+		}
+		if (!Number.isInteger(hh) || hh < 0 || hh > 23 || !Number.isInteger(mm) || mm < 0 || mm > 59) {
+			return fail(400, { message: 'Revisá la hora: debe estar entre 00:00 y 23:59.' });
+		}
+
+		const created_at = new Date(y, m - 1, d, hh, mm, 0, 0).toISOString();
 
 		if (!event_type || !detail) {
 			return fail(400, { message: 'Tipo y detalle son obligatorios' });
 		}
 
 		const { error } = await supabase.from('case_events').insert({
+			owner_id: ownerId,
 			case_id: params.id,
 			event_type,
 			detail,

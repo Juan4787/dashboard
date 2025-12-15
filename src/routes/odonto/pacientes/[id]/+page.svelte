@@ -1,5 +1,7 @@
 <script lang="ts">
 	import Modal from '$lib/components/Modal.svelte';
+	import DateTimePartsInput from '$lib/components/DateTimePartsInput.svelte';
+	import DatePartsInput from '$lib/components/DatePartsInput.svelte';
 	import { CLINICAL_ENTRY_TYPES } from '$lib/constants';
 	import { formatDate, formatDateTime } from '$lib/utils/format';
 
@@ -10,11 +12,15 @@
 
 	let showEntryModal = $state(false);
 	let showEditModal = $state(false);
+	let showArchiveConfirm = $state(false);
+	let showDeleteConfirm = $state(false);
+	let deleteConfirmText = $state('');
 	let tab = $state<'historial' | 'datos'>('historial');
 	let filterType = $state<'Todos' | 'Consulta' | 'Tratamiento'>('Todos');
 	let onlyWithNote = $state(false);
 	let timelineSearch = $state('');
 	let expandedId = $state<string | null>(null);
+	const currentYear = new Date().getFullYear();
 	const fmtTime = (dateStr: string) =>
 		new Intl.DateTimeFormat('es-AR', {
 			hour: '2-digit',
@@ -70,10 +76,73 @@
 		if (onlyWithNote && !entry.internal_note) return false;
 		if (timelineSearch.trim()) {
 			const q = timelineSearch.toLowerCase();
-			const haystack = `${entry.entry_type} ${entry.description ?? ''} ${entry.internal_note ?? ''} ${entry.teeth ?? ''}`.toLowerCase();
+			const dateText = formatDate(entry.created_at);
+			const haystack = `${entry.entry_type} ${entry.description ?? ''} ${entry.internal_note ?? ''} ${entry.teeth ?? ''} ${dateText} ${entry.created_at}`.toLowerCase();
 			if (!haystack.includes(q)) return false;
 		}
 		return true;
+	};
+
+let showEntryErrors = $state(false);
+let showEditErrors = $state(false);
+let showEditEntryErrors = $state(false);
+let showEditEntryModal = $state(false);
+let editingEntry: any | null = $state(null);
+let editEntryType = $state('');
+let editEntryDescription = $state('');
+let editEntryTeeth = $state('');
+let editEntryAmount = $state('');
+let editEntryNote = $state('');
+let editEntryCreatedAt = $state('');
+let archiveForm: HTMLFormElement | null = null;
+let unarchiveForm: HTMLFormElement | null = null;
+let deleteForm: HTMLFormElement | null = null;
+	const isArchived = $derived(Boolean(data.patient.archived_at));
+
+	const handleEntrySubmit = (event: SubmitEvent) => {
+		showEntryErrors = true;
+		const formEl = event.currentTarget as HTMLFormElement;
+		const hidden = formEl.querySelector<HTMLInputElement>('input[name="created_at"]');
+		if (!hidden || !hidden.value || hidden.value === '__invalid__') {
+			event.preventDefault();
+		}
+	};
+
+const handleEditSubmit = (event: SubmitEvent) => {
+	showEditErrors = true;
+	const formEl = event.currentTarget as HTMLFormElement;
+	const birthHidden = formEl.querySelector<HTMLInputElement>('input[name="birth_date"]');
+	if (birthHidden && birthHidden.value === '__invalid__') {
+		event.preventDefault();
+	}
+};
+
+const handleEditEntrySubmit = (event: SubmitEvent) => {
+	showEditEntryErrors = true;
+	const formEl = event.currentTarget as HTMLFormElement;
+	const hidden = formEl.querySelector<HTMLInputElement>('input[name="created_at"]');
+	if (!hidden || !hidden.value || hidden.value === '__invalid__') {
+		event.preventDefault();
+	}
+};
+
+const openEditEntry = (entry: any) => {
+	editingEntry = entry;
+	editEntryType = entry.entry_type ?? '';
+	editEntryDescription = entry.description ?? '';
+	editEntryTeeth = entry.teeth ?? '';
+	editEntryAmount = entry.amount ?? '';
+	editEntryNote = entry.internal_note ?? '';
+	editEntryCreatedAt = entry.created_at ?? '';
+	showEditEntryErrors = false;
+	showEditEntryModal = true;
+};
+
+const preventEnterSubmit = (event: KeyboardEvent) => {
+	if (event.key !== 'Enter') return;
+	const target = event.target as HTMLElement | null;
+	if (target instanceof HTMLTextAreaElement) return;
+	event.preventDefault();
 	};
 </script>
 
@@ -81,29 +150,36 @@
 	<div class="rounded-2xl border border-neutral-100 bg-white/90 p-6 shadow-card dark:border-[#1f3554] dark:bg-[#152642]">
 		<div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
 			<div class="space-y-1">
-				<h1 class="text-3xl font-semibold text-neutral-900 dark:text-white">{data.patient.full_name}</h1>
+				<h1 class="text-[30px] font-semibold text-neutral-900 dark:text-white">{data.patient.full_name}</h1>
 			</div>
 			<div class="flex flex-wrap items-center gap-3">
-				<form method="post" action="?/archive_patient" class="contents">
-					<button
-						type="submit"
-						class="hidden rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 transition hover:-translate-y-0.5 hover:bg-neutral-100 hover:shadow-card dark:border-[#1f3554] dark:text-[#eaf1ff] dark:hover:bg-[#0f1f36] md:inline-flex"
-						onclick={(event: MouseEvent) => {
-							event.preventDefault();
-							if (confirm('¿Archivar paciente? Podés recuperarlo desde "Archivados".')) {
-								(event.target as HTMLButtonElement).closest('form')?.submit();
-							}
-						}}
-					>
-						Archivar
+					<form method="post" action="?/archive_patient" class="contents" bind:this={archiveForm}>
+						<button
+							type="submit"
+							class="hidden rounded-full bg-neutral-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-neutral-800 hover:shadow-card dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white md:inline-flex"
+							onclick={(event: MouseEvent) => {
+								event.preventDefault();
+								showArchiveConfirm = true;
+							}}
+						>
+						{isArchived ? 'Desarchivar paciente' : 'Archivar paciente'}
 					</button>
 				</form>
+				<form method="post" action="?/unarchive_patient" class="hidden" bind:this={unarchiveForm}></form>
+				<form method="post" action="?/delete_patient" class="hidden" bind:this={deleteForm}></form>
+					<button
+						class="hidden rounded-full bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-red-700 hover:shadow-card dark:bg-red-700 dark:hover:bg-red-800 md:inline-flex"
+						type="button"
+						onclick={() => (showDeleteConfirm = true)}
+					>
+						Eliminar paciente
+					</button>
 				<button
 					class="hidden rounded-full bg-[#7c3aed] px-5 py-2 text-sm font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed] md:inline-flex"
 					type="button"
 					onclick={() => (showEntryModal = true)}
 				>
-					+ Nueva entrada
+					+ Registrar consulta
 				</button>
 			</div>
 		</div>
@@ -144,19 +220,24 @@
 			>
 				Datos
 			</button>
-			<button
-				class="ml-auto flex h-10 w-10 items-center justify-center rounded-full border border-neutral-200 text-neutral-600 transition hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-100 dark:hover:bg-[#122641] md:hidden"
-				type="button"
-				onclick={() => {
-					if (confirm('¿Archivar paciente? Podés recuperarlo desde "Archivados".')) {
-						(document.querySelector('form[action=\"?/archive_patient\"]') as HTMLFormElement | null)?.submit();
-					}
-				}}
-				aria-label="Más acciones"
-				title="Archivar"
-			>
-				<span aria-hidden="true">⋯</span>
-			</button>
+				<button
+					class="ml-auto flex h-10 items-center justify-center rounded-full border border-neutral-200 px-3 text-sm font-semibold text-neutral-700 transition hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-100 dark:hover:bg-[#122641] md:hidden"
+					type="button"
+					onclick={() => (showArchiveConfirm = true)}
+					aria-label={isArchived ? 'Desarchivar paciente' : 'Archivar paciente'}
+					title={isArchived ? 'Desarchivar paciente' : 'Archivar paciente'}
+				>
+					{isArchived ? 'Desarchivar' : 'Archivar'} paciente
+				</button>
+				<button
+					class="ml-2 flex h-10 items-center justify-center rounded-full bg-red-600 px-3 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-800 md:hidden"
+					type="button"
+					onclick={() => (showDeleteConfirm = true)}
+					aria-label="Eliminar paciente"
+					title="Eliminar paciente"
+				>
+					Eliminar paciente
+				</button>
 		</div>
 		<div class="mt-4 flex flex-wrap gap-3">
 			{#each chips as chip}
@@ -190,7 +271,7 @@
 				</select>
 				<input
 					type="search"
-					placeholder="Buscar (zona, palabra, fecha)"
+					placeholder="Buscar (palabra, fecha)"
 					class="w-full rounded-full border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-700 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-neutral-50"
 					bind:value={timelineSearch}
 				/>
@@ -198,7 +279,7 @@
 			<div class="mt-4">
 				{#if data.entries.length === 0}
 					<p class="rounded-xl border border-dashed border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-neutral-200">
-						Sin entradas todavía. Cargá la primera desde “Nueva entrada”.
+						Sin entradas todavía. Cargá la primera desde “Registrar consulta”.
 					</p>
 				{:else}
 					<div class="relative pl-8">
@@ -224,9 +305,21 @@
 														{mainTitle(entry)}
 													</p>
 												</div>
-												{#if entry.amount}
-													<span class="text-sm font-semibold text-neutral-800 dark:text-neutral-100"> ${entry.amount} </span>
-												{/if}
+												<div class="flex items-center gap-2">
+													{#if entry.amount}
+														<span class="text-sm font-semibold text-neutral-800 dark:text-neutral-100"> ${entry.amount} </span>
+													{/if}
+													<button
+														type="button"
+														class="rounded-full border border-neutral-200 px-3 py-1 text-xs font-semibold text-neutral-600 transition hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-100 dark:hover:bg-[#122641]"
+														onclick={(event) => {
+															event.stopPropagation();
+															openEditEntry(entry);
+														}}
+													>
+														Editar
+													</button>
+												</div>
 											</div>
 											{#if entry.description && !isDuplicateDescription(entry)}
 												<p class="mt-1 text-[13px] font-medium text-neutral-700 opacity-85 line-clamp-1 dark:text-neutral-200">
@@ -268,13 +361,13 @@
 				<div class="rounded-xl border border-neutral-100 bg-white/60 p-4 dark:border-[#1f3554] dark:bg-[#0f1f36]">
 					<div class="mb-3 flex items-center justify-between">
 						<p class="text-[13px] font-bold uppercase tracking-wide text-neutral-600 dark:text-neutral-300">Alertas médicas</p>
-						<button
-							type="button"
-							class="rounded-full border border-neutral-200 px-3 py-1 text-xs font-semibold text-neutral-700 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-50 dark:hover:bg-[#122641]"
-							onclick={() => (showEditModal = true)}
-						>
-							Editar
-						</button>
+							<button
+								type="button"
+								class="rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-50 dark:hover:bg-[#122641]"
+								onclick={() => (showEditModal = true)}
+							>
+								Editar
+							</button>
 					</div>
 					<div class="space-y-3">
 						<div class="flex items-start justify-between gap-3 rounded-lg bg-amber-100/30 px-3 py-2 dark:bg-amber-500/10">
@@ -329,13 +422,13 @@
 				<div class="rounded-xl border border-neutral-100 bg-white/60 p-4 dark:border-[#1f3554] dark:bg-[#0f1f36]">
 					<div class="mb-3 flex items-center justify-between">
 						<p class="text-[13px] font-bold uppercase tracking-wide text-neutral-600 dark:text-neutral-300">Contacto</p>
-						<button
-							type="button"
-							class="rounded-full border border-neutral-200 px-3 py-1 text-xs font-semibold text-neutral-700 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-50 dark:hover:bg-[#122641]"
-							onclick={() => (showEditModal = true)}
-						>
-							Editar
-						</button>
+							<button
+								type="button"
+								class="rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-50 dark:hover:bg-[#122641]"
+								onclick={() => (showEditModal = true)}
+							>
+								Editar
+							</button>
 					</div>
 					<div class="grid gap-3 md:grid-cols-2">
 						<div class="space-y-1">
@@ -398,13 +491,13 @@
 				<div class="rounded-xl border border-neutral-100 bg-white/60 p-4 dark:border-[#1f3554] dark:bg-[#0f1f36]">
 					<div class="mb-3 flex items-center justify-between">
 						<p class="text-[13px] font-bold uppercase tracking-wide text-neutral-600 dark:text-neutral-300">Administrativo</p>
-						<button
-							type="button"
-							class="rounded-full border border-neutral-200 px-3 py-1 text-xs font-semibold text-neutral-700 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-50 dark:hover:bg-[#122641]"
-							onclick={() => (showEditModal = true)}
-						>
-							Editar
-						</button>
+							<button
+								type="button"
+								class="rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-50 dark:hover:bg-[#122641]"
+								onclick={() => (showEditModal = true)}
+							>
+								Editar
+							</button>
 					</div>
 					<div class="grid gap-3 md:grid-cols-2">
 						<div class="space-y-1">
@@ -436,13 +529,14 @@
 <button
 	class="fixed bottom-20 right-4 z-20 flex h-14 w-14 items-center justify-center rounded-full bg-[#7c3aed] text-2xl font-bold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed] md:hidden"
 	onclick={() => (showEntryModal = true)}
-	aria-label="Nueva entrada"
+aria-label="Registrar consulta"
 >
 	+
 </button>
 
-<Modal open={showEntryModal} title="Nueva entrada" on:close={() => (showEntryModal = false)}>
-	<form method="post" action="?/add_entry" class="space-y-4">
+<Modal open={showEntryModal} title="Registrar consulta" on:close={() => (showEntryModal = false)}>
+	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+	<form method="post" action="?/add_entry" class="space-y-4" onkeydown={preventEnterSubmit} onsubmit={handleEntrySubmit}>
 		<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
 			<div class="space-y-2">
 				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="entry_type">Tipo</label>
@@ -459,13 +553,8 @@
 				</select>
 			</div>
 			<div class="space-y-2">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="created_at">Fecha y hora</label>
-				<input
-					id="created_at"
-					name="created_at"
-					type="datetime-local"
-					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
-				/>
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="created_at-year">Fecha y hora</label>
+				<DateTimePartsInput name="created_at" minYear={2000} maxYear={2045} showErrors={showEntryErrors} />
 			</div>
 		</div>
 		<div class="space-y-2">
@@ -531,8 +620,181 @@
 	</form>
 </Modal>
 
+<Modal open={showArchiveConfirm} title={isArchived ? 'Desarchivar paciente' : 'Archivar paciente'} on:close={() => (showArchiveConfirm = false)}>
+	<div class="space-y-4 text-sm text-neutral-800 dark:text-neutral-100">
+		{#if isArchived}
+			<p>El paciente volverá a la lista de activos.</p>
+		{:else}
+			<p>El paciente se moverá a “Archivados”. Podrás recuperarlo más adelante.</p>
+		{/if}
+		<div class="flex justify-end gap-2">
+			<button
+				type="button"
+				class="rounded-xl px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:text-white dark:hover:bg-[#1b2d4b]"
+				onclick={() => (showArchiveConfirm = false)}
+			>
+				Cancelar
+			</button>
+				<button
+					type="button"
+					class="rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+					onclick={() => {
+						showArchiveConfirm = false;
+					if (isArchived) {
+						unarchiveForm?.submit();
+					} else {
+						archiveForm?.submit();
+					}
+					}}
+				>
+					{isArchived ? 'Desarchivar paciente' : 'Archivar paciente'}
+				</button>
+			</div>
+		</div>
+	</Modal>
+
+<Modal open={showDeleteConfirm} title="Eliminar paciente" on:close={() => (showDeleteConfirm = false)}>
+	<div class="space-y-4 text-sm text-neutral-800 dark:text-neutral-100">
+		<p class="text-base font-semibold text-red-600 dark:text-red-400">Esta acción eliminará al paciente y su historial. No se puede deshacer.</p>
+		<div class="space-y-2">
+			<label class="text-sm font-semibold text-neutral-600 dark:text-neutral-300" for="delete-confirm-input">
+					Escribí <span class="font-bold">eliminar</span> para confirmar
+				</label>
+			<input
+				id="delete-confirm-input"
+				class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-red-500 focus:ring-2 focus:ring-red-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+				placeholder="eliminar"
+				bind:value={deleteConfirmText}
+				autocomplete="off"
+			/>
+		</div>
+		<div class="flex justify-end gap-2">
+			<button
+				type="button"
+				class="rounded-xl px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:text-white dark:hover:bg-[#1b2d4b]"
+				onclick={() => {
+					deleteConfirmText = '';
+					showDeleteConfirm = false;
+				}}
+			>
+				Cancelar
+			</button>
+			<button
+				type="button"
+				disabled={deleteConfirmText.trim().toLowerCase() !== 'eliminar'}
+				class={`rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500 ${
+					deleteConfirmText.trim().toLowerCase() === 'eliminar'
+						? 'bg-red-600 hover:bg-red-700'
+						: 'bg-red-400 cursor-not-allowed opacity-80'
+				}`}
+				onclick={() => {
+					if (deleteConfirmText.trim().toLowerCase() !== 'eliminar') return;
+					showDeleteConfirm = false;
+					deleteConfirmText = '';
+					deleteForm?.submit();
+				}}
+			>
+				Eliminar definitivamente
+			</button>
+		</div>
+	</div>
+</Modal>
+
+<Modal open={showEditEntryModal} title="Editar entrada" on:close={() => (showEditEntryModal = false)}>
+	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+	<form method="post" action="?/update_entry" class="space-y-4" onkeydown={preventEnterSubmit} onsubmit={handleEditEntrySubmit}>
+		<input type="hidden" name="entry_id" value={editingEntry?.id ?? ''} />
+		<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+			<div class="space-y-2">
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="edit_entry_type">Tipo</label>
+				<select
+					id="edit_entry_type"
+					name="entry_type"
+					required
+					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+					bind:value={editEntryType}
+				>
+					<option value="">Seleccionar</option>
+					{#each CLINICAL_ENTRY_TYPES as type}
+						<option value={type}>{type}</option>
+					{/each}
+				</select>
+			</div>
+			<div class="space-y-2">
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="edit_created_at-year">Fecha y hora</label>
+				<DateTimePartsInput name="created_at" minYear={2000} maxYear={2045} initialValue={editEntryCreatedAt} showErrors={showEditEntryErrors} />
+			</div>
+		</div>
+		<div class="space-y-2">
+			<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="edit_description">Descripción</label>
+			<textarea
+				id="edit_description"
+				name="description"
+				required
+				rows="4"
+				class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+				bind:value={editEntryDescription}
+				placeholder="Motivo de consulta, hallazgos, indicaciones..."
+			></textarea>
+		</div>
+		<div class="grid grid-cols-1 gap-3 md:grid-cols-3">
+			<div class="space-y-2">
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="edit_teeth">Dientes / zona</label>
+				<input
+					id="edit_teeth"
+					name="teeth"
+					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+					bind:value={editEntryTeeth}
+					placeholder="Ej: 11-12"
+				/>
+			</div>
+			<div class="space-y-2">
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="edit_amount">Importe</label>
+				<input
+					id="edit_amount"
+					name="amount"
+					type="number"
+					step="0.01"
+					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+					bind:value={editEntryAmount}
+					placeholder="Ej: 12000"
+				/>
+			</div>
+			<div class="space-y-2">
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="edit_internal_note">Nota interna</label>
+				<input
+					id="edit_internal_note"
+					name="internal_note"
+					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+					bind:value={editEntryNote}
+					placeholder="Opcional"
+				/>
+			</div>
+		</div>
+		{#if form?.message}
+			<p class="rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{form.message}</p>
+		{/if}
+		<div class="flex items-center justify-end gap-2">
+			<button
+				type="button"
+				onclick={() => (showEditEntryModal = false)}
+				class="rounded-xl px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:text-white dark:hover:bg-[#1b2d4b]"
+			>
+				Cancelar
+			</button>
+			<button
+				type="submit"
+				class="rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+			>
+				Guardar cambios
+			</button>
+		</div>
+	</form>
+</Modal>
+
 <Modal open={showEditModal} title="Editar datos" on:close={() => (showEditModal = false)}>
-	<form method="post" action="?/update_patient" class="space-y-3">
+	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+	<form method="post" action="?/update_patient" class="space-y-3" onkeydown={preventEnterSubmit} onsubmit={handleEditSubmit}>
 		<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
 			<div class="space-y-1">
 				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="email">Email</label>
@@ -556,13 +818,13 @@
 		</div>
 		<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
 			<div class="space-y-1">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="birth_date">Fecha de nacimiento</label>
-				<input
-					id="birth_date"
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="birth_date-year">Fecha de nacimiento</label>
+				<DatePartsInput
 					name="birth_date"
-					type="date"
-					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
-					value={data.patient.birth_date ?? ''}
+					initialValue={data.patient.birth_date ?? null}
+					minYear={1900}
+					maxYear={currentYear}
+					showErrors={showEditErrors}
 				/>
 			</div>
 			<div class="space-y-1">

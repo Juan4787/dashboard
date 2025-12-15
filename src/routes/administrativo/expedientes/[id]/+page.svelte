@@ -1,16 +1,44 @@
 <script lang="ts">
 	import Modal from '$lib/components/Modal.svelte';
+	import DateTimePartsInput from '$lib/components/DateTimePartsInput.svelte';
 	import Timeline from '$lib/components/Timeline.svelte';
 	import { CASE_EVENT_TYPES, CASE_STATUS } from '$lib/constants';
 	import { formatDate, formatDateTime } from '$lib/utils/format';
 
-	let { data, form } = $props<{
-		data: { caseFile: any; person: any; events: any[]; statuses: typeof CASE_STATUS; eventTypes: typeof CASE_EVENT_TYPES };
-		form: { message?: string };
-	}>();
+let { data, form } = $props<{
+	data: { caseFile: any; person: any; events: any[]; statuses: typeof CASE_STATUS; eventTypes: typeof CASE_EVENT_TYPES };
+	form: { message?: string };
+}>();
 
-	let showEventModal = $state(false);
-	let showEditModal = $state(false);
+let showEventModal = $state(false);
+let showEditModal = $state(false);
+let showEventErrors = $state(false);
+let showEditErrors = $state(false);
+
+const preventEnterSubmit = (event: KeyboardEvent) => {
+	if (event.key !== 'Enter') return;
+	const target = event.target as HTMLElement | null;
+	if (target instanceof HTMLTextAreaElement) return;
+	event.preventDefault();
+};
+
+const handleEventSubmit = (event: SubmitEvent) => {
+	showEventErrors = true;
+	const formEl = event.currentTarget as HTMLFormElement;
+	const hidden = formEl.querySelector<HTMLInputElement>('input[name="created_at"]');
+	if (!hidden || !hidden.value || hidden.value === '__invalid__') {
+		event.preventDefault();
+	}
+};
+
+const handleEditSubmit = (event: SubmitEvent) => {
+	showEditErrors = true;
+	const formEl = event.currentTarget as HTMLFormElement;
+	// No custom parts here (date native), so rely on form validity. Keeping hook for symmetry if we add parts later.
+	if (!formEl.checkValidity()) {
+		event.preventDefault();
+	}
+};
 </script>
 
 <div class="flex flex-col gap-4">
@@ -122,7 +150,8 @@
 </div>
 
 <Modal open={showEventModal} title="Nuevo movimiento" on:close={() => (showEventModal = false)}>
-	<form method="post" action="?/add_event" class="space-y-3">
+	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+	<form method="post" action="?/add_event" class="space-y-3" onkeydown={preventEnterSubmit} onsubmit={handleEventSubmit}>
 		<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
 			<div class="space-y-2">
 				<label class="text-sm font-semibold text-neutral-800" for="event_type">Tipo</label>
@@ -139,13 +168,8 @@
 				</select>
 			</div>
 			<div class="space-y-2">
-				<label class="text-sm font-semibold text-neutral-800" for="created_at">Fecha y hora</label>
-				<input
-					id="created_at"
-					name="created_at"
-					type="datetime-local"
-					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-100"
-				/>
+				<label class="text-sm font-semibold text-neutral-800" for="created_at-year">Fecha y hora</label>
+				<DateTimePartsInput name="created_at" minYear={2000} maxYear={2045} showErrors={showEventErrors} />
 			</div>
 		</div>
 		<div class="space-y-2">
@@ -181,7 +205,8 @@
 </Modal>
 
 <Modal open={showEditModal} title="Editar expediente" on:close={() => (showEditModal = false)}>
-	<form method="post" action="?/update_case" class="space-y-3">
+	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+	<form method="post" action="?/update_case" class="space-y-3" onkeydown={preventEnterSubmit} onsubmit={handleEditSubmit}>
 		<div class="space-y-2">
 			<label class="text-sm font-semibold text-neutral-800" for="status">Estado</label>
 			<select

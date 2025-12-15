@@ -3,6 +3,8 @@ import Modal from '$lib/components/Modal.svelte';
 import { formatDate } from '$lib/utils/format';
 import { goto } from '$app/navigation';
 import { page } from '$app/stores';
+import { enhance } from '$app/forms';
+import type { KeyboardEventHandler } from 'svelte/elements';
 
 type FormResult = {
 	message?: string;
@@ -27,9 +29,20 @@ const normalize = (value: string) =>
 		if ($page.url.searchParams.has('nuevo')) {
 			showCreate = true;
 		}
+		if (form?.message) {
+			showCreate = true;
+		}
 	});
 
 	let filteredPatients = $state<any[]>([]);
+
+	const preventEnterSubmit: KeyboardEventHandler<HTMLFormElement> = (event) => {
+		if (event.key !== 'Enter') return;
+		const target = event.target as HTMLElement | null;
+		// Allow Enter inside textareas (nueva línea). Block elsewhere to evitar submits accidentales.
+		if (target instanceof HTMLTextAreaElement) return;
+		event.preventDefault();
+	};
 
 	const activeCount = $derived((data.patients ?? []).filter((p: any) => !p.archived_at).length);
 	const archivedCount = $derived((data.patients ?? []).filter((p: any) => p.archived_at).length);
@@ -155,11 +168,11 @@ const normalize = (value: string) =>
 						</div>
 					</div>
 
-					<div class="table-row-group">
-						{#each filteredPatients as patient}
-							<div
-								class="table-row border-b border-white/10 last:border-b-0 hover:bg-neutral-50 dark:hover:bg-[#0f1f36] cursor-pointer"
-								role="button"
+			<div class="table-row-group">
+				{#each filteredPatients as patient}
+					<div
+						class="table-row border-b border-white/10 last:border-b-0 hover:bg-neutral-50 dark:hover:bg-[#0f1f36] cursor-pointer"
+						role="button"
 								tabindex="0"
 								onclick={() => goto(`/odonto/pacientes/${patient.id}`)}
 								onkeydown={(event) => {
@@ -207,6 +220,16 @@ const normalize = (value: string) =>
 									>
 										Abrir paciente
 									</a>
+									{#if patient.archived_at}
+										<form method="post" action={`/odonto/pacientes/${patient.id}?/unarchive_patient`} class="mt-3">
+											<button
+												type="submit"
+												class="rounded-full border border-neutral-200 px-4 py-2 text-xs font-semibold text-neutral-700 transition hover:bg-neutral-100 dark:border-[#1f3554] dark:text-[#eaf1ff] dark:hover:bg-[#0f1f36]"
+											>
+												Desarchivar
+											</button>
+										</form>
+									{/if}
 								</div>
 							</div>
 						{/each}
@@ -272,7 +295,8 @@ const normalize = (value: string) =>
 </section>
 
 <Modal open={showCreate} title="Alta rápida de paciente" on:close={closeModal}>
-	<form method="post" class="space-y-4">
+	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+	<form method="post" class="space-y-4" use:enhance onkeydown={preventEnterSubmit}>
 		<div class="space-y-2">
 			<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="full_name">Nombre y apellido *</label>
 			<input

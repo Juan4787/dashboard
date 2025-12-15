@@ -1,24 +1,25 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+import { onMount } from 'svelte';
 
-	let theme = $state<'light' | 'dark'>('light');
+let theme = $state<'light' | 'dark'>('dark');
 
-	const applyTheme = (value: 'light' | 'dark') => {
-		theme = value;
-		if (typeof document !== 'undefined') {
+const applyTheme = (value: 'light' | 'dark') => {
+	theme = value;
+	if (typeof document !== 'undefined') {
+		if (document.documentElement.classList.contains('dark') !== (value === 'dark')) {
 			document.documentElement.classList.toggle('dark', value === 'dark');
-			localStorage.setItem('theme', value);
 		}
-	};
+		localStorage.setItem('theme', value);
+	}
+};
 
-	onMount(() => {
-		const stored = localStorage.getItem('theme');
-		if (stored === 'dark' || stored === 'light') {
-			applyTheme(stored);
-		} else {
-			applyTheme('light');
-		}
-	});
+onMount(() => {
+	const stored = localStorage.getItem('theme');
+	const fromDom = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+	const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+	const next = stored === 'dark' || stored === 'light' ? stored : fromDom || (prefersDark ? 'dark' : 'light');
+	applyTheme(next === 'dark' ? 'dark' : 'light');
+});
 
 	const toggle = () => applyTheme(theme === 'dark' ? 'light' : 'dark');
 </script>

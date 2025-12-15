@@ -8,6 +8,8 @@
 		{ label: 'Expedientes', href: '/administrativo/expedientes' },
 		{ label: 'Configuración', href: '/administrativo/configuracion' }
 	];
+
+	const isActive = (href: string) => $page.url.pathname.startsWith(href);
 </script>
 
 <div class="min-h-screen bg-neutral-50 text-neutral-900 dark:bg-[#0b1626] dark:text-[#eaf1ff]">
@@ -22,33 +24,27 @@
 					<a
 						href={item.href}
 						class={`group rounded-full px-3 py-2 transition-all duration-200 ${
-							$page.url.pathname.startsWith(item.href)
+							isActive(item.href)
 								? 'bg-[#7c3aed] text-white shadow-sm'
 								: 'text-neutral-500 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white'
 						}`}
 					>
-						{#each item.label.split('') as char, i}
-							<span
-								class="inline-block transition-colors duration-200 group-hover:text-[#7c3aed] group-[.bg\\[\\#7c3aed\\]]:text-white dark:group-hover:text-[#c084fc]"
-								style={`transition-delay:${i * 18}ms`}
-							>
-								{char}
-							</span>
-						{/each}
+						<span
+							class={`inline-block transition-colors duration-200 ${
+								isActive(item.href) ? 'text-white' : 'group-hover:text-[#7c3aed] dark:group-hover:text-[#c084fc]'
+							}`}
+						>
+							{item.label}
+						</span>
 					</a>
 				{/each}
 				<a
 					href="/logout"
 					class="group text-neutral-500 transition hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white"
 				>
-					{#each 'Salir'.split('') as char, i}
-						<span
-							class="inline-block transition-colors duration-200 group-hover:text-[#7c3aed] dark:group-hover:text-[#c084fc]"
-							style={`transition-delay:${i * 18}ms`}
-						>
-							{char}
-						</span>
-					{/each}
+					<span class="inline-block transition-colors duration-200 group-hover:text-[#7c3aed] dark:group-hover:text-[#c084fc]">
+						Salir
+					</span>
 				</a>
 			</nav>
 		</div>

@@ -1,5 +1,5 @@
 import { env } from '$env/dynamic/private';
-import { createSupabaseServerClient } from '$lib/server/supabase';
+import { createSupabaseServerClient, getUserIdFromAccessToken } from '$lib/server/supabase';
 import { normalizePhone } from '$lib/utils/format';
 import { fail, redirect, error as kitError } from '@sveltejs/kit';
 import { demoPatients } from '$lib/server/demo-data';
@@ -25,9 +25,8 @@ export const load: PageServerLoad = async ({ locals, url, fetch }) => {
 		.select('id, full_name, dni, phone, archived_at, last_entry_at, updated_at, created_at')
 		.order('updated_at', { ascending: false })
 		.limit(200);
-	if (!showArchived) {
-		builder = builder.is('archived_at', null);
-	}
+
+	builder = showArchived ? builder.not('archived_at', 'is', null) : builder.is('archived_at', null);
 
 	const { data, error } = await builder;
 	if (error) {
@@ -47,6 +46,10 @@ export const actions: Actions = {
 			return fail(400, { message: 'Modo demo: no se guardan cambios' });
 		}
 		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
+		const ownerId = getUserIdFromAccessToken(locals.auth.access_token);
+		if (!ownerId) {
+			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
+		}
 
 		const form = await request.formData();
 		const full_name = String(form.get('full_name') ?? '').trim();
@@ -78,6 +81,7 @@ export const actions: Actions = {
 		const { data, error } = await supabase
 			.from('patients')
 			.insert({
+				owner_id: ownerId,
 				full_name,
 				dni: dni || null,
 				phone: phone || null
