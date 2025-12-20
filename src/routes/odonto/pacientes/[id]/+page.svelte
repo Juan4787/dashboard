@@ -14,6 +14,7 @@
 	let showEditModal = $state(false);
 	let showArchiveConfirm = $state(false);
 	let showDeleteConfirm = $state(false);
+	let showMobileActions = $state(false);
 	let deleteConfirmText = $state('');
 	let tab = $state<'historial' | 'datos'>('historial');
 	let filterType = $state<'Todos' | 'Consulta' | 'Tratamiento'>('Todos');
@@ -194,12 +195,28 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 </script>
 
 <div class="flex flex-col gap-5">
-	<div class="rounded-2xl border border-neutral-100 bg-white/90 p-6 shadow-card dark:border-[#1f3554] dark:bg-[#152642]">
+	<div class="rounded-2xl border border-neutral-100 bg-white/90 p-4 shadow-card dark:border-[#1f3554] dark:bg-[#152642] sm:p-6">
 		<div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-			<div class="space-y-1">
-				<h1 class="text-[30px] font-semibold text-neutral-900 dark:text-white">{data.patient.full_name}</h1>
+			<div class="flex items-start justify-between gap-3">
+				<div class="min-w-0 space-y-1">
+					<h1 class="break-words text-[28px] font-semibold text-neutral-900 dark:text-white sm:text-[30px]">
+						{data.patient.full_name}
+					</h1>
+				</div>
+				<button
+					type="button"
+					class="flex h-10 w-10 items-center justify-center rounded-full border border-neutral-200 text-neutral-700 transition hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-100 dark:hover:bg-[#122641] md:hidden"
+					onclick={() => (showMobileActions = true)}
+					aria-label="Acciones del paciente"
+				>
+					<svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+						<circle cx="6" cy="12" r="1.6" />
+						<circle cx="12" cy="12" r="1.6" />
+						<circle cx="18" cy="12" r="1.6" />
+					</svg>
+				</button>
 			</div>
-			<div class="flex flex-wrap items-center gap-3">
+			<div class="hidden flex-wrap items-center gap-3 md:flex">
 					<form method="post" action="?/archive_patient" class="contents" bind:this={archiveForm}>
 						<button
 							type="submit"
@@ -230,10 +247,10 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				</button>
 			</div>
 		</div>
-		<div class="mt-4 flex gap-3 text-sm">
+		<div class="mt-4 grid grid-cols-3 gap-2 text-sm md:flex md:items-center md:gap-3">
 			<a
 				href="/odonto/pacientes"
-				class="flex items-center gap-2 rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 transition hover:-translate-y-0.5 hover:bg-neutral-100 hover:shadow-card dark:border-[#1f3554] dark:text-[#eaf1ff] dark:hover:bg-[#122641]"
+				class="flex w-full items-center justify-center gap-2 rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 transition hover:-translate-y-0.5 hover:bg-neutral-100 hover:shadow-card dark:border-[#1f3554] dark:text-[#eaf1ff] dark:hover:bg-[#122641] md:w-auto"
 			>
 				<svg
 					aria-hidden="true"
@@ -248,7 +265,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				Atrás
 			</a>
 			<button
-				class={`rounded-full px-4 py-2 font-semibold transition ${
+				class={`w-full rounded-full px-4 py-2 text-center font-semibold transition md:w-auto ${
 					tab === 'historial'
 						? 'bg-[#7c3aed] text-white shadow-sm'
 						: 'text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-[#0f1f36]'
@@ -258,7 +275,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				Historial
 			</button>
 			<button
-				class={`rounded-full px-4 py-2 font-semibold transition ${
+				class={`w-full rounded-full px-4 py-2 text-center font-semibold transition md:w-auto ${
 					tab === 'datos'
 						? 'bg-[#7c3aed] text-white shadow-sm'
 						: 'text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-[#0f1f36]'
@@ -267,24 +284,6 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 			>
 				Datos
 			</button>
-				<button
-					class="ml-auto flex h-10 items-center justify-center rounded-full border border-neutral-200 px-3 text-sm font-semibold text-neutral-700 transition hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-100 dark:hover:bg-[#122641] md:hidden"
-					type="button"
-					onclick={() => (showArchiveConfirm = true)}
-					aria-label={isArchived ? 'Desarchivar paciente' : 'Archivar paciente'}
-					title={isArchived ? 'Desarchivar paciente' : 'Archivar paciente'}
-				>
-					{isArchived ? 'Desarchivar' : 'Archivar'} paciente
-				</button>
-				<button
-					class="ml-2 flex h-10 items-center justify-center rounded-full bg-red-600 px-3 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-800 md:hidden"
-					type="button"
-					onclick={() => (showDeleteConfirm = true)}
-					aria-label="Eliminar paciente"
-					title="Eliminar paciente"
-				>
-					Eliminar paciente
-				</button>
 		</div>
 		<div class="mt-4 flex flex-wrap gap-3">
 			{#each chips as chip}
@@ -305,7 +304,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 	</div>
 
 	{#if tab === 'historial'}
-		<div class="rounded-2xl border border-neutral-100 bg-white/90 p-6 shadow-card dark:border-[#1f3554] dark:bg-[#152642]">
+		<div class="rounded-2xl border border-neutral-100 bg-white/90 p-4 shadow-card dark:border-[#1f3554] dark:bg-[#152642] sm:p-6">
 			<div class="flex flex-col gap-3 text-sm sm:flex-row sm:items-center">
 				<select
 					bind:value={filterType}
@@ -326,7 +325,8 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 			<div class="mt-4">
 				{#if data.entries.length === 0}
 					<p class="rounded-xl border border-dashed border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-neutral-200">
-						Sin consultas registradas. Cargá la primera desde “Registrar consulta”.
+						<span class="md:hidden">Sin consultas registradas. Cargá la primera tocando el botón + de abajo a la derecha.</span>
+						<span class="hidden md:inline">Sin consultas registradas. Cargá la primera desde “Registrar consulta”.</span>
 					</p>
 				{:else}
 					<div class="relative pl-8">
@@ -344,7 +344,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 										>
 											<span class="absolute left-[-14px] top-5 h-3 w-3 rounded-full border-2 border-white bg-[#7c3aed] shadow dark:border-[#0f1f36]"></span>
 											<div class="flex items-center justify-between gap-3">
-												<div class="flex items-center gap-3">
+												<div class="flex min-w-0 flex-1 items-center gap-3">
 													<span class="rounded-full bg-[#7c3aed]/15 px-3 py-1 text-xs font-bold uppercase tracking-wide text-[#5b21b6] dark:bg-[#7c3aed]/20 dark:text-[#d9c5ff]">
 														{entry.entry_type}
 													</span>
@@ -352,7 +352,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 														{mainTitle(entry)}
 													</p>
 												</div>
-												<div class="flex items-center gap-2">
+												<div class="flex shrink-0 items-center gap-2">
 													{#if entry.amount}
 														<span class="text-sm font-semibold text-neutral-800 dark:text-neutral-100"> ${entry.amount} </span>
 													{/if}
@@ -402,12 +402,12 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 			</div>
 		</div>
 	{:else}
-		<div class="rounded-2xl border border-neutral-100 bg-white p-5 shadow-sm dark:border-[#1f3554] dark:bg-[#122641]">
-			<div class="flex items-center justify-between">
+		<div class="rounded-2xl border border-neutral-100 bg-white p-4 shadow-sm dark:border-[#1f3554] dark:bg-[#122641] sm:p-5">
+			<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 				<h2 class="text-lg font-semibold text-neutral-900 dark:text-white">Datos del paciente</h2>
 				<button
 					type="button"
-					class="rounded-full border border-neutral-200 bg-white px-4 py-2 text-sm font-semibold text-neutral-900 shadow-sm transition hover:-translate-y-0.5 hover:shadow-card"
+					class="w-full rounded-full border border-neutral-200 bg-white px-4 py-2 text-sm font-semibold text-neutral-900 shadow-sm transition hover:-translate-y-0.5 hover:shadow-card sm:w-auto"
 					onclick={() => (showEditModal = true)}
 				>
 					{hasPatientData ? 'Editar datos del paciente' : 'Agregar datos del paciente'}
@@ -596,6 +596,38 @@ aria-label="Registrar consulta"
 	+
 </button>
 
+<Modal open={showMobileActions} title="Acciones del paciente" on:close={() => (showMobileActions = false)}>
+	<div class="space-y-3">
+		<button
+			type="button"
+			class="w-full rounded-xl border border-neutral-200 px-4 py-3 text-sm font-semibold text-neutral-800 transition hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-100 dark:hover:bg-[#122641]"
+			onclick={() => {
+				showMobileActions = false;
+				showArchiveConfirm = true;
+			}}
+		>
+			{isArchived ? 'Desarchivar paciente' : 'Archivar paciente'}
+		</button>
+		<button
+			type="button"
+			class="w-full rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700"
+			onclick={() => {
+				showMobileActions = false;
+				showDeleteConfirm = true;
+			}}
+		>
+			Eliminar paciente
+		</button>
+		<button
+			type="button"
+			class="w-full rounded-xl px-4 py-3 text-sm font-semibold text-neutral-600 transition hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-[#122641]"
+			onclick={() => (showMobileActions = false)}
+		>
+			Cerrar
+		</button>
+	</div>
+</Modal>
+
 <Modal open={showEntryModal} title={`Registrar consulta - ${data.patient.full_name}`} on:close={() => (showEntryModal = false)}>
 	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 	<form method="post" action="?/add_entry" class="space-y-4" onkeydown={preventEnterSubmit} onsubmit={handleEntrySubmit}>
@@ -667,17 +699,17 @@ aria-label="Registrar consulta"
 		{#if form?.message}
 			<p class="rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{form.message}</p>
 		{/if}
-		<div class="flex items-center justify-end gap-2">
+		<div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
 			<button
 				type="button"
 				onclick={() => (showEntryModal = false)}
-				class="rounded-xl px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:text-white dark:hover:bg-[#1b2d4b]"
+				class="w-full rounded-xl px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:text-white dark:hover:bg-[#1b2d4b] sm:w-auto"
 			>
 				Cancelar
 			</button>
 			<button
 				type="submit"
-				class="rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+				class="w-full rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 sm:w-auto"
 			>
 				Guardar
 			</button>
@@ -692,17 +724,17 @@ aria-label="Registrar consulta"
 		{:else}
 			<p>El paciente se moverá a “Archivados”. Podrás recuperarlo más adelante.</p>
 		{/if}
-		<div class="flex justify-end gap-2">
+		<div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
 			<button
 				type="button"
-				class="rounded-xl px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:text-white dark:hover:bg-[#1b2d4b]"
+				class="w-full rounded-xl px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:text-white dark:hover:bg-[#1b2d4b] sm:w-auto"
 				onclick={() => (showArchiveConfirm = false)}
 			>
 				Cancelar
 			</button>
 				<button
 					type="button"
-					class="rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+					class="w-full rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 sm:w-auto"
 					onclick={() => {
 						showArchiveConfirm = false;
 					if (isArchived) {
@@ -733,10 +765,10 @@ aria-label="Registrar consulta"
 				autocomplete="off"
 			/>
 		</div>
-		<div class="flex justify-end gap-2">
+		<div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
 			<button
 				type="button"
-				class="rounded-xl px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:text-white dark:hover:bg-[#1b2d4b]"
+				class="w-full rounded-xl px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:text-white dark:hover:bg-[#1b2d4b] sm:w-auto"
 				onclick={() => {
 					deleteConfirmText = '';
 					showDeleteConfirm = false;
@@ -747,7 +779,7 @@ aria-label="Registrar consulta"
 			<button
 				type="button"
 				disabled={deleteConfirmText.trim().toLowerCase() !== 'eliminar'}
-				class={`rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500 ${
+				class={`w-full rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500 sm:w-auto ${
 					deleteConfirmText.trim().toLowerCase() === 'eliminar'
 						? 'bg-red-600 hover:bg-red-700'
 						: 'bg-red-400 cursor-not-allowed opacity-80'
@@ -841,17 +873,17 @@ aria-label="Registrar consulta"
 		{#if form?.message}
 			<p class="rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{form.message}</p>
 		{/if}
-		<div class="flex items-center justify-end gap-2">
+		<div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
 			<button
 				type="button"
 				onclick={() => (showEditEntryModal = false)}
-				class="rounded-xl px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:text-white dark:hover:bg-[#1b2d4b]"
+				class="w-full rounded-xl px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:text-white dark:hover:bg-[#1b2d4b] sm:w-auto"
 			>
 				Cancelar
 			</button>
 			<button
 				type="submit"
-				class="rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+				class="w-full rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 sm:w-auto"
 			>
 				Guardar cambios
 			</button>
@@ -971,17 +1003,17 @@ aria-label="Registrar consulta"
 			<p class="rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{form.message}</p>
 		{/if}
 		<p class="text-xs text-neutral-500 dark:text-neutral-300">Todos los datos son opcionales.</p>
-		<div class="flex items-center justify-end gap-2">
+		<div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
 			<button
 				type="button"
-				class="rounded-xl px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:text-white dark:hover:bg-[#1b2d4b]"
+				class="w-full rounded-xl px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:text-white dark:hover:bg-[#1b2d4b] sm:w-auto"
 				onclick={() => (showEditModal = false)}
 			>
 				Cancelar
 			</button>
 			<button
 				type="submit"
-				class="rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+				class="w-full rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 sm:w-auto"
 			>
 				Guardar cambios
 			</button>

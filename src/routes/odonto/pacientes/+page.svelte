@@ -25,6 +25,7 @@ const normalize = (value: string) =>
 let search = $state('');
 let showCreate = $state($page.url.searchParams.has('nuevo'));
 let showReport = $state(false);
+const isSearching = $derived(search.trim().length > 0);
 
 	$effect(() => {
 		if ($page.url.searchParams.has('nuevo')) {
@@ -45,8 +46,8 @@ let showReport = $state(false);
 		event.preventDefault();
 	};
 
-	const activeCount = $derived((data.patients ?? []).filter((p: any) => !p.archived_at).length);
-	const archivedCount = $derived((data.patients ?? []).filter((p: any) => p.archived_at).length);
+	const activeCount = $derived(data.activeCount ?? (data.patients ?? []).filter((p: any) => !p.archived_at).length);
+	const archivedCount = $derived(data.archivedCount ?? (data.patients ?? []).filter((p: any) => p.archived_at).length);
 
 	$effect(() => {
 		const term = normalize(search);
@@ -71,7 +72,7 @@ let showReport = $state(false);
 	};
 </script>
 
-<section class="flex flex-col gap-4">
+<section class="flex flex-col gap-4 pb-24 md:pb-0">
 	<div class="flex flex-col items-start gap-3 md:flex-row md:items-center md:justify-between">
 		<div class="space-y-1">
 			<h1 class="text-3xl font-semibold text-neutral-900 dark:text-white">Pacientes</h1>
@@ -144,7 +145,16 @@ let showReport = $state(false);
 
 	<div class="overflow-hidden rounded-2xl border border-neutral-100 bg-white shadow-sm dark:border-[#1f3554] dark:bg-[#122641] mb-10">
 		{#if filteredPatients.length === 0}
-			<div class="p-6 text-sm text-neutral-600 dark:text-[#c8d4e8]">No encontramos pacientes con ese criterio.</div>
+			<div class="p-6 text-sm text-neutral-600 dark:text-[#c8d4e8]">
+				{#if isSearching}
+					No encontramos pacientes con ese criterio.
+				{:else if data.showArchived}
+					No hay pacientes archivados.
+				{:else}
+					<span class="md:hidden">Aun no hay pacientes registrados. Creá el primero tocando el botón + de abajo.</span>
+					<span class="hidden md:inline">Aun no hay pacientes registrados.</span>
+				{/if}
+			</div>
 		{:else}
 			<!-- Desktop table -->
 			<div class="hidden md:block">
@@ -306,22 +316,43 @@ let showReport = $state(false);
 										.map((p: string) => p[0]?.toUpperCase())
 										.join('')}
 								</div>
-								<div class="flex-1">
+								<div class="flex-1 min-w-0">
 									<div class="flex items-center gap-2">
-										<p class="text-base font-semibold text-neutral-900 dark:text-white">{patient.full_name}</p>
+										<p class="truncate text-base font-semibold text-neutral-900 dark:text-white">{patient.full_name}</p>
 										{#if patient.archived_at}
 											<span class="rounded-full bg-neutral-200 px-2 py-1 text-[11px] font-semibold text-neutral-700 dark:bg-[#1f3554] dark:text-neutral-100">Archivado</span>
 										{:else}
 											<span class="rounded-full bg-green-100 px-2 py-1 text-[11px] font-semibold text-green-800 dark:bg-green-800/40 dark:text-green-100">Activo</span>
 										{/if}
 									</div>
-									<p class="mt-1 text-[12px] text-neutral-600 dark:text-neutral-300">
-										DNI {patient.dni ?? 'Sin DNI'}{patient.phone ? ` · Tel ${patient.phone}` : ''}
-									</p>
+									<div class="mt-1 space-y-1 text-[12px] text-neutral-600 dark:text-neutral-300">
+										<p class="break-all">DNI {patient.dni ?? 'Sin DNI'}</p>
+										{#if patient.phone}
+											<p class="break-all">Tel {patient.phone}</p>
+										{/if}
+									</div>
 									<p class="mt-1 text-[12px] text-neutral-600 dark:text-neutral-300">
 										Últ. visita {patient.last_entry_at ? formatDate(patient.last_entry_at) : '—'}
 									</p>
 								</div>
+							</div>
+							<div class="mt-3 flex flex-col gap-2">
+								<a
+									href={`/odonto/pacientes/${patient.id}`}
+									class="w-full rounded-full bg-[#7c3aed] px-4 py-2.5 text-center text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-card"
+								>
+									Abrir paciente
+								</a>
+								{#if patient.archived_at}
+									<form method="post" action={`/odonto/pacientes/${patient.id}?/unarchive_patient`}>
+										<button
+											type="submit"
+											class="w-full rounded-full border border-neutral-300 px-4 py-2.5 text-sm font-semibold text-neutral-800 transition hover:-translate-y-0.5 hover:bg-neutral-200 dark:border-[#8fb3ff] dark:text-white dark:hover:bg-[#1b2d4b]"
+										>
+											Desarchivar paciente
+										</button>
+									</form>
+								{/if}
 							</div>
 						</div>
 					{:else}
@@ -346,18 +377,21 @@ let showReport = $state(false);
 										.map((p: string) => p[0]?.toUpperCase())
 										.join('')}
 								</div>
-								<div class="flex-1">
+								<div class="flex-1 min-w-0">
 									<div class="flex items-center gap-2">
-										<p class="text-base font-semibold text-neutral-900 dark:text-white">{patient.full_name}</p>
+										<p class="truncate text-base font-semibold text-neutral-900 dark:text-white">{patient.full_name}</p>
 										{#if patient.archived_at}
 											<span class="rounded-full bg-neutral-200 px-2 py-1 text-[11px] font-semibold text-neutral-700 dark:bg-[#1f3554] dark:text-neutral-100">Archivado</span>
 										{:else}
 											<span class="rounded-full bg-green-100 px-2 py-1 text-[11px] font-semibold text-green-800 dark:bg-green-800/40 dark:text-green-100">Activo</span>
 										{/if}
 									</div>
-									<p class="mt-1 text-[12px] text-neutral-600 dark:text-neutral-300">
-										DNI {patient.dni ?? 'Sin DNI'}{patient.phone ? ` · Tel ${patient.phone}` : ''}
-									</p>
+									<div class="mt-1 space-y-1 text-[12px] text-neutral-600 dark:text-neutral-300">
+										<p class="break-all">DNI {patient.dni ?? 'Sin DNI'}</p>
+										{#if patient.phone}
+											<p class="break-all">Tel {patient.phone}</p>
+										{/if}
+									</div>
 									<p class="mt-1 text-[12px] text-neutral-600 dark:text-neutral-300">
 										Últ. visita {patient.last_entry_at ? formatDate(patient.last_entry_at) : '—'}
 									</p>
@@ -371,7 +405,7 @@ let showReport = $state(false);
 		</div>
 	</div>
 
-	<div class="mt-4 flex justify-end">
+	<div class="mt-4 hidden justify-end md:flex">
 		<div class="flex flex-col items-end gap-2">
 			<button
 				type="button"
@@ -446,17 +480,17 @@ let showReport = $state(false);
 			</div>
 		{/if}
 
-		<div class="flex items-center justify-end gap-2">
+		<div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
 			<button
 				type="button"
 				onclick={closeModal}
-				class="rounded-xl px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100"
+				class="w-full rounded-xl px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 sm:w-auto"
 			>
 				Cancelar
 			</button>
 			<button
 				type="submit"
-				class="rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+				class="w-full rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 sm:w-auto"
 			>
 				Crear paciente
 			</button>
