@@ -1,8 +1,3 @@
-<script lang="ts">
-	let showArchivedByDefault = $state(false);
-	let orderByLastVisit = $state(true);
-</script>
-
 <section class="space-y-4">
 	<header class="flex items-center justify-between">
 		<div>
@@ -43,24 +38,6 @@
 			</div>
 		</div>
 
-		<!-- Preferencias de vista -->
-		<div class="rounded-2xl border border-neutral-100 bg-white p-5 shadow-sm dark:border-[#1f3554] dark:bg-[#122641]">
-			<p class="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">Preferencias de vista</p>
-			<h2 class="text-lg font-semibold text-neutral-900 dark:text-white">Listas y fichas</h2>
-			<div class="mt-4 space-y-3">
-				<label class="flex items-center justify-between rounded-xl border border-neutral-100 bg-neutral-50 px-3 py-2 text-sm font-semibold text-neutral-800 transition dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-neutral-100">
-					<span>Mostrar archivados por defecto</span>
-					<input type="checkbox" bind:checked={showArchivedByDefault} class="h-5 w-5 accent-[#7c3aed]" />
-				</label>
-				<label class="flex items-center justify-between rounded-xl border border-neutral-100 bg-neutral-50 px-3 py-2 text-sm font-semibold text-neutral-800 transition dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-neutral-100">
-					<span>Ordenar por última visita</span>
-					<input type="checkbox" bind:checked={orderByLastVisit} class="h-5 w-5 accent-[#7c3aed]" />
-				</label>
-				<p class="text-xs text-neutral-500 dark:text-neutral-300">
-					Estas preferencias son locales (no se guardan en servidor) para mantener la app simple.
-				</p>
-			</div>
-		</div>
 	</div>
 
 	<div class="grid gap-4 lg:grid-cols-2">

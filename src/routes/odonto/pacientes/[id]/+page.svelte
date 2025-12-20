@@ -101,6 +101,20 @@ let archiveForm: HTMLFormElement | null = null;
 let unarchiveForm: HTMLFormElement | null = null;
 let deleteForm: HTMLFormElement | null = null;
 	const isArchived = $derived(Boolean(data.patient.archived_at));
+	const hasPatientData = $derived(
+		Boolean(
+			data.patient.dni ||
+			data.patient.phone ||
+				data.patient.email ||
+				data.patient.address ||
+				data.patient.birth_date ||
+				data.patient.insurance ||
+				data.patient.insurance_plan ||
+				data.patient.allergies ||
+				data.patient.medication ||
+				data.patient.background
+		)
+	);
 
 const formatAmountInput = (value: string) => {
 	const digits = value.replace(/\D/g, '');
@@ -389,7 +403,16 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 		</div>
 	{:else}
 		<div class="rounded-2xl border border-neutral-100 bg-white p-5 shadow-sm dark:border-[#1f3554] dark:bg-[#122641]">
-			<h2 class="text-lg font-semibold text-neutral-900 dark:text-white">Datos del paciente</h2>
+			<div class="flex items-center justify-between">
+				<h2 class="text-lg font-semibold text-neutral-900 dark:text-white">Datos del paciente</h2>
+				<button
+					type="button"
+					class="rounded-full border border-neutral-200 bg-white px-4 py-2 text-sm font-semibold text-neutral-900 shadow-sm transition hover:-translate-y-0.5 hover:shadow-card"
+					onclick={() => (showEditModal = true)}
+				>
+					{hasPatientData ? 'Editar datos del paciente' : 'Agregar datos del paciente'}
+				</button>
+			</div>
 			<div class="mt-4 space-y-4">
 				<div class="rounded-xl border border-neutral-100 bg-white/60 p-4 dark:border-[#1f3554] dark:bg-[#0f1f36]">
 					<div class="mb-3 flex items-center justify-between">
@@ -403,7 +426,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 							</button>
 					</div>
 					<div class="space-y-3">
-						<div class="flex items-start justify-between gap-3 rounded-lg bg-amber-100/30 px-3 py-2 dark:bg-amber-500/10">
+						<div class="flex min-w-0 items-start justify-between gap-3 rounded-lg bg-amber-100/30 px-3 py-2 dark:bg-amber-500/10">
 							<div class="flex items-center gap-2 text-xs font-semibold text-amber-700 dark:text-amber-200">
 								<svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M4.93 19h14.14a1 1 0 0 0 .9-1.45L12.9 4.55a1 1 0 0 0-1.8 0L4.03 17.55A1 1 0 0 0 4.93 19Z" />
@@ -411,14 +434,14 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 								Alergias
 							</div>
 							<p
-								class={`text-[15px] font-semibold ${
+								class={`flex-1 break-words text-right text-[15px] font-semibold ${
 									data.patient.allergies ? 'text-amber-900 dark:text-amber-100' : 'text-amber-700/70 dark:text-amber-200/70'
 								}`}
 							>
 								{data.patient.allergies ?? 'Sin registrar'}
 							</p>
 						</div>
-						<div class="flex items-start justify-between gap-3">
+						<div class="flex min-w-0 items-start justify-between gap-3">
 							<div class="flex items-center gap-2 text-xs font-semibold text-neutral-500 dark:text-neutral-300">
 								<svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" d="M6.75 6.75 17.25 17.25M9 5.25 5.25 9 9 12.75 12.75 9 9 5.25Z" />
@@ -427,14 +450,14 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 								Medicación
 							</div>
 							<p
-								class={`text-[15px] font-semibold ${
+								class={`flex-1 break-words text-left text-[15px] font-semibold ${
 									data.patient.medication ? 'text-white dark:text-white' : 'text-neutral-400 dark:text-neutral-500'
 								}`}
 							>
 								{data.patient.medication ?? 'Sin registrar'}
 							</p>
 						</div>
-						<div class="flex items-start justify-between gap-3">
+						<div class="flex min-w-0 items-start justify-between gap-3">
 							<div class="flex items-center gap-2 text-xs font-semibold text-neutral-500 dark:text-neutral-300">
 								<svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" d="M6.75 4.5h10.5a1.5 1.5 0 0 1 1.5 1.5v12.75l-4.5-2.25L9.75 18.75 5.25 21V6A1.5 1.5 0 0 1 6.75 4.5Z" />
@@ -442,7 +465,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 								Antecedentes
 							</div>
 							<p
-								class={`text-[15px] font-semibold whitespace-pre-wrap ${
+								class={`flex-1 break-words text-left text-[15px] font-semibold whitespace-pre-wrap ${
 									data.patient.background ? 'text-white dark:text-white' : 'text-neutral-400 dark:text-neutral-500'
 								}`}
 							>
@@ -537,6 +560,12 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 							<p class="text-xs font-semibold text-neutral-500 dark:text-neutral-300">Obra social</p>
 							<p class={`text-[15px] font-semibold ${data.patient.insurance ? 'text-white' : 'text-neutral-400 dark:text-neutral-500'}`}>
 								{data.patient.insurance ?? 'Sin registrar'}
+							</p>
+						</div>
+						<div class="space-y-1">
+							<p class="text-xs font-semibold text-neutral-500 dark:text-neutral-300">Plan de la obra social</p>
+							<p class={`text-[15px] font-semibold ${data.patient.insurance_plan ? 'text-white' : 'text-neutral-400 dark:text-neutral-500'}`}>
+								{data.patient.insurance_plan ?? 'Sin registrar'}
 							</p>
 						</div>
 						<div class="space-y-1">
@@ -833,7 +862,7 @@ aria-label="Registrar consulta"
 <Modal open={showEditModal} title="Editar datos" on:close={() => (showEditModal = false)}>
 	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 	<form method="post" action="?/update_patient" class="space-y-3" onkeydown={preventEnterSubmit} onsubmit={handleEditSubmit}>
-		<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+		<div class="grid grid-cols-1 gap-3 md:grid-cols-3">
 			<div class="space-y-1">
 				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="email">Email</label>
 				<input
@@ -851,6 +880,16 @@ aria-label="Registrar consulta"
 					name="phone"
 					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
 					value={data.patient.phone ?? ''}
+				/>
+			</div>
+			<div class="space-y-1">
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="dni">DNI</label>
+				<input
+					id="dni"
+					name="dni"
+					inputmode="numeric"
+					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+					value={data.patient.dni ?? ''}
 				/>
 			</div>
 		</div>
@@ -876,14 +915,27 @@ aria-label="Registrar consulta"
 			</div>
 		</div>
 		<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-			<div class="space-y-1">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="insurance">Obra social</label>
-				<input
-					id="insurance"
-					name="insurance"
-					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
-					value={data.patient.insurance ?? ''}
-				/>
+			<div class="space-y-3">
+				<div class="space-y-1">
+					<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="insurance">Obra social</label>
+					<input
+						id="insurance"
+						name="insurance"
+						class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+						value={data.patient.insurance ?? ''}
+					/>
+				</div>
+				<div class="space-y-1">
+					<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="insurance_plan">
+						Plan de la obra social
+					</label>
+					<input
+						id="insurance_plan"
+						name="insurance_plan"
+						class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+						value={data.patient.insurance_plan ?? ''}
+					/>
+				</div>
 			</div>
 			<div class="space-y-1">
 				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="allergies">Alergias</label>
@@ -918,6 +970,7 @@ aria-label="Registrar consulta"
 		{#if form?.message}
 			<p class="rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{form.message}</p>
 		{/if}
+		<p class="text-xs text-neutral-500 dark:text-neutral-300">Todos los datos son opcionales.</p>
 		<div class="flex items-center justify-end gap-2">
 			<button
 				type="button"

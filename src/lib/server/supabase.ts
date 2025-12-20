@@ -8,9 +8,13 @@ export type AuthTokens = {
 	refresh_token: string;
 };
 
+export const MASTER_EMAIL =
+	(env.MASTER_EMAIL ?? 'juanpabloaltamira@protonmail.com').trim().toLowerCase();
+
 const moduleEmails: Record<Module, string | undefined> = {
 	odonto: env.SABRINA_EMAIL,
-	administrativo: env.ADMIN_EMAIL
+	// administrativo: env.ADMIN_EMAIL
+	administrativo: undefined
 };
 
 const moduleConfig: Record<
@@ -37,7 +41,12 @@ export const resolveModuleByEmail = (email: string): Module | null => {
 };
 
 export const getModuleEntryRoute = (module: Module) =>
-	module === 'odonto' ? '/odonto/pacientes' : '/administrativo/expedientes';
+	// Administrativo deshabilitado por ahora.
+	// module === 'odonto' ? '/odonto/pacientes' : '/administrativo/expedientes';
+	'/odonto/pacientes';
+
+export const isMasterEmail = (email?: string | null) =>
+	Boolean(email && email.trim().toLowerCase() === MASTER_EMAIL);
 
 export const createSupabaseServerClient = async (
 	module: Module,
@@ -85,6 +94,25 @@ export const getUserIdFromAccessToken = (accessToken?: string | null): string | 
 	try {
 		const decoded = JSON.parse(Buffer.from(normalized, 'base64').toString('utf8')) as { sub?: unknown };
 		return typeof decoded.sub === 'string' ? decoded.sub : null;
+	} catch {
+		return null;
+	}
+};
+
+export const getEmailFromAccessToken = (accessToken?: string | null): string | null => {
+	if (!accessToken) return null;
+	const parts = accessToken.split('.');
+	if (parts.length < 2) return null;
+	const payload = parts[1];
+	const normalized = payload
+		.replace(/-/g, '+')
+		.replace(/_/g, '/')
+		.padEnd(Math.ceil(payload.length / 4) * 4, '=');
+	try {
+		const decoded = JSON.parse(Buffer.from(normalized, 'base64').toString('utf8')) as {
+			email?: unknown;
+		};
+		return typeof decoded.email === 'string' ? decoded.email : null;
 	} catch {
 		return null;
 	}

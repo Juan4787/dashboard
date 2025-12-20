@@ -21,6 +21,7 @@ export interface Patient {
 	medication?: string | null;
 	background?: string | null;
 	insurance?: string | null;
+	insurance_plan?: string | null;
 	custom_fields?: Record<string, unknown> | null;
 	archived_at?: string | null;
 	last_entry_at?: string | null;

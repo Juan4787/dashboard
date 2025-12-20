@@ -11,12 +11,18 @@
 
 		{#if form?.success}
 			<div class="space-y-4">
-				<p class="flex items-center gap-2 rounded-xl bg-green-500/15 px-4 py-3 text-sm font-semibold text-green-100">
-					<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-						<path stroke-linecap="round" stroke-linejoin="round" d="m5 13 4 4L19 7" />
-					</svg>
-					Si el email corresponde a un usuario, enviamos un enlace de recuperación.
-				</p>
+				<div class="flex justify-center">
+					<div class="grid h-16 w-16 place-items-center rounded-full border border-green-400/40 bg-green-500/15 text-green-100">
+						<svg class="h-8 w-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+							<path stroke-linecap="round" stroke-linejoin="round" d="m5 13 4 4L19 7" />
+						</svg>
+					</div>
+				</div>
+				<div class="space-y-3 rounded-xl bg-green-500/15 px-4 py-3 text-sm font-semibold text-green-100">
+					<p class="text-sm font-semibold text-green-100">
+						Revisá tu correo: Supabase Auth te envió el email para recuperar la contraseña.
+					</p>
+				</div>
 				<a
 					href="/login"
 					class="inline-flex w-full items-center justify-center rounded-2xl bg-[#7c3aed] px-4 py-3 text-base font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed]"

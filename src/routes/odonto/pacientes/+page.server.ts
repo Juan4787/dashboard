@@ -1,8 +1,8 @@
 import { env } from '$env/dynamic/private';
+import { newId, readDemoDb, updateDemoDb } from '$lib/server/demo-store';
 import { createSupabaseServerClient, getUserIdFromAccessToken } from '$lib/server/supabase';
 import { normalizePhone } from '$lib/utils/format';
 import { fail, redirect, error as kitError } from '@sveltejs/kit';
-import { demoPatients } from '$lib/server/demo-data';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals, url, fetch }) => {
@@ -14,8 +14,14 @@ export const load: PageServerLoad = async ({ locals, url, fetch }) => {
 	const showArchived = url.searchParams.get('estado') === 'archivados';
 
 	if (isDemo) {
-		const filtered = demoPatients.filter((p) => (showArchived ? true : p.archived_at === null));
-		return { patients: filtered, query: '', showArchived, demo: true };
+		const patients = readDemoDb().patients
+			.filter((p) => (showArchived ? p.archived_at !== null : p.archived_at === null))
+			.sort((a, b) => {
+				const aDate = a.updated_at ?? a.last_entry_at ?? a.created_at ?? '';
+				const bDate = b.updated_at ?? b.last_entry_at ?? b.created_at ?? '';
+				return aDate < bDate ? 1 : -1;
+			});
+		return { patients, query: '', showArchived, demo: true };
 	}
 
 	const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
@@ -42,15 +48,6 @@ export const actions: Actions = {
 		if (!locals.auth) {
 			throw redirect(303, '/login');
 		}
-		if (env.DEMO_MODE === 'true') {
-			return fail(400, { message: 'Modo demo: no se guardan cambios' });
-		}
-		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
-		const ownerId = getUserIdFromAccessToken(locals.auth.access_token);
-		if (!ownerId) {
-			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
-		}
-
 		const form = await request.formData();
 		const full_name = String(form.get('full_name') ?? '').trim();
 		const dni = String(form.get('dni') ?? '').trim();
@@ -58,6 +55,65 @@ export const actions: Actions = {
 
 		if (!full_name) {
 			return fail(400, { message: 'Nombre y apellido son obligatorios' });
+		}
+
+		if (env.DEMO_MODE === 'true') {
+			let createdId: string | null = null;
+			let existingId: string | null = null;
+
+			updateDemoDb((db) => {
+				if (dni) {
+					const existing = db.patients.find((p) => p.dni === dni);
+					if (existing) {
+						existingId = existing.id;
+						return;
+					}
+				}
+
+				const now = new Date().toISOString();
+				const id = newId('p');
+				db.patients.unshift({
+					id,
+					full_name,
+					dni: dni || null,
+					phone: phone || null,
+					email: null,
+					birth_date: null,
+					address: null,
+					allergies: null,
+					medication: null,
+					background: null,
+					insurance: null,
+					custom_fields: null,
+					archived_at: null,
+					last_entry_at: null,
+					created_at: now,
+					updated_at: now
+				});
+				createdId = id;
+			});
+
+			if (existingId) {
+				return fail(409, {
+					message: 'Ya existe un paciente con este DNI',
+					existingId,
+					full_name,
+					dni,
+					phone
+				});
+			}
+
+			if (!createdId) {
+				return fail(500, { message: 'No se pudo crear el paciente', full_name, dni, phone });
+			}
+
+			throw redirect(303, `/odonto/pacientes/${createdId}`);
+		}
+
+		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
+		const ownerId = getUserIdFromAccessToken(locals.auth.access_token);
+		if (!ownerId) {
+			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
 		}
 
 		if (dni) {

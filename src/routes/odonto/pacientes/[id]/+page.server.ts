@@ -1,9 +1,15 @@
 import { env } from '$env/dynamic/private';
+import { newId, readDemoDb, updateDemoDb } from '$lib/server/demo-store';
 import { createSupabaseServerClient, getUserIdFromAccessToken } from '$lib/server/supabase';
 import { normalizePhone } from '$lib/utils/format';
 import { fail, redirect, error as kitError } from '@sveltejs/kit';
-import { demoClinicalEntries, demoPatients } from '$lib/server/demo-data';
 import type { Actions, PageServerLoad } from './$types';
+import type { ClinicalEntry } from '$lib/types';
+
+const getLatestEntryDate = (patientId: string, entries: { patient_id: string; created_at: string }[]) =>
+	entries
+		.filter((e) => e.patient_id === patientId)
+		.reduce<string | null>((latest, entry) => (entry.created_at > (latest ?? '') ? entry.created_at : latest), null);
 
 export const load: PageServerLoad = async ({ params, locals, fetch }) => {
 	if (!locals.auth) {
@@ -11,9 +17,10 @@ export const load: PageServerLoad = async ({ params, locals, fetch }) => {
 	}
 
 	if (env.DEMO_MODE === 'true') {
-		const patient = demoPatients.find((p) => p.id === params.id);
+		const db = readDemoDb();
+		const patient = db.patients.find((p) => p.id === params.id);
 		if (!patient) throw kitError(404, 'Paciente no encontrado');
-		const entries = demoClinicalEntries
+		const entries = db.clinicalEntries
 			.filter((e) => e.patient_id === params.id)
 			.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
 		return { patient, entries, demo: true };
@@ -26,7 +33,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch }) => {
 			supabase
 				.from('patients')
 				.select(
-					'id, full_name, dni, phone, email, birth_date, address, allergies, medication, background, insurance, custom_fields, archived_at, created_at, updated_at'
+					'id, full_name, dni, phone, email, birth_date, address, allergies, medication, background, insurance, insurance_plan, custom_fields, archived_at, created_at, updated_at'
 				)
 				.eq('id', params.id)
 				.maybeSingle(),
@@ -50,22 +57,13 @@ export const load: PageServerLoad = async ({ params, locals, fetch }) => {
 		patient,
 		entries: entries ?? []
 	};
-};
+	};
 
 export const actions: Actions = {
 	add_entry: async ({ request, params, locals, fetch }) => {
 		if (!locals.auth) throw redirect(303, '/login');
-		if (env.DEMO_MODE === 'true') {
-			return fail(400, { message: 'Modo demo: no se guardan cambios' });
-		}
-		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
-		const ownerId = getUserIdFromAccessToken(locals.auth.access_token);
-		if (!ownerId) {
-			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
-		}
-
 		const form = await request.formData();
-		const entry_type = String(form.get('entry_type') ?? '').trim();
+		const entry_type = String(form.get('entry_type') ?? '').trim() as ClinicalEntry['entry_type'];
 		const description = String(form.get('description') ?? '').trim();
 		const createdAtRaw = String(form.get('created_at') ?? '').trim();
 		if (!createdAtRaw) {
@@ -108,6 +106,40 @@ export const actions: Actions = {
 
 		const amount = amountRaw ? Number(amountRaw) : null;
 
+		if (env.DEMO_MODE === 'true') {
+			let saved = false;
+			updateDemoDb((db) => {
+				const patient = db.patients.find((p) => p.id === params.id);
+				if (!patient) return;
+
+				db.clinicalEntries.unshift({
+					id: newId('e'),
+					patient_id: params.id,
+					entry_type,
+					description,
+					created_at,
+					teeth: teeth || null,
+					amount,
+					internal_note: internal_note || null
+				});
+				patient.last_entry_at = getLatestEntryDate(params.id, db.clinicalEntries);
+				patient.updated_at = new Date().toISOString();
+				saved = true;
+			});
+
+			if (!saved) {
+				return fail(404, { message: 'Paciente no encontrado' });
+			}
+
+			throw redirect(303, `/odonto/pacientes/${params.id}`);
+		}
+
+		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
+		const ownerId = getUserIdFromAccessToken(locals.auth.access_token);
+		if (!ownerId) {
+			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
+		}
+
 		const { error } = await supabase.from('clinical_entries').insert({
 			owner_id: ownerId,
 			patient_id: params.id,
@@ -128,14 +160,10 @@ export const actions: Actions = {
 	},
 	update_entry: async ({ request, params, locals, fetch }) => {
 		if (!locals.auth) throw redirect(303, '/login');
-		if (env.DEMO_MODE === 'true') {
-			return fail(400, { message: 'Modo demo: no se guardan cambios' });
-		}
-		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
 
 		const form = await request.formData();
 		const entry_id = String(form.get('entry_id') ?? '').trim();
-		const entry_type = String(form.get('entry_type') ?? '').trim();
+		const entry_type = String(form.get('entry_type') ?? '').trim() as ClinicalEntry['entry_type'];
 		const description = String(form.get('description') ?? '').trim();
 		const createdAtRaw = String(form.get('created_at') ?? '').trim();
 		const teeth = String(form.get('teeth') ?? '').trim();
@@ -178,6 +206,33 @@ export const actions: Actions = {
 		const created_at = new Date(y, m - 1, d, hh, mm, 0, 0).toISOString();
 		const amount = amountRaw ? Number(amountRaw) : null;
 
+		if (env.DEMO_MODE === 'true') {
+			let updated = false;
+			updateDemoDb((db) => {
+				const entry = db.clinicalEntries.find((e) => e.id === entry_id && e.patient_id === params.id);
+				const patient = db.patients.find((p) => p.id === params.id);
+				if (!entry || !patient) return;
+
+				entry.entry_type = entry_type;
+				entry.description = description;
+				entry.created_at = created_at;
+				entry.teeth = teeth || null;
+				entry.amount = amount;
+				entry.internal_note = internal_note || null;
+				patient.last_entry_at = getLatestEntryDate(params.id, db.clinicalEntries);
+				patient.updated_at = new Date().toISOString();
+				updated = true;
+			});
+
+			if (!updated) {
+				return fail(404, { message: 'Entrada no encontrada' });
+			}
+
+			throw redirect(303, `/odonto/pacientes/${params.id}`);
+		}
+
+		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
+
 		const { error } = await supabase
 			.from('clinical_entries')
 			.update({
@@ -200,12 +255,9 @@ export const actions: Actions = {
 	},
 	update_patient: async ({ request, params, locals, fetch }) => {
 		if (!locals.auth) throw redirect(303, '/login');
-		if (env.DEMO_MODE === 'true') {
-			return fail(400, { message: 'Modo demo: no se guardan cambios' });
-		}
-		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
 
 		const form = await request.formData();
+		const dni = String(form.get('dni') ?? '').trim();
 		const phone = normalizePhone(String(form.get('phone') ?? ''));
 		const birthDateRaw = String(form.get('birth_date') ?? '').trim();
 
@@ -237,15 +289,35 @@ export const actions: Actions = {
 
 		const updates = {
 			email: String(form.get('email') ?? '') || null,
+			dni: dni || null,
 			birth_date,
 			address: String(form.get('address') ?? '') || null,
 			allergies: String(form.get('allergies') ?? '') || null,
 			medication: String(form.get('medication') ?? '') || null,
 			background: String(form.get('background') ?? '') || null,
 			insurance: String(form.get('insurance') ?? '') || null,
+			insurance_plan: String(form.get('insurance_plan') ?? '') || null,
 			phone: phone || null,
 			updated_at: new Date().toISOString()
 		};
+
+		if (env.DEMO_MODE === 'true') {
+			let updated = false;
+			updateDemoDb((db) => {
+				const patient = db.patients.find((p) => p.id === params.id);
+				if (!patient) return;
+				Object.assign(patient, updates);
+				updated = true;
+			});
+
+			if (!updated) {
+				return fail(404, { message: 'Paciente no encontrado' });
+			}
+
+			throw redirect(303, `/odonto/pacientes/${params.id}`);
+		}
+
+		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
 
 		const { error } = await supabase.from('patients').update(updates).eq('id', params.id);
 
@@ -259,7 +331,21 @@ export const actions: Actions = {
 	archive_patient: async ({ params, locals, fetch }) => {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') {
-			return fail(400, { message: 'Modo demo: no se guardan cambios' });
+			let archived = false;
+			updateDemoDb((db) => {
+				const patient = db.patients.find((p) => p.id === params.id);
+				if (!patient) return;
+				const now = new Date().toISOString();
+				patient.archived_at = now;
+				patient.updated_at = now;
+				archived = true;
+			});
+
+			if (!archived) {
+				return fail(404, { message: 'Paciente no encontrado' });
+			}
+
+			throw redirect(303, '/odonto/pacientes?estado=archivados');
 		}
 		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
 
@@ -278,7 +364,20 @@ export const actions: Actions = {
 	unarchive_patient: async ({ params, locals, fetch }) => {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') {
-			return fail(400, { message: 'Modo demo: no se guardan cambios' });
+			let unarchived = false;
+			updateDemoDb((db) => {
+				const patient = db.patients.find((p) => p.id === params.id);
+				if (!patient) return;
+				patient.archived_at = null;
+				patient.updated_at = new Date().toISOString();
+				unarchived = true;
+			});
+
+			if (!unarchived) {
+				return fail(404, { message: 'Paciente no encontrado' });
+			}
+
+			throw redirect(303, '/odonto/pacientes');
 		}
 		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
 
@@ -294,7 +393,20 @@ export const actions: Actions = {
 	delete_patient: async ({ params, locals, fetch }) => {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') {
-			return fail(400, { message: 'Modo demo: no se guardan cambios' });
+			let deleted = false;
+			updateDemoDb((db) => {
+				const patientIndex = db.patients.findIndex((p) => p.id === params.id);
+				if (patientIndex === -1) return;
+				db.clinicalEntries = db.clinicalEntries.filter((e) => e.patient_id !== params.id);
+				db.patients.splice(patientIndex, 1);
+				deleted = true;
+			});
+
+			if (!deleted) {
+				return fail(404, { message: 'Paciente no encontrado' });
+			}
+
+			throw redirect(303, '/odonto/pacientes');
 		}
 		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
 

@@ -2,7 +2,7 @@
 	import { page } from '$app/stores';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 
-	let { children } = $props();
+	let { data, children } = $props();
 
 	const nav = [
 		{ label: 'Pacientes', href: '/odonto/pacientes' },
@@ -42,6 +42,26 @@
 						</span>
 					</a>
 				{/each}
+				{#if data?.isMaster}
+					<a
+						href="/odonto/maestro"
+						class={`group rounded-full px-3 py-2 transition-all duration-200 ${
+							isActive('/odonto/maestro')
+								? 'bg-[#7c3aed] text-white shadow-sm'
+								: 'text-neutral-500 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white'
+						}`}
+					>
+						<span
+							class={`inline-block transition-colors duration-200 ${
+								isActive('/odonto/maestro')
+									? 'text-white'
+									: 'group-hover:text-[#7c3aed] dark:group-hover:text-[#c084fc]'
+							}`}
+						>
+							Panel maestro
+						</span>
+					</a>
+				{/if}
 				<a
 					href="/logout"
 					class="group text-neutral-500 transition hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white"

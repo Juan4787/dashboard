@@ -1,5 +1,5 @@
 import { env } from '$env/dynamic/private';
-import { createSupabaseServerClient, resolveModuleByEmail } from '$lib/server/supabase';
+import { createSupabaseServerClient, isMasterEmail } from '$lib/server/supabase';
 import { fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -20,15 +20,27 @@ export const actions: Actions = {
 			return fail(400, { message: 'Ingresá un email válido', email });
 		}
 
-		const module = resolveModuleByEmail(email);
-		if (!module) {
-			return fail(400, {
-				message: 'Solo podés recuperar la clave con los emails de Sabrina o del Administrador (ANSES).',
-				email
+		if (!isMasterEmail(email)) {
+			const supabaseCheck = await createSupabaseServerClient('odonto', null, fetch);
+			const { data: allowed, error: allowedError } = await supabaseCheck.rpc('is_email_enabled', {
+				p_email: email
 			});
+			if (allowedError) {
+				console.error('Error validando email habilitado', allowedError);
+				return fail(500, {
+					message: 'Falta configurar el control de emails habilitados en Supabase.',
+					email
+				});
+			}
+			if (!allowed) {
+				return fail(400, {
+					message: 'Ese email no está habilitado para recuperar contraseña.',
+					email
+				});
+			}
 		}
 
-		const supabase = await createSupabaseServerClient(module, null, fetch);
+		const supabase = await createSupabaseServerClient('odonto', null, fetch);
 		const redirectTo = env.PUBLIC_SITE_URL
 			? `${env.PUBLIC_SITE_URL}/reset/callback`
 			: 'http://localhost:5173/reset/callback';

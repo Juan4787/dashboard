@@ -1,9 +1,9 @@
 import { env } from '$env/dynamic/private';
 import { CASE_STATUS } from '$lib/constants';
+import { newId, readDemoDb, updateDemoDb } from '$lib/server/demo-store';
 import { createSupabaseServerClient, getUserIdFromAccessToken } from '$lib/server/supabase';
 import { normalizePhone } from '$lib/utils/format';
 import { fail, redirect, error as kitError } from '@sveltejs/kit';
-import { demoCases } from '$lib/server/demo-data';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals, url, fetch }) => {
@@ -13,8 +13,14 @@ export const load: PageServerLoad = async ({ locals, url, fetch }) => {
 	const statusFilter = url.searchParams.get('estado') ?? 'todos';
 
 	if (isDemo) {
-		const filtered = demoCases.filter((c) => (statusFilter === 'todos' ? true : c.status === statusFilter));
-		return { cases: filtered, query: '', statusFilter, statuses: CASE_STATUS, demo: true };
+		const cases = readDemoDb().cases
+			.filter((c) => (statusFilter === 'todos' ? true : c.status === statusFilter))
+			.sort((a, b) => {
+				const aDate = a.updated_at ?? a.created_at ?? '';
+				const bDate = b.updated_at ?? b.created_at ?? '';
+				return aDate < bDate ? 1 : -1;
+			});
+		return { cases, query: '', statusFilter, statuses: CASE_STATUS, demo: true };
 	}
 
 	const supabase = await createSupabaseServerClient('administrativo', locals.auth, fetch);
@@ -42,15 +48,6 @@ export const load: PageServerLoad = async ({ locals, url, fetch }) => {
 export const actions: Actions = {
 	default: async ({ request, locals, fetch }) => {
 		if (!locals.auth) throw redirect(303, '/login');
-		if (env.DEMO_MODE === 'true') {
-			return fail(400, { message: 'Modo demo: no se guardan cambios' });
-		}
-		const supabase = await createSupabaseServerClient('administrativo', locals.auth, fetch);
-		const ownerId = getUserIdFromAccessToken(locals.auth.access_token);
-		if (!ownerId) {
-			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
-		}
-
 		const form = await request.formData();
 		const person_name = String(form.get('person_name') ?? '').trim();
 		const person_dni = String(form.get('person_dni') ?? '').trim();
@@ -63,6 +60,63 @@ export const actions: Actions = {
 
 		if (!person_name || !title) {
 			return fail(400, { message: 'Nombre y carátula son obligatorios', person_name, person_dni, title });
+		}
+
+		if (env.DEMO_MODE === 'true') {
+			let createdCaseId: string | null = null;
+			updateDemoDb((db) => {
+				const now = new Date().toISOString();
+				const existingPerson = person_dni
+					? db.people.find((p) => p.dni === person_dni)
+					: undefined;
+
+				const personId = existingPerson?.id ?? newId('per');
+				if (existingPerson) {
+					existingPerson.full_name = person_name;
+					existingPerson.phone = person_phone || existingPerson.phone || null;
+					existingPerson.email = person_email || existingPerson.email || null;
+					existingPerson.updated_at = now;
+				} else {
+					db.people.unshift({
+						id: personId,
+						full_name: person_name,
+						dni: person_dni || null,
+						phone: person_phone || null,
+						email: person_email || null,
+						archived_at: null,
+						created_at: now,
+						updated_at: now
+					});
+				}
+
+				createdCaseId = newId('c');
+				db.cases.unshift({
+					id: createdCaseId,
+					person_id: personId,
+					person_name,
+					person_dni: person_dni || null,
+					title,
+					status,
+					next_action: next_action || null,
+					next_action_date: next_action_date || null,
+					notes: null,
+					archived_at: null,
+					created_at: now,
+					updated_at: now
+				});
+			});
+
+			if (!createdCaseId) {
+				return fail(500, { message: 'No se pudo crear el expediente', person_name, person_dni, title });
+			}
+
+			throw redirect(303, `/administrativo/expedientes/${createdCaseId}`);
+		}
+
+		const supabase = await createSupabaseServerClient('administrativo', locals.auth, fetch);
+		const ownerId = getUserIdFromAccessToken(locals.auth.access_token);
+		if (!ownerId) {
+			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
 		}
 
 		// Reutilizar persona si coincide DNI

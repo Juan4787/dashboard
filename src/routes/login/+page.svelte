@@ -1,6 +1,7 @@
 <script lang="ts">
 	let { form } = $props();
 	let showPassword = $state(false);
+	let mode = $state<'login' | 'register'>('login');
 </script>
 
 <div class="min-h-screen bg-gradient-to-br from-[#0b1626] via-[#0f1f36] to-[#0a1222] flex items-center justify-center px-4 py-10">
@@ -9,7 +10,26 @@
 			<h1 class="text-3xl font-semibold text-white">Acceso a la App</h1>
 		</div>
 
-		<form method="post" class="space-y-6">
+		<div class="mb-6 flex items-center justify-center">
+			<div class="flex rounded-full border border-white/10 bg-white/10 p-1 text-xs font-semibold text-white/70">
+				<button
+					type="button"
+					class={`rounded-full px-4 py-2 transition ${mode === 'login' ? 'bg-[#7c3aed] text-white shadow-sm' : 'hover:text-white'}`}
+					onclick={() => (mode = 'login')}
+				>
+					Ingresar
+				</button>
+				<button
+					type="button"
+					class={`rounded-full px-4 py-2 transition ${mode === 'register' ? 'bg-[#7c3aed] text-white shadow-sm' : 'hover:text-white'}`}
+					onclick={() => (mode = 'register')}
+				>
+					Crear cuenta
+				</button>
+			</div>
+		</div>
+
+		<form method="post" action={mode === 'register' ? '?/register' : '?/login'} class="space-y-6">
 			<div class="space-y-3">
 				<label for="email" class="text-sm font-medium text-white">Email</label>
 				<input
@@ -32,9 +52,9 @@
 						name="password"
 						type={showPassword ? 'text' : 'password'}
 						class="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 pr-16 text-white shadow-sm outline-none transition focus:border-[#7c3aed] focus:ring-2 focus:ring-[#7c3aed]/40 placeholder:text-neutral-400"
-						placeholder="Introduce tu contraseña"
+						placeholder={mode === 'register' ? 'Creá una contraseña segura' : 'Introduce tu contraseña'}
 						required
-						autocomplete="current-password"
+						autocomplete={mode === 'register' ? 'new-password' : 'current-password'}
 					/>
 					<button
 						type="button"
@@ -59,12 +79,20 @@
 				type="submit"
 				class="flex w-full items-center justify-center rounded-2xl bg-[#7c3aed] px-4 py-3 text-base font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed]"
 			>
-				Ingresar
+				{mode === 'register' ? 'Crear cuenta' : 'Ingresar'}
 			</button>
 
-			<div class="text-right text-sm text-neutral-200">
-				<a href="/reset" class="font-semibold hover:underline">¿Olvidaste tu contraseña?</a>
-			</div>
+			{#if mode === 'login'}
+				<div class="text-right text-sm text-neutral-200">
+					<a href="/reset" class="font-semibold hover:underline">¿Olvidaste tu contraseña?</a>
+				</div>
+			{:else}
+				<div class="text-right text-sm text-neutral-200">
+					<button type="button" class="font-semibold hover:underline" onclick={() => (mode = 'login')}>
+						¿Ya tenés cuenta? Ingresá
+					</button>
+				</div>
+			{/if}
 		</form>
 	</div>
 </div>

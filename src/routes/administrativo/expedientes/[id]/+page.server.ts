@@ -1,12 +1,8 @@
 import { env } from '$env/dynamic/private';
 import { CASE_EVENT_TYPES, CASE_STATUS } from '$lib/constants';
+import { newId, readDemoDb, updateDemoDb } from '$lib/server/demo-store';
 import { createSupabaseServerClient, getUserIdFromAccessToken } from '$lib/server/supabase';
 import { fail, redirect, error as kitError } from '@sveltejs/kit';
-import {
-	demoCaseEvents,
-	demoCases,
-	demoPeople
-} from '$lib/server/demo-data';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params, locals, fetch }) => {
@@ -14,10 +10,11 @@ export const load: PageServerLoad = async ({ params, locals, fetch }) => {
 	const isDemo = env.DEMO_MODE === 'true';
 
 	if (isDemo) {
-		const caseFile = demoCases.find((c) => c.id === params.id);
+		const db = readDemoDb();
+		const caseFile = db.cases.find((c) => c.id === params.id);
 		if (!caseFile) throw kitError(404, 'Expediente no encontrado');
-		const person = demoPeople.find((p) => p.id === caseFile.person_id);
-		const events = demoCaseEvents
+		const person = db.people.find((p) => p.id === caseFile.person_id);
+		const events = db.caseEvents
 			.filter((e) => e.case_id === params.id)
 			.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
 		return { caseFile, person, events, statuses: CASE_STATUS, eventTypes: CASE_EVENT_TYPES, demo: true };
@@ -66,14 +63,6 @@ export const load: PageServerLoad = async ({ params, locals, fetch }) => {
 export const actions: Actions = {
 	add_event: async ({ request, params, locals, fetch }) => {
 		if (!locals.auth) throw redirect(303, '/login');
-		if (env.DEMO_MODE === 'true') {
-			return fail(400, { message: 'Modo demo: no se guardan cambios' });
-		}
-		const supabase = await createSupabaseServerClient('administrativo', locals.auth, fetch);
-		const ownerId = getUserIdFromAccessToken(locals.auth.access_token);
-		if (!ownerId) {
-			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
-		}
 
 		const form = await request.formData();
 		const event_type = String(form.get('event_type') ?? '').trim() as (typeof CASE_EVENT_TYPES)[number];
@@ -114,6 +103,36 @@ export const actions: Actions = {
 			return fail(400, { message: 'Tipo y detalle son obligatorios' });
 		}
 
+		if (env.DEMO_MODE === 'true') {
+			let saved = false;
+			updateDemoDb((db) => {
+				const caseFile = db.cases.find((c) => c.id === params.id);
+				if (!caseFile) return;
+
+				db.caseEvents.unshift({
+					id: newId('ce'),
+					case_id: params.id,
+					event_type,
+					detail,
+					created_at
+				});
+				caseFile.updated_at = new Date().toISOString();
+				saved = true;
+			});
+
+			if (!saved) {
+				return fail(404, { message: 'Expediente no encontrado' });
+			}
+
+			throw redirect(303, `/administrativo/expedientes/${params.id}`);
+		}
+
+		const supabase = await createSupabaseServerClient('administrativo', locals.auth, fetch);
+		const ownerId = getUserIdFromAccessToken(locals.auth.access_token);
+		if (!ownerId) {
+			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
+		}
+
 		const { error } = await supabase.from('case_events').insert({
 			owner_id: ownerId,
 			case_id: params.id,
@@ -131,16 +150,34 @@ export const actions: Actions = {
 	},
 	update_case: async ({ request, params, locals, fetch }) => {
 		if (!locals.auth) throw redirect(303, '/login');
-		if (env.DEMO_MODE === 'true') {
-			return fail(400, { message: 'Modo demo: no se guardan cambios' });
-		}
-		const supabase = await createSupabaseServerClient('administrativo', locals.auth, fetch);
 
 		const form = await request.formData();
 		const status = String(form.get('status') ?? '') as (typeof CASE_STATUS)[number];
 		const notes = String(form.get('notes') ?? '').trim();
 		const next_action = String(form.get('next_action') ?? '').trim();
 		const next_action_date = String(form.get('next_action_date') ?? '').trim();
+
+		if (env.DEMO_MODE === 'true') {
+			let updated = false;
+			updateDemoDb((db) => {
+				const caseFile = db.cases.find((c) => c.id === params.id);
+				if (!caseFile) return;
+				caseFile.status = status || 'Nuevo';
+				caseFile.notes = notes || null;
+				caseFile.next_action = next_action || null;
+				caseFile.next_action_date = next_action_date || null;
+				caseFile.updated_at = new Date().toISOString();
+				updated = true;
+			});
+
+			if (!updated) {
+				return fail(404, { message: 'Expediente no encontrado' });
+			}
+
+			throw redirect(303, `/administrativo/expedientes/${params.id}`);
+		}
+
+		const supabase = await createSupabaseServerClient('administrativo', locals.auth, fetch);
 
 		const { error } = await supabase
 			.from('cases')
@@ -163,7 +200,22 @@ export const actions: Actions = {
 	archive_case: async ({ params, locals, fetch }) => {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') {
-			return fail(400, { message: 'Modo demo: no se guardan cambios' });
+			let archived = false;
+			updateDemoDb((db) => {
+				const caseFile = db.cases.find((c) => c.id === params.id);
+				if (!caseFile) return;
+				const now = new Date().toISOString();
+				caseFile.status = 'Cerrado';
+				caseFile.archived_at = now;
+				caseFile.updated_at = now;
+				archived = true;
+			});
+
+			if (!archived) {
+				return fail(404, { message: 'Expediente no encontrado' });
+			}
+
+			throw redirect(303, '/administrativo/expedientes?estado=Cerrado');
 		}
 		const supabase = await createSupabaseServerClient('administrativo', locals.auth, fetch);
 
