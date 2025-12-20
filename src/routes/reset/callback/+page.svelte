@@ -2,7 +2,7 @@
 	import { browser } from '$app/environment';
 	import { onMount } from 'svelte';
 	import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-	import { PUBLIC_ODONTO_SUPABASE_ANON_KEY, PUBLIC_ODONTO_SUPABASE_URL } from '$env/static/public';
+	import { env } from '$env/dynamic/public';
 
 	let status = $state<'loading' | 'ready' | 'success' | 'error'>('loading');
 	let message = $state('');
@@ -12,7 +12,7 @@
 	let supabase: SupabaseClient | null = null;
 
 	const initSessionFromHash = async () => {
-		if (!PUBLIC_ODONTO_SUPABASE_URL || !PUBLIC_ODONTO_SUPABASE_ANON_KEY) {
+		if (!env.PUBLIC_ODONTO_SUPABASE_URL || !env.PUBLIC_ODONTO_SUPABASE_ANON_KEY) {
 			status = 'error';
 			message = 'Falta configurar PUBLIC_ODONTO_SUPABASE_URL y PUBLIC_ODONTO_SUPABASE_ANON_KEY.';
 			return;
@@ -35,7 +35,7 @@
 			return;
 		}
 
-		supabase = createClient(PUBLIC_ODONTO_SUPABASE_URL, PUBLIC_ODONTO_SUPABASE_ANON_KEY, {
+		supabase = createClient(env.PUBLIC_ODONTO_SUPABASE_URL, env.PUBLIC_ODONTO_SUPABASE_ANON_KEY, {
 			auth: {
 				persistSession: false,
 				autoRefreshToken: false
