@@ -5,6 +5,23 @@ import { normalizePhone } from '$lib/utils/format';
 import { fail, redirect, error as kitError } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
+const getCreatePatientErrorMessage = (error: { code?: string | null; message?: string | null }) => {
+	const message = (error?.message ?? '').toLowerCase();
+	if (error?.code === '42501' || message.includes('row-level security')) {
+		return 'No se pudo crear el paciente porque tu sesión no tiene permisos. Cerrá sesión y volvé a ingresar.';
+	}
+	if (error?.code === '23505') {
+		return 'Ya existe un paciente con este DNI.';
+	}
+	if (error?.code === '23502') {
+		return 'Faltan datos obligatorios para crear el paciente.';
+	}
+	if (error?.code === '22P02') {
+		return 'El DNI o el teléfono tienen un formato inválido.';
+	}
+	return 'No se pudo crear el paciente. Intentá de nuevo.';
+};
+
 export const load: PageServerLoad = async ({ locals, url, fetch }) => {
 	if (!locals.auth) {
 		throw redirect(303, '/login');
@@ -104,7 +121,12 @@ export const actions: Actions = {
 			}
 
 			if (!createdId) {
-				return fail(500, { message: 'No se pudo crear el paciente', full_name, dni, phone });
+				return fail(500, {
+					message: 'No se pudo crear el paciente. Intentá de nuevo.',
+					full_name,
+					dni,
+					phone
+				});
 			}
 
 			throw redirect(303, `/odonto/pacientes/${createdId}`);
@@ -147,7 +169,7 @@ export const actions: Actions = {
 
 		if (error || !data) {
 			console.error('Error creando paciente', error);
-			return fail(500, { message: 'No se pudo crear el paciente', full_name, dni, phone });
+			return fail(500, { message: getCreatePatientErrorMessage(error ?? {}), full_name, dni, phone });
 		}
 
 		throw redirect(303, `/odonto/pacientes/${data.id}`);

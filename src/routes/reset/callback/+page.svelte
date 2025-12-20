@@ -75,6 +75,17 @@
 
 		const { error } = await supabase.auth.updateUser({ password });
 		if (error) {
+			const msg = error.message?.toLowerCase() ?? '';
+			if (
+				msg.includes('same password') ||
+				msg.includes('same as the old password') ||
+				msg.includes('new password should be different') ||
+				msg.includes('password should be different')
+			) {
+				await supabase.auth.signOut();
+				status = 'success';
+				return;
+			}
 			message = 'No pudimos actualizar la contraseña. Intentá de nuevo.';
 			return;
 		}
