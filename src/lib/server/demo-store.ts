@@ -5,14 +5,23 @@ import {
 	demoCaseEvents,
 	demoCases,
 	demoClinicalEntries,
+	demoRadiographs,
 	demoPatients,
 	demoPeople
 } from './demo-data';
-import type { CaseEvent, CaseFile, ClinicalEntry, Patient, Person } from '$lib/types';
+import type {
+	CaseEvent,
+	CaseFile,
+	ClinicalEntry,
+	Patient,
+	PatientRadiograph,
+	Person
+} from '$lib/types';
 
 type DemoDb = {
 	patients: Patient[];
 	clinicalEntries: ClinicalEntry[];
+	radiographs: PatientRadiograph[];
 	people: Person[];
 	cases: CaseFile[];
 	caseEvents: CaseEvent[];
@@ -24,6 +33,7 @@ const DEMO_DB_PATH =
 const seed: DemoDb = {
 	patients: demoPatients,
 	clinicalEntries: demoClinicalEntries,
+	radiographs: demoRadiographs,
 	people: demoPeople,
 	cases: demoCases,
 	caseEvents: demoCaseEvents

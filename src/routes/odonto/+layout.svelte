@@ -6,7 +6,10 @@
 	let mobileMenuOpen = $state(false);
 	let showReportHelp = $state(false);
 
-	const nav = [{ label: 'Pacientes', href: '/odonto/pacientes' }];
+	const nav = [
+		{ label: 'Pacientes', href: '/odonto/pacientes' },
+		{ label: 'Configuración', href: '/odonto/configuracion' }
+	];
 
 	const isActive = (href: string) => $page.url.pathname.startsWith(href);
 
@@ -16,6 +19,7 @@
 			return $page.data.patient.full_name;
 		}
 		if (path.startsWith('/odonto/pacientes')) return 'Pacientes';
+		if (path.startsWith('/odonto/configuracion')) return 'Configuración';
 		if (path.startsWith('/odonto/maestro')) return 'Panel maestro';
 		return 'Odontología';
 	});

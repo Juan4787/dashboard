@@ -1,12 +1,26 @@
 <script lang="ts">
+	import { deserialize } from '$app/forms';
+	import { PUBLIC_GOOGLE_CLIENT_ID } from '$env/static/public';
 	import Modal from '$lib/components/Modal.svelte';
 	import DateTimePartsInput from '$lib/components/DateTimePartsInput.svelte';
 	import DatePartsInput from '$lib/components/DatePartsInput.svelte';
 	import { CLINICAL_ENTRY_TYPES } from '$lib/constants';
+	import {
+		createDriveFolder,
+		initResumableUpload,
+		requestAccessToken,
+		uploadResumable
+	} from '$lib/client/drive';
 	import { formatDate, formatDateTime } from '$lib/utils/format';
 
 	let { data, form } = $props<{
-		data: { patient: any; entries: any[] };
+		data: {
+			patient: any;
+			entries: any[];
+			radiographs: any[];
+			driveConnection: { connected_email?: string | null; root_folder_id?: string | null } | null;
+			demo?: boolean;
+		};
 		form: { message?: string };
 	}>();
 
@@ -16,12 +30,30 @@
 	let showDeleteConfirm = $state(false);
 	let showMobileActions = $state(false);
 	let deleteConfirmText = $state('');
-	let tab = $state<'historial' | 'datos'>('historial');
+	let tab = $state<'historial' | 'datos' | 'radiografias'>('historial');
 	let filterType = $state<'Todos' | 'Consulta' | 'Tratamiento'>('Todos');
 	let onlyWithNote = $state(false);
 	let timelineSearch = $state('');
 	let expandedId = $state<string | null>(null);
 	const currentYear = new Date().getFullYear();
+	const driveScopes =
+		'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile';
+	const patientFolderLabel = (patientId: string) => patientId;
+	const radiographsFolderLabel = 'Radiografias';
+	const largeFileThreshold = 12 * 1024 * 1024;
+
+	let driveConnection = $state(data.driveConnection);
+	let radiographs = $state(data.radiographs ?? []);
+	let uploadingRadiograph = $state(false);
+	let uploadError = $state('');
+	let uploadInfo = $state('');
+	let uploadWarning = $state('');
+	let retryTargetId = $state<string | null>(null);
+	let radiographNote = $state('');
+	let radiographTakenAt = $state('');
+	let patientDriveFolderId = $state<string | null>(data.patient.drive_folder_id ?? null);
+	let fileInput: HTMLInputElement | null = null;
+	const isDriveConnected = $derived(Boolean(driveConnection?.root_folder_id));
 	const fmtTime = (dateStr: string) =>
 		new Intl.DateTimeFormat('es-AR', {
 			hour: '2-digit',
@@ -82,6 +114,254 @@
 			if (!haystack.includes(q)) return false;
 		}
 		return true;
+	};
+
+	const postAction = async (action: string, formData: FormData) => {
+		const response = await fetch(action, { method: 'POST', body: formData });
+		const result = deserialize(await response.text());
+		if (result.type === 'failure') {
+			throw new Error((result.data as { message?: string })?.message ?? 'Error inesperado.');
+		}
+		if (result.type === 'redirect') {
+			window.location.assign(result.location);
+			throw new Error('Redireccionando...');
+		}
+		return result.data as Record<string, unknown>;
+	};
+
+	const formatBytes = (value?: number | null) => {
+		if (value == null || Number.isNaN(value)) return '';
+		const units = ['B', 'KB', 'MB', 'GB'];
+		let current = value;
+		let idx = 0;
+		while (current >= 1024 && idx < units.length - 1) {
+			current /= 1024;
+			idx += 1;
+		}
+		const decimals = current >= 10 || idx === 0 ? 0 : 1;
+		return `${current.toFixed(decimals)} ${units[idx]}`;
+	};
+
+	const isRadiographReady = (radiograph: any) => {
+		if (!radiograph) return false;
+		if (radiograph.status) return radiograph.status === 'ready';
+		return Boolean(radiograph.drive_file_id);
+	};
+
+	const isRadiographFailed = (radiograph: any) => radiograph?.status === 'failed';
+
+	const isRadiographUploading = (radiograph: any) => {
+		if (!radiograph) return false;
+		if (radiograph.status) return radiograph.status === 'uploading';
+		return !radiograph.drive_file_id;
+	};
+
+	const ensurePatientFolder = async (accessToken: string) => {
+		if (!driveConnection?.root_folder_id) {
+			throw new Error('Conectá Google Drive antes de subir radiografias.');
+		}
+		if (patientDriveFolderId) return patientDriveFolderId;
+		const patientFolderId = await createDriveFolder({
+			accessToken,
+			name: patientFolderLabel(data.patient.id),
+			parentId: driveConnection.root_folder_id
+		});
+		const radiographsFolderId = await createDriveFolder({
+			accessToken,
+			name: radiographsFolderLabel,
+			parentId: patientFolderId
+		});
+		const formData = new FormData();
+		formData.set('drive_folder_id', radiographsFolderId);
+		await postAction('?/set_drive_folder', formData);
+		patientDriveFolderId = radiographsFolderId;
+		return radiographsFolderId;
+	};
+
+	const startRadiographRecord = async (file: File) => {
+		const formData = new FormData();
+		formData.set('original_filename', file.name || 'radiografia');
+		formData.set('mime_type', file.type || 'application/octet-stream');
+		formData.set('bytes', String(file.size ?? 0));
+		const result = await postAction('?/start_radiograph', formData);
+		const radiograph = result.radiograph as any;
+		radiographs = [radiograph, ...radiographs];
+		return radiograph;
+	};
+
+	const resetRadiographRecord = async (radiographId: string, file: File) => {
+		const formData = new FormData();
+		formData.set('radiograph_id', radiographId);
+		formData.set('original_filename', file.name || 'radiografia');
+		formData.set('mime_type', file.type || 'application/octet-stream');
+		formData.set('bytes', String(file.size ?? 0));
+		const result = await postAction('?/reset_radiograph', formData);
+		const updated = result.radiograph as any;
+		radiographs = radiographs.map((item) => (item.id === updated.id ? updated : item));
+		return updated;
+	};
+
+	const finalizeRadiographRecord = async (
+		radiographId: string,
+		driveFileId: string,
+		note?: string,
+		takenAt?: string
+	) => {
+		const formData = new FormData();
+		formData.set('radiograph_id', radiographId);
+		formData.set('drive_file_id', driveFileId);
+		if (note) formData.set('note', note);
+		if (takenAt) formData.set('taken_at', takenAt);
+		const result = await postAction('?/finalize_radiograph', formData);
+		const updated = result.radiograph as any;
+		radiographs = radiographs.map((item) => (item.id === updated.id ? updated : item));
+		return updated;
+	};
+
+	const markRadiographFailed = async (radiographId: string) => {
+		const formData = new FormData();
+		formData.set('radiograph_id', radiographId);
+		try {
+			const result = await postAction('?/mark_radiograph_failed', formData);
+			const updated = result.radiograph as any;
+			radiographs = radiographs.map((item) => (item.id === updated.id ? updated : item));
+		} catch {
+			radiographs = radiographs.map((item) =>
+				item.id === radiographId ? { ...item, status: 'failed' } : item
+			);
+		}
+	};
+
+	const deleteRadiograph = async (radiographId: string) => {
+		const confirmed = window.confirm('¿Eliminar la referencia de esta radiografia?');
+		if (!confirmed) return;
+		uploadError = '';
+		uploadInfo = '';
+		try {
+			const formData = new FormData();
+			formData.set('radiograph_id', radiographId);
+			await postAction('?/delete_radiograph', formData);
+			radiographs = radiographs.filter((item) => item.id !== radiographId);
+		} catch (err) {
+			uploadError = err instanceof Error ? err.message : 'No se pudo eliminar la radiografia.';
+		}
+	};
+
+	const openRetryUpload = (radiographId: string) => {
+		const existing = radiographs.find((item) => item.id === radiographId);
+		if (existing) {
+			radiographNote = existing.note ?? '';
+			radiographTakenAt = existing.taken_at ?? '';
+		}
+		retryTargetId = radiographId;
+		uploadError = '';
+		uploadInfo = '';
+		uploadWarning = '';
+		fileInput?.click();
+	};
+
+	const uploadRadiograph = async (file: File, existingId?: string) => {
+		if (data.demo) {
+			uploadError = 'No disponible en modo demo.';
+			retryTargetId = null;
+			return;
+		}
+		if (!PUBLIC_GOOGLE_CLIENT_ID) {
+			uploadError = 'Falta configurar PUBLIC_GOOGLE_CLIENT_ID.';
+			retryTargetId = null;
+			return;
+		}
+		if (radiographTakenAt && !/^\d{4}-\d{2}-\d{2}$/.test(radiographTakenAt)) {
+			uploadError = 'La fecha debe tener formato AAAA-MM-DD.';
+			retryTargetId = null;
+			return;
+		}
+		uploadingRadiograph = true;
+		uploadError = '';
+		uploadInfo = '';
+		let pendingId: string | null = null;
+		try {
+			const existing = existingId ? radiographs.find((item) => item.id === existingId) : null;
+			const noteToSend = radiographNote || existing?.note || '';
+			const takenAtToSend = radiographTakenAt || existing?.taken_at || '';
+
+			const token = await requestAccessToken({
+				clientId: PUBLIC_GOOGLE_CLIENT_ID,
+				scopes: driveScopes,
+				prompt: ''
+			});
+			const folderId = await ensurePatientFolder(token);
+			const pending = existingId
+				? await resetRadiographRecord(existingId, file)
+				: await startRadiographRecord(file);
+			pendingId = pending.id;
+			const uploadUrl = await initResumableUpload({
+				accessToken: token,
+				file,
+				metadata: {
+					name: file.name || `radiografia-${Date.now()}`,
+					parents: [folderId]
+				}
+			});
+			const uploaded = await uploadResumable({ accessToken: token, uploadUrl, file });
+			if (!uploaded?.id) {
+				throw new Error('Drive no devolvio el id del archivo.');
+			}
+			await finalizeRadiographRecord(pending.id, uploaded.id, noteToSend, takenAtToSend);
+			uploadInfo = 'Radiografia guardada.';
+			radiographNote = '';
+			radiographTakenAt = '';
+			uploadWarning = '';
+		} catch (err) {
+			const raw = err instanceof Error ? err.message : 'No se pudo subir la radiografia.';
+			if (
+				raw.includes('401') ||
+				raw.includes('403') ||
+				raw.includes('insufficientPermissions') ||
+				raw.includes('authError')
+			) {
+				uploadError = 'Tu sesion con Google vencio. Reconecta Drive en Configuracion.';
+			} else {
+				uploadError = raw;
+			}
+			if (pendingId) {
+				await markRadiographFailed(pendingId);
+			}
+		} finally {
+			uploadingRadiograph = false;
+			retryTargetId = null;
+			if (fileInput) fileInput.value = '';
+		}
+	};
+
+	const handleRadiographChange = (event: Event) => {
+		const target = event.currentTarget as HTMLInputElement | null;
+		const file = target?.files?.[0];
+		if (!file) {
+			retryTargetId = null;
+			return;
+		}
+		uploadError = '';
+		uploadInfo = '';
+		uploadWarning = '';
+		const name = file.name.toLowerCase();
+		const isHeic = file.type === 'image/heic' || file.type === 'image/heif' || name.endsWith('.heic');
+		if (isHeic) {
+			uploadError = 'Converti la imagen a JPG o PNG antes de subirla.';
+			if (fileInput) fileInput.value = '';
+			return;
+		}
+		const isJpeg = file.type === 'image/jpeg' || name.endsWith('.jpg') || name.endsWith('.jpeg');
+		const isPng = file.type === 'image/png' || name.endsWith('.png');
+		if (!isJpeg && !isPng) {
+			uploadError = 'Solo se permiten archivos JPG o PNG.';
+			if (fileInput) fileInput.value = '';
+			return;
+		}
+		if (file.size > largeFileThreshold) {
+			uploadWarning = 'Archivo pesado: la subida puede tardar varios minutos.';
+		}
+		void uploadRadiograph(file, retryTargetId ?? undefined);
 	};
 
 let showEntryErrors = $state(false);
@@ -247,7 +527,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				</button>
 			</div>
 		</div>
-		<div class="mt-4 grid grid-cols-3 gap-2 text-sm md:flex md:items-center md:gap-3">
+		<div class="mt-4 grid grid-cols-4 gap-2 text-sm md:flex md:items-center md:gap-3">
 			<a
 				href="/odonto/pacientes"
 				class="flex w-full items-center justify-center gap-2 rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 transition hover:-translate-y-0.5 hover:bg-neutral-100 hover:shadow-card dark:border-[#1f3554] dark:text-[#eaf1ff] dark:hover:bg-[#122641] md:w-auto"
@@ -283,6 +563,16 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				onclick={() => (tab = 'datos')}
 			>
 				Datos
+			</button>
+			<button
+				class={`w-full rounded-full px-4 py-2 text-center font-semibold transition md:w-auto ${
+					tab === 'radiografias'
+						? 'bg-[#7c3aed] text-white shadow-sm'
+						: 'text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-[#0f1f36]'
+				}`}
+				onclick={() => (tab = 'radiografias')}
+			>
+				Radiografías
 			</button>
 		</div>
 		<div class="mt-4 flex flex-wrap gap-3">
@@ -401,7 +691,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				{/if}
 			</div>
 		</div>
-	{:else}
+	{:else if tab === 'datos'}
 		<div class="rounded-2xl border border-neutral-100 bg-white p-4 shadow-sm dark:border-[#1f3554] dark:bg-[#122641] sm:p-5">
 			<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 				<h2 class="text-lg font-semibold text-neutral-900 dark:text-white">Datos del paciente</h2>
@@ -584,17 +874,176 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				</p>
 			</details>
 		</div>
+	{:else if tab === 'radiografias'}
+		<div class="rounded-2xl border border-neutral-100 bg-white/90 p-4 shadow-card dark:border-[#1f3554] dark:bg-[#152642] sm:p-6">
+			<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+				<div>
+					<h2 class="text-lg font-semibold text-neutral-900 dark:text-white">Radiografías</h2>
+					{#if driveConnection?.connected_email}
+						<p class="mt-1 text-xs text-neutral-500 dark:text-neutral-300">
+							Conectado como {driveConnection.connected_email}
+						</p>
+					{/if}
+				</div>
+				<div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+					<input
+						class="hidden"
+						type="file"
+						accept="image/*"
+						capture="environment"
+						bind:this={fileInput}
+						onchange={handleRadiographChange}
+					/>
+					<button
+						type="button"
+						class="rounded-full bg-[#7c3aed] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-[#6d28d9] disabled:cursor-not-allowed disabled:opacity-60"
+						onclick={() => fileInput?.click()}
+						disabled={!isDriveConnected || uploadingRadiograph || data.demo || !PUBLIC_GOOGLE_CLIENT_ID}
+					>
+						{uploadingRadiograph ? 'Subiendo...' : '+ Añadir radiografía'}
+					</button>
+				</div>
+			</div>
+
+			<div class="mt-4 grid gap-3 sm:grid-cols-2">
+				<div class="space-y-1">
+					<label class="text-xs font-semibold text-neutral-600 dark:text-neutral-200" for="radiograph-date">
+						Fecha de toma (opcional)
+					</label>
+					<input
+						id="radiograph-date"
+						type="date"
+						class="w-full rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-700 shadow-sm outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-neutral-50"
+						bind:value={radiographTakenAt}
+					/>
+				</div>
+				<div class="space-y-1">
+					<label class="text-xs font-semibold text-neutral-600 dark:text-neutral-200" for="radiograph-note">
+						Nota (opcional)
+					</label>
+					<input
+						id="radiograph-note"
+						type="text"
+						placeholder="Ej: Panorámica inicial"
+						class="w-full rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-700 shadow-sm outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-neutral-50"
+						bind:value={radiographNote}
+					/>
+				</div>
+			</div>
+
+			{#if !isDriveConnected}
+				<p class="mt-4 rounded-xl border border-dashed border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-neutral-200">
+					Conectá Google Drive desde <a href="/odonto/configuracion" class="font-semibold text-[#7c3aed]">Configuración</a> para subir radiografías.
+				</p>
+			{/if}
+
+			{#if data.demo}
+				<p class="mt-4 rounded-xl border border-dashed border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+					Subidas a Drive no disponibles en modo demo.
+				</p>
+			{/if}
+			{#if !PUBLIC_GOOGLE_CLIENT_ID}
+				<p class="mt-4 rounded-xl border border-dashed border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+					Falta configurar el Client ID de Google para habilitar las subidas.
+				</p>
+			{/if}
+
+			{#if uploadError}
+				<p class="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+					{uploadError}
+				</p>
+			{/if}
+			{#if uploadWarning}
+				<p class="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+					{uploadWarning}
+				</p>
+			{/if}
+			{#if uploadInfo}
+				<p class="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+					{uploadInfo}
+				</p>
+			{/if}
+
+			<div class="mt-4 space-y-3">
+				{#if radiographs.length === 0}
+					<p class="rounded-xl border border-dashed border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-neutral-200">
+						Todavía no hay radiografías asociadas. Subí la primera con “Añadir radiografía”.
+					</p>
+				{:else}
+					{#each radiographs as radiograph (radiograph.id)}
+						<div class="flex flex-col gap-3 rounded-xl border border-neutral-100 bg-white/80 p-4 shadow-sm dark:border-[#1f3554] dark:bg-[#0f1f36] sm:flex-row sm:items-center sm:justify-between">
+							<div class="min-w-0">
+								<p class="truncate text-sm font-semibold text-neutral-900 dark:text-white">
+									{radiograph.original_filename ?? 'Radiografía'}
+								</p>
+								<p class="mt-1 text-xs text-neutral-500 dark:text-neutral-300">
+									{formatDate(radiograph.taken_at ?? radiograph.created_at)}
+									{radiograph.bytes ? ` · ${formatBytes(radiograph.bytes)}` : ''}
+								</p>
+								{#if radiograph.note}
+									<p class="mt-1 text-xs text-neutral-600 dark:text-neutral-200">{radiograph.note}</p>
+								{/if}
+								{#if isRadiographFailed(radiograph)}
+									<p class="mt-2 text-xs font-semibold text-red-600">Subida fallida</p>
+								{:else if isRadiographUploading(radiograph)}
+									<p class="mt-2 text-xs font-semibold text-amber-600">Subida en proceso</p>
+								{/if}
+							</div>
+							<div class="flex flex-col gap-2 sm:flex-row">
+								{#if isRadiographReady(radiograph)}
+									<a
+										href={`https://drive.google.com/file/d/${radiograph.drive_file_id}/preview`}
+										target="_blank"
+										rel="noreferrer"
+										class="rounded-full border border-neutral-200 px-4 py-2 text-center text-sm font-semibold text-neutral-700 transition hover:-translate-y-0.5 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-200 dark:hover:bg-[#122641]"
+									>
+										Ver
+									</a>
+								{:else}
+									<button
+										type="button"
+										class="rounded-full border border-neutral-200 px-4 py-2 text-center text-sm font-semibold text-neutral-400 dark:border-[#1f3554] dark:text-neutral-500"
+										disabled
+									>
+										Ver
+									</button>
+								{/if}
+								{#if !isRadiographReady(radiograph)}
+									<button
+										type="button"
+										class="rounded-full border border-neutral-200 px-4 py-2 text-center text-sm font-semibold text-neutral-700 transition hover:-translate-y-0.5 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-200 dark:hover:bg-[#122641]"
+										onclick={() => openRetryUpload(radiograph.id)}
+										disabled={!isDriveConnected || uploadingRadiograph || data.demo}
+									>
+										Reintentar
+									</button>
+								{/if}
+								<button
+									type="button"
+									class="rounded-full border border-neutral-200 px-4 py-2 text-center text-sm font-semibold text-neutral-700 transition hover:-translate-y-0.5 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-200 dark:hover:bg-[#122641]"
+									onclick={() => deleteRadiograph(radiograph.id)}
+								>
+									Eliminar referencia
+								</button>
+							</div>
+						</div>
+					{/each}
+				{/if}
+			</div>
+		</div>
 	{/if}
 </div>
 
 <!-- FAB móvil para nueva entrada -->
-<button
-	class="fixed bottom-20 right-4 z-20 flex h-14 w-14 items-center justify-center rounded-full bg-[#7c3aed] text-2xl font-bold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed] md:hidden"
-	onclick={openNewEntryModal}
-aria-label="Registrar consulta"
->
-	+
-</button>
+{#if tab === 'historial'}
+	<button
+		class="fixed bottom-20 right-4 z-20 flex h-14 w-14 items-center justify-center rounded-full bg-[#7c3aed] text-2xl font-bold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed] md:hidden"
+		onclick={openNewEntryModal}
+		aria-label="Registrar consulta"
+	>
+		+
+	</button>
+{/if}
 
 <Modal open={showMobileActions} title="Acciones del paciente" on:close={() => (showMobileActions = false)}>
 	<div class="space-y-3">

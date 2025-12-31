@@ -11,6 +11,14 @@ const getLatestEntryDate = (patientId: string, entries: { patient_id: string; cr
 		.filter((e) => e.patient_id === patientId)
 		.reduce<string | null>((latest, entry) => (entry.created_at > (latest ?? '') ? entry.created_at : latest), null);
 
+const normalizeFilename = (value?: string | null) => {
+	const cleaned = String(value ?? '')
+		.replace(/[\\/]/g, '')
+		.trim();
+	if (!cleaned) return null;
+	return cleaned.length > 120 ? cleaned.slice(0, 120) : cleaned;
+};
+
 export const load: PageServerLoad = async ({ params, locals, fetch }) => {
 	if (!locals.auth) {
 		throw redirect(303, '/login');
@@ -23,27 +31,50 @@ export const load: PageServerLoad = async ({ params, locals, fetch }) => {
 		const entries = db.clinicalEntries
 			.filter((e) => e.patient_id === params.id)
 			.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
-		return { patient, entries, demo: true };
+		const radiographs = db.radiographs
+			.filter((r) => r.patient_id === params.id)
+			.sort((a, b) => (a.created_at ?? '') < (b.created_at ?? '') ? 1 : -1);
+		return { patient, entries, radiographs, driveConnection: null, demo: true };
 	}
 
 	const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
+	const ownerId = getUserIdFromAccessToken(locals.auth.access_token);
 
-	const [{ data: patient, error: patientError }, { data: entries, error: entriesError }] =
-		await Promise.all([
-			supabase
-				.from('patients')
-				.select(
-					'id, full_name, dni, phone, email, birth_date, address, allergies, medication, background, insurance, insurance_plan, custom_fields, archived_at, created_at, updated_at'
-				)
-				.eq('id', params.id)
-				.maybeSingle(),
-			supabase
-				.from('clinical_entries')
-				.select('id, created_at, entry_type, description, teeth, amount, internal_note')
-				.eq('patient_id', params.id)
-				.is('archived_at', null)
-				.order('created_at', { ascending: false })
-		]);
+	const [
+		{ data: patient, error: patientError },
+		{ data: entries, error: entriesError },
+		{ data: radiographs, error: radiographsError },
+		{ data: driveConnection, error: driveError }
+	] = await Promise.all([
+		supabase
+			.from('patients')
+			.select(
+				'id, full_name, dni, phone, email, birth_date, address, allergies, medication, background, insurance, insurance_plan, custom_fields, archived_at, created_at, updated_at, drive_folder_id'
+			)
+			.eq('id', params.id)
+			.maybeSingle(),
+		supabase
+			.from('clinical_entries')
+			.select('id, created_at, entry_type, description, teeth, amount, internal_note')
+			.eq('patient_id', params.id)
+			.is('archived_at', null)
+			.order('created_at', { ascending: false }),
+		supabase
+			.from('patient_radiographs')
+			.select(
+				'id, patient_id, status, drive_file_id, original_filename, mime_type, bytes, taken_at, note, created_at'
+			)
+			.eq('patient_id', params.id)
+			.is('deleted_at', null)
+			.order('created_at', { ascending: false }),
+		ownerId
+			? supabase
+					.from('drive_connections')
+					.select('connected_email, root_folder_id, updated_at')
+					.eq('owner_id', ownerId)
+					.maybeSingle()
+			: Promise.resolve({ data: null, error: null })
+	]);
 
 	if (patientError || !patient) {
 		throw kitError(404, 'Paciente no encontrado');
@@ -52,14 +83,234 @@ export const load: PageServerLoad = async ({ params, locals, fetch }) => {
 	if (entriesError) {
 		console.error('Error cargando entradas', entriesError);
 	}
+	if (radiographsError) {
+		console.error('Error cargando radiografias', radiographsError);
+	}
+	if (driveError) {
+		console.error('Error cargando conexion Drive', driveError);
+	}
 
 	return {
 		patient,
-		entries: entries ?? []
+		entries: entries ?? [],
+		radiographs: radiographs ?? [],
+		driveConnection: driveConnection ?? null,
+		demo: false
 	};
-	};
+};
 
 export const actions: Actions = {
+	set_drive_folder: async ({ request, params, locals, fetch }) => {
+		if (!locals.auth) throw redirect(303, '/login');
+		if (env.DEMO_MODE === 'true') {
+			return fail(400, { message: 'No disponible en modo demo.' });
+		}
+		const form = await request.formData();
+		const drive_folder_id = String(form.get('drive_folder_id') ?? '').trim();
+		if (!drive_folder_id) {
+			return fail(400, { message: 'Carpeta invalida.' });
+		}
+
+		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
+		const { error } = await supabase
+			.from('patients')
+			.update({ drive_folder_id })
+			.eq('id', params.id);
+
+		if (error) {
+			console.error('Error guardando carpeta Drive', error);
+			return fail(500, { message: 'No se pudo guardar la carpeta de Drive.' });
+		}
+
+		return { success: true };
+	},
+	start_radiograph: async ({ request, params, locals, fetch }) => {
+		if (!locals.auth) throw redirect(303, '/login');
+		if (env.DEMO_MODE === 'true') {
+			return fail(400, { message: 'No disponible en modo demo.' });
+		}
+
+		const form = await request.formData();
+		const original_filename = normalizeFilename(form.get('original_filename') as string);
+		const mime_type = String(form.get('mime_type') ?? '').trim();
+		const bytesRaw = String(form.get('bytes') ?? '').trim();
+		const parsedBytes = bytesRaw ? Number(bytesRaw) : null;
+		const bytes = typeof parsedBytes === 'number' && Number.isFinite(parsedBytes) ? parsedBytes : null;
+
+		const ownerId = getUserIdFromAccessToken(locals.auth.access_token);
+		if (!ownerId) {
+			return fail(401, { message: 'Sesion invalida. Volve a iniciar sesion.' });
+		}
+
+		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
+		const { data, error } = await supabase
+			.from('patient_radiographs')
+			.insert({
+				owner_id: ownerId,
+				patient_id: params.id,
+				status: 'uploading',
+				original_filename,
+				mime_type: mime_type || null,
+				bytes,
+				created_by: ownerId
+			})
+			.select(
+				'id, patient_id, status, original_filename, mime_type, bytes, taken_at, note, created_at'
+			)
+			.single();
+
+		if (error || !data) {
+			console.error('Error creando radiografia', error);
+			return fail(500, { message: 'No se pudo iniciar la carga.' });
+		}
+
+		return { success: true, radiograph: data };
+	},
+	reset_radiograph: async ({ request, params, locals, fetch }) => {
+		if (!locals.auth) throw redirect(303, '/login');
+		if (env.DEMO_MODE === 'true') {
+			return fail(400, { message: 'No disponible en modo demo.' });
+		}
+
+		const form = await request.formData();
+		const radiograph_id = String(form.get('radiograph_id') ?? '').trim();
+		const original_filename = normalizeFilename(form.get('original_filename') as string);
+		const mime_type = String(form.get('mime_type') ?? '').trim();
+		const bytesRaw = String(form.get('bytes') ?? '').trim();
+		const parsedBytes = bytesRaw ? Number(bytesRaw) : null;
+		const bytes = typeof parsedBytes === 'number' && Number.isFinite(parsedBytes) ? parsedBytes : null;
+
+		if (!radiograph_id) {
+			return fail(400, { message: 'Radiografia invalida.' });
+		}
+
+		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
+		const { data, error } = await supabase
+			.from('patient_radiographs')
+			.update({
+				status: 'uploading',
+				drive_file_id: null,
+				original_filename,
+				mime_type: mime_type || null,
+				bytes
+			})
+			.eq('id', radiograph_id)
+			.eq('patient_id', params.id)
+			.select(
+				'id, patient_id, status, drive_file_id, original_filename, mime_type, bytes, taken_at, note, created_at'
+			)
+			.single();
+
+		if (error || !data) {
+			console.error('Error reintentando radiografia', error);
+			return fail(500, { message: 'No se pudo reintentar la carga.' });
+		}
+
+		return { success: true, radiograph: data };
+	},
+	finalize_radiograph: async ({ request, params, locals, fetch }) => {
+		if (!locals.auth) throw redirect(303, '/login');
+		if (env.DEMO_MODE === 'true') {
+			return fail(400, { message: 'No disponible en modo demo.' });
+		}
+
+		const form = await request.formData();
+		const radiograph_id = String(form.get('radiograph_id') ?? '').trim();
+		const drive_file_id = String(form.get('drive_file_id') ?? '').trim();
+		const noteRaw = String(form.get('note') ?? '').trim();
+		const note = noteRaw.length > 500 ? noteRaw.slice(0, 500) : noteRaw;
+		const taken_at_raw = String(form.get('taken_at') ?? '').trim();
+		let taken_at: string | null = null;
+		if (taken_at_raw) {
+			if (!/^\d{4}-\d{2}-\d{2}$/.test(taken_at_raw)) {
+				return fail(400, { message: 'Fecha invalida. Formato esperado: AAAA-MM-DD.' });
+			}
+			taken_at = taken_at_raw;
+		}
+
+		if (!radiograph_id || !drive_file_id) {
+			return fail(400, { message: 'Faltan datos para finalizar la carga.' });
+		}
+
+		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
+		const { data, error } = await supabase
+			.from('patient_radiographs')
+			.update({
+				drive_file_id,
+				status: 'ready',
+				note: note || null,
+				taken_at
+			})
+			.eq('id', radiograph_id)
+			.eq('patient_id', params.id)
+			.select(
+				'id, patient_id, status, drive_file_id, original_filename, mime_type, bytes, taken_at, note, created_at'
+			)
+			.single();
+
+		if (error || !data) {
+			console.error('Error finalizando radiografia', error);
+			return fail(500, { message: 'No se pudo guardar la radiografia.' });
+		}
+
+		return { success: true, radiograph: data };
+	},
+	mark_radiograph_failed: async ({ request, params, locals, fetch }) => {
+		if (!locals.auth) throw redirect(303, '/login');
+		if (env.DEMO_MODE === 'true') {
+			return fail(400, { message: 'No disponible en modo demo.' });
+		}
+
+		const form = await request.formData();
+		const radiograph_id = String(form.get('radiograph_id') ?? '').trim();
+		if (!radiograph_id) {
+			return fail(400, { message: 'Radiografia invalida.' });
+		}
+
+		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
+		const { data, error } = await supabase
+			.from('patient_radiographs')
+			.update({ status: 'failed' })
+			.eq('id', radiograph_id)
+			.eq('patient_id', params.id)
+			.select(
+				'id, patient_id, status, drive_file_id, original_filename, mime_type, bytes, taken_at, note, created_at'
+			)
+			.single();
+
+		if (error || !data) {
+			console.error('Error marcando radiografia fallida', error);
+			return fail(500, { message: 'No se pudo actualizar la radiografia.' });
+		}
+
+		return { success: true, radiograph: data };
+	},
+	delete_radiograph: async ({ request, params, locals, fetch }) => {
+		if (!locals.auth) throw redirect(303, '/login');
+		if (env.DEMO_MODE === 'true') {
+			return fail(400, { message: 'No disponible en modo demo.' });
+		}
+
+		const form = await request.formData();
+		const radiograph_id = String(form.get('radiograph_id') ?? '').trim();
+		if (!radiograph_id) {
+			return fail(400, { message: 'Radiografia invalida.' });
+		}
+
+		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
+		const { error } = await supabase
+			.from('patient_radiographs')
+			.delete()
+			.eq('id', radiograph_id)
+			.eq('patient_id', params.id);
+
+		if (error) {
+			console.error('Error eliminando radiografia', error);
+			return fail(500, { message: 'No se pudo eliminar la radiografia.' });
+		}
+
+		return { success: true };
+	},
 	add_entry: async ({ request, params, locals, fetch }) => {
 		if (!locals.auth) throw redirect(303, '/login');
 		const form = await request.formData();

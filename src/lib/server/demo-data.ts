@@ -1,4 +1,4 @@
-import type { CaseEvent, CaseFile, ClinicalEntry, Patient, Person } from '$lib/types';
+import type { CaseEvent, CaseFile, ClinicalEntry, Patient, PatientRadiograph, Person } from '$lib/types';
 
 export const demoPatients: Patient[] = [
 	{
@@ -69,6 +69,33 @@ export const demoClinicalEntries: ClinicalEntry[] = [
 		amount: 0,
 		internal_note: null,
 		created_at: '2025-01-20T14:00:00Z'
+	}
+];
+
+export const demoRadiographs: PatientRadiograph[] = [
+	{
+		id: 'r1',
+		patient_id: 'p1',
+		status: 'ready',
+		drive_file_id: 'demo-file-1',
+		original_filename: 'rx-panorama-2025-02-01.jpg',
+		mime_type: 'image/jpeg',
+		bytes: 2450000,
+		taken_at: '2025-02-01',
+		note: 'Panoramica inicial.',
+		created_at: '2025-02-01T10:30:00Z'
+	},
+	{
+		id: 'r2',
+		patient_id: 'p1',
+		status: 'ready',
+		drive_file_id: 'demo-file-2',
+		original_filename: 'rx-periapical-46-2025-02-12.png',
+		mime_type: 'image/png',
+		bytes: 980000,
+		taken_at: '2025-02-12',
+		note: 'Control post endodoncia.',
+		created_at: '2025-02-12T09:15:00Z'
 	}
 ];
 

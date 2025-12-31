@@ -23,6 +23,7 @@ export interface Patient {
 	insurance?: string | null;
 	insurance_plan?: string | null;
 	custom_fields?: Record<string, unknown> | null;
+	drive_folder_id?: string | null;
 	archived_at?: string | null;
 	last_entry_at?: string | null;
 	created_at?: string | null;
@@ -38,6 +39,24 @@ export interface ClinicalEntry {
 	teeth?: string | null;
 	amount?: number | null;
 	internal_note?: string | null;
+}
+
+export type RadiographStatus = 'uploading' | 'ready' | 'failed';
+
+export interface PatientRadiograph {
+	id: string;
+	patient_id: string;
+	status?: RadiographStatus | null;
+	drive_file_id?: string | null;
+	original_filename?: string | null;
+	mime_type?: string | null;
+	bytes?: number | null;
+	sha256?: string | null;
+	taken_at?: string | null;
+	note?: string | null;
+	created_at?: string | null;
+	created_by?: string | null;
+	deleted_at?: string | null;
 }
 
 export type PersonStatus = 'activo' | 'archivado';
