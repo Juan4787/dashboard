@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { deserialize } from '$app/forms';
-	import { PUBLIC_GOOGLE_CLIENT_ID } from '$env/static/public';
+	import { env } from '$env/dynamic/public';
 	import { createDriveFolder, getUserInfo, requestAccessToken } from '$lib/client/drive';
 
 	let { data } = $props<{
@@ -18,14 +18,15 @@
 	const APP_FOLDER_NAME = 'Base de Datos Sabrina';
 	const PATIENTS_FOLDER_NAME = 'Pacientes';
 
-	let driveConnection = $state(data.driveConnection);
+	const googleClientId = env.PUBLIC_GOOGLE_CLIENT_ID ?? '';
+	let driveConnection = $state<typeof data.driveConnection>(null);
 	let busy = $state(false);
 	let errorMessage = $state('');
 	let successMessage = $state('');
 	let infoMessage = $state('');
 
 	const isConnected = $derived(Boolean(driveConnection?.root_folder_id));
-	const hasClientId = Boolean(PUBLIC_GOOGLE_CLIENT_ID);
+	const hasClientId = Boolean(googleClientId);
 	const rootFolderLink = $derived(
 		driveConnection?.root_folder_id
 			? `https://drive.google.com/drive/folders/${driveConnection.root_folder_id}`
@@ -49,7 +50,7 @@
 		errorMessage = '';
 		successMessage = '';
 		infoMessage = '';
-		if (!PUBLIC_GOOGLE_CLIENT_ID) {
+		if (!googleClientId) {
 			errorMessage = 'Falta configurar PUBLIC_GOOGLE_CLIENT_ID.';
 			return;
 		}
@@ -57,7 +58,7 @@
 		try {
 			const promptValue = driveConnection?.root_folder_id ? 'select_account' : 'consent';
 			const token = await requestAccessToken({
-				clientId: PUBLIC_GOOGLE_CLIENT_ID,
+				clientId: googleClientId,
 				scopes: DRIVE_SCOPES,
 				prompt: promptValue
 			});
@@ -123,6 +124,10 @@
 			busy = false;
 		}
 	};
+
+	$effect(() => {
+		driveConnection = data.driveConnection;
+	});
 </script>
 
 <section class="flex flex-col gap-6">

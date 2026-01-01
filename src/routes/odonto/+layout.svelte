@@ -72,10 +72,12 @@
 			</button>
 		</div>
 		{#if mobileMenuOpen}
-			<div class="fixed inset-0 z-40 flex items-start justify-center bg-black/60 px-4 py-6 md:hidden">
+			<div class="fixed inset-0 z-40 flex items-start justify-center bg-black/60 px-4 py-6 md:hidden relative">
 				<div
-					class="w-full max-w-sm rounded-2xl border border-neutral-100 bg-white p-4 text-neutral-900 shadow-2xl dark:border-white/10 dark:bg-[#0f1f36] dark:text-white"
-					onclick={(event) => event.stopPropagation()}
+					class="relative z-10 w-full max-w-sm rounded-2xl border border-neutral-100 bg-white p-4 text-neutral-900 shadow-2xl dark:border-white/10 dark:bg-[#0f1f36] dark:text-white"
+					role="dialog"
+					aria-modal="true"
+					aria-label="Menú de navegación"
 				>
 					<div class="flex items-center justify-between">
 						<p class="text-sm font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">Menú</p>
@@ -149,13 +151,15 @@
 						Salir
 					</a>
 				</div>
-				<div
-					class="absolute inset-0"
+				<button
+					type="button"
+					class="absolute inset-0 z-0"
+					aria-label="Cerrar menú"
 					onclick={() => {
 						mobileMenuOpen = false;
 						showReportHelp = false;
 					}}
-				></div>
+				></button>
 			</div>
 		{/if}
 		<div class="mx-auto hidden max-w-6xl items-center justify-between px-6 py-3 md:flex">

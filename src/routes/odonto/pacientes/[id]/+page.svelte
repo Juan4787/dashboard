@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { deserialize } from '$app/forms';
-	import { PUBLIC_GOOGLE_CLIENT_ID } from '$env/static/public';
+	import { env } from '$env/dynamic/public';
 	import Modal from '$lib/components/Modal.svelte';
 	import DateTimePartsInput from '$lib/components/DateTimePartsInput.svelte';
 	import DatePartsInput from '$lib/components/DatePartsInput.svelte';
@@ -41,9 +41,10 @@
 	const patientFolderLabel = (patientId: string) => patientId;
 	const radiographsFolderLabel = 'Radiografias';
 	const largeFileThreshold = 12 * 1024 * 1024;
+	const googleClientId = env.PUBLIC_GOOGLE_CLIENT_ID ?? '';
 
-	let driveConnection = $state(data.driveConnection);
-	let radiographs = $state(data.radiographs ?? []);
+	let driveConnection = $state<typeof data.driveConnection>(null);
+	let radiographs = $state<any[]>([]);
 	let uploadingRadiograph = $state(false);
 	let uploadError = $state('');
 	let uploadInfo = $state('');
@@ -51,9 +52,14 @@
 	let retryTargetId = $state<string | null>(null);
 	let radiographNote = $state('');
 	let radiographTakenAt = $state('');
-	let patientDriveFolderId = $state<string | null>(data.patient.drive_folder_id ?? null);
-	let fileInput: HTMLInputElement | null = null;
+	let patientDriveFolderId = $state<string | null>(null);
+	let fileInput = $state<HTMLInputElement | null>(null);
 	const isDriveConnected = $derived(Boolean(driveConnection?.root_folder_id));
+	$effect(() => {
+		driveConnection = data.driveConnection;
+		radiographs = data.radiographs ?? [];
+		patientDriveFolderId = data.patient.drive_folder_id ?? null;
+	});
 	const fmtTime = (dateStr: string) =>
 		new Intl.DateTimeFormat('es-AR', {
 			hour: '2-digit',
@@ -266,7 +272,7 @@
 			retryTargetId = null;
 			return;
 		}
-		if (!PUBLIC_GOOGLE_CLIENT_ID) {
+		if (!googleClientId) {
 			uploadError = 'Falta configurar PUBLIC_GOOGLE_CLIENT_ID.';
 			retryTargetId = null;
 			return;
@@ -286,7 +292,7 @@
 			const takenAtToSend = radiographTakenAt || existing?.taken_at || '';
 
 			const token = await requestAccessToken({
-				clientId: PUBLIC_GOOGLE_CLIENT_ID,
+				clientId: googleClientId,
 				scopes: driveScopes,
 				prompt: ''
 			});
@@ -898,7 +904,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 						type="button"
 						class="rounded-full bg-[#7c3aed] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-[#6d28d9] disabled:cursor-not-allowed disabled:opacity-60"
 						onclick={() => fileInput?.click()}
-						disabled={!isDriveConnected || uploadingRadiograph || data.demo || !PUBLIC_GOOGLE_CLIENT_ID}
+						disabled={!isDriveConnected || uploadingRadiograph || data.demo || !googleClientId}
 					>
 						{uploadingRadiograph ? 'Subiendo...' : '+ Añadir radiografía'}
 					</button>
@@ -942,7 +948,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 					Subidas a Drive no disponibles en modo demo.
 				</p>
 			{/if}
-			{#if !PUBLIC_GOOGLE_CLIENT_ID}
+			{#if !googleClientId}
 				<p class="mt-4 rounded-xl border border-dashed border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
 					Falta configurar el Client ID de Google para habilitar las subidas.
 				</p>
@@ -1013,7 +1019,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 										type="button"
 										class="rounded-full border border-neutral-200 px-4 py-2 text-center text-sm font-semibold text-neutral-700 transition hover:-translate-y-0.5 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-200 dark:hover:bg-[#122641]"
 										onclick={() => openRetryUpload(radiograph.id)}
-										disabled={!isDriveConnected || uploadingRadiograph || data.demo}
+										disabled={!isDriveConnected || uploadingRadiograph || data.demo || !googleClientId}
 									>
 										Reintentar
 									</button>
