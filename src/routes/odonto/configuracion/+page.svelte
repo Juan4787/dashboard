@@ -132,6 +132,12 @@
 
 <section class="flex flex-col gap-6">
 	<div class="rounded-2xl border border-neutral-100 bg-white/90 p-5 shadow-card dark:border-[#1f3554] dark:bg-[#152642] sm:p-6">
+		<a
+			href="/odonto/pacientes"
+			class="text-xs font-semibold uppercase tracking-wide text-[#7c3aed] hover:underline"
+		>
+			Volver a pacientes
+		</a>
 		<h1 class="text-2xl font-semibold text-neutral-900 dark:text-white">Configuración</h1>
 		<p class="mt-2 text-sm text-neutral-600 dark:text-neutral-200">
 			Las radiografías se guardan en tu Google Drive. La app solo mantiene el índice por paciente.
