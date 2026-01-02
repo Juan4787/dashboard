@@ -55,7 +55,6 @@
 	let radiographTakenAt = $state('');
 	let patientDriveFolderId = $state<string | null>(null);
 	let fileInput = $state<HTMLInputElement | null>(null);
-	let showDriveHelp = $state(false);
 	const isDriveConnected = $derived(Boolean(driveConnection?.root_folder_id));
 	const canConnectDrive = $derived(Boolean(googleClientId) && !data.demo);
 	const requestedTab = $derived.by(() => $page.url.searchParams.get('tab'));
@@ -932,7 +931,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 			{#if isDriveConnected}
 				<div class="mt-5 flex flex-wrap items-center gap-2 text-xs text-neutral-500 dark:text-neutral-300">
 					<span class="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 font-semibold text-emerald-800 dark:bg-emerald-400/15 dark:text-emerald-200">
-						✓ Drive conectado
+						✓ Google Drive conectado
 					</span>
 					{#if driveConnection?.connected_email}
 						<span>Cuenta: {driveConnection.connected_email}</span>
@@ -947,52 +946,49 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 						Para subir radiografías, primero conectá Google Drive
 					</h3>
 					<p class="mt-1 text-sm text-neutral-600 dark:text-neutral-200">
-						Se guarda en tu Drive. Podés desconectarlo cuando quieras.
+						Se guarda en tu Google Drive. Podés desconectarlo cuando quieras.
 					</p>
-					<div class="mt-5 flex flex-col gap-3 sm:flex-row">
-						<a
-							href={connectConfigHref}
-							class={`rounded-full bg-[#7c3aed] px-5 py-2 text-center text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-[#6d28d9] ${
-								canConnectDrive ? '' : 'pointer-events-none opacity-60'
-							}`}
-							aria-disabled={!canConnectDrive}
-						>
-							Conectar Google Drive
-						</a>
-						<button
-							type="button"
-							class="rounded-full border border-neutral-200 px-5 py-2 text-sm font-semibold text-neutral-700 transition hover:-translate-y-0.5 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-200 dark:hover:bg-[#122641]"
-							onclick={() => (showDriveHelp = !showDriveHelp)}
-						>
-							¿Por qué lo necesito?
-						</button>
-					</div>
-					{#if showDriveHelp}
-						<p class="mt-4 text-xs text-neutral-600 dark:text-neutral-300">
-							No almacenamos tus radiografías: quedan en tu Google Drive y la app solo organiza el
-							listado por paciente.
-						</p>
-					{/if}
-					<div class="mt-5 grid gap-3 sm:grid-cols-2">
-						<div class="flex items-center gap-4 rounded-xl border border-neutral-200 bg-white/80 px-4 py-4 dark:border-[#1f3554] dark:bg-[#0b1626]">
-							<span class="flex h-8 w-8 items-center justify-center rounded-full bg-amber-100 text-sm font-semibold text-amber-700 dark:bg-amber-500/15 dark:text-amber-200">
-								1
-							</span>
-							<div>
-								<p class="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">Paso 1</p>
-								<p class="text-sm font-semibold text-neutral-900 dark:text-white">Conectar Drive</p>
+					<div class="mt-6 flex flex-col gap-3 sm:flex-row sm:items-stretch">
+						<div class="flex flex-1 flex-col gap-3 rounded-xl border border-neutral-200 bg-white/80 px-4 py-4 dark:border-[#1f3554] dark:bg-[#0b1626]">
+							<div class="flex flex-col gap-3 sm:flex-row sm:items-center">
+								<span class="flex h-9 w-9 items-center justify-center rounded-full bg-amber-100 text-sm font-semibold text-amber-700 dark:bg-amber-500/15 dark:text-amber-200">
+									1
+								</span>
+								<div class="min-w-0 flex-1">
+									<p class="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">Paso 1</p>
+									<p class="text-sm font-semibold text-neutral-900 dark:text-white">Conectar Google Drive</p>
+								</div>
+								<a
+									href={connectConfigHref}
+									class={`flex w-full items-center justify-center gap-2 rounded-full bg-[#7c3aed] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-[#6d28d9] sm:ml-auto sm:w-auto ${
+										canConnectDrive ? '' : 'pointer-events-none opacity-60'
+									}`}
+									aria-disabled={!canConnectDrive}
+								>
+									<svg class="h-4 w-4" viewBox="0 0 87 78" aria-hidden="true">
+										<path fill="#0F9D58" d="M6.5 67.6L27.6 31l13.9 24.1L20.4 78 6.5 67.6z" />
+										<path fill="#4285F4" d="M80.5 67.6H38.4L24.5 43.5h42.1l13.9 24.1z" />
+										<path fill="#F4B400" d="M42.2 0l21 36.6-13.9 24.1L28.3 24 42.2 0z" />
+									</svg>
+									Conectar Google Drive
+								</a>
 							</div>
-							<span class="ml-auto text-xs font-semibold text-amber-700 dark:text-amber-200">Pendiente</span>
+							<p class="text-xs text-neutral-600 dark:text-neutral-300">
+								Se abre una ventana de Google para autorizar. No guardamos archivos en nuestros servidores.
+							</p>
 						</div>
-						<div class="flex items-center gap-4 rounded-xl border border-neutral-200 bg-white/70 px-4 py-4 opacity-70 dark:border-[#1f3554] dark:bg-[#0b1626]">
-							<span class="flex h-8 w-8 items-center justify-center rounded-full bg-neutral-100 text-sm font-semibold text-neutral-500 dark:bg-white/10 dark:text-neutral-300">
+						<div class="flex items-center justify-center text-neutral-400 sm:hidden">↓</div>
+						<div class="hidden sm:flex items-center justify-center text-neutral-400">→</div>
+						<div class="flex flex-1 items-center gap-4 rounded-xl border border-neutral-200 bg-white/70 px-4 py-4 opacity-70 dark:border-[#1f3554] dark:bg-[#0b1626]">
+							<span class="flex h-9 w-9 items-center justify-center rounded-full bg-neutral-100 text-sm font-semibold text-neutral-500 dark:bg-white/10 dark:text-neutral-300">
 								2
 							</span>
 							<div>
 								<p class="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">Paso 2</p>
 								<p class="text-sm font-semibold text-neutral-900 dark:text-white">Subir primera radiografía</p>
 							</div>
-							<span class="ml-auto text-xs font-semibold text-neutral-500 dark:text-neutral-400">Bloqueado</span>
+							<span class="ml-auto text-lg text-neutral-400" aria-hidden="true">🔒</span>
+							<span class="sr-only">Bloqueado</span>
 						</div>
 					</div>
 				</div>
