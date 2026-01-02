@@ -502,30 +502,30 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 					</svg>
 				</button>
 			</div>
-			<div class="hidden flex-wrap items-center gap-3 md:flex">
-					<form method="post" action="?/archive_patient" class="contents" bind:this={archiveForm}>
-						<button
-							type="submit"
-							class="hidden rounded-full bg-neutral-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-neutral-800 hover:shadow-card dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white md:inline-flex"
-							onclick={(event: MouseEvent) => {
-								event.preventDefault();
-								showArchiveConfirm = true;
-							}}
-						>
+			<div class="hidden md:grid md:grid-cols-2 md:gap-2 md:justify-items-start lg:flex lg:flex-wrap lg:items-center lg:gap-3">
+				<form method="post" action="?/archive_patient" class="contents" bind:this={archiveForm}>
+					<button
+						type="submit"
+						class="rounded-full bg-neutral-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-neutral-800 hover:shadow-card dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white md:inline-flex md:justify-self-start"
+						onclick={(event: MouseEvent) => {
+							event.preventDefault();
+							showArchiveConfirm = true;
+						}}
+					>
 						{isArchived ? 'Desarchivar paciente' : 'Archivar paciente'}
 					</button>
 				</form>
 				<form method="post" action="?/unarchive_patient" class="hidden" bind:this={unarchiveForm}></form>
 				<form method="post" action="?/delete_patient" class="hidden" bind:this={deleteForm}></form>
-					<button
-						class="hidden rounded-full bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-red-700 hover:shadow-card dark:bg-red-700 dark:hover:bg-red-800 md:inline-flex"
-						type="button"
-						onclick={() => (showDeleteConfirm = true)}
-					>
-						Eliminar paciente
-					</button>
 				<button
-					class="hidden rounded-full bg-[#7c3aed] px-5 py-2 text-sm font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed] md:inline-flex"
+					class="rounded-full bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-red-700 hover:shadow-card dark:bg-red-700 dark:hover:bg-red-800 md:inline-flex md:justify-self-start"
+					type="button"
+					onclick={() => (showDeleteConfirm = true)}
+				>
+					Eliminar paciente
+				</button>
+				<button
+					class="rounded-full bg-[#7c3aed] px-5 py-2 text-sm font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed] md:col-span-2 md:inline-flex md:justify-self-start lg:col-span-1"
 					type="button"
 					onclick={openNewEntryModal}
 				>
@@ -533,10 +533,10 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				</button>
 			</div>
 		</div>
-		<div class="mt-4 grid grid-cols-4 gap-2 text-sm md:flex md:items-center md:gap-3">
+		<div class="mt-4 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4 sm:text-sm md:flex md:items-center md:gap-3">
 			<a
 				href="/odonto/pacientes"
-				class="flex w-full items-center justify-center gap-2 rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 transition hover:-translate-y-0.5 hover:bg-neutral-100 hover:shadow-card dark:border-[#1f3554] dark:text-[#eaf1ff] dark:hover:bg-[#122641] md:w-auto"
+				class="flex w-full items-center justify-center gap-2 rounded-full border border-neutral-200 px-2 py-2 text-xs font-semibold text-neutral-700 transition hover:-translate-y-0.5 hover:bg-neutral-100 hover:shadow-card dark:border-[#1f3554] dark:text-[#eaf1ff] dark:hover:bg-[#122641] sm:px-4 sm:text-sm md:w-auto"
 			>
 				<svg
 					aria-hidden="true"
@@ -551,7 +551,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				Atrás
 			</a>
 			<button
-				class={`w-full rounded-full px-4 py-2 text-center font-semibold transition md:w-auto ${
+				class={`w-full rounded-full px-2 py-2 text-center text-xs font-semibold transition sm:px-4 sm:text-sm md:w-auto ${
 					tab === 'historial'
 						? 'bg-[#7c3aed] text-white shadow-sm'
 						: 'text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-[#0f1f36]'
@@ -561,7 +561,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				Historial
 			</button>
 			<button
-				class={`w-full rounded-full px-4 py-2 text-center font-semibold transition md:w-auto ${
+				class={`w-full rounded-full px-2 py-2 text-center text-xs font-semibold transition sm:px-4 sm:text-sm md:w-auto ${
 					tab === 'datos'
 						? 'bg-[#7c3aed] text-white shadow-sm'
 						: 'text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-[#0f1f36]'
@@ -571,7 +571,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				Datos
 			</button>
 			<button
-				class={`w-full rounded-full px-4 py-2 text-center font-semibold transition md:w-auto ${
+				class={`w-full rounded-full px-2 py-2 text-center text-xs font-semibold transition sm:px-4 sm:text-sm md:w-auto ${
 					tab === 'radiografias'
 						? 'bg-[#7c3aed] text-white shadow-sm'
 						: 'text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-[#0f1f36]'

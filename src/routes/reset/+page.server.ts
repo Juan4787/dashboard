@@ -41,9 +41,15 @@ export const actions: Actions = {
 		}
 
 		const supabase = await createSupabaseServerClient('odonto', null, fetch);
-		const redirectTo = env.PUBLIC_SITE_URL
-			? `${env.PUBLIC_SITE_URL}/reset/callback`
-			: 'http://localhost:5173/reset/callback';
+		const rawSiteUrl =
+			env.PUBLIC_SITE_URL ??
+			env.SITE_URL ??
+			env.URL ??
+			env.DEPLOY_PRIME_URL ??
+			env.DEPLOY_URL ??
+			(env.VERCEL_URL ? `https://${env.VERCEL_URL}` : '');
+		const baseUrl = rawSiteUrl ? rawSiteUrl.replace(/\/+$/, '') : '';
+		const redirectTo = baseUrl ? `${baseUrl}/reset/callback` : 'http://localhost:5173/reset/callback';
 
 		const { error } = await supabase.auth.resetPasswordForEmail(email, {
 			redirectTo
