@@ -15,7 +15,7 @@
 
 	const DRIVE_SCOPES =
 		'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile';
-	const APP_FOLDER_NAME = 'Base de Datos Sabrina';
+	const APP_FOLDER_NAME = 'Dental Suite';
 	const PATIENTS_FOLDER_NAME = 'Pacientes';
 
 	const googleClientId = env.PUBLIC_GOOGLE_CLIENT_ID ?? '';

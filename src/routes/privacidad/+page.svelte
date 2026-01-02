@@ -19,7 +19,7 @@
 			<section class="mt-6 space-y-3 text-sm leading-relaxed text-neutral-700 dark:text-neutral-200">
 				<p>
 					Esta politica describe como se recopila, usa y protege la informacion dentro de la app
-					"Base de datos odontologia holistica". Si no estas de acuerdo, no uses el servicio.
+					"Dental Suite". Si no estas de acuerdo, no uses el servicio.
 				</p>
 			</section>
 

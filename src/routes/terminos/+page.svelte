@@ -18,7 +18,7 @@
 
 			<section class="mt-6 space-y-3 text-sm leading-relaxed text-neutral-700 dark:text-neutral-200">
 				<p>
-					Estos terminos regulan el uso de la app "Base de datos odontologia holistica". Al usar el servicio,
+					Estos terminos regulan el uso de la app "Dental Suite". Al usar el servicio,
 					aceptas estos terminos y la Politica de privacidad.
 				</p>
 			</section>

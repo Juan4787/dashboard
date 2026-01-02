@@ -166,7 +166,7 @@
 			<div class="flex items-center gap-3">
 				<img
 					src="/logo-mejorado.png"
-					alt="Clínica Sabrina"
+					alt="Dental Suite"
 					class="h-20 w-20"
 				/>
 			</div>
