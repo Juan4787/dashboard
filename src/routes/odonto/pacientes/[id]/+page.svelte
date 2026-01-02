@@ -903,7 +903,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 		</div>
 	{:else if tab === 'radiografias'}
 		<div class="rounded-2xl border border-neutral-100 bg-white/90 p-4 shadow-card dark:border-[#1f3554] dark:bg-[#152642] sm:p-6">
-			<div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+			<div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
 				<div>
 					<h2 class="text-lg font-semibold text-neutral-900 dark:text-white">Radiografías</h2>
 				</div>
@@ -930,7 +930,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 			</div>
 
 			{#if isDriveConnected}
-				<div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-neutral-500 dark:text-neutral-300">
+				<div class="mt-5 flex flex-wrap items-center gap-2 text-xs text-neutral-500 dark:text-neutral-300">
 					<span class="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 font-semibold text-emerald-800 dark:bg-emerald-400/15 dark:text-emerald-200">
 						✓ Drive conectado
 					</span>
@@ -942,14 +942,14 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 					</a>
 				</div>
 			{:else}
-				<div class="mt-4 rounded-2xl border border-dashed border-neutral-200 bg-neutral-50/80 p-4 dark:border-[#1f3554] dark:bg-[#0f1f36]">
+				<div class="mt-5 rounded-2xl border border-dashed border-neutral-200 bg-neutral-50/80 p-5 dark:border-[#1f3554] dark:bg-[#0f1f36] sm:p-6">
 					<h3 class="text-lg font-semibold text-neutral-900 dark:text-white">
 						Para subir radiografías, primero conectá Google Drive
 					</h3>
 					<p class="mt-1 text-sm text-neutral-600 dark:text-neutral-200">
 						Se guarda en tu Drive. Podés desconectarlo cuando quieras.
 					</p>
-					<div class="mt-4 flex flex-col gap-2 sm:flex-row">
+					<div class="mt-5 flex flex-col gap-3 sm:flex-row">
 						<a
 							href={connectConfigHref}
 							class={`rounded-full bg-[#7c3aed] px-5 py-2 text-center text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-[#6d28d9] ${
@@ -968,13 +968,13 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 						</button>
 					</div>
 					{#if showDriveHelp}
-						<p class="mt-3 text-xs text-neutral-600 dark:text-neutral-300">
+						<p class="mt-4 text-xs text-neutral-600 dark:text-neutral-300">
 							No almacenamos tus radiografías: quedan en tu Google Drive y la app solo organiza el
 							listado por paciente.
 						</p>
 					{/if}
-					<div class="mt-4 grid gap-2 sm:grid-cols-2">
-						<div class="flex items-center gap-3 rounded-xl border border-neutral-200 bg-white/80 px-4 py-3 dark:border-[#1f3554] dark:bg-[#0b1626]">
+					<div class="mt-5 grid gap-3 sm:grid-cols-2">
+						<div class="flex items-center gap-4 rounded-xl border border-neutral-200 bg-white/80 px-4 py-4 dark:border-[#1f3554] dark:bg-[#0b1626]">
 							<span class="flex h-8 w-8 items-center justify-center rounded-full bg-amber-100 text-sm font-semibold text-amber-700 dark:bg-amber-500/15 dark:text-amber-200">
 								1
 							</span>
@@ -984,7 +984,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 							</div>
 							<span class="ml-auto text-xs font-semibold text-amber-700 dark:text-amber-200">Pendiente</span>
 						</div>
-						<div class="flex items-center gap-3 rounded-xl border border-neutral-200 bg-white/70 px-4 py-3 opacity-70 dark:border-[#1f3554] dark:bg-[#0b1626]">
+						<div class="flex items-center gap-4 rounded-xl border border-neutral-200 bg-white/70 px-4 py-4 opacity-70 dark:border-[#1f3554] dark:bg-[#0b1626]">
 							<span class="flex h-8 w-8 items-center justify-center rounded-full bg-neutral-100 text-sm font-semibold text-neutral-500 dark:bg-white/10 dark:text-neutral-300">
 								2
 							</span>
@@ -999,8 +999,8 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 			{/if}
 
 			{#if isDriveConnected}
-				<div class="mt-4 grid gap-3 sm:grid-cols-2">
-					<div class="space-y-1">
+				<div class="mt-6 grid gap-4 sm:grid-cols-2">
+					<div class="space-y-2">
 						<label class="text-xs font-semibold text-neutral-600 dark:text-neutral-200" for="radiograph-date">
 							Fecha de toma (opcional)
 						</label>
@@ -1011,7 +1011,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 							bind:value={radiographTakenAt}
 						/>
 					</div>
-					<div class="space-y-1">
+					<div class="space-y-2">
 						<label class="text-xs font-semibold text-neutral-600 dark:text-neutral-200" for="radiograph-note">
 							Nota (opcional)
 						</label>
@@ -1027,38 +1027,34 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 			{/if}
 
 			{#if data.demo}
-				<p class="mt-4 rounded-xl border border-dashed border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+				<p class="mt-5 rounded-xl border border-dashed border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
 					Subidas a Drive no disponibles en modo demo.
 				</p>
 			{/if}
 			{#if !googleClientId}
-				<p class="mt-4 rounded-xl border border-dashed border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+				<p class="mt-5 rounded-xl border border-dashed border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
 					Falta configurar el Client ID de Google para habilitar las subidas.
 				</p>
 			{/if}
 
 			{#if uploadError}
-				<p class="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+				<p class="mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
 					{uploadError}
 				</p>
 			{/if}
 			{#if uploadWarning}
-				<p class="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+				<p class="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
 					{uploadWarning}
 				</p>
 			{/if}
 			{#if uploadInfo}
-				<p class="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+				<p class="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
 					{uploadInfo}
 				</p>
 			{/if}
 
-			<div class="mt-4 space-y-3">
-				{#if radiographs.length === 0}
-					<p class="rounded-xl border border-dashed border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-neutral-200">
-						Todavía no hay radiografías asociadas. Subí la primera con “Añadir radiografía”.
-					</p>
-				{:else}
+			<div class="mt-6 space-y-4">
+				{#if radiographs.length > 0}
 					{#each radiographs as radiograph (radiograph.id)}
 						<div class="flex flex-col gap-3 rounded-xl border border-neutral-100 bg-white/80 p-4 shadow-sm dark:border-[#1f3554] dark:bg-[#0f1f36] sm:flex-row sm:items-center sm:justify-between">
 							<div class="min-w-0">
