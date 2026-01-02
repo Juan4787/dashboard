@@ -2,6 +2,14 @@
 	let { form } = $props();
 	let showPassword = $state(false);
 	let mode = $state<'login' | 'register'>('login');
+	let email = $state(form?.email ?? '');
+	let password = $state('');
+
+	$effect(() => {
+		if (form?.email && form.email !== email) {
+			email = form.email;
+		}
+	});
 </script>
 
 <div class="min-h-screen bg-gradient-to-br from-[#0b1626] via-[#0f1f36] to-[#0a1222] flex items-center justify-center px-4 py-10">
@@ -39,7 +47,7 @@
 					class="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white shadow-sm outline-none transition focus:border-[#7c3aed] focus:ring-2 focus:ring-[#7c3aed]/40 placeholder:text-neutral-400"
 					placeholder="Introduce tu email"
 					required
-					value={form?.email ?? ''}
+					bind:value={email}
 					autocomplete="email"
 				/>
 			</div>
@@ -54,6 +62,7 @@
 						class="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 pr-16 text-white shadow-sm outline-none transition focus:border-[#7c3aed] focus:ring-2 focus:ring-[#7c3aed]/40 placeholder:text-neutral-400"
 						placeholder={mode === 'register' ? 'Creá una contraseña segura' : 'Introduce tu contraseña'}
 						required
+						bind:value={password}
 						autocomplete={mode === 'register' ? 'new-password' : 'current-password'}
 					/>
 					<button
