@@ -8,6 +8,7 @@
 	import { CLINICAL_ENTRY_TYPES } from '$lib/constants';
 	import {
 		createDriveFolder,
+		getUserInfo,
 		initResumableUpload,
 		requestAccessToken,
 		uploadResumable
@@ -39,6 +40,8 @@
 	const currentYear = new Date().getFullYear();
 	const driveScopes =
 		'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile';
+	const APP_FOLDER_NAME = 'Dental Suite';
+	const PATIENTS_FOLDER_NAME = 'Pacientes';
 	const patientFolderLabel = (patientId: string) => patientId;
 	const radiographsFolderLabel = 'Radiografias';
 	const largeFileThreshold = 12 * 1024 * 1024;
@@ -50,6 +53,7 @@
 	let uploadError = $state('');
 	let uploadInfo = $state('');
 	let uploadWarning = $state('');
+	let connectingDrive = $state(false);
 	let retryTargetId = $state<string | null>(null);
 	let radiographNote = $state('');
 	let radiographTakenAt = $state('');
@@ -58,11 +62,7 @@
 	const isDriveConnected = $derived(Boolean(driveConnection?.root_folder_id));
 	const canConnectDrive = $derived(Boolean(googleClientId) && !data.demo);
 	const requestedTab = $derived.by(() => $page.url.searchParams.get('tab'));
-	const returnTo = $derived.by(() => {
-		const params = new URLSearchParams($page.url.search);
-		params.set('tab', 'radiografias');
-		return encodeURIComponent(`${$page.url.pathname}?${params.toString()}`);
-	});
+	const returnTo = $derived.by(() => encodeURIComponent(`${$page.url.pathname}?tab=radiografias`));
 	const connectConfigHref = $derived.by(() => `/odonto/configuracion?return=${returnTo}`);
 	$effect(() => {
 		if (
@@ -266,6 +266,71 @@
 			radiographs = radiographs.map((item) =>
 				item.id === radiographId ? { ...item, status: 'failed' } : item
 			);
+		}
+	};
+
+	const connectDriveInline = async () => {
+		uploadError = '';
+		uploadInfo = '';
+		if (!googleClientId) {
+			uploadError = 'Falta configurar PUBLIC_GOOGLE_CLIENT_ID.';
+			return;
+		}
+		if (data.demo) {
+			uploadError = 'No disponible en modo demo.';
+			return;
+		}
+		connectingDrive = true;
+		try {
+			const promptValue = driveConnection?.root_folder_id ? 'select_account' : 'consent';
+			const token = await requestAccessToken({
+				clientId: googleClientId,
+				scopes: driveScopes,
+				prompt: promptValue
+			});
+			const userInfo = await getUserInfo(token);
+			const email = userInfo.email ?? 'Cuenta conectada';
+			const sameAccount =
+				driveConnection?.connected_email &&
+				email &&
+				driveConnection.connected_email.toLowerCase() === email.toLowerCase();
+
+			if (driveConnection?.connected_email && !sameAccount) {
+				await postAction('?/disconnect_drive', new FormData());
+				driveConnection = null;
+				patientDriveFolderId = null;
+			}
+
+			let rootFolderId = sameAccount ? driveConnection?.root_folder_id ?? '' : '';
+			if (!rootFolderId) {
+				const appFolderId = await createDriveFolder({
+					accessToken: token,
+					name: APP_FOLDER_NAME
+				});
+				rootFolderId = await createDriveFolder({
+					accessToken: token,
+					name: PATIENTS_FOLDER_NAME,
+					parentId: appFolderId
+				});
+			}
+
+			const formData = new FormData();
+			formData.set('connected_email', email);
+			formData.set('root_folder_id', rootFolderId);
+			await postAction('?/save_drive_connection', formData);
+			driveConnection = { connected_email: email, root_folder_id: rootFolderId };
+			uploadInfo = 'Google Drive conectado.';
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : 'No se pudo conectar Google Drive.';
+			if (msg.includes('popup') || msg.includes('popup_blocked_by_browser')) {
+				uploadError = 'Permití los popups para conectar Google Drive.';
+			} else if (msg.includes('popup_closed_by_user') || msg.includes('access_denied')) {
+				uploadError = 'La autorización fue cancelada.';
+			} else {
+				uploadError = msg;
+			}
+		} finally {
+			connectingDrive = false;
 		}
 	};
 
@@ -996,20 +1061,19 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 									<p class="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">Paso 1</p>
 									<p class="text-sm font-semibold text-neutral-900 dark:text-white">Conectar Google Drive</p>
 								</div>
-								<a
-									href={connectConfigHref}
-									class={`flex w-full items-center justify-center gap-2 rounded-full bg-[#7c3aed] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-[#6d28d9] sm:ml-auto sm:w-auto ${
-										canConnectDrive ? '' : 'pointer-events-none opacity-60'
-									}`}
-									aria-disabled={!canConnectDrive}
+								<button
+									type="button"
+									class="flex w-full items-center justify-center gap-2 rounded-full bg-[#7c3aed] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-[#6d28d9] disabled:cursor-not-allowed disabled:opacity-60 sm:ml-auto sm:w-auto"
+									onclick={connectDriveInline}
+									disabled={!canConnectDrive || connectingDrive}
 								>
 									<svg class="h-4 w-4" viewBox="0 0 87 78" aria-hidden="true">
 										<path fill="#0F9D58" d="M6.5 67.6L27.6 31l13.9 24.1L20.4 78 6.5 67.6z" />
 										<path fill="#4285F4" d="M80.5 67.6H38.4L24.5 43.5h42.1l13.9 24.1z" />
 										<path fill="#F4B400" d="M42.2 0l21 36.6-13.9 24.1L28.3 24 42.2 0z" />
 									</svg>
-									Conectar Google Drive
-								</a>
+									{connectingDrive ? 'Conectando...' : 'Conectar Google Drive'}
+								</button>
 							</div>
 						</div>
 						<div class="flex items-center justify-center text-neutral-400 sm:hidden">↓</div>

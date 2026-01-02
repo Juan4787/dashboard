@@ -100,6 +100,73 @@ export const load: PageServerLoad = async ({ params, locals, fetch }) => {
 };
 
 export const actions: Actions = {
+	save_drive_connection: async ({ request, locals, fetch }) => {
+		if (!locals.auth) throw redirect(303, '/login');
+		if (env.DEMO_MODE === 'true') {
+			return fail(400, { message: 'No disponible en modo demo.' });
+		}
+
+		const form = await request.formData();
+		const connected_email = String(form.get('connected_email') ?? '').trim();
+		const root_folder_id = String(form.get('root_folder_id') ?? '').trim();
+
+		if (!connected_email || !root_folder_id) {
+			return fail(400, { message: 'Faltan datos para guardar la conexión.' });
+		}
+
+		const ownerId = getUserIdFromAccessToken(locals.auth.access_token);
+		if (!ownerId) {
+			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
+		}
+
+		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
+		const { error } = await supabase
+			.from('drive_connections')
+			.upsert(
+				{
+					owner_id: ownerId,
+					connected_email,
+					root_folder_id,
+					updated_at: new Date().toISOString()
+				},
+				{ onConflict: 'owner_id' }
+			);
+
+		if (error) {
+			console.error('Error guardando Drive connection', error);
+			return fail(500, { message: 'No se pudo guardar la conexión con Drive.' });
+		}
+
+		return { success: true };
+	},
+	disconnect_drive: async ({ locals, fetch }) => {
+		if (!locals.auth) throw redirect(303, '/login');
+		if (env.DEMO_MODE === 'true') {
+			return fail(400, { message: 'No disponible en modo demo.' });
+		}
+
+		const ownerId = getUserIdFromAccessToken(locals.auth.access_token);
+		if (!ownerId) {
+			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
+		}
+
+		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
+		const { error } = await supabase.from('drive_connections').delete().eq('owner_id', ownerId);
+		const { error: resetError } = await supabase
+			.from('patients')
+			.update({ drive_folder_id: null })
+			.eq('owner_id', ownerId);
+
+		if (error) {
+			console.error('Error desconectando Drive', error);
+			return fail(500, { message: 'No se pudo desconectar Drive.' });
+		}
+		if (resetError) {
+			console.error('Error limpiando carpetas Drive en pacientes', resetError);
+		}
+
+		return { success: true };
+	},
 	set_drive_folder: async ({ request, params, locals, fetch }) => {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') {
