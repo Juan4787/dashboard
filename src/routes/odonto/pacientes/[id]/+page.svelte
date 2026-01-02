@@ -31,6 +31,7 @@
 	let showArchiveConfirm = $state(false);
 	let showDeleteConfirm = $state(false);
 	let showRadiographDeleteConfirm = $state(false);
+	let showRadiographModal = $state(false);
 	let showMobileActions = $state(false);
 	let deleteConfirmText = $state('');
 	let deleteRadiographConfirmText = $state('');
@@ -62,6 +63,8 @@
 	let radiographTakenAt = $state('');
 	let patientDriveFolderId = $state<string | null>(null);
 	let fileInput = $state<HTMLInputElement | null>(null);
+	let pendingRadiographFile = $state<File | null>(null);
+	let failedThumbnails = $state<Record<string, boolean>>({});
 	const isDriveConnected = $derived(Boolean(driveConnection?.root_folder_id));
 	const canConnectDrive = $derived(Boolean(googleClientId) && !data.demo);
 	const requestedTab = $derived.by(() => $page.url.searchParams.get('tab'));
@@ -167,6 +170,83 @@
 		}
 		const decimals = current >= 10 || idx === 0 ? 0 : 1;
 		return `${current.toFixed(decimals)} ${units[idx]}`;
+	};
+
+	const maskEmail = (email?: string | null) => {
+		if (!email) return '';
+		const [user, domain] = email.split('@');
+		if (!domain) return email;
+		if (!user) return `…@${domain}`;
+		const visible = user.length <= 3 ? user.slice(0, 1) : user.slice(0, 4);
+		return `${visible}…@${domain}`;
+	};
+
+	const getFileTypeLabel = (mime?: string | null, name?: string | null) => {
+		const normalizedMime = (mime ?? '').toLowerCase();
+		const normalizedName = (name ?? '').toLowerCase();
+		if (normalizedMime.includes('dicom') || normalizedName.endsWith('.dcm')) return 'DICOM';
+		if (normalizedMime === 'application/pdf' || normalizedName.endsWith('.pdf')) return 'PDF';
+		if (
+			normalizedMime === 'image/jpeg' ||
+			normalizedName.endsWith('.jpg') ||
+			normalizedName.endsWith('.jpeg')
+		)
+			return 'JPG';
+		if (normalizedMime === 'image/png' || normalizedName.endsWith('.png')) return 'PNG';
+		if (normalizedMime.startsWith('image/')) return 'Imagen';
+		if (normalizedMime) {
+			const short = normalizedMime.split('/')[1];
+			return short ? short.toUpperCase() : 'Archivo';
+		}
+		return 'Archivo';
+	};
+
+	const getRadiographKind = (radiograph: any) => {
+		const mime = (radiograph?.mime_type ?? '').toLowerCase();
+		const name = (radiograph?.original_filename ?? '').toLowerCase();
+		if (mime.includes('dicom') || name.endsWith('.dcm')) return 'dicom';
+		if (mime === 'application/pdf' || name.endsWith('.pdf')) return 'pdf';
+		if (mime.startsWith('image/') || /\.(jpg|jpeg|png|webp|gif)$/.test(name)) return 'image';
+		return 'other';
+	};
+
+	const getRadiographTitle = (radiograph: any) => {
+		const note = (radiograph?.note ?? '').trim();
+		if (note) return note;
+		const date = formatDate(radiograph?.taken_at ?? radiograph?.created_at);
+		return date ? `Radiografía (${date})` : 'Radiografía';
+	};
+
+	const getRadiographMeta = (radiograph: any) => {
+		const note = (radiograph?.note ?? '').trim();
+		const date = radiograph?.taken_at ?? radiograph?.created_at;
+		const typeLabel = getFileTypeLabel(radiograph?.mime_type, radiograph?.original_filename);
+		const sizeLabel = formatBytes(radiograph?.bytes);
+		const parts: string[] = [];
+		if (note && date) parts.push(formatDate(date));
+		if (typeLabel) parts.push(typeLabel);
+		if (sizeLabel) parts.push(sizeLabel);
+		return parts.join(' · ');
+	};
+
+	const getRadiographThumbnail = (radiograph: any) => {
+		if (!radiograph?.drive_file_id) return '';
+		if (!isRadiographReady(radiograph)) return '';
+		const kind = getRadiographKind(radiograph);
+		if (kind !== 'image') return '';
+		if (failedThumbnails[radiograph.id]) return '';
+		return `https://drive.google.com/thumbnail?id=${radiograph.drive_file_id}&sz=w120`;
+	};
+
+	const markThumbnailFailed = (id: string) => {
+		failedThumbnails = { ...failedThumbnails, [id]: true };
+	};
+
+	const getPendingFileMeta = (file: File | null) => {
+		if (!file) return '';
+		const typeLabel = getFileTypeLabel(file.type, file.name);
+		const sizeLabel = formatBytes(file.size);
+		return [typeLabel, sizeLabel].filter(Boolean).join(' · ');
 	};
 
 	const formatCurrency = (value?: number | string | null) => {
@@ -370,6 +450,38 @@
 		fileInput?.click();
 	};
 
+	const openNewRadiographUpload = () => {
+		retryTargetId = null;
+		radiographNote = '';
+		radiographTakenAt = '';
+		uploadError = '';
+		uploadInfo = '';
+		uploadWarning = '';
+		fileInput?.click();
+	};
+
+	const closeRadiographModal = () => {
+		showRadiographModal = false;
+		pendingRadiographFile = null;
+		retryTargetId = null;
+		radiographNote = '';
+		radiographTakenAt = '';
+		uploadWarning = '';
+		if (fileInput) fileInput.value = '';
+	};
+
+	const submitRadiographUpload = async () => {
+		if (!pendingRadiographFile) return;
+		if (radiographTakenAt && !/^\d{4}-\d{2}-\d{2}$/.test(radiographTakenAt)) {
+			uploadError = 'La fecha debe tener formato AAAA-MM-DD.';
+			return;
+		}
+		const file = pendingRadiographFile;
+		pendingRadiographFile = null;
+		showRadiographModal = false;
+		await uploadRadiograph(file, retryTargetId ?? undefined);
+	};
+
 	const uploadRadiograph = async (file: File, existingId?: string) => {
 		if (data.demo) {
 			uploadError = 'No disponible en modo demo.';
@@ -471,7 +583,8 @@
 		if (file.size > largeFileThreshold) {
 			uploadWarning = 'Archivo pesado: la subida puede tardar varios minutos.';
 		}
-		void uploadRadiograph(file, retryTargetId ?? undefined);
+		pendingRadiographFile = file;
+		showRadiographModal = true;
 	};
 
 let showEntryErrors = $state(false);
@@ -1030,7 +1143,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 						<button
 							type="button"
 							class="rounded-full bg-[#7c3aed] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-[#6d28d9] disabled:cursor-not-allowed disabled:opacity-60"
-							onclick={() => fileInput?.click()}
+							onclick={openNewRadiographUpload}
 							disabled={uploadingRadiograph || data.demo || !googleClientId}
 						>
 							{uploadingRadiograph ? 'Subiendo...' : '+ Añadir radiografía'}
@@ -1045,7 +1158,9 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 						✓ Google Drive conectado
 					</span>
 					{#if driveConnection?.connected_email}
-						<span>Cuenta: {driveConnection.connected_email}</span>
+						<span title={driveConnection.connected_email}>
+							Cuenta: {maskEmail(driveConnection.connected_email)}
+						</span>
 					{/if}
 					<a href={connectConfigHref} class="font-semibold text-[#7c3aed] hover:underline">
 						Cambiar o desconectar
@@ -1101,34 +1216,6 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				</div>
 			{/if}
 
-			{#if isDriveConnected}
-				<div class="mt-6 grid gap-4 sm:grid-cols-2">
-					<div class="space-y-2">
-						<label class="text-xs font-semibold text-neutral-600 dark:text-neutral-200" for="radiograph-date">
-							Fecha de toma (opcional)
-						</label>
-						<input
-							id="radiograph-date"
-							type="date"
-							class="w-full rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-700 shadow-sm outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-neutral-50"
-							bind:value={radiographTakenAt}
-						/>
-					</div>
-					<div class="space-y-2">
-						<label class="text-xs font-semibold text-neutral-600 dark:text-neutral-200" for="radiograph-note">
-							Nota (opcional)
-						</label>
-						<input
-							id="radiograph-note"
-							type="text"
-							placeholder="Ej: Panorámica inicial"
-							class="w-full rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-700 shadow-sm outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-neutral-50"
-							bind:value={radiographNote}
-						/>
-					</div>
-				</div>
-			{/if}
-
 			{#if data.demo}
 				<p class="mt-5 rounded-xl border border-dashed border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
 					Subidas a Drive no disponibles en modo demo.
@@ -1159,31 +1246,63 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 			<div class="mt-6 space-y-4">
 				{#if radiographs.length > 0}
 					{#each radiographs as radiograph (radiograph.id)}
-						<div class="flex flex-col gap-3 rounded-xl border border-neutral-100 bg-white/80 p-4 shadow-sm dark:border-[#1f3554] dark:bg-[#0f1f36] sm:flex-row sm:items-center sm:justify-between">
-							<div class="min-w-0">
-								<p class="truncate text-sm font-semibold text-neutral-900 dark:text-white">
-									{radiograph.original_filename ?? 'Radiografía'}
-								</p>
-								<p class="mt-1 text-xs text-neutral-500 dark:text-neutral-300">
-									{formatDate(radiograph.taken_at ?? radiograph.created_at)}
-									{radiograph.bytes ? ` · ${formatBytes(radiograph.bytes)}` : ''}
-								</p>
-								{#if radiograph.note}
-									<p class="mt-1 text-xs text-neutral-600 dark:text-neutral-200">{radiograph.note}</p>
-								{/if}
-								{#if isRadiographFailed(radiograph)}
-									<p class="mt-2 text-xs font-semibold text-red-600">Subida fallida</p>
-								{:else if isRadiographUploading(radiograph)}
-									<p class="mt-2 text-xs font-semibold text-amber-600">Subida en proceso</p>
-								{/if}
+						{@const thumbnailUrl = getRadiographThumbnail(radiograph)}
+						{@const kind = getRadiographKind(radiograph)}
+						{@const title = getRadiographTitle(radiograph)}
+						{@const meta = getRadiographMeta(radiograph)}
+						<div class="flex flex-col gap-4 rounded-xl border border-neutral-100 bg-white/80 p-4 shadow-sm dark:border-[#1f3554] dark:bg-[#0f1f36] sm:flex-row sm:items-center sm:justify-between">
+							<div class="flex min-w-0 flex-1 items-start gap-3">
+								<div class="relative h-12 w-12 shrink-0 overflow-hidden rounded-xl border border-neutral-200 bg-white/70 text-neutral-500 dark:border-[#1f3554] dark:bg-[#122641] dark:text-neutral-200">
+									{#if thumbnailUrl}
+										<img
+											src={thumbnailUrl}
+											alt=""
+											class="h-full w-full object-cover"
+											loading="lazy"
+											on:error={() => markThumbnailFailed(radiograph.id)}
+										/>
+									{:else if kind === 'pdf'}
+										<div class="flex h-full w-full items-center justify-center text-[10px] font-bold tracking-wide">
+											PDF
+										</div>
+									{:else if kind === 'dicom'}
+										<div class="flex h-full w-full items-center justify-center text-[10px] font-bold tracking-wide">
+											DICOM
+										</div>
+									{:else}
+										<div class="flex h-full w-full items-center justify-center">
+											<svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+												<rect x="3" y="4" width="18" height="16" rx="2" />
+												<circle cx="9" cy="10" r="1.5" />
+												<path stroke-linecap="round" stroke-linejoin="round" d="M21 16l-5-4-4 3-3-2-4 3" />
+											</svg>
+										</div>
+									{/if}
+								</div>
+								<div class="min-w-0 flex-1">
+									<p
+										class="text-sm font-semibold text-neutral-900 dark:text-white line-clamp-1"
+										title={radiograph.original_filename ?? ''}
+									>
+										{title}
+									</p>
+									{#if meta}
+										<p class="mt-1 text-xs text-neutral-500 dark:text-neutral-300">{meta}</p>
+									{/if}
+									{#if isRadiographFailed(radiograph)}
+										<p class="mt-2 text-xs font-semibold text-red-600">Subida fallida</p>
+									{:else if isRadiographUploading(radiograph)}
+										<p class="mt-2 text-xs font-semibold text-amber-600">Subida en proceso</p>
+									{/if}
+								</div>
 							</div>
-							<div class="flex flex-col gap-2 sm:flex-row">
+							<div class="flex flex-col gap-2 sm:flex-row sm:items-center">
 								{#if isRadiographReady(radiograph)}
 									<a
 										href={`https://drive.google.com/file/d/${radiograph.drive_file_id}/preview`}
 										target="_blank"
 										rel="noreferrer"
-										class="rounded-full border border-neutral-200 px-4 py-2 text-center text-sm font-semibold text-neutral-700 transition hover:-translate-y-0.5 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-200 dark:hover:bg-[#122641]"
+										class="rounded-full bg-[#7c3aed] px-4 py-2 text-center text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-[#6d28d9]"
 									>
 										Ver
 									</a>
@@ -1208,10 +1327,15 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 								{/if}
 								<button
 									type="button"
-									class="rounded-full border border-neutral-200 px-4 py-2 text-center text-sm font-semibold text-neutral-700 transition hover:-translate-y-0.5 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-200 dark:hover:bg-[#122641]"
+									class="inline-flex items-center justify-center gap-1 rounded-full border border-neutral-200 px-4 py-2 text-center text-sm font-semibold text-neutral-500 transition hover:border-red-200 hover:text-red-600 dark:border-[#1f3554] dark:text-neutral-300 dark:hover:border-red-400/40 dark:hover:text-red-300"
 									onclick={() => openRadiographDeleteConfirm(radiograph.id)}
 								>
-									Eliminar referencia
+									<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+										<path stroke-linecap="round" stroke-linejoin="round" d="M3 6h18" />
+										<path stroke-linecap="round" stroke-linejoin="round" d="M8 6V4h8v2" />
+										<path stroke-linecap="round" stroke-linejoin="round" d="M7 6l1 14h8l1-14" />
+									</svg>
+									Quitar
 								</button>
 							</div>
 						</div>
@@ -1219,8 +1343,8 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				{/if}
 			</div>
 
-			<details class="mt-6 text-xs text-neutral-600 dark:text-neutral-300">
-				<summary class="inline-flex cursor-pointer items-center gap-1 font-semibold text-neutral-700 dark:text-neutral-200">
+			<details class="mt-6 text-[11px] text-neutral-600 dark:text-neutral-300">
+				<summary class="inline-flex cursor-pointer items-center gap-1 font-medium text-neutral-600 dark:text-neutral-300">
 					Más información
 					<svg class="h-3.5 w-3.5 text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 						<path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6" />
@@ -1279,6 +1403,76 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 		>
 			Cerrar
 		</button>
+	</div>
+</Modal>
+
+<Modal
+	open={showRadiographModal}
+	title={retryTargetId ? 'Reintentar radiografía' : 'Añadir radiografía'}
+	on:close={closeRadiographModal}
+>
+	<div class="space-y-4 text-sm text-neutral-800 dark:text-neutral-100">
+		<div class="rounded-xl border border-neutral-200 bg-white/80 px-4 py-3 dark:border-[#1f3554] dark:bg-[#0f1f36]">
+			<p class="text-sm font-semibold text-neutral-900 dark:text-white">
+				{pendingRadiographFile?.name ?? 'Archivo seleccionado'}
+			</p>
+			{#if pendingRadiographFile}
+				<p class="mt-1 text-xs text-neutral-500 dark:text-neutral-300">
+					{getPendingFileMeta(pendingRadiographFile)}
+				</p>
+			{/if}
+		</div>
+		<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+			<div class="space-y-2">
+				<label class="text-xs font-semibold text-neutral-600 dark:text-neutral-300" for="radiograph-date">
+					Fecha de toma (opcional)
+				</label>
+				<input
+					id="radiograph-date"
+					type="date"
+					class="w-full rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-700 shadow-sm outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-neutral-50"
+					bind:value={radiographTakenAt}
+				/>
+			</div>
+			<div class="space-y-2">
+				<label class="text-xs font-semibold text-neutral-600 dark:text-neutral-300" for="radiograph-note">
+					Nota (opcional)
+				</label>
+				<input
+					id="radiograph-note"
+					type="text"
+					placeholder="Ej: Panorámica inicial"
+					class="w-full rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-700 shadow-sm outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-neutral-50"
+					bind:value={radiographNote}
+				/>
+			</div>
+		</div>
+		{#if uploadWarning}
+			<p class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
+				{uploadWarning}
+			</p>
+		{/if}
+		<div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
+			<button
+				type="button"
+				class="w-full rounded-xl px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:text-white dark:hover:bg-[#1b2d4b] sm:w-auto"
+				onclick={closeRadiographModal}
+			>
+				Cancelar
+			</button>
+			<button
+				type="button"
+				disabled={!pendingRadiographFile || uploadingRadiograph}
+				class={`w-full rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 sm:w-auto ${
+					pendingRadiographFile && !uploadingRadiograph
+						? 'bg-primary-600 hover:bg-primary-700'
+						: 'bg-primary-400 cursor-not-allowed opacity-80'
+				}`}
+				onclick={submitRadiographUpload}
+			>
+				{uploadingRadiograph ? 'Subiendo...' : 'Subir radiografía'}
+			</button>
+		</div>
 	</div>
 </Modal>
 
@@ -1453,13 +1647,13 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 
 <Modal
 	open={showRadiographDeleteConfirm}
-	title="Eliminar referencia"
+	title="Quitar de la ficha"
 	on:close={() => (showRadiographDeleteConfirm = false)}
 	dismissible
 >
 	<div class="space-y-4 text-sm text-neutral-800 dark:text-neutral-100">
 		<p class="text-base font-semibold text-red-600 dark:text-red-400">
-			Esta acción elimina la referencia en la app. El archivo sigue en tu Google Drive.
+			Esta acción quita la referencia en la app. El archivo sigue en tu Google Drive.
 		</p>
 		<div class="space-y-2">
 			<label class="text-sm font-semibold text-neutral-600 dark:text-neutral-300" for="delete-radiograph-input">
@@ -1504,7 +1698,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 					}
 				}}
 			>
-				Eliminar referencia
+				Quitar de la ficha
 			</button>
 		</div>
 	</div>
