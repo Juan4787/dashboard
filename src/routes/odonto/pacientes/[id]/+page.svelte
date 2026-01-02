@@ -1259,7 +1259,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 											alt=""
 											class="h-full w-full object-cover"
 											loading="lazy"
-											on:error={() => markThumbnailFailed(radiograph.id)}
+											onerror={() => markThumbnailFailed(radiograph.id)}
 										/>
 									{:else if kind === 'pdf'}
 										<div class="flex h-full w-full items-center justify-center text-[10px] font-bold tracking-wide">

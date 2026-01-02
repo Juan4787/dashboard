@@ -2,12 +2,13 @@
 	let { form } = $props();
 	let showPassword = $state(false);
 	let mode = $state<'login' | 'register'>('login');
-	let email = $state(form?.email ?? '');
+	const formEmail = $derived(form?.email ?? '');
+	let email = $state('');
 	let password = $state('');
 
 	$effect(() => {
-		if (form?.email && form.email !== email) {
-			email = form.email;
+		if (formEmail) {
+			email = formEmail;
 		}
 	});
 </script>
