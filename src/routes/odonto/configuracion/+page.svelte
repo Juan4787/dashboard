@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { deserialize } from '$app/forms';
+	import { page } from '$app/stores';
 	import { env } from '$env/dynamic/public';
 	import { createDriveFolder, getUserInfo, requestAccessToken } from '$lib/client/drive';
 
@@ -27,6 +28,15 @@
 
 	const isConnected = $derived(Boolean(driveConnection?.root_folder_id));
 	const hasClientId = Boolean(googleClientId);
+	const returnTarget = $derived.by(() => {
+		const raw = $page.url.searchParams.get('return') ?? '';
+		try {
+			const decoded = decodeURIComponent(raw);
+			return decoded.startsWith('/odonto/') ? decoded : '';
+		} catch {
+			return '';
+		}
+	});
 	const rootFolderLink = $derived(
 		driveConnection?.root_folder_id
 			? `https://drive.google.com/drive/folders/${driveConnection.root_folder_id}`
@@ -95,6 +105,9 @@
 			await postAction('?/save_drive_connection', formData);
 			driveConnection = { connected_email: email, root_folder_id: rootFolderId };
 			successMessage = 'Drive conectado correctamente.';
+			if (returnTarget) {
+				window.location.assign(returnTarget);
+			}
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : 'No se pudo conectar Drive.';
 			if (msg.includes('popup') || msg.includes('popup_blocked_by_browser')) {
@@ -133,7 +146,7 @@
 <section class="flex flex-col gap-6">
 	<div class="rounded-2xl border border-neutral-100 bg-white/90 p-5 shadow-card dark:border-[#1f3554] dark:bg-[#152642] sm:p-6">
 		<a
-			href="/odonto/pacientes"
+			href={returnTarget || '/odonto/pacientes'}
 			class="text-xs font-semibold uppercase tracking-wide text-[#7c3aed] hover:underline"
 		>
 			Volver a pacientes

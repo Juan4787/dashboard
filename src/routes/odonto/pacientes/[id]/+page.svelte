@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { deserialize } from '$app/forms';
+	import { page } from '$app/stores';
 	import { env } from '$env/dynamic/public';
 	import Modal from '$lib/components/Modal.svelte';
 	import DateTimePartsInput from '$lib/components/DateTimePartsInput.svelte';
@@ -54,7 +55,25 @@
 	let radiographTakenAt = $state('');
 	let patientDriveFolderId = $state<string | null>(null);
 	let fileInput = $state<HTMLInputElement | null>(null);
+	let showDriveHelp = $state(false);
 	const isDriveConnected = $derived(Boolean(driveConnection?.root_folder_id));
+	const canConnectDrive = $derived(Boolean(googleClientId) && !data.demo);
+	const requestedTab = $derived.by(() => $page.url.searchParams.get('tab'));
+	const returnTo = $derived.by(() => {
+		const params = new URLSearchParams($page.url.search);
+		params.set('tab', 'radiografias');
+		return encodeURIComponent(`${$page.url.pathname}?${params.toString()}`);
+	});
+	const connectConfigHref = $derived.by(() => `/odonto/configuracion?return=${returnTo}`);
+	$effect(() => {
+		if (
+			requestedTab === 'historial' ||
+			requestedTab === 'datos' ||
+			requestedTab === 'radiografias'
+		) {
+			tab = requestedTab;
+		}
+	});
 	$effect(() => {
 		driveConnection = data.driveConnection;
 		radiographs = data.radiographs ?? [];
@@ -884,65 +903,127 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 		</div>
 	{:else if tab === 'radiografias'}
 		<div class="rounded-2xl border border-neutral-100 bg-white/90 p-4 shadow-card dark:border-[#1f3554] dark:bg-[#152642] sm:p-6">
-			<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+			<div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
 				<div>
 					<h2 class="text-lg font-semibold text-neutral-900 dark:text-white">Radiografías</h2>
+				</div>
+				{#if isDriveConnected}
+					<div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+						<input
+							class="hidden"
+							type="file"
+							accept="image/*"
+							capture="environment"
+							bind:this={fileInput}
+							onchange={handleRadiographChange}
+						/>
+						<button
+							type="button"
+							class="rounded-full bg-[#7c3aed] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-[#6d28d9] disabled:cursor-not-allowed disabled:opacity-60"
+							onclick={() => fileInput?.click()}
+							disabled={uploadingRadiograph || data.demo || !googleClientId}
+						>
+							{uploadingRadiograph ? 'Subiendo...' : '+ Añadir radiografía'}
+						</button>
+					</div>
+				{/if}
+			</div>
+
+			{#if isDriveConnected}
+				<div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-neutral-500 dark:text-neutral-300">
+					<span class="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 font-semibold text-emerald-800 dark:bg-emerald-400/15 dark:text-emerald-200">
+						✓ Drive conectado
+					</span>
 					{#if driveConnection?.connected_email}
-						<p class="mt-1 text-xs text-neutral-500 dark:text-neutral-300">
-							Conectado como {driveConnection.connected_email}
+						<span>Cuenta: {driveConnection.connected_email}</span>
+					{/if}
+					<a href={connectConfigHref} class="font-semibold text-[#7c3aed] hover:underline">
+						Cambiar o desconectar
+					</a>
+				</div>
+			{:else}
+				<div class="mt-4 rounded-2xl border border-dashed border-neutral-200 bg-neutral-50/80 p-4 dark:border-[#1f3554] dark:bg-[#0f1f36]">
+					<h3 class="text-lg font-semibold text-neutral-900 dark:text-white">
+						Para subir radiografías, primero conectá Google Drive
+					</h3>
+					<p class="mt-1 text-sm text-neutral-600 dark:text-neutral-200">
+						Se guarda en tu Drive. Podés desconectarlo cuando quieras.
+					</p>
+					<div class="mt-4 flex flex-col gap-2 sm:flex-row">
+						<a
+							href={connectConfigHref}
+							class={`rounded-full bg-[#7c3aed] px-5 py-2 text-center text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-[#6d28d9] ${
+								canConnectDrive ? '' : 'pointer-events-none opacity-60'
+							}`}
+							aria-disabled={!canConnectDrive}
+						>
+							Conectar Google Drive
+						</a>
+						<button
+							type="button"
+							class="rounded-full border border-neutral-200 px-5 py-2 text-sm font-semibold text-neutral-700 transition hover:-translate-y-0.5 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-200 dark:hover:bg-[#122641]"
+							onclick={() => (showDriveHelp = !showDriveHelp)}
+						>
+							¿Por qué lo necesito?
+						</button>
+					</div>
+					{#if showDriveHelp}
+						<p class="mt-3 text-xs text-neutral-600 dark:text-neutral-300">
+							No almacenamos tus radiografías: quedan en tu Google Drive y la app solo organiza el
+							listado por paciente.
 						</p>
 					{/if}
+					<div class="mt-4 grid gap-2 sm:grid-cols-2">
+						<div class="flex items-center gap-3 rounded-xl border border-neutral-200 bg-white/80 px-4 py-3 dark:border-[#1f3554] dark:bg-[#0b1626]">
+							<span class="flex h-8 w-8 items-center justify-center rounded-full bg-amber-100 text-sm font-semibold text-amber-700 dark:bg-amber-500/15 dark:text-amber-200">
+								1
+							</span>
+							<div>
+								<p class="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">Paso 1</p>
+								<p class="text-sm font-semibold text-neutral-900 dark:text-white">Conectar Drive</p>
+							</div>
+							<span class="ml-auto text-xs font-semibold text-amber-700 dark:text-amber-200">Pendiente</span>
+						</div>
+						<div class="flex items-center gap-3 rounded-xl border border-neutral-200 bg-white/70 px-4 py-3 opacity-70 dark:border-[#1f3554] dark:bg-[#0b1626]">
+							<span class="flex h-8 w-8 items-center justify-center rounded-full bg-neutral-100 text-sm font-semibold text-neutral-500 dark:bg-white/10 dark:text-neutral-300">
+								2
+							</span>
+							<div>
+								<p class="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">Paso 2</p>
+								<p class="text-sm font-semibold text-neutral-900 dark:text-white">Subir primera radiografía</p>
+							</div>
+							<span class="ml-auto text-xs font-semibold text-neutral-500 dark:text-neutral-400">Bloqueado</span>
+						</div>
+					</div>
 				</div>
-				<div class="flex flex-col gap-2 sm:flex-row sm:items-center">
-					<input
-						class="hidden"
-						type="file"
-						accept="image/*"
-						capture="environment"
-						bind:this={fileInput}
-						onchange={handleRadiographChange}
-					/>
-					<button
-						type="button"
-						class="rounded-full bg-[#7c3aed] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-[#6d28d9] disabled:cursor-not-allowed disabled:opacity-60"
-						onclick={() => fileInput?.click()}
-						disabled={!isDriveConnected || uploadingRadiograph || data.demo || !googleClientId}
-					>
-						{uploadingRadiograph ? 'Subiendo...' : '+ Añadir radiografía'}
-					</button>
-				</div>
-			</div>
+			{/if}
 
-			<div class="mt-4 grid gap-3 sm:grid-cols-2">
-				<div class="space-y-1">
-					<label class="text-xs font-semibold text-neutral-600 dark:text-neutral-200" for="radiograph-date">
-						Fecha de toma (opcional)
-					</label>
-					<input
-						id="radiograph-date"
-						type="date"
-						class="w-full rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-700 shadow-sm outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-neutral-50"
-						bind:value={radiographTakenAt}
-					/>
+			{#if isDriveConnected}
+				<div class="mt-4 grid gap-3 sm:grid-cols-2">
+					<div class="space-y-1">
+						<label class="text-xs font-semibold text-neutral-600 dark:text-neutral-200" for="radiograph-date">
+							Fecha de toma (opcional)
+						</label>
+						<input
+							id="radiograph-date"
+							type="date"
+							class="w-full rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-700 shadow-sm outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-neutral-50"
+							bind:value={radiographTakenAt}
+						/>
+					</div>
+					<div class="space-y-1">
+						<label class="text-xs font-semibold text-neutral-600 dark:text-neutral-200" for="radiograph-note">
+							Nota (opcional)
+						</label>
+						<input
+							id="radiograph-note"
+							type="text"
+							placeholder="Ej: Panorámica inicial"
+							class="w-full rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-700 shadow-sm outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-neutral-50"
+							bind:value={radiographNote}
+						/>
+					</div>
 				</div>
-				<div class="space-y-1">
-					<label class="text-xs font-semibold text-neutral-600 dark:text-neutral-200" for="radiograph-note">
-						Nota (opcional)
-					</label>
-					<input
-						id="radiograph-note"
-						type="text"
-						placeholder="Ej: Panorámica inicial"
-						class="w-full rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-700 shadow-sm outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-neutral-50"
-						bind:value={radiographNote}
-					/>
-				</div>
-			</div>
-
-			{#if !isDriveConnected}
-				<p class="mt-4 rounded-xl border border-dashed border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-neutral-200">
-					Conectá Google Drive desde <a href="/odonto/configuracion" class="font-semibold text-[#7c3aed]">Configuración</a> para subir radiografías.
-				</p>
 			{/if}
 
 			{#if data.demo}
