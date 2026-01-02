@@ -166,6 +166,19 @@
 		return `${current.toFixed(decimals)} ${units[idx]}`;
 	};
 
+	const formatCurrency = (value?: number | string | null) => {
+		if (value == null || value === '') return '';
+		const normalized =
+			typeof value === 'string' ? value.replace(/\./g, '').replace(',', '.') : value;
+		const numeric = Number(normalized);
+		if (!Number.isFinite(numeric)) return '';
+		const formatted = new Intl.NumberFormat('es-AR', {
+			minimumFractionDigits: 0,
+			maximumFractionDigits: 0
+		}).format(numeric);
+		return `$ ${formatted}`;
+	};
+
 	const isRadiographReady = (radiograph: any) => {
 		if (!radiograph) return false;
 		if (radiograph.status) return radiograph.status === 'ready';
@@ -620,21 +633,36 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 	{#if tab === 'historial'}
 		<div class="rounded-2xl border border-neutral-100 bg-white/90 p-4 shadow-card dark:border-[#1f3554] dark:bg-[#152642] sm:p-6">
 			<div class="flex flex-col gap-3 text-sm sm:flex-row sm:items-center">
-				<select
-					bind:value={filterType}
-					class="w-full rounded-full border border-neutral-200 bg-white px-3 py-2 text-sm dark:border-[#1f3554] dark:bg-[#0f1f36]"
-				>
-					<option value="Todos">Tipo: Todos</option>
-					<option value="Consulta">Consulta</option>
-					<option value="Diagnóstico">Diagnóstico</option>
-					<option value="Tratamiento">Tratamiento</option>
-				</select>
-				<input
-					type="search"
-					placeholder="Buscar (palabra, fecha)"
-					class="w-full rounded-full border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-700 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-neutral-50"
-					bind:value={timelineSearch}
-				/>
+				<div class="relative w-full sm:max-w-xs">
+					<span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400">
+						<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+							<path stroke-linecap="round" stroke-linejoin="round" d="M3 5h18M6 12h12M10 19h4" />
+						</svg>
+					</span>
+					<select
+						bind:value={filterType}
+						class="w-full rounded-full border border-neutral-200 bg-white py-2 pl-9 pr-3 text-sm dark:border-[#1f3554] dark:bg-[#0f1f36]"
+					>
+						<option value="Todos">Filtrar por tipo: Todos</option>
+						<option value="Consulta">Filtrar por tipo: Consulta</option>
+						<option value="Diagnóstico">Filtrar por tipo: Diagnóstico</option>
+						<option value="Tratamiento">Filtrar por tipo: Tratamiento</option>
+					</select>
+				</div>
+				<div class="relative w-full">
+					<span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400">
+						<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+							<circle cx="11" cy="11" r="7" />
+							<path stroke-linecap="round" stroke-linejoin="round" d="M20 20l-3.5-3.5" />
+						</svg>
+					</span>
+					<input
+						type="search"
+						placeholder="Buscar (palabra, fecha)"
+						class="w-full rounded-full border border-neutral-200 bg-white py-2 pl-9 pr-3 text-sm text-neutral-700 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-neutral-50"
+						bind:value={timelineSearch}
+					/>
+				</div>
 			</div>
 			<div class="mt-4">
 				{#if data.entries.length === 0}
@@ -654,32 +682,36 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 											tabindex="0"
 											onclick={() => (expandedId = expandedId === (entry.id ?? entry.created_at) ? null : entry.id ?? entry.created_at)}
 											onkeydown={(e) => e.key === 'Enter' && (expandedId = expandedId === (entry.id ?? entry.created_at) ? null : entry.id ?? entry.created_at)}
-											class="group relative overflow-hidden rounded-xl border border-neutral-100 bg-white px-4 py-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed] dark:border-[#1f3554] dark:bg-[#0f1f36]"
+											class="group relative overflow-hidden rounded-xl border border-neutral-100 bg-white px-4 py-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed] dark:border-[#1f3554] dark:bg-[#0f1f36]"
 										>
 											<span class="absolute left-[-14px] top-5 h-3 w-3 rounded-full border-2 border-white bg-[#7c3aed] shadow dark:border-[#0f1f36]"></span>
-											<div class="flex flex-wrap items-center gap-3">
+											<div class="flex flex-wrap items-start gap-3">
 												<div class="flex min-w-0 flex-1 items-center gap-3">
 													<span class="rounded-full bg-[#7c3aed]/15 px-3 py-1 text-xs font-bold uppercase tracking-wide text-[#5b21b6] dark:bg-[#7c3aed]/20 dark:text-[#d9c5ff]">
 														{entry.entry_type}
 													</span>
-													<p class="text-[15px] font-semibold text-neutral-900 dark:text-white line-clamp-1">
+													<p class="text-[16px] font-semibold text-neutral-900 dark:text-white line-clamp-1">
 														{mainTitle(entry)}
 													</p>
 												</div>
 												<div class="flex w-full items-center justify-end gap-2 sm:w-auto sm:shrink-0 sm:justify-start">
 													{#if entry.amount}
-														<span class="text-sm font-semibold text-neutral-800 whitespace-nowrap dark:text-neutral-100">
-															${entry.amount}
+														<span class="text-[15px] font-semibold text-neutral-800 whitespace-nowrap dark:text-neutral-100">
+															{formatCurrency(entry.amount)}
 														</span>
 													{/if}
 													<button
 														type="button"
-														class="rounded-full border border-neutral-200 px-3 py-1 text-xs font-semibold text-neutral-600 transition hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-100 dark:hover:bg-[#122641]"
+														class="inline-flex items-center gap-1 rounded-full border border-neutral-200 px-3 py-1 text-xs font-semibold text-neutral-600 transition hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-100 dark:hover:bg-[#122641]"
 														onclick={(event) => {
 															event.stopPropagation();
 															openEditEntry(entry);
 														}}
 													>
+														<svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+															<path stroke-linecap="round" stroke-linejoin="round" d="M12 20h9" />
+															<path stroke-linecap="round" stroke-linejoin="round" d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+														</svg>
 														Editar
 													</button>
 												</div>
@@ -689,19 +721,25 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 													{entry.description}
 												</p>
 											{/if}
-											<p class="mt-2 text-[12px] font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
-												{formatDate(entry.created_at)} · {fmtTime(entry.created_at)}
-												{entry.teeth ? ` · Zona ${entry.teeth}` : ''}
-											</p>
+											<div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-neutral-500 dark:text-neutral-300">
+												<span>{formatDate(entry.created_at)}</span>
+												<span>·</span>
+												<span>{fmtTime(entry.created_at)}</span>
+												{#if entry.teeth}
+													<span class="rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] font-semibold text-neutral-600 dark:bg-white/10 dark:text-neutral-200">
+														Zona {entry.teeth}
+													</span>
+												{/if}
+											</div>
 											{#if hasDistinctNote(entry)}
-												<p class="mt-1 text-[12px] font-semibold text-neutral-700 dark:text-neutral-200 line-clamp-1">
+												<p class="mt-2 text-xs text-neutral-500 dark:text-neutral-300 line-clamp-1">
 													Nota: {entry.internal_note}
 												</p>
 											{/if}
 											{#if expandedId === (entry.id ?? entry.created_at)}
 												<div class="mt-3 space-y-2 text-sm text-neutral-800 dark:text-neutral-100">
 													{#if entry.amount}
-														<p><span class="font-semibold">Importe:</span> ${entry.amount}</p>
+														<p><span class="font-semibold">Importe:</span> {formatCurrency(entry.amount)}</p>
 													{/if}
 													{#if entry.internal_note}
 														<p><span class="font-semibold">Nota completa:</span> {entry.internal_note}</p>
