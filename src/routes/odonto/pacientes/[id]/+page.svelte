@@ -1011,9 +1011,18 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 									Conectar Google Drive
 								</a>
 							</div>
-							<p class="text-xs text-neutral-600 dark:text-neutral-300">
-								Se abre una ventana de Google para autorizar. No guardamos archivos en nuestros servidores.
-							</p>
+							<details class="text-xs text-neutral-600 dark:text-neutral-300">
+								<summary class="inline-flex cursor-pointer items-center gap-1 font-semibold text-neutral-700 dark:text-neutral-200">
+									¿Es seguro?
+									<svg class="h-3.5 w-3.5 text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+										<path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6" />
+									</svg>
+								</summary>
+								<p class="mt-2 text-xs text-neutral-600 dark:text-neutral-300">
+									Las imágenes se guardan en tu cuenta de Google Drive y permanecen allí hasta que vos lo
+									decidas. Nuestra base de datos solo guarda la referencia.
+								</p>
+							</details>
 						</div>
 						<div class="flex items-center justify-center text-neutral-400 sm:hidden">↓</div>
 						<div class="hidden sm:flex items-center justify-center text-neutral-400">→</div>
