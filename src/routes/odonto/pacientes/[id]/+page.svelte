@@ -639,7 +639,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 											class="group relative overflow-hidden rounded-xl border border-neutral-100 bg-white px-4 py-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed] dark:border-[#1f3554] dark:bg-[#0f1f36]"
 										>
 											<span class="absolute left-[-14px] top-5 h-3 w-3 rounded-full border-2 border-white bg-[#7c3aed] shadow dark:border-[#0f1f36]"></span>
-											<div class="flex items-center justify-between gap-3">
+											<div class="flex flex-wrap items-center gap-3">
 												<div class="flex min-w-0 flex-1 items-center gap-3">
 													<span class="rounded-full bg-[#7c3aed]/15 px-3 py-1 text-xs font-bold uppercase tracking-wide text-[#5b21b6] dark:bg-[#7c3aed]/20 dark:text-[#d9c5ff]">
 														{entry.entry_type}
@@ -648,9 +648,11 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 														{mainTitle(entry)}
 													</p>
 												</div>
-												<div class="flex shrink-0 items-center gap-2">
+												<div class="flex w-full items-center justify-end gap-2 sm:w-auto sm:shrink-0 sm:justify-start">
 													{#if entry.amount}
-														<span class="text-sm font-semibold text-neutral-800 dark:text-neutral-100"> ${entry.amount} </span>
+														<span class="text-sm font-semibold text-neutral-800 whitespace-nowrap dark:text-neutral-100">
+															${entry.amount}
+														</span>
 													{/if}
 													<button
 														type="button"
