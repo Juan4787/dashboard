@@ -805,7 +805,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 							</div>
 							<p
 								class={`flex-1 break-words text-left text-[15px] font-semibold ${
-									data.patient.medication ? 'text-white dark:text-white' : 'text-neutral-400 dark:text-neutral-500'
+									data.patient.medication ? 'text-neutral-800 dark:text-white' : 'text-neutral-400 dark:text-neutral-500'
 								}`}
 							>
 								{data.patient.medication ?? 'Sin registrar'}
@@ -820,7 +820,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 							</div>
 							<p
 								class={`flex-1 break-words text-left text-[15px] font-semibold whitespace-pre-wrap ${
-									data.patient.background ? 'text-white dark:text-white' : 'text-neutral-400 dark:text-neutral-500'
+									data.patient.background ? 'text-neutral-800 dark:text-white' : 'text-neutral-400 dark:text-neutral-500'
 								}`}
 							>
 								{data.patient.background ?? 'Sin registrar'}
@@ -844,7 +844,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 						<div class="space-y-1">
 							<p class="text-xs font-semibold text-neutral-500 dark:text-neutral-300">Teléfono</p>
 							<div class="flex items-center gap-2">
-								<p class={`text-[15px] font-semibold ${data.patient.phone ? 'text-white' : 'text-neutral-400 dark:text-neutral-500'}`}>
+								<p class={`text-[15px] font-semibold ${data.patient.phone ? 'text-neutral-800 dark:text-white' : 'text-neutral-400 dark:text-neutral-500'}`}>
 									{data.patient.phone ?? 'Sin registrar'}
 								</p>
 								{#if data.patient.phone}
@@ -862,7 +862,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 						<div class="space-y-1">
 							<p class="text-xs font-semibold text-neutral-500 dark:text-neutral-300">Email</p>
 							<div class="flex items-center gap-2">
-								<p class={`text-[15px] font-semibold break-all ${data.patient.email ? 'text-white' : 'text-neutral-400 dark:text-neutral-500'}`}>
+								<p class={`text-[15px] font-semibold break-all ${data.patient.email ? 'text-neutral-800 dark:text-white' : 'text-neutral-400 dark:text-neutral-500'}`}>
 									{data.patient.email ?? 'Sin registrar'}
 								</p>
 								{#if data.patient.email}
@@ -880,7 +880,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 						<div class="space-y-1 md:col-span-2">
 							<p class="text-xs font-semibold text-neutral-500 dark:text-neutral-300">Dirección</p>
 							<div class="flex items-center gap-2">
-								<p class={`text-[15px] font-semibold ${data.patient.address ? 'text-white' : 'text-neutral-400 dark:text-neutral-500'}`}>
+								<p class={`text-[15px] font-semibold ${data.patient.address ? 'text-neutral-800 dark:text-white' : 'text-neutral-400 dark:text-neutral-500'}`}>
 									{data.patient.address ?? 'Sin registrar'}
 								</p>
 								{#if data.patient.address}
@@ -912,19 +912,19 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 					<div class="grid gap-3 md:grid-cols-2">
 						<div class="space-y-1">
 							<p class="text-xs font-semibold text-neutral-500 dark:text-neutral-300">Obra social</p>
-							<p class={`text-[15px] font-semibold ${data.patient.insurance ? 'text-white' : 'text-neutral-400 dark:text-neutral-500'}`}>
+							<p class={`text-[15px] font-semibold ${data.patient.insurance ? 'text-neutral-800 dark:text-white' : 'text-neutral-400 dark:text-neutral-500'}`}>
 								{data.patient.insurance ?? 'Sin registrar'}
 							</p>
 						</div>
 						<div class="space-y-1">
 							<p class="text-xs font-semibold text-neutral-500 dark:text-neutral-300">Plan de la obra social</p>
-							<p class={`text-[15px] font-semibold ${data.patient.insurance_plan ? 'text-white' : 'text-neutral-400 dark:text-neutral-500'}`}>
+							<p class={`text-[15px] font-semibold ${data.patient.insurance_plan ? 'text-neutral-800 dark:text-white' : 'text-neutral-400 dark:text-neutral-500'}`}>
 								{data.patient.insurance_plan ?? 'Sin registrar'}
 							</p>
 						</div>
 						<div class="space-y-1">
 							<p class="text-xs font-semibold text-neutral-500 dark:text-neutral-300">Nacimiento</p>
-							<p class={`text-[15px] font-semibold ${data.patient.birth_date ? 'text-white' : 'text-neutral-400 dark:text-neutral-500'}`}>
+							<p class={`text-[15px] font-semibold ${data.patient.birth_date ? 'text-neutral-800 dark:text-white' : 'text-neutral-400 dark:text-neutral-500'}`}>
 								{data.patient.birth_date ? formatDate(data.patient.birth_date) : 'Sin registrar'}
 							</p>
 						</div>
@@ -1011,18 +1011,6 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 									Conectar Google Drive
 								</a>
 							</div>
-							<details class="text-xs text-neutral-600 dark:text-neutral-300">
-								<summary class="inline-flex cursor-pointer items-center gap-1 font-semibold text-neutral-700 dark:text-neutral-200">
-									¿Es seguro?
-									<svg class="h-3.5 w-3.5 text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-										<path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6" />
-									</svg>
-								</summary>
-								<p class="mt-2 text-xs text-neutral-600 dark:text-neutral-300">
-									Las imágenes se guardan en tu cuenta de Google Drive y permanecen allí hasta que vos lo
-									decidas. Nuestra base de datos solo guarda la referencia.
-								</p>
-							</details>
 						</div>
 						<div class="flex items-center justify-center text-neutral-400 sm:hidden">↓</div>
 						<div class="hidden sm:flex items-center justify-center text-neutral-400">→</div>
@@ -1158,6 +1146,23 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 					{/each}
 				{/if}
 			</div>
+
+			<details class="mt-6 text-xs text-neutral-600 dark:text-neutral-300">
+				<summary class="inline-flex cursor-pointer items-center gap-1 font-semibold text-neutral-700 dark:text-neutral-200">
+					Más información
+					<svg class="h-3.5 w-3.5 text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+						<path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6" />
+					</svg>
+				</summary>
+				<div class="mt-3 rounded-xl border border-neutral-200 bg-white/70 px-4 py-3 dark:border-[#1f3554] dark:bg-[#0f1f36]">
+					<div class="space-y-2">
+						<p><span class="font-semibold">¿Dónde se guarda?</span> En tu cuenta de Google Drive.</p>
+						<p><span class="font-semibold">¿Es seguro?</span> Solo vos podés acceder; la app guarda referencias.</p>
+						<p><span class="font-semibold">¿Cuánto tiempo permanece?</span> Hasta que vos lo elimines en Drive.</p>
+						<p><span class="font-semibold">¿Qué pasa si pierdo la cuenta?</span> No vas a poder acceder a esas imágenes.</p>
+					</div>
+				</div>
+			</details>
 		</div>
 	{/if}
 </div>
