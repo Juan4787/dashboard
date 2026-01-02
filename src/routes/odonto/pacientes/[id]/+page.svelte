@@ -30,8 +30,11 @@
 	let showEditModal = $state(false);
 	let showArchiveConfirm = $state(false);
 	let showDeleteConfirm = $state(false);
+	let showRadiographDeleteConfirm = $state(false);
 	let showMobileActions = $state(false);
 	let deleteConfirmText = $state('');
+	let deleteRadiographConfirmText = $state('');
+	let deleteRadiographTargetId = $state<string | null>(null);
 	let tab = $state<'historial' | 'datos' | 'radiografias'>('historial');
 	let filterType = $state<'Todos' | 'Consulta' | 'Tratamiento'>('Todos');
 	let onlyWithNote = $state(false);
@@ -335,8 +338,7 @@
 	};
 
 	const deleteRadiograph = async (radiographId: string) => {
-		const confirmed = window.confirm('¿Eliminar la referencia de esta radiografia?');
-		if (!confirmed) return;
+		if (!radiographId) return;
 		uploadError = '';
 		uploadInfo = '';
 		try {
@@ -347,6 +349,12 @@
 		} catch (err) {
 			uploadError = err instanceof Error ? err.message : 'No se pudo eliminar la radiografia.';
 		}
+	};
+
+	const openRadiographDeleteConfirm = (radiographId: string) => {
+		deleteRadiographTargetId = radiographId;
+		deleteRadiographConfirmText = '';
+		showRadiographDeleteConfirm = true;
 	};
 
 	const openRetryUpload = (radiographId: string) => {
@@ -1201,7 +1209,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 								<button
 									type="button"
 									class="rounded-full border border-neutral-200 px-4 py-2 text-center text-sm font-semibold text-neutral-700 transition hover:-translate-y-0.5 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-200 dark:hover:bg-[#122641]"
-									onclick={() => deleteRadiograph(radiograph.id)}
+									onclick={() => openRadiographDeleteConfirm(radiograph.id)}
 								>
 									Eliminar referencia
 								</button>
@@ -1438,6 +1446,65 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				}}
 			>
 				Eliminar definitivamente
+			</button>
+		</div>
+	</div>
+</Modal>
+
+<Modal
+	open={showRadiographDeleteConfirm}
+	title="Eliminar referencia"
+	on:close={() => (showRadiographDeleteConfirm = false)}
+	dismissible
+>
+	<div class="space-y-4 text-sm text-neutral-800 dark:text-neutral-100">
+		<p class="text-base font-semibold text-red-600 dark:text-red-400">
+			Esta acción elimina la referencia en la app. El archivo sigue en tu Google Drive.
+		</p>
+		<div class="space-y-2">
+			<label class="text-sm font-semibold text-neutral-600 dark:text-neutral-300" for="delete-radiograph-input">
+				Escribí <span class="font-bold">eliminar</span> para confirmar
+			</label>
+			<input
+				id="delete-radiograph-input"
+				class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-red-500 focus:ring-2 focus:ring-red-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+				placeholder="eliminar"
+				bind:value={deleteRadiographConfirmText}
+				autocomplete="off"
+			/>
+		</div>
+		<div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
+			<button
+				type="button"
+				class="w-full rounded-xl px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:text-white dark:hover:bg-[#1b2d4b] sm:w-auto"
+				onclick={() => {
+					deleteRadiographConfirmText = '';
+					deleteRadiographTargetId = null;
+					showRadiographDeleteConfirm = false;
+				}}
+			>
+				Cancelar
+			</button>
+			<button
+				type="button"
+				disabled={deleteRadiographConfirmText.trim().toLowerCase() !== 'eliminar'}
+				class={`w-full rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500 sm:w-auto ${
+					deleteRadiographConfirmText.trim().toLowerCase() === 'eliminar'
+						? 'bg-red-600 hover:bg-red-700'
+						: 'bg-red-400 cursor-not-allowed opacity-80'
+				}`}
+				onclick={() => {
+					if (deleteRadiographConfirmText.trim().toLowerCase() !== 'eliminar') return;
+					const targetId = deleteRadiographTargetId;
+					showRadiographDeleteConfirm = false;
+					deleteRadiographConfirmText = '';
+					deleteRadiographTargetId = null;
+					if (targetId) {
+						void deleteRadiograph(targetId);
+					}
+				}}
+			>
+				Eliminar referencia
 			</button>
 		</div>
 	</div>
