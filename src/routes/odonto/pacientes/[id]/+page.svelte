@@ -62,7 +62,8 @@
 	let radiographNote = $state('');
 	let radiographTakenAt = $state('');
 	let patientDriveFolderId = $state<string | null>(null);
-	let fileInput = $state<HTMLInputElement | null>(null);
+	let fileInputCamera = $state<HTMLInputElement | null>(null);
+	let fileInputGallery = $state<HTMLInputElement | null>(null);
 	let pendingRadiographFile = $state<File | null>(null);
 	let failedThumbnails = $state<Record<string, boolean>>({});
 	const isDriveConnected = $derived(Boolean(driveConnection?.root_folder_id));
@@ -447,7 +448,7 @@
 		uploadError = '';
 		uploadInfo = '';
 		uploadWarning = '';
-		fileInput?.click();
+		fileInputGallery?.click();
 	};
 
 	const openNewRadiographUpload = () => {
@@ -457,7 +458,17 @@
 		uploadError = '';
 		uploadInfo = '';
 		uploadWarning = '';
-		fileInput?.click();
+		fileInputGallery?.click();
+	};
+
+	const openCameraUpload = () => {
+		retryTargetId = null;
+		radiographNote = '';
+		radiographTakenAt = '';
+		uploadError = '';
+		uploadInfo = '';
+		uploadWarning = '';
+		fileInputCamera?.click();
 	};
 
 	const closeRadiographModal = () => {
@@ -467,7 +478,8 @@
 		radiographNote = '';
 		radiographTakenAt = '';
 		uploadWarning = '';
-		if (fileInput) fileInput.value = '';
+		if (fileInputCamera) fileInputCamera.value = '';
+		if (fileInputGallery) fileInputGallery.value = '';
 	};
 
 	const submitRadiographUpload = async () => {
@@ -552,7 +564,8 @@
 		} finally {
 			uploadingRadiograph = false;
 			retryTargetId = null;
-			if (fileInput) fileInput.value = '';
+			if (fileInputCamera) fileInputCamera.value = '';
+			if (fileInputGallery) fileInputGallery.value = '';
 		}
 	};
 
@@ -1137,12 +1150,37 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 							type="file"
 							accept="image/*"
 							capture="environment"
-							bind:this={fileInput}
+							bind:this={fileInputCamera}
 							onchange={handleRadiographChange}
 						/>
+						<input
+							class="hidden"
+							type="file"
+							accept="image/*"
+							bind:this={fileInputGallery}
+							onchange={handleRadiographChange}
+						/>
+						<div class="flex flex-col gap-2 sm:hidden">
+							<button
+								type="button"
+								class="rounded-full bg-[#7c3aed] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-[#6d28d9] disabled:cursor-not-allowed disabled:opacity-60"
+								onclick={openCameraUpload}
+								disabled={uploadingRadiograph || data.demo || !googleClientId}
+							>
+								Sacar foto
+							</button>
+							<button
+								type="button"
+								class="rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 transition hover:-translate-y-0.5 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-200 dark:hover:bg-[#122641] disabled:cursor-not-allowed disabled:opacity-60"
+								onclick={openNewRadiographUpload}
+								disabled={uploadingRadiograph || data.demo || !googleClientId}
+							>
+								Elegir de galería
+							</button>
+						</div>
 						<button
 							type="button"
-							class="rounded-full bg-[#7c3aed] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-[#6d28d9] disabled:cursor-not-allowed disabled:opacity-60"
+							class="hidden rounded-full bg-[#7c3aed] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-[#6d28d9] disabled:cursor-not-allowed disabled:opacity-60 sm:inline-flex"
 							onclick={openNewRadiographUpload}
 							disabled={uploadingRadiograph || data.demo || !googleClientId}
 						>
