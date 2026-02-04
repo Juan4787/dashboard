@@ -51,6 +51,8 @@ export const isMasterEmail = (email?: string | null) =>
 export const createSupabaseServerClient = async (
 	module: Module,
 	tokens?: AuthTokens | null,
+	// fetchImpl es opcional, pero en server preferimos usar fetch global
+	// para evitar interferencias con headers/cookies en requests externas.
 	fetchImpl?: typeof fetch
 ): Promise<SupabaseClient> => {
 	if (env.DEMO_MODE === 'true') {
@@ -72,8 +74,7 @@ export const createSupabaseServerClient = async (
 			autoRefreshToken: true
 		},
 		global: {
-			headers,
-			fetch: fetchImpl
+			headers
 		}
 	});
 
