@@ -99,6 +99,24 @@ export const getUserIdFromAccessToken = (accessToken?: string | null): string | 
 	}
 };
 
+export const getAuthUserId = async (
+	supabase: SupabaseClient,
+	accessToken?: string | null
+): Promise<string | null> => {
+	let ownerId = getUserIdFromAccessToken(accessToken);
+	try {
+		const { data, error } = await supabase.auth.getUser();
+		if (error) {
+			console.warn('No se pudo obtener usuario desde Supabase auth', error);
+		} else if (data?.user?.id) {
+			ownerId = data.user.id;
+		}
+	} catch (err) {
+		console.warn('Error obteniendo usuario desde Supabase auth', err);
+	}
+	return ownerId;
+};
+
 export const getEmailFromAccessToken = (accessToken?: string | null): string | null => {
 	if (!accessToken) return null;
 	const parts = accessToken.split('.');

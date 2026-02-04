@@ -1,6 +1,6 @@
 import { env } from '$env/dynamic/private';
 import { newId, readDemoDb, updateDemoDb } from '$lib/server/demo-store';
-import { createSupabaseServerClient, getUserIdFromAccessToken } from '$lib/server/supabase';
+import { createSupabaseServerClient, getAuthUserId } from '$lib/server/supabase';
 import { normalizePhone } from '$lib/utils/format';
 import { fail, redirect, error as kitError } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
@@ -179,7 +179,7 @@ export const actions: Actions = {
 		}
 
 		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
-		const ownerId = getUserIdFromAccessToken(locals.auth.access_token);
+		const ownerId = await getAuthUserId(supabase, locals.auth.access_token);
 		if (!ownerId) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
 		}

@@ -1,6 +1,6 @@
 import { env } from '$env/dynamic/private';
 import { newId, readDemoDb, updateDemoDb } from '$lib/server/demo-store';
-import { createSupabaseServerClient, getUserIdFromAccessToken } from '$lib/server/supabase';
+import { createSupabaseServerClient, getAuthUserId } from '$lib/server/supabase';
 import { normalizePhone } from '$lib/utils/format';
 import { fail, redirect, error as kitError } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
@@ -38,7 +38,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch }) => {
 	}
 
 	const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
-	const ownerId = getUserIdFromAccessToken(locals.auth.access_token);
+	const ownerId = await getAuthUserId(supabase, locals.auth.access_token);
 
 	const [
 		{ data: patient, error: patientError },
@@ -114,12 +114,11 @@ export const actions: Actions = {
 			return fail(400, { message: 'Faltan datos para guardar la conexión.' });
 		}
 
-		const ownerId = getUserIdFromAccessToken(locals.auth.access_token);
+		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
+		const ownerId = await getAuthUserId(supabase, locals.auth.access_token);
 		if (!ownerId) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
 		}
-
-		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
 		const { error } = await supabase
 			.from('drive_connections')
 			.upsert(
@@ -145,12 +144,11 @@ export const actions: Actions = {
 			return fail(400, { message: 'No disponible en modo demo.' });
 		}
 
-		const ownerId = getUserIdFromAccessToken(locals.auth.access_token);
+		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
+		const ownerId = await getAuthUserId(supabase, locals.auth.access_token);
 		if (!ownerId) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
 		}
-
-		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
 		const { error } = await supabase.from('drive_connections').delete().eq('owner_id', ownerId);
 		const { error: resetError } = await supabase
 			.from('patients')
@@ -204,12 +202,11 @@ export const actions: Actions = {
 		const parsedBytes = bytesRaw ? Number(bytesRaw) : null;
 		const bytes = typeof parsedBytes === 'number' && Number.isFinite(parsedBytes) ? parsedBytes : null;
 
-		const ownerId = getUserIdFromAccessToken(locals.auth.access_token);
+		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
+		const ownerId = await getAuthUserId(supabase, locals.auth.access_token);
 		if (!ownerId) {
 			return fail(401, { message: 'Sesion invalida. Volve a iniciar sesion.' });
 		}
-
-		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
 		const { data, error } = await supabase
 			.from('patient_radiographs')
 			.insert({
@@ -453,7 +450,7 @@ export const actions: Actions = {
 		}
 
 		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
-		const ownerId = getUserIdFromAccessToken(locals.auth.access_token);
+		const ownerId = await getAuthUserId(supabase, locals.auth.access_token);
 		if (!ownerId) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
 		}

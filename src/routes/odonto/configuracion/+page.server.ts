@@ -1,5 +1,5 @@
 import { env } from '$env/dynamic/private';
-import { createSupabaseServerClient, getUserIdFromAccessToken } from '$lib/server/supabase';
+import { createSupabaseServerClient, getAuthUserId } from '$lib/server/supabase';
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -13,7 +13,7 @@ export const load: PageServerLoad = async ({ locals, fetch }) => {
 	}
 
 	const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
-	const ownerId = getUserIdFromAccessToken(locals.auth.access_token);
+	const ownerId = await getAuthUserId(supabase, locals.auth.access_token);
 	if (!ownerId) {
 		return { demo: false, driveConnection: null };
 	}
@@ -46,12 +46,11 @@ export const actions: Actions = {
 			return fail(400, { message: 'Faltan datos para guardar la conexion.' });
 		}
 
-		const ownerId = getUserIdFromAccessToken(locals.auth.access_token);
+		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
+		const ownerId = await getAuthUserId(supabase, locals.auth.access_token);
 		if (!ownerId) {
 			return fail(401, { message: 'Sesion invalida. Volve a iniciar sesion.' });
 		}
-
-		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
 		const { error } = await supabase
 			.from('drive_connections')
 			.upsert(
@@ -77,12 +76,11 @@ export const actions: Actions = {
 			return fail(400, { message: 'No disponible en modo demo.' });
 		}
 
-		const ownerId = getUserIdFromAccessToken(locals.auth.access_token);
+		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
+		const ownerId = await getAuthUserId(supabase, locals.auth.access_token);
 		if (!ownerId) {
 			return fail(401, { message: 'Sesion invalida. Volve a iniciar sesion.' });
 		}
-
-		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
 		const { error } = await supabase.from('drive_connections').delete().eq('owner_id', ownerId);
 		const { error: resetError } = await supabase
 			.from('patients')
