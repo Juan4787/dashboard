@@ -434,7 +434,7 @@ const isSearching = $derived(search.trim().length > 0);
 
 <Modal open={showCreate} title="Alta rápida de paciente" on:close={closeModal}>
 	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-	<form method="post" class="space-y-4" use:enhance onkeydown={preventEnterSubmit}>
+<form method="post" action="?/create_patient" class="space-y-4" use:enhance onkeydown={preventEnterSubmit}>
 		<div class="space-y-2">
 			<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="full_name">Nombre y apellido *</label>
 			<input

@@ -106,8 +106,8 @@ export const load: PageServerLoad = async ({ locals, url, fetch }) => {
 	return { patients: data ?? [], query: '', showArchived, demo: false, totalCount, activeCount, archivedCount };
 };
 
-export const actions: Actions = {
-	default: async ({ request, locals, fetch }) => {
+
+const handleCreatePatient = async ({ request, locals, fetch }: { request: Request; locals: App.Locals; fetch: typeof globalThis.fetch }) => {
 		if (!locals.auth) {
 			throw redirect(303, '/login');
 		}
@@ -219,5 +219,9 @@ export const actions: Actions = {
 		}
 
 		throw redirect(303, `/odonto/pacientes/${data.id}`);
-	}
+	};
+
+export const actions: Actions = {
+	default: handleCreatePatient,
+	create_patient: handleCreatePatient
 };
