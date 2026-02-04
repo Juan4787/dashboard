@@ -109,7 +109,7 @@ export const load: PageServerLoad = async ({ locals, url, fetch }) => {
 
 const handleCreatePatient = async ({ request, locals, fetch }: { request: Request; locals: App.Locals; fetch: typeof globalThis.fetch }) => {
 		if (!locals.auth) {
-			throw redirect(303, '/login');
+			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
 		}
 		const form = await request.formData();
 		const full_name = String(form.get('full_name') ?? '').trim();
