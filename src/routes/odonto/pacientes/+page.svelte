@@ -14,7 +14,8 @@ type FormResult = {
 	phone?: string;
 };
 
-let { data, form } = $props<{ data: any; form: FormResult }>();
+let { data } = $props<{ data: any; form: FormResult }>();
+const formState = $derived(($page.form as FormResult | null) ?? null);
 
 const normalize = (value: string) =>
 	value
@@ -31,7 +32,7 @@ const isSearching = $derived(search.trim().length > 0);
 		if ($page.url.searchParams.has('nuevo')) {
 			showCreate = true;
 		}
-		if (form?.message) {
+		if (formState?.message) {
 			showCreate = true;
 		}
 	});
@@ -443,7 +444,7 @@ const isSearching = $derived(search.trim().length > 0);
 				class="w-full rounded-xl border border-neutral-200 px-4 py-3 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
 				placeholder="Ej: Juan Pérez"
 				required
-				value={form?.full_name ?? ''}
+				value={formState?.full_name ?? ''}
 			/>
 		</div>
 		<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -455,7 +456,7 @@ const isSearching = $derived(search.trim().length > 0);
 					inputmode="numeric"
 					class="w-full rounded-xl border border-neutral-200 px-4 py-3 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
 					placeholder="Solo números"
-					value={form?.dni ?? ''}
+					value={formState?.dni ?? ''}
 				/>
 			</div>
 			<div class="space-y-2">
@@ -466,16 +467,16 @@ const isSearching = $derived(search.trim().length > 0);
 					inputmode="tel"
 					class="w-full rounded-xl border border-neutral-200 px-4 py-3 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
 					placeholder="Código + número"
-					value={form?.phone ?? ''}
+					value={formState?.phone ?? ''}
 				/>
 			</div>
 		</div>
 
-		{#if form?.message}
+		{#if formState?.message}
 			<div class="rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
-				{form.message}
-				{#if form.existingId}
-					<a class="ml-2 underline" href={`/odonto/pacientes/${form.existingId}`}>Ver ficha existente</a>
+				{formState.message}
+				{#if formState.existingId}
+					<a class="ml-2 underline" href={`/odonto/pacientes/${formState.existingId}`}>Ver ficha existente</a>
 				{/if}
 			</div>
 		{/if}

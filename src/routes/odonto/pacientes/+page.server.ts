@@ -22,6 +22,14 @@ const getCreatePatientErrorMessage = (error: { code?: string | null; message?: s
 	return 'No se pudo crear el paciente. Intentá de nuevo.';
 };
 
+const getCreatePatientStatus = (error: { code?: string | null; message?: string | null }) => {
+	const message = (error?.message ?? '').toLowerCase();
+	if (error?.code === '42501' || message.includes('row-level security')) return 403;
+	if (error?.code === '23505') return 409;
+	if (error?.code === '23502' || error?.code === '22P02') return 400;
+	return 500;
+};
+
 export const load: PageServerLoad = async ({ locals, url, fetch }) => {
 	if (!locals.auth) {
 		throw redirect(303, '/login');
@@ -215,7 +223,12 @@ const handleCreatePatient = async ({ request, locals, fetch }: { request: Reques
 
 		if (error || !data) {
 			console.error('Error creando paciente', error);
-			return fail(500, { message: getCreatePatientErrorMessage(error ?? {}), full_name, dni, phone });
+			return fail(getCreatePatientStatus(error ?? {}), {
+				message: getCreatePatientErrorMessage(error ?? {}),
+				full_name,
+				dni,
+				phone
+			});
 		}
 
 		throw redirect(303, `/odonto/pacientes/${data.id}`);
