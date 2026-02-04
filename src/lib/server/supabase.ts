@@ -61,13 +61,18 @@ export const createSupabaseServerClient = async (
 		throw new Error(`Faltan variables de entorno de Supabase para el módulo ${module}`);
 	}
 
+	const headers: Record<string, string> = { 'X-App-Module': module };
+	if (tokens?.access_token) {
+		headers.Authorization = `Bearer ${tokens.access_token}`;
+	}
+
 	const supabase = createClient(config.url, config.key, {
 		auth: {
 			persistSession: false,
 			autoRefreshToken: true
 		},
 		global: {
-			headers: { 'X-App-Module': module },
+			headers,
 			fetch: fetchImpl
 		}
 	});
