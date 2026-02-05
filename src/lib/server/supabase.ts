@@ -103,7 +103,7 @@ export const createSupabaseServerClient = async (
 	return supabase;
 };
 
-export const getUserIdFromAccessToken = (accessToken?: string | null): string | null => {
+export const decodeJwtPayload = (accessToken?: string | null): Record<string, unknown> | null => {
 	if (!accessToken) return null;
 	const parts = accessToken.split('.');
 	if (parts.length < 2) return null;
@@ -113,11 +113,28 @@ export const getUserIdFromAccessToken = (accessToken?: string | null): string | 
 		.replace(/_/g, '/')
 		.padEnd(Math.ceil(payload.length / 4) * 4, '=');
 	try {
-		const decoded = JSON.parse(Buffer.from(normalized, 'base64').toString('utf8')) as { sub?: unknown };
-		return typeof decoded.sub === 'string' ? decoded.sub : null;
+		return JSON.parse(Buffer.from(normalized, 'base64').toString('utf8')) as Record<string, unknown>;
 	} catch {
 		return null;
 	}
+};
+
+export const getJwtExpiry = (accessToken?: string | null): number | null => {
+	const payload = decodeJwtPayload(accessToken);
+	const exp = payload?.exp;
+	return typeof exp === 'number' ? exp : null;
+};
+
+export const isJwtExpired = (accessToken?: string | null, skewSeconds = 60): boolean => {
+	const exp = getJwtExpiry(accessToken);
+	if (!exp) return true;
+	return exp * 1000 < Date.now() + skewSeconds * 1000;
+};
+
+export const getUserIdFromAccessToken = (accessToken?: string | null): string | null => {
+	const decoded = decodeJwtPayload(accessToken);
+	const sub = decoded?.sub;
+	return typeof sub === 'string' ? sub : null;
 };
 
 export const getAuthUserId = async (
@@ -139,20 +156,7 @@ export const getAuthUserId = async (
 };
 
 export const getEmailFromAccessToken = (accessToken?: string | null): string | null => {
-	if (!accessToken) return null;
-	const parts = accessToken.split('.');
-	if (parts.length < 2) return null;
-	const payload = parts[1];
-	const normalized = payload
-		.replace(/-/g, '+')
-		.replace(/_/g, '/')
-		.padEnd(Math.ceil(payload.length / 4) * 4, '=');
-	try {
-		const decoded = JSON.parse(Buffer.from(normalized, 'base64').toString('utf8')) as {
-			email?: unknown;
-		};
-		return typeof decoded.email === 'string' ? decoded.email : null;
-	} catch {
-		return null;
-	}
+	const decoded = decodeJwtPayload(accessToken);
+	const email = decoded?.email;
+	return typeof email === 'string' ? email : null;
 };
