@@ -11,8 +11,13 @@ export type AuthTokens = {
 export const MASTER_EMAIL =
 	(env.MASTER_EMAIL ?? 'juanpabloaltamira@protonmail.com').trim().toLowerCase();
 
+const normalizeEnv = (value?: string | null) => {
+	const trimmed = value?.trim();
+	return trimmed ? trimmed : undefined;
+};
+
 const moduleEmails: Record<Module, string | undefined> = {
-	odonto: env.SABRINA_EMAIL,
+	odonto: normalizeEnv(env.SABRINA_EMAIL),
 	// administrativo: env.ADMIN_EMAIL
 	administrativo: undefined
 };
@@ -25,12 +30,12 @@ const moduleConfig: Record<
 	}
 > = {
 	odonto: {
-		url: env.ODONTO_SUPABASE_URL,
-		key: env.ODONTO_SUPABASE_ANON_KEY
+		url: normalizeEnv(env.ODONTO_SUPABASE_URL),
+		key: normalizeEnv(env.ODONTO_SUPABASE_ANON_KEY)
 	},
 	administrativo: {
-		url: env.ADMIN_SUPABASE_URL,
-		key: env.ADMIN_SUPABASE_ANON_KEY
+		url: normalizeEnv(env.ADMIN_SUPABASE_URL),
+		key: normalizeEnv(env.ADMIN_SUPABASE_ANON_KEY)
 	}
 };
 
@@ -62,6 +67,12 @@ export const createSupabaseServerClient = async (
 	if (!config.url || !config.key) {
 		throw new Error(`Faltan variables de entorno de Supabase para el módulo ${module}`);
 	}
+	try {
+		new URL(config.url);
+	} catch {
+		const label = module === 'odonto' ? 'ODONTO_SUPABASE_URL' : 'ADMIN_SUPABASE_URL';
+		throw new Error(`URL inválida en ${label}`);
+	}
 
 	const headers: Record<string, string> = { 'X-App-Module': module };
 	if (tokens?.access_token) {
@@ -71,7 +82,8 @@ export const createSupabaseServerClient = async (
 	const supabase = createClient(config.url, config.key, {
 		auth: {
 			persistSession: false,
-			autoRefreshToken: true
+			autoRefreshToken: false,
+			detectSessionInUrl: false
 		},
 		global: {
 			headers
@@ -79,10 +91,13 @@ export const createSupabaseServerClient = async (
 	});
 
 	if (tokens?.access_token && tokens?.refresh_token) {
-		await supabase.auth.setSession({
+		const { error: sessionError } = await supabase.auth.setSession({
 			access_token: tokens.access_token,
 			refresh_token: tokens.refresh_token
 		});
+		if (sessionError) {
+			console.warn('Error setting Supabase session:', sessionError.message);
+		}
 	}
 
 	return supabase;

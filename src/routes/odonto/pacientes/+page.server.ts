@@ -60,7 +60,13 @@ export const load: PageServerLoad = async ({ locals, url, fetch }) => {
 		};
 	}
 
-	const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
+	let supabase;
+	try {
+		supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
+	} catch (err) {
+		console.error('Error creando cliente Supabase:', err);
+		throw kitError(500, 'Error de conexión con la base de datos');
+	}
 
 	let builder = supabase
 		.from('patients')
@@ -116,6 +122,7 @@ export const load: PageServerLoad = async ({ locals, url, fetch }) => {
 
 
 const handleCreatePatient = async ({ request, locals, fetch }: { request: Request; locals: App.Locals; fetch: typeof globalThis.fetch }) => {
+	try {
 		if (!locals.auth) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
 		}
@@ -186,7 +193,19 @@ const handleCreatePatient = async ({ request, locals, fetch }: { request: Reques
 			throw redirect(303, `/odonto/pacientes/${createdId}`);
 		}
 
-		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
+		let supabase;
+		try {
+			supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
+		} catch (err) {
+			console.error('Error creando cliente Supabase:', err);
+			return fail(500, {
+				message: 'Error de conexión con la base de datos. Intentá de nuevo.',
+				full_name,
+				dni,
+				phone
+			});
+		}
+
 		const ownerId = await getAuthUserId(supabase, locals.auth.access_token);
 		if (!ownerId) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
@@ -222,7 +241,7 @@ const handleCreatePatient = async ({ request, locals, fetch }: { request: Reques
 			.single();
 
 		if (error || !data) {
-			console.error('Error creando paciente', error);
+			console.error('Error creando paciente:', error);
 			return fail(getCreatePatientStatus(error ?? {}), {
 				message: getCreatePatientErrorMessage(error ?? {}),
 				full_name,
@@ -232,7 +251,20 @@ const handleCreatePatient = async ({ request, locals, fetch }: { request: Reques
 		}
 
 		throw redirect(303, `/odonto/pacientes/${data.id}`);
-	};
+	} catch (err) {
+		// Re-throw redirects (they use throw in SvelteKit)
+		if (err && typeof err === 'object' && 'status' in err && 'location' in err) {
+			throw err;
+		}
+		console.error('Error inesperado en create_patient:', err);
+		return fail(500, {
+			message: 'Error interno del servidor. Intentá de nuevo.',
+			full_name: '',
+			dni: '',
+			phone: ''
+		});
+	}
+};
 
 export const actions: Actions = {
 	default: handleCreatePatient,

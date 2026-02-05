@@ -12,9 +12,19 @@
 	let supabase: SupabaseClient | null = null;
 
 	const initSessionFromHash = async () => {
-		if (!env.PUBLIC_ODONTO_SUPABASE_URL || !env.PUBLIC_ODONTO_SUPABASE_ANON_KEY) {
+		const supabaseUrl = env.PUBLIC_ODONTO_SUPABASE_URL?.trim();
+		const supabaseKey = env.PUBLIC_ODONTO_SUPABASE_ANON_KEY?.trim();
+
+		if (!supabaseUrl || !supabaseKey) {
 			status = 'error';
 			message = 'Falta configurar PUBLIC_ODONTO_SUPABASE_URL y PUBLIC_ODONTO_SUPABASE_ANON_KEY.';
+			return;
+		}
+		try {
+			new URL(supabaseUrl);
+		} catch {
+			status = 'error';
+			message = 'PUBLIC_ODONTO_SUPABASE_URL es inválida. Revisá tu .env.';
 			return;
 		}
 
@@ -35,7 +45,7 @@
 			return;
 		}
 
-		supabase = createClient(env.PUBLIC_ODONTO_SUPABASE_URL, env.PUBLIC_ODONTO_SUPABASE_ANON_KEY, {
+		supabase = createClient(supabaseUrl, supabaseKey, {
 			auth: {
 				persistSession: false,
 				autoRefreshToken: false
