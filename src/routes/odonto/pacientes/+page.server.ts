@@ -1,14 +1,18 @@
 import { env } from '$env/dynamic/private';
 import { newId, readDemoDb, updateDemoDb } from '$lib/server/demo-store';
-import { createSupabaseServerClient, getAuthUserId } from '$lib/server/supabase';
+import { createSupabaseServerClient, getAuthUserId, isJwtExpired } from '$lib/server/supabase';
 import { normalizePhone } from '$lib/utils/format';
 import { fail, redirect, error as kitError } from '@sveltejs/kit';
+import { dev } from '$app/environment';
 import type { Actions, PageServerLoad } from './$types';
 
 const getCreatePatientErrorMessage = (error: { code?: string | null; message?: string | null }) => {
 	const message = (error?.message ?? '').toLowerCase();
 	if (error?.code === '42501' || message.includes('row-level security')) {
 		return 'No se pudo crear el paciente porque tu sesión no tiene permisos. Cerrá sesión y volvé a ingresar.';
+	}
+	if (error?.code === 'PGRST303' || message.includes('jwt expired')) {
+		return 'Tu sesión expiró. Volvé a iniciar sesión.';
 	}
 	if (error?.code === '23505') {
 		return 'Ya existe un paciente con este DNI.';
@@ -25,9 +29,15 @@ const getCreatePatientErrorMessage = (error: { code?: string | null; message?: s
 const getCreatePatientStatus = (error: { code?: string | null; message?: string | null }) => {
 	const message = (error?.message ?? '').toLowerCase();
 	if (error?.code === '42501' || message.includes('row-level security')) return 403;
+	if (error?.code === 'PGRST303' || message.includes('jwt expired')) return 401;
 	if (error?.code === '23505') return 409;
 	if (error?.code === '23502' || error?.code === '22P02') return 400;
 	return 500;
+};
+
+const isJwtExpiredError = (error: { code?: string | null; message?: string | null }) => {
+	const message = (error?.message ?? '').toLowerCase();
+	return error?.code === 'PGRST303' || message.includes('jwt expired');
 };
 
 export const load: PageServerLoad = async ({ locals, url, fetch }) => {
@@ -121,7 +131,17 @@ export const load: PageServerLoad = async ({ locals, url, fetch }) => {
 };
 
 
-const handleCreatePatient = async ({ request, locals, fetch }: { request: Request; locals: App.Locals; fetch: typeof globalThis.fetch }) => {
+const handleCreatePatient = async ({
+	request,
+	locals,
+	fetch,
+	cookies
+}: {
+	request: Request;
+	locals: App.Locals;
+	fetch: typeof globalThis.fetch;
+	cookies: import('@sveltejs/kit').Cookies;
+}) => {
 	try {
 		if (!locals.auth) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
@@ -206,6 +226,44 @@ const handleCreatePatient = async ({ request, locals, fetch }: { request: Reques
 			});
 		}
 
+		const refreshSessionIfNeeded = async () => {
+			if (!locals.auth) return false;
+			if (!isJwtExpired(locals.auth.access_token)) return true;
+			const { data, error } = await supabase.auth.refreshSession({
+				refresh_token: locals.auth.refresh_token
+			});
+			if (error || !data.session) {
+				return false;
+			}
+			const session = data.session;
+			const cookieOptions = {
+				path: '/',
+				httpOnly: true,
+				secure: !dev,
+				sameSite: 'lax' as const,
+				maxAge: 60 * 60 * 24 * 7
+			};
+			cookies.set('sb-module', locals.auth.module, cookieOptions);
+			cookies.set('sb-access-token', session.access_token, cookieOptions);
+			cookies.set('sb-refresh-token', session.refresh_token, cookieOptions);
+			locals.auth = {
+				module: locals.auth.module,
+				access_token: session.access_token,
+				refresh_token: session.refresh_token
+			};
+			return true;
+		};
+
+		const refreshed = await refreshSessionIfNeeded();
+		if (!refreshed) {
+			return fail(401, {
+				message: 'Tu sesión expiró. Volvé a iniciar sesión.',
+				full_name,
+				dni,
+				phone
+			});
+		}
+
 		const ownerId = await getAuthUserId(supabase, locals.auth.access_token);
 		if (!ownerId) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
@@ -218,6 +276,26 @@ const handleCreatePatient = async ({ request, locals, fetch }: { request: Reques
 				.eq('dni', dni)
 				.maybeSingle();
 
+			if (existingError && isJwtExpiredError(existingError)) {
+				const refreshed = await refreshSessionIfNeeded();
+				if (refreshed) {
+					const { data: retryExisting, error: retryError } = await supabase
+						.from('patients')
+						.select('id')
+						.eq('dni', dni)
+						.maybeSingle();
+					if (!retryError && retryExisting?.id) {
+						return fail(409, {
+							message: 'Ya existe un paciente con este DNI',
+							existingId: retryExisting.id,
+							full_name,
+							dni,
+							phone
+						});
+					}
+				}
+			}
+
 			if (!existingError && existing?.id) {
 				return fail(409, {
 					message: 'Ya existe un paciente con este DNI',
@@ -229,7 +307,7 @@ const handleCreatePatient = async ({ request, locals, fetch }: { request: Reques
 			}
 		}
 
-		const { data, error } = await supabase
+		let { data, error } = await supabase
 			.from('patients')
 			.insert({
 				owner_id: ownerId,
@@ -239,6 +317,24 @@ const handleCreatePatient = async ({ request, locals, fetch }: { request: Reques
 			})
 			.select('id')
 			.single();
+
+		if (error && isJwtExpiredError(error)) {
+			const refreshed = await refreshSessionIfNeeded();
+			if (refreshed) {
+				const retry = await supabase
+					.from('patients')
+					.insert({
+						owner_id: ownerId,
+						full_name,
+						dni: dni || null,
+						phone: phone || null
+					})
+					.select('id')
+					.single();
+				data = retry.data;
+				error = retry.error;
+			}
+		}
 
 		if (error || !data) {
 			console.error('Error creando paciente:', error);
@@ -267,6 +363,5 @@ const handleCreatePatient = async ({ request, locals, fetch }: { request: Reques
 };
 
 export const actions: Actions = {
-	default: handleCreatePatient,
 	create_patient: handleCreatePatient
 };
