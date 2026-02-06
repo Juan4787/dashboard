@@ -1,10 +1,22 @@
 <script lang="ts">
 	import { page } from '$app/stores';
+	import { navigating } from '$app/stores';
+	import { onDestroy } from 'svelte';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
+	import OdontoRouteSkeleton from '$lib/components/skeleton/OdontoRouteSkeleton.svelte';
 
 	let { data, children } = $props();
 	let mobileMenuOpen = $state(false);
 	let showReportHelp = $state(false);
+	let showSkeleton = $state(false);
+	let shownAt = $state<number | null>(null);
+	let skeletonKind = $state<'patients' | 'patientDetail' | 'config' | 'master'>('patients');
+
+	const SKELETON_DELAY_MS = 120;
+	const SKELETON_MIN_VISIBLE_MS = 220;
+
+	let showDelayTimer: ReturnType<typeof setTimeout> | null = null;
+	let hideTimer: ReturnType<typeof setTimeout> | null = null;
 
 	const nav = [
 		{ label: 'Pacientes', href: '/odonto/pacientes' },
@@ -27,6 +39,70 @@
 	const showBack = $derived.by(() => {
 		const path = $page.url.pathname;
 		return path !== '/odonto/pacientes' && path.startsWith('/odonto');
+	});
+
+	const resolveSkeletonKind = (routeId: string | null | undefined, path: string) => {
+		if (routeId === '/odonto/pacientes/[id]') return 'patientDetail';
+		if (routeId === '/odonto/configuracion') return 'config';
+		if (routeId === '/odonto/maestro') return 'master';
+		if (routeId === '/odonto/pacientes') return 'patients';
+		if (path.startsWith('/odonto/pacientes/')) return 'patientDetail';
+		if (path.startsWith('/odonto/configuracion')) return 'config';
+		if (path.startsWith('/odonto/maestro')) return 'master';
+		return 'patients';
+	};
+
+	const clearShowDelay = () => {
+		if (!showDelayTimer) return;
+		clearTimeout(showDelayTimer);
+		showDelayTimer = null;
+	};
+
+	const clearHideDelay = () => {
+		if (!hideTimer) return;
+		clearTimeout(hideTimer);
+		hideTimer = null;
+	};
+
+	const scheduleShowSkeleton = (kind: 'patients' | 'patientDetail' | 'config' | 'master') => {
+		skeletonKind = kind;
+		clearHideDelay();
+		if (showSkeleton) return;
+		clearShowDelay();
+		showDelayTimer = setTimeout(() => {
+			showSkeleton = true;
+			shownAt = Date.now();
+			showDelayTimer = null;
+		}, SKELETON_DELAY_MS);
+	};
+
+	const scheduleHideSkeleton = () => {
+		clearShowDelay();
+		if (!showSkeleton) return;
+		const elapsed = shownAt ? Date.now() - shownAt : 0;
+		const wait = Math.max(SKELETON_MIN_VISIBLE_MS - elapsed, 0);
+		clearHideDelay();
+		hideTimer = setTimeout(() => {
+			showSkeleton = false;
+			shownAt = null;
+			hideTimer = null;
+		}, wait);
+	};
+
+	$effect(() => {
+		const navState = $navigating;
+		const targetPath = navState?.to?.url?.pathname ?? '';
+		if (targetPath.startsWith('/odonto')) {
+			const kind = resolveSkeletonKind(navState?.to?.route?.id, targetPath);
+			scheduleShowSkeleton(kind);
+		} else {
+			scheduleHideSkeleton();
+		}
+	});
+
+	onDestroy(() => {
+		clearShowDelay();
+		clearHideDelay();
 	});
 </script>
 
@@ -222,7 +298,11 @@
 		</div>
 	</header>
 
-	<main class="mx-auto max-w-6xl px-4 py-6">
-		{@render children()}
+	<main class="mx-auto max-w-6xl px-4 py-6" aria-busy={showSkeleton}>
+		{#if showSkeleton}
+			<OdontoRouteSkeleton kind={skeletonKind} />
+		{:else}
+			{@render children()}
+		{/if}
 	</main>
 </div>
