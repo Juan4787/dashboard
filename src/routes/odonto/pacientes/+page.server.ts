@@ -96,35 +96,42 @@ export const load: PageServerLoad = async ({ locals, url, fetch }) => {
 	let activeCount = showArchived ? 0 : totalCount;
 	let archivedCount = showArchived ? totalCount : 0;
 
-	const [totalRes, activeRes, archivedRes] = await Promise.all([
-		supabase.from('patients').select('id', { count: 'exact', head: true }),
-		supabase.from('patients').select('id', { count: 'exact', head: true }).is('archived_at', null),
-		supabase.from('patients').select('id', { count: 'exact', head: true }).not('archived_at', 'is', null)
-	]);
+	const ownerId = await getAuthUserId(supabase, locals.auth.access_token);
+	if (ownerId) {
+		const { data: countsRaw, error: countsError } = await supabase
+			.rpc('patients_counts_by_owner', { p_owner: ownerId })
+			.maybeSingle();
+		const counts = countsRaw as
+			| { total_count?: number | null; active_count?: number | null; archived_count?: number | null }
+			| null;
+		if (!countsError && counts) {
+			totalCount = Number(counts.total_count ?? totalCount);
+			activeCount = Number(counts.active_count ?? activeCount);
+			archivedCount = Number(counts.archived_count ?? archivedCount);
+		} else if (countsError) {
+			console.error('Error contando pacientes por RPC, se usa fallback', countsError);
+			const [totalRes, activeRes, archivedRes] = await Promise.all([
+				supabase.from('patients').select('id', { count: 'exact', head: true }),
+				supabase.from('patients').select('id', { count: 'exact', head: true }).is('archived_at', null),
+				supabase.from('patients').select('id', { count: 'exact', head: true }).not('archived_at', 'is', null)
+			]);
 
-	if (totalRes.error) {
-		console.error('Error contando pacientes', totalRes.error);
-	} else if (typeof totalRes.count === 'number') {
-		totalCount = totalRes.count;
-	}
-
-	if (activeRes.error) {
-		console.error('Error contando pacientes activos', activeRes.error);
-	} else if (typeof activeRes.count === 'number') {
-		activeCount = activeRes.count;
-	}
-
-	if (archivedRes.error) {
-		console.error('Error contando pacientes archivados', archivedRes.error);
-	} else if (typeof archivedRes.count === 'number') {
-		archivedCount = archivedRes.count;
-	}
-
-	if (typeof activeRes.count !== 'number' && totalCount && showArchived) {
-		activeCount = Math.max(totalCount - (data?.length ?? 0), 0);
-	}
-	if (typeof archivedRes.count !== 'number' && totalCount && !showArchived) {
-		archivedCount = Math.max(totalCount - (data?.length ?? 0), 0);
+			if (totalRes.error) {
+				console.error('Error contando pacientes', totalRes.error);
+			} else if (typeof totalRes.count === 'number') {
+				totalCount = totalRes.count;
+			}
+			if (activeRes.error) {
+				console.error('Error contando pacientes activos', activeRes.error);
+			} else if (typeof activeRes.count === 'number') {
+				activeCount = activeRes.count;
+			}
+			if (archivedRes.error) {
+				console.error('Error contando pacientes archivados', archivedRes.error);
+			} else if (typeof archivedRes.count === 'number') {
+				archivedCount = archivedRes.count;
+			}
+		}
 	}
 
 	return { patients: data ?? [], query: '', showArchived, demo: false, totalCount, activeCount, archivedCount };

@@ -6,20 +6,17 @@
 	import DateTimePartsInput from '$lib/components/DateTimePartsInput.svelte';
 	import DatePartsInput from '$lib/components/DatePartsInput.svelte';
 	import { CLINICAL_ENTRY_TYPES } from '$lib/constants';
-	import {
-		createDriveFolder,
-		getUserInfo,
-		initResumableUpload,
-		requestAccessToken,
-		uploadResumable
-	} from '$lib/client/drive';
 	import { formatDate, formatDateTime } from '$lib/utils/format';
+
+	type DriveClient = typeof import('$lib/client/drive');
 
 	let { data, form } = $props<{
 		data: {
 			patient: any;
 			entries: any[];
 			radiographs: any[];
+			hasMoreEntries?: boolean;
+			hasMoreRadiographs?: boolean;
 			driveConnection: { connected_email?: string | null; root_folder_id?: string | null } | null;
 			demo?: boolean;
 		};
@@ -50,9 +47,15 @@
 	const radiographsFolderLabel = 'Radiografias';
 	const largeFileThreshold = 12 * 1024 * 1024;
 	const googleClientId = env.PUBLIC_GOOGLE_CLIENT_ID ?? '';
+	let driveClientPromise: Promise<DriveClient> | null = null;
 
+	let entries = $state<any[]>([]);
 	let driveConnection = $state<typeof data.driveConnection>(null);
 	let radiographs = $state<any[]>([]);
+	let hasMoreEntries = $state(false);
+	let hasMoreRadiographs = $state(false);
+	let loadingMoreEntries = $state(false);
+	let loadingMoreRadiographs = $state(false);
 	let uploadingRadiograph = $state(false);
 	let uploadError = $state('');
 	let uploadInfo = $state('');
@@ -71,6 +74,12 @@
 	const requestedTab = $derived.by(() => $page.url.searchParams.get('tab'));
 	const returnTo = $derived.by(() => encodeURIComponent(`${$page.url.pathname}?tab=radiografias`));
 	const connectConfigHref = $derived.by(() => `/odonto/configuracion?return=${returnTo}`);
+	const getDriveClient = async () => {
+		if (!driveClientPromise) {
+			driveClientPromise = import('$lib/client/drive');
+		}
+		return driveClientPromise;
+	};
 	$effect(() => {
 		if (
 			requestedTab === 'historial' ||
@@ -81,9 +90,17 @@
 		}
 	});
 	$effect(() => {
+		entries = data.entries ?? [];
 		driveConnection = data.driveConnection;
 		radiographs = data.radiographs ?? [];
+		hasMoreEntries = Boolean(data.hasMoreEntries);
+		hasMoreRadiographs = Boolean(data.hasMoreRadiographs);
 		patientDriveFolderId = data.patient.drive_folder_id ?? null;
+	});
+	$effect(() => {
+		if (tab === 'radiografias' && googleClientId && !data.demo) {
+			void getDriveClient().catch(() => null);
+		}
 	});
 	const fmtTime = (dateStr: string) =>
 		new Intl.DateTimeFormat('es-AR', {
@@ -106,7 +123,7 @@
 		}
 	};
 
-	const lastVisit = $derived(data.entries?.[0]?.created_at ?? null);
+	const lastVisit = $derived(entries?.[0]?.created_at ?? null);
 	const chips = $derived(
 		(
 			[
@@ -147,17 +164,93 @@
 		return true;
 	};
 
+	const loadMoreEntries = async () => {
+		if (loadingMoreEntries || !hasMoreEntries) return;
+		const last = entries.at(-1);
+		if (!last?.created_at || !last?.id) {
+			hasMoreEntries = false;
+			return;
+		}
+		loadingMoreEntries = true;
+		try {
+			const params = new URLSearchParams({
+				cursor_created_at: String(last.created_at),
+				cursor_id: String(last.id)
+			});
+			const response = await fetch(
+				`/odonto/pacientes/${data.patient.id}/historial?${params.toString()}`
+			);
+			if (!response.ok) {
+				throw new Error('No se pudo cargar más historial.');
+			}
+			const payload = (await response.json()) as {
+				items?: any[];
+				has_more?: boolean;
+			};
+			const incoming = Array.isArray(payload.items) ? payload.items : [];
+			const existing = new Set(entries.map((entry) => entry.id));
+			const deduped = incoming.filter((entry) => !existing.has(entry.id));
+			entries = [...entries, ...deduped];
+			hasMoreEntries = Boolean(payload.has_more);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : 'No se pudo cargar más historial.';
+			uploadError = message;
+		} finally {
+			loadingMoreEntries = false;
+		}
+	};
+
+	const loadMoreRadiographs = async () => {
+		if (loadingMoreRadiographs || !hasMoreRadiographs) return;
+		const last = radiographs.at(-1);
+		if (!last?.created_at || !last?.id) {
+			hasMoreRadiographs = false;
+			return;
+		}
+		loadingMoreRadiographs = true;
+		try {
+			const params = new URLSearchParams({
+				cursor_created_at: String(last.created_at),
+				cursor_id: String(last.id)
+			});
+			const response = await fetch(
+				`/odonto/pacientes/${data.patient.id}/radiografias?${params.toString()}`
+			);
+			if (!response.ok) {
+				throw new Error('No se pudieron cargar más radiografías.');
+			}
+			const payload = (await response.json()) as {
+				items?: any[];
+				has_more?: boolean;
+			};
+			const incoming = Array.isArray(payload.items) ? payload.items : [];
+			const existing = new Set(radiographs.map((item) => item.id));
+			const deduped = incoming.filter((item) => !existing.has(item.id));
+			radiographs = [...radiographs, ...deduped];
+			hasMoreRadiographs = Boolean(payload.has_more);
+		} catch (err) {
+			const message =
+				err instanceof Error ? err.message : 'No se pudieron cargar más radiografías.';
+			uploadError = message;
+		} finally {
+			loadingMoreRadiographs = false;
+		}
+	};
+
 	const postAction = async (action: string, formData: FormData) => {
 		const response = await fetch(action, { method: 'POST', body: formData });
 		const result = deserialize(await response.text());
 		if (result.type === 'failure') {
 			throw new Error((result.data as { message?: string })?.message ?? 'Error inesperado.');
 		}
+		if (result.type === 'error') {
+			throw new Error('Error inesperado.');
+		}
 		if (result.type === 'redirect') {
 			window.location.assign(result.location);
 			throw new Error('Redireccionando...');
 		}
-		return result.data as Record<string, unknown>;
+		return (result.data ?? {}) as Record<string, unknown>;
 	};
 
 	const formatBytes = (value?: number | null) => {
@@ -282,12 +375,13 @@
 			throw new Error('Conectá Google Drive antes de subir radiografias.');
 		}
 		if (patientDriveFolderId) return patientDriveFolderId;
-		const patientFolderId = await createDriveFolder({
+		const driveClient = await getDriveClient();
+		const patientFolderId = await driveClient.createDriveFolder({
 			accessToken,
 			name: patientFolderLabel(data.patient.id),
 			parentId: driveConnection.root_folder_id
 		});
-		const radiographsFolderId = await createDriveFolder({
+		const radiographsFolderId = await driveClient.createDriveFolder({
 			accessToken,
 			name: radiographsFolderLabel,
 			parentId: patientFolderId
@@ -366,13 +460,14 @@
 		}
 		connectingDrive = true;
 		try {
+			const driveClient = await getDriveClient();
 			const promptValue = driveConnection?.root_folder_id ? 'select_account' : 'consent';
-			const token = await requestAccessToken({
+			const token = await driveClient.requestAccessToken({
 				clientId: googleClientId,
 				scopes: driveScopes,
 				prompt: promptValue
 			});
-			const userInfo = await getUserInfo(token);
+			const userInfo = await driveClient.getUserInfo(token);
 			const email = userInfo.email ?? 'Cuenta conectada';
 			const sameAccount =
 				driveConnection?.connected_email &&
@@ -387,11 +482,11 @@
 
 			let rootFolderId = sameAccount ? driveConnection?.root_folder_id ?? '' : '';
 			if (!rootFolderId) {
-				const appFolderId = await createDriveFolder({
+				const appFolderId = await driveClient.createDriveFolder({
 					accessToken: token,
 					name: APP_FOLDER_NAME
 				});
-				rootFolderId = await createDriveFolder({
+				rootFolderId = await driveClient.createDriveFolder({
 					accessToken: token,
 					name: PATIENTS_FOLDER_NAME,
 					parentId: appFolderId
@@ -515,11 +610,12 @@
 		uploadInfo = '';
 		let pendingId: string | null = null;
 		try {
+			const driveClient = await getDriveClient();
 			const existing = existingId ? radiographs.find((item) => item.id === existingId) : null;
 			const noteToSend = radiographNote || existing?.note || '';
 			const takenAtToSend = radiographTakenAt || existing?.taken_at || '';
 
-			const token = await requestAccessToken({
+			const token = await driveClient.requestAccessToken({
 				clientId: googleClientId,
 				scopes: driveScopes,
 				prompt: ''
@@ -529,7 +625,7 @@
 				? await resetRadiographRecord(existingId, file)
 				: await startRadiographRecord(file);
 			pendingId = pending.id;
-			const uploadUrl = await initResumableUpload({
+			const uploadUrl = await driveClient.initResumableUpload({
 				accessToken: token,
 				file,
 				metadata: {
@@ -537,7 +633,7 @@
 					parents: [folderId]
 				}
 			});
-			const uploaded = await uploadResumable({ accessToken: token, uploadUrl, file });
+			const uploaded = await driveClient.uploadResumable({ accessToken: token, uploadUrl, file });
 			if (!uploaded?.id) {
 				throw new Error('Drive no devolvio el id del archivo.');
 			}
@@ -583,14 +679,14 @@
 		const isHeic = file.type === 'image/heic' || file.type === 'image/heif' || name.endsWith('.heic');
 		if (isHeic) {
 			uploadError = 'Converti la imagen a JPG o PNG antes de subirla.';
-			if (fileInput) fileInput.value = '';
+			if (target) target.value = '';
 			return;
 		}
 		const isJpeg = file.type === 'image/jpeg' || name.endsWith('.jpg') || name.endsWith('.jpeg');
 		const isPng = file.type === 'image/png' || name.endsWith('.png');
 		if (!isJpeg && !isPng) {
 			uploadError = 'Solo se permiten archivos JPG o PNG.';
-			if (fileInput) fileInput.value = '';
+			if (target) target.value = '';
 			return;
 		}
 		if (file.size > largeFileThreshold) {
@@ -864,7 +960,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				</div>
 			</div>
 			<div class="mt-4">
-				{#if data.entries.length === 0}
+				{#if entries.length === 0}
 					<p class="rounded-xl border border-dashed border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-neutral-200">
 						<span class="md:hidden">Sin consultas registradas. Cargá la primera tocando el botón + de abajo a la derecha.</span>
 						<span class="hidden md:inline">Sin consultas registradas. Cargá la primera desde “Registrar consulta”.</span>
@@ -873,7 +969,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 					<div class="relative pl-8">
 						<span class="absolute left-2 top-0 h-full w-px bg-neutral-200 dark:bg-[#1f3554]/60"></span>
 						<div class="space-y-3">
-							{#each data.entries as entry (entry.id ?? entry.created_at)}
+							{#each entries as entry (entry.id ?? entry.created_at)}
 								{#if entryMatches(entry)}
 									{#key entry.id ?? entry.created_at}
 										<div
@@ -951,6 +1047,18 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 							{/each}
 						</div>
 					</div>
+					{#if hasMoreEntries}
+						<div class="mt-4 flex justify-center">
+							<button
+								type="button"
+								class="rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 transition hover:-translate-y-0.5 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-200 dark:hover:bg-[#122641] disabled:cursor-not-allowed disabled:opacity-60"
+								onclick={loadMoreEntries}
+								disabled={loadingMoreEntries}
+							>
+								{loadingMoreEntries ? 'Cargando...' : 'Cargar más historial'}
+							</button>
+						</div>
+					{/if}
 				{/if}
 			</div>
 		</div>
@@ -1380,6 +1488,18 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 					{/each}
 				{/if}
 			</div>
+			{#if hasMoreRadiographs}
+				<div class="mt-4 flex justify-center">
+					<button
+						type="button"
+						class="rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 transition hover:-translate-y-0.5 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-200 dark:hover:bg-[#122641] disabled:cursor-not-allowed disabled:opacity-60"
+						onclick={loadMoreRadiographs}
+						disabled={loadingMoreRadiographs}
+					>
+						{loadingMoreRadiographs ? 'Cargando...' : 'Cargar más radiografías'}
+					</button>
+				</div>
+			{/if}
 
 			<details class="mt-6 text-[11px] text-neutral-600 dark:text-neutral-300">
 				<summary class="inline-flex cursor-pointer items-center gap-1 font-medium text-neutral-600 dark:text-neutral-300">

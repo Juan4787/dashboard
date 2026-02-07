@@ -11,8 +11,50 @@ import { redirect, type Handle } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 
 const moduleHome = (module: Module) => getModuleEntryRoute(module);
+const toHost = (value?: string | null) => {
+	if (!value) return null;
+	try {
+		return new URL(value).host.toLowerCase();
+	} catch {
+		return null;
+	}
+};
+
+const supabaseHosts = new Set(
+	[toHost(env.ODONTO_SUPABASE_URL), toHost(env.ADMIN_SUPABASE_URL)].filter(
+		(host): host is string => Boolean(host)
+	)
+);
 
 export const handle: Handle = async ({ event, resolve }) => {
+	const startedAt = performance.now();
+	let authMs = 0;
+	let dbQ = 0;
+
+	const originalFetch = event.fetch;
+	event.fetch = async (input, init) => {
+		const urlRaw =
+			typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+		let parsed: URL | null = null;
+		try {
+			parsed = new URL(urlRaw, event.url.origin);
+		} catch {
+			parsed = null;
+		}
+
+		const isSupabaseRequest = Boolean(parsed && supabaseHosts.has(parsed.host.toLowerCase()));
+		const pathname = parsed?.pathname ?? '';
+		const isRestRequest = isSupabaseRequest && pathname.startsWith('/rest/v1/');
+		const isAuthRequest = isSupabaseRequest && pathname.startsWith('/auth/v1/');
+		const fetchStart = performance.now();
+		const response = await originalFetch(input, init);
+		const fetchMs = performance.now() - fetchStart;
+
+		if (isRestRequest || isAuthRequest) dbQ += 1;
+		if (isAuthRequest) authMs += fetchMs;
+		return response;
+	};
+
 	const moduleCookie = event.cookies.get('sb-module') as Module | undefined;
 	const accessToken = event.cookies.get('sb-access-token');
 	const refreshToken = event.cookies.get('sb-refresh-token');
@@ -26,7 +68,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 	if (event.locals.auth && !isDemo) {
 		if (isJwtExpired(event.locals.auth.access_token)) {
 			try {
-				const supabase = await createSupabaseServerClient('odonto', null);
+				const supabase = await createSupabaseServerClient('odonto', null, event.fetch);
 				const { data, error } = await supabase.auth.refreshSession({
 					refresh_token: event.locals.auth.refresh_token
 				});
@@ -92,5 +134,11 @@ export const handle: Handle = async ({ event, resolve }) => {
 		}
 	}
 
-	return resolve(event);
+	const response = await resolve(event);
+	const totalMs = performance.now() - startedAt;
+	const loadMs = Math.max(totalMs - authMs, 0);
+	const timingValue = `auth;dur=${authMs.toFixed(1)}, load;dur=${loadMs.toFixed(1)}, db_q;desc="${dbQ}"`;
+	const existingTiming = response.headers.get('Server-Timing');
+	response.headers.set('Server-Timing', existingTiming ? `${existingTiming}, ${timingValue}` : timingValue);
+	return response;
 };

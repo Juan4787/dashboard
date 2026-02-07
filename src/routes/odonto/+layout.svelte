@@ -240,11 +240,18 @@
 		{/if}
 		<div class="mx-auto hidden max-w-6xl items-center justify-between px-6 py-3 md:flex">
 			<div class="flex items-center gap-3">
-				<img
-					src="/logo-mejorado.png"
-					alt="Dental Suite"
-					class="h-20 w-20"
-				/>
+				<picture>
+					<source srcset="/logo-mejorado.webp" type="image/webp" />
+					<img
+						src="/logo-mejorado.png"
+						alt="Dental Suite"
+						class="h-20 w-20"
+						width="80"
+						height="80"
+						loading="eager"
+						decoding="async"
+					/>
+				</picture>
 			</div>
 			<nav class="flex items-center gap-10 text-sm font-semibold">
 				<ThemeToggle />

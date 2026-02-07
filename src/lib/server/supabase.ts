@@ -86,19 +86,10 @@ export const createSupabaseServerClient = async (
 			detectSessionInUrl: false
 		},
 		global: {
-			headers
+			headers,
+			fetch: fetchImpl ?? fetch
 		}
 	});
-
-	if (tokens?.access_token && tokens?.refresh_token) {
-		const { error: sessionError } = await supabase.auth.setSession({
-			access_token: tokens.access_token,
-			refresh_token: tokens.refresh_token
-		});
-		if (sessionError) {
-			console.warn('Error setting Supabase session:', sessionError.message);
-		}
-	}
 
 	return supabase;
 };
@@ -141,18 +132,21 @@ export const getAuthUserId = async (
 	supabase: SupabaseClient,
 	accessToken?: string | null
 ): Promise<string | null> => {
-	let ownerId = getUserIdFromAccessToken(accessToken);
+	const ownerId = getUserIdFromAccessToken(accessToken);
+	if (ownerId) {
+		return ownerId;
+	}
 	try {
 		const { data, error } = await supabase.auth.getUser();
 		if (error) {
 			console.warn('No se pudo obtener usuario desde Supabase auth', error);
-		} else if (data?.user?.id) {
-			ownerId = data.user.id;
+			return null;
 		}
+		return data?.user?.id ?? null;
 	} catch (err) {
 		console.warn('Error obteniendo usuario desde Supabase auth', err);
+		return null;
 	}
-	return ownerId;
 };
 
 export const getEmailFromAccessToken = (accessToken?: string | null): string | null => {

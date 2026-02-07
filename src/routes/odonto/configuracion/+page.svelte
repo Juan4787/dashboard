@@ -49,11 +49,14 @@
 		if (result.type === 'failure') {
 			throw new Error((result.data as { message?: string })?.message ?? 'Error inesperado.');
 		}
+		if (result.type === 'error') {
+			throw new Error('Error inesperado.');
+		}
 		if (result.type === 'redirect') {
 			window.location.assign(result.location);
 			throw new Error('Redireccionando...');
 		}
-		return result.data as Record<string, unknown>;
+		return (result.data ?? {}) as Record<string, unknown>;
 	};
 
 	const connectDrive = async () => {

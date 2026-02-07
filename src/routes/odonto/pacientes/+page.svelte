@@ -218,6 +218,7 @@ const isSearching = $derived(search.trim().length > 0);
 									<div class="table-cell align-middle px-6 py-5 text-right">
 										<a
 											href={`/odonto/pacientes/${patient.id}`}
+											data-sveltekit-preload-data="hover"
 											class="rounded-full px-4 py-2 text-xs font-semibold text-white bg-[#7c3aed] shadow-sm transition hover:-translate-y-0.5 hover:shadow-card"
 										>
 											Abrir paciente
@@ -281,6 +282,7 @@ const isSearching = $derived(search.trim().length > 0);
 									<div class="table-cell align-middle px-6 py-5 text-right">
 										<a
 											href={`/odonto/pacientes/${patient.id}`}
+											data-sveltekit-preload-data="hover"
 											class="rounded-full px-4 py-2 text-xs font-semibold text-white bg-[#7c3aed] shadow-sm transition hover:-translate-y-0.5 hover:shadow-card"
 										>
 											Abrir paciente
@@ -340,6 +342,7 @@ const isSearching = $derived(search.trim().length > 0);
 							<div class="mt-3 flex flex-col gap-2">
 								<a
 									href={`/odonto/pacientes/${patient.id}`}
+									data-sveltekit-preload-data="tap"
 									class="w-full rounded-full bg-[#7c3aed] px-4 py-2.5 text-center text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-card"
 								>
 									Abrir paciente
@@ -476,7 +479,13 @@ const isSearching = $derived(search.trim().length > 0);
 			<div class="rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
 				{formState.message}
 				{#if formState.existingId}
-					<a class="ml-2 underline" href={`/odonto/pacientes/${formState.existingId}`}>Ver ficha existente</a>
+					<a
+						class="ml-2 underline"
+						href={`/odonto/pacientes/${formState.existingId}`}
+						data-sveltekit-preload-data="hover"
+					>
+						Ver ficha existente
+					</a>
 				{/if}
 			</div>
 		{/if}

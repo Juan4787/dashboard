@@ -19,6 +19,9 @@ const normalizeFilename = (value?: string | null) => {
 	return cleaned.length > 120 ? cleaned.slice(0, 120) : cleaned;
 };
 
+const ENTRIES_PAGE_SIZE = 30;
+const RADIOGRAPHS_PAGE_SIZE = 24;
+
 export const load: PageServerLoad = async ({ params, locals, fetch }) => {
 	if (!locals.auth) {
 		throw redirect(303, '/login');
@@ -34,7 +37,15 @@ export const load: PageServerLoad = async ({ params, locals, fetch }) => {
 		const radiographs = db.radiographs
 			.filter((r) => r.patient_id === params.id)
 			.sort((a, b) => (a.created_at ?? '') < (b.created_at ?? '') ? 1 : -1);
-		return { patient, entries, radiographs, driveConnection: null, demo: true };
+		return {
+			patient,
+			entries,
+			radiographs,
+			hasMoreEntries: false,
+			hasMoreRadiographs: false,
+			driveConnection: null,
+			demo: true
+		};
 	}
 
 	const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
@@ -58,7 +69,9 @@ export const load: PageServerLoad = async ({ params, locals, fetch }) => {
 			.select('id, created_at, entry_type, description, teeth, amount, internal_note')
 			.eq('patient_id', params.id)
 			.is('archived_at', null)
-			.order('created_at', { ascending: false }),
+			.order('created_at', { ascending: false })
+			.order('id', { ascending: false })
+			.limit(ENTRIES_PAGE_SIZE + 1),
 		supabase
 			.from('patient_radiographs')
 			.select(
@@ -66,7 +79,9 @@ export const load: PageServerLoad = async ({ params, locals, fetch }) => {
 			)
 			.eq('patient_id', params.id)
 			.is('deleted_at', null)
-			.order('created_at', { ascending: false }),
+			.order('created_at', { ascending: false })
+			.order('id', { ascending: false })
+			.limit(RADIOGRAPHS_PAGE_SIZE + 1),
 		ownerId
 			? supabase
 					.from('drive_connections')
@@ -90,10 +105,19 @@ export const load: PageServerLoad = async ({ params, locals, fetch }) => {
 		console.error('Error cargando conexion Drive', driveError);
 	}
 
+	const safeEntries = entries ?? [];
+	const safeRadiographs = radiographs ?? [];
+	const hasMoreEntries = safeEntries.length > ENTRIES_PAGE_SIZE;
+	const hasMoreRadiographs = safeRadiographs.length > RADIOGRAPHS_PAGE_SIZE;
+
 	return {
 		patient,
-		entries: entries ?? [],
-		radiographs: radiographs ?? [],
+		entries: hasMoreEntries ? safeEntries.slice(0, ENTRIES_PAGE_SIZE) : safeEntries,
+		radiographs: hasMoreRadiographs
+			? safeRadiographs.slice(0, RADIOGRAPHS_PAGE_SIZE)
+			: safeRadiographs,
+		hasMoreEntries,
+		hasMoreRadiographs,
 		driveConnection: driveConnection ?? null,
 		demo: false
 	};
