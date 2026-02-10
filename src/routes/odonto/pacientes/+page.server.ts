@@ -40,6 +40,8 @@ const isJwtExpiredError = (error: { code?: string | null; message?: string | nul
 	return error?.code === 'PGRST303' || message.includes('jwt expired');
 };
 
+type CountsSource = 'rpc' | 'fallback_planned';
+
 export const load: PageServerLoad = async ({ locals, url, fetch }) => {
 	if (!locals.auth) {
 		throw redirect(303, '/login');
@@ -66,7 +68,8 @@ export const load: PageServerLoad = async ({ locals, url, fetch }) => {
 			demo: true,
 			totalCount: demoPatients.length,
 			activeCount,
-			archivedCount
+			archivedCount,
+			countsSource: 'fallback_planned' as const
 		};
 	}
 
@@ -78,15 +81,27 @@ export const load: PageServerLoad = async ({ locals, url, fetch }) => {
 		throw kitError(500, 'Error de conexión con la base de datos');
 	}
 
-	let builder = supabase
+	const ownerId = await getAuthUserId(supabase, locals.auth.access_token);
+	if (!ownerId) {
+		throw redirect(303, '/login');
+	}
+
+	let patientsBuilder = supabase
 		.from('patients')
 		.select('id, full_name, dni, phone, archived_at, last_entry_at, updated_at, created_at')
+		.eq('owner_id', ownerId)
 		.order('updated_at', { ascending: false })
 		.limit(200);
 
-	builder = showArchived ? builder.not('archived_at', 'is', null) : builder.is('archived_at', null);
+	patientsBuilder = showArchived
+		? patientsBuilder.not('archived_at', 'is', null)
+		: patientsBuilder.is('archived_at', null);
 
-	const { data, error } = await builder;
+	const [patientsRes, countsRpcRes] = await Promise.all([
+		patientsBuilder,
+		supabase.rpc('patients_counts_by_owner', { p_owner: ownerId }).maybeSingle()
+	]);
+	const { data, error } = patientsRes;
 	if (error) {
 		console.error('Error cargando pacientes', error);
 		throw kitError(500, 'No se pudieron cargar los pacientes');
@@ -95,46 +110,65 @@ export const load: PageServerLoad = async ({ locals, url, fetch }) => {
 	let totalCount = data?.length ?? 0;
 	let activeCount = showArchived ? 0 : totalCount;
 	let archivedCount = showArchived ? totalCount : 0;
+	let countsSource: CountsSource = 'rpc';
 
-	const ownerId = await getAuthUserId(supabase, locals.auth.access_token);
-	if (ownerId) {
-		const { data: countsRaw, error: countsError } = await supabase
-			.rpc('patients_counts_by_owner', { p_owner: ownerId })
-			.maybeSingle();
-		const counts = countsRaw as
-			| { total_count?: number | null; active_count?: number | null; archived_count?: number | null }
-			| null;
-		if (!countsError && counts) {
-			totalCount = Number(counts.total_count ?? totalCount);
-			activeCount = Number(counts.active_count ?? activeCount);
-			archivedCount = Number(counts.archived_count ?? archivedCount);
-		} else if (countsError) {
-			console.error('Error contando pacientes por RPC, se usa fallback', countsError);
-			const [totalRes, activeRes, archivedRes] = await Promise.all([
-				supabase.from('patients').select('id', { count: 'exact', head: true }),
-				supabase.from('patients').select('id', { count: 'exact', head: true }).is('archived_at', null),
-				supabase.from('patients').select('id', { count: 'exact', head: true }).not('archived_at', 'is', null)
-			]);
+	const { data: countsRaw, error: countsError } = countsRpcRes;
+	const counts = countsRaw as
+		| { total_count?: number | null; active_count?: number | null; archived_count?: number | null }
+		| null;
+	if (!countsError && counts) {
+		totalCount = Number(counts.total_count ?? totalCount);
+		activeCount = Number(counts.active_count ?? activeCount);
+		archivedCount = Number(counts.archived_count ?? archivedCount);
+	} else {
+		countsSource = 'fallback_planned';
+		if (countsError) {
+			console.error('Error contando pacientes por RPC, se usa fallback planned', countsError);
+		}
+		const [totalRes, activeRes, archivedRes] = await Promise.all([
+			supabase
+				.from('patients')
+				.select('id', { count: 'planned', head: true })
+				.eq('owner_id', ownerId),
+			supabase
+				.from('patients')
+				.select('id', { count: 'planned', head: true })
+				.eq('owner_id', ownerId)
+				.is('archived_at', null),
+			supabase
+				.from('patients')
+				.select('id', { count: 'planned', head: true })
+				.eq('owner_id', ownerId)
+				.not('archived_at', 'is', null)
+		]);
 
-			if (totalRes.error) {
-				console.error('Error contando pacientes', totalRes.error);
-			} else if (typeof totalRes.count === 'number') {
-				totalCount = totalRes.count;
-			}
-			if (activeRes.error) {
-				console.error('Error contando pacientes activos', activeRes.error);
-			} else if (typeof activeRes.count === 'number') {
-				activeCount = activeRes.count;
-			}
-			if (archivedRes.error) {
-				console.error('Error contando pacientes archivados', archivedRes.error);
-			} else if (typeof archivedRes.count === 'number') {
-				archivedCount = archivedRes.count;
-			}
+		if (totalRes.error) {
+			console.error('Error contando pacientes (planned)', totalRes.error);
+		} else if (typeof totalRes.count === 'number') {
+			totalCount = totalRes.count;
+		}
+		if (activeRes.error) {
+			console.error('Error contando pacientes activos (planned)', activeRes.error);
+		} else if (typeof activeRes.count === 'number') {
+			activeCount = activeRes.count;
+		}
+		if (archivedRes.error) {
+			console.error('Error contando pacientes archivados (planned)', archivedRes.error);
+		} else if (typeof archivedRes.count === 'number') {
+			archivedCount = archivedRes.count;
 		}
 	}
 
-	return { patients: data ?? [], query: '', showArchived, demo: false, totalCount, activeCount, archivedCount };
+	return {
+		patients: data ?? [],
+		query: '',
+		showArchived,
+		demo: false,
+		totalCount,
+		activeCount,
+		archivedCount,
+		countsSource
+	};
 };
 
 
