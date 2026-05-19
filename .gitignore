@@ -1,18 +1,22 @@
 node_modules
+**/node_modules
 
 # Output
 .output
 .vercel
 .netlify
 .wrangler
-/.svelte-kit
-/build
+.svelte-kit
+**/.svelte-kit
+build
+**/build
 playwright-report
 test-results
 
 # OS
 .DS_Store
 Thumbs.db
+.vscode/
 
 # Env
 .env
@@ -23,6 +27,7 @@ Thumbs.db
 
 # Supabase CLI
 supabase/.temp/
+supabase/.branches/
 
 # Vite
 vite.config.js.timestamp-*

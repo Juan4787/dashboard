@@ -1,38 +1,38 @@
-# sv
+# Turnos SaaS
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+Monorepo SvelteKit + Supabase preparado para evolucionar el panel actual hacia el SaaS de turnos, agenda, WhatsApp oficial, recordatorios, confirmaciones y ficha de pacientes/clientes.
 
-## Creating a project
+## Estructura
 
-If you're seeing this, you've probably already done this step. Congrats!
-
-```sh
-# create a new project in the current directory
-npx sv create
-
-# create a new project in my-app
-npx sv create my-app
+```text
+apps/web              App SvelteKit existente
+packages/shared       Tipos, constantes y helpers compartidos
+supabase/migrations   SQL versionado
+supabase/functions    Edge Functions futuras
 ```
 
-## Developing
-
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+## Comandos
 
 ```sh
-npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
+pnpm install
+pnpm dev
+pnpm check
+pnpm test
+pnpm test:e2e
+pnpm build
 ```
 
-## Building
-
-To create a production version of your app:
+## Supabase
 
 ```sh
-npm run build
+pnpm supabase:start
+pnpm supabase:types
+pnpm supabase:db:reset
+pnpm supabase:stop
 ```
 
-You can preview the production build with `npm run preview`.
+Las variables de entorno viven en la raíz. `apps/web/vite.config.ts` usa `envDir: '../..'` para que SvelteKit las cargue desde el workspace root.
 
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+## Estado actual
+
+La app operativa sigue siendo el panel SvelteKit existente en `apps/web`, con rutas `/odonto` protegidas, login Supabase, modo demo y radiografías vía Google Drive. Las siguientes fases incorporan el modelo multi-tenant, turnos, disponibilidad, agenda y WhatsApp oficial.

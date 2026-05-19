@@ -1,0 +1,257 @@
+import {
+	BUSINESS_ROLES,
+	demoBusinessContext,
+	isBusinessRole,
+	resolveActiveBusiness,
+	type BusinessRole
+} from '$lib/server/business';
+import { createSupabaseServerClient, getAuthUserId } from '$lib/server/supabase';
+import { env } from '$env/dynamic/private';
+import { error as kitError, fail, redirect } from '@sveltejs/kit';
+import type { Actions, PageServerLoad } from './$types';
+import type { SupabaseClient } from '@supabase/supabase-js';
+
+type BusinessMember = {
+	id: string;
+	business_id: string;
+	user_id: string;
+	email: string | null;
+	role: BusinessRole;
+	created_at: string;
+};
+
+const DEMO_MEMBERS: BusinessMember[] = [
+	{
+		id: 'demo-owner',
+		business_id: 'demo-business',
+		user_id: 'demo-user',
+		email: 'dueno@consultorio.demo',
+		role: 'owner',
+		created_at: new Date('2026-01-01T12:00:00Z').toISOString()
+	},
+	{
+		id: 'demo-reception',
+		business_id: 'demo-business',
+		user_id: 'demo-reception-user',
+		email: 'recepcion@consultorio.demo',
+		role: 'reception',
+		created_at: new Date('2026-01-02T12:00:00Z').toISOString()
+	}
+];
+
+const normalizeEmail = (value: FormDataEntryValue | null) =>
+	String(value ?? '')
+		.trim()
+		.toLowerCase();
+
+const normalizeMember = (row: any): BusinessMember | null => {
+	const role = String(row?.role ?? '');
+	if (!row?.id || !row?.business_id || !row?.user_id || !isBusinessRole(role)) return null;
+	return {
+		id: String(row.id),
+		business_id: String(row.business_id),
+		user_id: String(row.user_id),
+		email: row.email ? String(row.email) : null,
+		role,
+		created_at: String(row.created_at ?? '')
+	};
+};
+
+const listMembers = async (
+	supabase: SupabaseClient,
+	businessId: string
+): Promise<BusinessMember[]> => {
+	const { data, error } = await supabase.rpc('list_business_users', {
+		target_business_id: businessId
+	});
+	if (error) {
+		throw error;
+	}
+	return ((data ?? []) as unknown[])
+		.map(normalizeMember)
+		.filter((item): item is BusinessMember => Boolean(item));
+};
+
+const getUsersPageContext = async ({
+	locals,
+	fetch,
+	cookies
+}: {
+	locals: App.Locals;
+	fetch: typeof globalThis.fetch;
+	cookies: import('@sveltejs/kit').Cookies;
+}) => {
+	if (!locals.auth) throw redirect(303, '/login');
+
+	const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
+	const [context, currentUserId] = await Promise.all([
+		resolveActiveBusiness({
+			supabase,
+			accessToken: locals.auth.access_token,
+			cookies
+		}),
+		getAuthUserId(supabase, locals.auth.access_token)
+	]);
+
+	if (!context) {
+		throw kitError(500, 'No se pudo resolver el negocio activo');
+	}
+
+	return { supabase, context, currentUserId };
+};
+
+const countOwners = (members: BusinessMember[]) =>
+	members.filter((member) => member.role === 'owner').length;
+
+export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
+	if (!locals.auth) throw redirect(303, '/login');
+
+	if (env.DEMO_MODE === 'true') {
+		return {
+			context: demoBusinessContext(),
+			members: DEMO_MEMBERS,
+			roles: BUSINESS_ROLES,
+			currentUserId: 'demo-user',
+			demo: true
+		};
+	}
+
+	const { supabase, context, currentUserId } = await getUsersPageContext({ locals, fetch, cookies });
+	if (context.role === 'professional') throw redirect(303, '/odonto/mis-turnos');
+	const members = await listMembers(supabase, context.business.id);
+
+	return {
+		context,
+		members,
+		roles: BUSINESS_ROLES,
+		currentUserId,
+		demo: false
+	};
+};
+
+export const actions: Actions = {
+	add_user: async ({ request, locals, fetch, cookies }) => {
+		if (!locals.auth) throw redirect(303, '/login');
+		if (env.DEMO_MODE === 'true') {
+			return fail(400, { message: 'No disponible en modo demo.' });
+		}
+
+		const form = await request.formData();
+		const email = normalizeEmail(form.get('email'));
+		const role = String(form.get('role') ?? '').trim();
+
+		if (!email || !email.includes('@')) {
+			return fail(400, { message: 'Ingresá un email válido.', values: Object.fromEntries(form) });
+		}
+		if (!isBusinessRole(role)) {
+			return fail(400, { message: 'El rol seleccionado no es válido.', values: Object.fromEntries(form) });
+		}
+
+		const { supabase, context } = await getUsersPageContext({ locals, fetch, cookies });
+		if (!context.canManage) {
+			return fail(403, { message: 'No tenés permisos para administrar usuarios.' });
+		}
+
+		const { error } = await supabase.rpc('add_business_user_by_email', {
+			target_business_id: context.business.id,
+			target_email: email,
+			target_role: role
+		});
+
+		if (error) {
+			console.error('Error agregando usuario al negocio', error);
+			const message = error.message?.includes('USER_NOT_FOUND')
+				? 'Ese email todavía no tiene una cuenta creada.'
+				: 'No se pudo agregar el usuario.';
+			return fail(500, { message, values: Object.fromEntries(form) });
+		}
+
+		return { success: true, message: 'Usuario agregado al negocio.' };
+	},
+	update_role: async ({ request, locals, fetch, cookies }) => {
+		if (!locals.auth) throw redirect(303, '/login');
+		if (env.DEMO_MODE === 'true') {
+			return fail(400, { message: 'No disponible en modo demo.' });
+		}
+
+		const form = await request.formData();
+		const membershipId = String(form.get('membership_id') ?? '').trim();
+		const role = String(form.get('role') ?? '').trim();
+
+		if (!membershipId) {
+			return fail(400, { message: 'Usuario inválido.' });
+		}
+		if (!isBusinessRole(role)) {
+			return fail(400, { message: 'El rol seleccionado no es válido.' });
+		}
+
+		const { supabase, context } = await getUsersPageContext({ locals, fetch, cookies });
+		if (!context.canManage) {
+			return fail(403, { message: 'No tenés permisos para administrar usuarios.' });
+		}
+
+		const members = await listMembers(supabase, context.business.id);
+		const target = members.find((member) => member.id === membershipId);
+		if (!target) {
+			return fail(404, { message: 'Usuario no encontrado en este negocio.' });
+		}
+		if (target.role === 'owner' && role !== 'owner' && countOwners(members) <= 1) {
+			return fail(400, { message: 'El negocio debe conservar al menos un owner.' });
+		}
+
+		const { error } = await supabase
+			.from('business_users')
+			.update({ role })
+			.eq('id', membershipId)
+			.eq('business_id', context.business.id);
+
+		if (error) {
+			console.error('Error actualizando rol', error);
+			return fail(500, { message: 'No se pudo actualizar el rol.' });
+		}
+
+		return { success: true, message: 'Rol actualizado.' };
+	},
+	remove_user: async ({ request, locals, fetch, cookies }) => {
+		if (!locals.auth) throw redirect(303, '/login');
+		if (env.DEMO_MODE === 'true') {
+			return fail(400, { message: 'No disponible en modo demo.' });
+		}
+
+		const form = await request.formData();
+		const membershipId = String(form.get('membership_id') ?? '').trim();
+		if (!membershipId) {
+			return fail(400, { message: 'Usuario inválido.' });
+		}
+
+		const { supabase, context, currentUserId } = await getUsersPageContext({ locals, fetch, cookies });
+		if (!context.canManage) {
+			return fail(403, { message: 'No tenés permisos para administrar usuarios.' });
+		}
+
+		const members = await listMembers(supabase, context.business.id);
+		const target = members.find((member) => member.id === membershipId);
+		if (!target) {
+			return fail(404, { message: 'Usuario no encontrado en este negocio.' });
+		}
+		if (target.user_id === currentUserId) {
+			return fail(400, { message: 'No podés quitar tu propio acceso desde esta pantalla.' });
+		}
+		if (target.role === 'owner' && countOwners(members) <= 1) {
+			return fail(400, { message: 'El negocio debe conservar al menos un owner.' });
+		}
+
+		const { error } = await supabase
+			.from('business_users')
+			.delete()
+			.eq('id', membershipId)
+			.eq('business_id', context.business.id);
+
+		if (error) {
+			console.error('Error quitando usuario', error);
+			return fail(500, { message: 'No se pudo quitar el usuario.' });
+		}
+
+		return { success: true, message: 'Usuario quitado del negocio.' };
+	}
+};
