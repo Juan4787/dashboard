@@ -10,6 +10,9 @@ const config = {
 	preprocess: vitePreprocess(),
 
 	kit: {
+		env: {
+			dir: '../..'
+		},
 		// Netlify adapter for deployment.
 		adapter: adapter(),
 		csp: isProd
