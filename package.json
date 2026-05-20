@@ -15,5 +15,9 @@
 		"supabase:stop": "supabase stop",
 		"supabase:types": "supabase gen types typescript --local > packages/shared/src/database.types.ts",
 		"supabase:db:reset": "supabase db reset"
+	},
+	"dependencies": {
+		"@supabase/supabase-js": "^2.105.4",
+		"@sveltejs/kit": "^2.59.1"
 	}
 }
