@@ -1,5 +1,5 @@
 [build]
-  command = "pnpm --filter web build"
+  command = "node scripts/netlify-build.mjs"
   publish = "apps/web/build"
 
 [functions]
