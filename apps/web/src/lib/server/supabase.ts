@@ -1,5 +1,6 @@
 import { env } from '$env/dynamic/private';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import WebSocket from 'ws';
 
 export type Module = 'odonto' | 'administrativo';
 
@@ -15,6 +16,8 @@ const normalizeEnv = (value?: string | null) => {
 	const trimmed = value?.trim();
 	return trimmed ? trimmed : undefined;
 };
+
+const WebSocketTransport = WebSocket as unknown as typeof globalThis.WebSocket;
 
 const moduleEmails: Record<Module, string | undefined> = {
 	odonto: normalizeEnv(env.SABRINA_EMAIL),
@@ -88,6 +91,9 @@ export const createSupabaseServerClient = async (
 			autoRefreshToken: false,
 			detectSessionInUrl: false
 		},
+		realtime: {
+			transport: WebSocketTransport
+		},
 		global: {
 			headers,
 			fetch: fetchImpl ?? fetch
@@ -122,6 +128,9 @@ export const createSupabaseAdminClient = async (
 			persistSession: false,
 			autoRefreshToken: false,
 			detectSessionInUrl: false
+		},
+		realtime: {
+			transport: WebSocketTransport
 		},
 		global: {
 			headers: { 'X-App-Module': module, 'X-Server-Context': 'admin' },
