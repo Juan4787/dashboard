@@ -36,6 +36,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 			context: demoBusinessContext(),
 			appointment: null,
 			auditLogs: [],
+			messageDispatches: [],
 			userLabels: {},
 			reprogramDate: new Date().toISOString().slice(0, 10),
 			reprogramSlots: [],
@@ -64,7 +65,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 		url.searchParams.get('reprogram_date') ?? localDateFor(data.starts_at, business.business.timezone);
 	const fromDate = url.searchParams.get('from_date') ?? localDateFor(data.starts_at, business.business.timezone);
 
-	const [auditResult, usersResult, reprogramSlots] = await Promise.all([
+	const [auditResult, usersResult, messageResult, reprogramSlots] = await Promise.all([
 		supabase
 			.from('audit_logs')
 			.select('id, user_id, action, entity_type, entity_id, metadata, created_at')
@@ -73,6 +74,12 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 			.eq('entity_id', params.appointmentId)
 			.order('created_at', { ascending: false }),
 		supabase.rpc('list_business_users', { target_business_id: business.business.id }),
+		supabase
+			.from('message_dispatches')
+			.select('id, type, status, scheduled_for, sent_at, delivered_at, read_at, failed_at, human_error_message, created_at')
+			.eq('business_id', business.business.id)
+			.eq('appointment_id', params.appointmentId)
+			.order('created_at', { ascending: false }),
 		business.canOperate && !['cancelled', 'attended', 'no_show'].includes(data.status)
 			? getAvailabilitySlots(supabase, {
 					business: business.business,
@@ -88,6 +95,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 
 	if (auditResult.error) console.error('Error cargando auditoria del turno', auditResult.error);
 	if (usersResult.error) console.error('Error cargando usuarios para auditoria', usersResult.error);
+	if (messageResult.error) console.error('Error cargando mensajes del turno', messageResult.error);
 
 	const userLabels = Object.fromEntries(
 		(usersResult.data ?? []).map((user: any) => [String(user.user_id), user.email ?? String(user.user_id).slice(0, 8)])
@@ -97,6 +105,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 		context: business,
 		appointment: data,
 		auditLogs: auditResult.data ?? [],
+		messageDispatches: messageResult.data ?? [],
 		userLabels,
 		reprogramDate,
 		reprogramSlots,

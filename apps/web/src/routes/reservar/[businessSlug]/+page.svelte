@@ -215,6 +215,19 @@
 							<span class="ux-label">Comentario opcional</span>
 							<textarea name="note" rows="3" class="ux-textarea">{String(values.note ?? '')}</textarea>
 						</label>
+						<label class="ux-soft-card flex items-start gap-3 p-4">
+							<input
+								type="checkbox"
+								name="whatsapp_opt_in"
+								value="true"
+								required
+								checked={String(values.whatsapp_opt_in ?? '') === 'true'}
+								class="mt-1 accent-[#7c3aed]"
+							/>
+							<span class="text-sm font-semibold text-white/75">
+								Acepto recibir mensajes relacionados con este turno por WhatsApp.
+							</span>
+						</label>
 					</div>
 
 					{#if data.turnstileSiteKey}

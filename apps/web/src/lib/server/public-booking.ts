@@ -53,6 +53,9 @@ export type PublicBookingState = {
 	issue: PublicBookingIssue | null;
 };
 
+export const WHATSAPP_OPERATIONAL_OPT_IN_TEXT =
+	'Al reservar, acepto recibir mensajes relacionados con este turno por WhatsApp.';
+
 type BookingAttemptInput = {
 	businessId?: string | null;
 	phoneE164?: string | null;
@@ -387,6 +390,7 @@ export const createPublicBooking = async (
 		patientPhone: string;
 		patientEmail?: string | null;
 		note?: string | null;
+		whatsappOptIn?: boolean;
 		ipHash?: string | null;
 		userAgent?: string | null;
 		now?: Date;
@@ -407,6 +411,7 @@ export const createPublicBooking = async (
 		const email = String(input.patientEmail ?? '').trim();
 		if (patientName.length < 3) throw new Error('PUBLIC_PATIENT_NAME_INVALID');
 		if (!phoneE164 || !isLikelyPhoneE164(phoneE164)) throw new Error('PUBLIC_PATIENT_PHONE_INVALID');
+		if (!input.whatsappOptIn) throw new Error('PUBLIC_WHATSAPP_OPT_IN_REQUIRED');
 
 		await assertPublicBookingRateLimits(supabase, {
 			businessId: business.id,
@@ -440,7 +445,10 @@ export const createPublicBooking = async (
 			professionalId: input.professionalId,
 			startsAt: new Date(selectedSlot.starts_at),
 			internalNote: input.note?.trim() || null,
-			source: 'public_booking'
+			source: 'public_booking',
+			whatsappOptInAt: now,
+			whatsappOptInSource: 'public_booking',
+			whatsappOptInText: WHATSAPP_OPERATIONAL_OPT_IN_TEXT
 		});
 
 		await recordPublicBookingAttempt(supabase, {
@@ -503,6 +511,9 @@ export const getPublicBookingErrorMessage = (error: unknown) => {
 	}
 	if (raw.includes('PUBLIC_CAPTCHA_REQUIRED') || raw.includes('PUBLIC_CAPTCHA_FAILED')) {
 		return 'No pudimos validar la protección anti-spam. Intentá nuevamente.';
+	}
+	if (raw.includes('PUBLIC_WHATSAPP_OPT_IN_REQUIRED')) {
+		return 'Aceptá recibir mensajes relacionados con este turno para completar la reserva.';
 	}
 	return getHumanAppointmentErrorMessage(error);
 };

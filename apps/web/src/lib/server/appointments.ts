@@ -188,6 +188,9 @@ export const createManualAppointment = async (
 		startsAt: Date;
 		internalNote?: string | null;
 		source?: AppointmentSource;
+		whatsappOptInAt?: Date | null;
+		whatsappOptInSource?: string | null;
+		whatsappOptInText?: string | null;
 	}
 ) => {
 	const patientId = await createOrFindPatientForAppointment(supabase, {
@@ -228,6 +231,9 @@ export const createManualAppointment = async (
 			source: input.source ?? 'manual',
 			reminder_due_at: reminderDueAt > now ? reminderDueAt.toISOString() : null,
 			internal_note: input.internalNote || null,
+			whatsapp_opt_in_at: input.whatsappOptInAt?.toISOString() ?? null,
+			whatsapp_opt_in_source: input.whatsappOptInSource ?? null,
+			whatsapp_opt_in_text: input.whatsappOptInText ?? null,
 			created_by_user_id: input.createdByUserId ?? null,
 			updated_by_user_id: input.createdByUserId ?? null,
 			service_name_snapshot: 'Pendiente',

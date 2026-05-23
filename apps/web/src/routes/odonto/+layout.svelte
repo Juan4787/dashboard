@@ -37,6 +37,8 @@
 		{ label: 'Profesionales', href: '/odonto/profesionales' },
 		{ label: 'Servicios', href: '/odonto/servicios' },
 		{ label: 'Disponibilidad', href: '/odonto/disponibilidad' },
+		{ label: 'Recordatorios', href: '/odonto/recordatorios' },
+		{ label: 'Mensajes', href: '/odonto/mensajes' },
 		{ label: 'Mis turnos', href: '/odonto/mis-turnos' },
 		{ label: 'Configuración', href: '/odonto/configuracion' }
 	];
@@ -64,6 +66,8 @@
 		if (path.startsWith('/odonto/profesionales')) return 'Profesionales';
 		if (path.startsWith('/odonto/servicios')) return 'Servicios';
 		if (path.startsWith('/odonto/disponibilidad')) return 'Disponibilidad';
+		if (path.startsWith('/odonto/recordatorios')) return 'Recordatorios';
+		if (path.startsWith('/odonto/mensajes')) return 'Mensajes';
 		if (path.startsWith('/odonto/mis-turnos')) return 'Mis turnos';
 		if (path.startsWith('/odonto/configuracion')) return 'Configuración';
 		if (path.startsWith('/odonto/maestro')) return 'Panel maestro';
@@ -80,6 +84,8 @@
 		if (routeId === '/odonto/agenda') return 'agenda';
 		if (routeId === '/odonto/turnos/[appointmentId]') return 'appointmentDetail';
 		if (routeId === '/odonto/mis-turnos') return 'appointments';
+		if (routeId === '/odonto/recordatorios') return 'appointments';
+		if (routeId === '/odonto/mensajes') return 'appointments';
 		if (routeId === '/odonto/disponibilidad') return 'availability';
 		if (routeId === '/odonto/servicios') return 'services';
 		if (routeId === '/odonto/profesionales/[professionalId]') return 'professionalDetail';
@@ -92,6 +98,8 @@
 		if (path.startsWith('/odonto/agenda')) return 'agenda';
 		if (path.startsWith('/odonto/turnos/')) return 'appointmentDetail';
 		if (path.startsWith('/odonto/mis-turnos')) return 'appointments';
+		if (path.startsWith('/odonto/recordatorios')) return 'appointments';
+		if (path.startsWith('/odonto/mensajes')) return 'appointments';
 		if (path.startsWith('/odonto/disponibilidad')) return 'availability';
 		if (path.startsWith('/odonto/servicios')) return 'services';
 		if (path.startsWith('/odonto/profesionales/')) return 'professionalDetail';

@@ -10,6 +10,8 @@ const REQUIRED_ENV = [
 	'PUBLIC_ODONTO_SUPABASE_URL',
 	'PUBLIC_ODONTO_SUPABASE_ANON_KEY',
 	'PUBLIC_SITE_URL',
+	'INTERNAL_JOB_SECRET',
+	'WHATSAPP_VERIFY_TOKEN',
 	'DEMO_MODE',
 	'MASTER_EMAIL'
 ];
@@ -19,7 +21,10 @@ const RECOMMENDED_ENV = [
 	'ADMIN_SUPABASE_ANON_KEY',
 	'ADMIN_SUPABASE_SERVICE_ROLE_KEY',
 	'PUBLIC_TURNSTILE_SITE_KEY',
-	'TURNSTILE_SECRET_KEY'
+	'TURNSTILE_SECRET_KEY',
+	'WHATSAPP_APP_SECRET',
+	'WHATSAPP_ACCESS_TOKEN',
+	'WHATSAPP_GRAPH_API_VERSION'
 ];
 
 const SECRET_KEYS = new Set([
@@ -29,7 +34,11 @@ const SECRET_KEYS = new Set([
 	'ADMIN_SUPABASE_SERVICE_ROLE_KEY',
 	'PUBLIC_ODONTO_SUPABASE_ANON_KEY',
 	'TURNSTILE_SECRET_KEY',
-	'PUBLIC_TURNSTILE_SITE_KEY'
+	'PUBLIC_TURNSTILE_SITE_KEY',
+	'INTERNAL_JOB_SECRET',
+	'WHATSAPP_VERIFY_TOKEN',
+	'WHATSAPP_APP_SECRET',
+	'WHATSAPP_ACCESS_TOKEN'
 ]);
 
 const PLACEHOLDER_PARTS = ['your-', 'xxxxx', 'odonto-anon-key', 'odonto-service-role-key', 'admin-anon-key', 'admin-service-role-key'];
@@ -40,6 +49,7 @@ const REQUIRED_FILES = [
 	'supabase/migrations/20260513010000_agenda_core.sql',
 	'supabase/migrations/20260513020000_panel_operational_hardening.sql',
 	'supabase/migrations/20260513030000_public_booking.sql',
+	'supabase/migrations/20260513040000_whatsapp_messaging.sql',
 	'apps/web/src/routes/reservar/[businessSlug]/+page.server.ts',
 	'apps/web/src/routes/reservar/[businessSlug]/+page.svelte',
 	'apps/web/src/routes/turno/[token]/+page.server.ts',
@@ -47,8 +57,19 @@ const REQUIRED_FILES = [
 	'apps/web/src/routes/confirmar/[token]/+page.server.ts',
 	'apps/web/src/routes/cancelar/[token]/+page.server.ts',
 	'apps/web/src/routes/reprogramar/[token]/+page.server.ts',
+	'apps/web/src/routes/api/whatsapp/webhook/+server.ts',
+	'apps/web/src/routes/internal/jobs/generate-reminder-dispatches/+server.ts',
+	'apps/web/src/routes/internal/jobs/process-message-dispatches/+server.ts',
+	'apps/web/src/routes/odonto/configuracion/whatsapp/+page.server.ts',
+	'apps/web/src/routes/odonto/configuracion/whatsapp/+page.svelte',
+	'apps/web/src/routes/odonto/mensajes/+page.server.ts',
+	'apps/web/src/routes/odonto/mensajes/+page.svelte',
+	'apps/web/src/routes/odonto/recordatorios/+page.server.ts',
+	'apps/web/src/routes/odonto/recordatorios/+page.svelte',
 	'apps/web/src/lib/server/public-booking.ts',
-	'apps/web/src/lib/server/public-appointments.ts'
+	'apps/web/src/lib/server/public-appointments.ts',
+	'apps/web/src/lib/server/messaging.ts',
+	'apps/web/src/lib/server/internal-jobs.ts'
 ];
 
 const REQUIRED_REMOTE_TABLES = [
@@ -64,7 +85,12 @@ const REQUIRED_REMOTE_TABLES = [
 	'patients',
 	'appointments',
 	'audit_logs',
-	'public_booking_attempts'
+	'public_booking_attempts',
+	'messaging_accounts',
+	'message_templates',
+	'message_dispatches',
+	'inbound_messages',
+	'whatsapp_webhook_events'
 ];
 
 const args = new Set(process.argv.slice(2));
@@ -147,7 +173,7 @@ const main = async () => {
 	const failures = [];
 	const warnings = [];
 
-	log('Staging preflight for Bloque 3.5');
+	log('Staging preflight for Bloque 3.5 / Bloque 4');
 	log(`Repo root: ${repoRoot}`);
 	log(`Env file: ${fs.existsSync(envPath) ? envPath : 'missing .env'}`);
 	log(`Remote DB check: ${shouldCheckRemote ? 'enabled' : 'disabled (use --remote)'}`);

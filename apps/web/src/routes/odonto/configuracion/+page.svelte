@@ -144,6 +144,11 @@
 			<h2 class="mt-4 text-2xl font-bold text-white">Usuarios</h2>
 			<p class="mt-2 text-sm text-white/55">Quién puede entrar y qué puede hacer.</p>
 		</a>
+		<a href="/odonto/configuracion/whatsapp" class="ux-choice p-6">
+			<span class="ux-badge">WhatsApp</span>
+			<h2 class="mt-4 text-2xl font-bold text-white">Mensajes automáticos</h2>
+			<p class="mt-2 text-sm text-white/55">Conexión oficial, bot y recordatorios.</p>
+		</a>
 	</div>
 
 	<div class="ux-card">

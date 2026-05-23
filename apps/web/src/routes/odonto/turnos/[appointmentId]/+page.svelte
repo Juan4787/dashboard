@@ -16,6 +16,7 @@
 			context: { canOperate: boolean; role: string };
 			appointment: any;
 			auditLogs: AuditLog[];
+			messageDispatches: any[];
 			userLabels: Record<string, string>;
 			reprogramDate: string;
 			reprogramSlots: Slot[];
@@ -43,6 +44,24 @@
 		manual: 'Manual',
 		whatsapp_bot: 'WhatsApp',
 		admin: 'Administración interna'
+	};
+
+	const messageStatusLabels: Record<string, string> = {
+		scheduled: 'Programado',
+		queued: 'En cola',
+		sending: 'Enviando',
+		sent: 'Enviado',
+		delivered: 'Entregado',
+		read: 'Leído',
+		failed: 'Falló',
+		cancelled: 'Cancelado',
+		skipped: 'Omitido'
+	};
+
+	const messageTypeLabels: Record<string, string> = {
+		appointment_reminder_24h: 'Recordatorio',
+		bot_reply: 'Respuesta automática',
+		manual_test: 'Prueba'
 	};
 
 	const statusTone: Record<string, string> = {
@@ -281,6 +300,31 @@
 								</div>
 							{/if}
 						</div>
+					</div>
+				</div>
+
+				<div class="mt-5 rounded-2xl border border-white/10 bg-white/[0.035] p-5">
+					<h2 class="text-lg font-semibold text-white">Mensajes</h2>
+					<div class="mt-4 grid gap-3">
+						{#each data.messageDispatches as dispatch}
+							<div class="rounded-2xl border border-white/10 bg-white/[0.035] px-4 py-4 text-sm">
+								<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+									<div>
+										<p class="font-semibold text-white">{messageTypeLabels[dispatch.type] ?? dispatch.type}</p>
+										<p class="mt-1 text-xs font-semibold text-white/45">{formatDateTime(dispatch.created_at)}</p>
+									</div>
+									<span class="ux-badge">{messageStatusLabels[dispatch.status] ?? dispatch.status}</span>
+								</div>
+								{#if dispatch.human_error_message}
+									<p class="mt-2 text-red-200">{dispatch.human_error_message}</p>
+								{/if}
+							</div>
+						{/each}
+						{#if data.messageDispatches.length === 0}
+							<p class="rounded-2xl border border-white/10 bg-white/[0.035] px-4 py-4 text-sm text-white/60">
+								Todavía no hay mensajes asociados a este turno.
+							</p>
+						{/if}
 					</div>
 				</div>
 			</div>
