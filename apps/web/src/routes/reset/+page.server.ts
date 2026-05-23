@@ -17,7 +17,7 @@ export const actions: Actions = {
 		const email = String(form.get('email') ?? '').trim().toLowerCase();
 
 		if (!email) {
-			return fail(400, { message: 'Ingresá un email válido', email });
+			return fail(400, { message: 'Ingresá un correo electrónico válido.', email });
 		}
 
 		if (!isMasterEmail(email)) {
@@ -28,13 +28,13 @@ export const actions: Actions = {
 			if (allowedError) {
 				console.error('Error validando email habilitado', allowedError);
 				return fail(500, {
-					message: 'Falta configurar el control de emails habilitados en Supabase.',
+					message: 'Falta configurar el control de correos habilitados.',
 					email
 				});
 			}
 			if (!allowed) {
 				return fail(400, {
-					message: 'Ese email no está habilitado para recuperar contraseña.',
+					message: 'Ese correo electrónico no está habilitado para recuperar contraseña.',
 					email
 				});
 			}

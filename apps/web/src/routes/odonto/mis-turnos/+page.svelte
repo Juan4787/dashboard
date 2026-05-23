@@ -31,39 +31,64 @@
 		reserved: 'Reservado',
 		confirmed: 'Confirmado',
 		cancelled: 'Cancelado',
-		reschedule_requested: 'Quiere reprogramar',
+		reschedule_requested: 'Reprogramar',
 		attended: 'Asistió',
 		no_show: 'No asistió'
 	};
 
+	const statusTone: Record<string, string> = {
+		reserved: 'ux-badge',
+		confirmed: 'ux-badge ux-badge-success',
+		cancelled: 'ux-badge ux-badge-danger',
+		reschedule_requested: 'ux-badge ux-badge-warning',
+		attended: 'ux-badge ux-badge-success',
+		no_show: 'ux-badge ux-badge-danger'
+	};
+
 	const timeOnly = (value: string) =>
 		new Intl.DateTimeFormat('es-AR', { hour: '2-digit', minute: '2-digit' }).format(new Date(value));
+
+	const selectedProfile = $derived(
+		data.professionalLinks.find((link: ProfessionalLink) => link.professional_id === data.selectedProfessionalId)?.professionals ??
+			null
+	);
 </script>
 
-<section class="flex flex-col gap-6">
-	<div class="rounded-2xl border border-neutral-100 bg-white/90 p-5 shadow-card dark:border-[#1f3554] dark:bg-[#152642] sm:p-6">
-		<h1 class="text-2xl font-semibold text-neutral-900 dark:text-white">Mis turnos</h1>
-		<p class="mt-2 max-w-3xl text-sm text-neutral-600 dark:text-neutral-200">
-			Vista operativa del profesional vinculado al usuario actual.
-		</p>
+<section class="ux-page">
+	<div class="ux-hero">
+		<div class="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+			<div>
+				<p class="ux-badge">Profesional</p>
+				<h1 class="ux-title mt-4">Mis turnos</h1>
+				<p class="ux-subtitle">
+					{selectedProfile ? selectedProfile.name : 'Tu agenda de hoy y próximos turnos.'}
+				</p>
+			</div>
+			<div class="grid grid-cols-2 gap-3">
+				<div class="ux-soft-card min-w-32 p-4 text-center">
+					<p class="text-sm font-bold text-white/55">Hoy</p>
+					<p class="mt-1 text-3xl font-bold text-white">{data.todayAppointments.length}</p>
+				</div>
+				<div class="ux-soft-card min-w-32 p-4 text-center">
+					<p class="text-sm font-bold text-white/55">Próximos</p>
+					<p class="mt-1 text-3xl font-bold text-white">{data.upcomingAppointments.length}</p>
+				</div>
+			</div>
+		</div>
 	</div>
 
 	{#if form?.message}
-		<p class={`rounded-xl px-4 py-3 text-sm font-semibold ${form.success ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-700'}`}>
-			{form.message}
-		</p>
+		<p class={form.success ? 'ux-alert ux-alert-success' : 'ux-alert'}>{form.message}</p>
 	{/if}
 
 	{#if data.professionalLinks.length === 0}
-		<div class="rounded-2xl border border-dashed border-neutral-300 bg-white/70 p-6 text-sm text-neutral-600 dark:border-[#1f3554] dark:bg-[#152642] dark:text-neutral-200">
-			Tu usuario no está asociado a ningún profesional. Pedile a administración que te vincule desde Profesionales.
-		</div>
+		<div class="ux-empty">Tu usuario no está asociado a ningún profesional.</div>
 	{:else}
-		<div class="rounded-2xl border border-neutral-100 bg-white/90 p-5 shadow-card dark:border-[#1f3554] dark:bg-[#152642] sm:p-6">
+		<div class="ux-card">
 			<form method="GET" class="grid gap-4 md:grid-cols-[1fr_auto]">
-				<label class="space-y-1">
-					<span class="text-sm font-semibold">Perfil profesional</span>
-					<select name="professional_id" class="w-full rounded-xl border border-neutral-200 px-4 py-3 text-sm dark:border-[#1f3554] dark:bg-[#0f1f36]">
+				<label>
+					<span class="ux-label">Perfil</span>
+					<select name="professional_id" class="ux-select">
 						<option value="">Todos mis perfiles</option>
 						{#each data.professionalLinks as link}
 							<option value={link.professional_id} selected={link.professional_id === data.selectedProfessionalId}>
@@ -72,37 +97,33 @@
 						{/each}
 					</select>
 				</label>
-				<button class="self-end rounded-xl border border-neutral-200 px-5 py-3 text-sm font-semibold transition hover:bg-neutral-50 dark:border-[#1f3554] dark:hover:bg-[#0f1f36]">
-					Filtrar
-				</button>
+				<button class="ux-btn-primary self-end">Ver</button>
 			</form>
 		</div>
 
-		<div class="rounded-2xl border border-neutral-100 bg-white/90 p-5 shadow-card dark:border-[#1f3554] dark:bg-[#152642] sm:p-6">
-			<h2 class="text-lg font-semibold text-neutral-900 dark:text-white">Hoy</h2>
-			<div class="mt-4 grid gap-3">
+		<div class="ux-card">
+			<h2 class="ux-section-title">Hoy</h2>
+			<div class="mt-5 grid gap-3">
 				{#each data.todayAppointments as appointment}
-					<article class="rounded-xl border border-neutral-200 p-4 dark:border-[#1f3554]">
-						<div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+					<article class="ux-soft-card p-4">
+						<div class="grid gap-4 lg:grid-cols-[110px_1fr_auto] lg:items-center">
 							<div>
-								<p class="font-semibold text-neutral-900 dark:text-white">
-									{timeOnly(appointment.starts_at)} a {timeOnly(appointment.ends_at)} · {appointment.service_name_snapshot}
-								</p>
-								<p class="mt-1 text-sm text-neutral-600 dark:text-neutral-200">
-									{appointment.patients?.full_name ?? 'Paciente'}{appointment.patients?.phone_e164 ? ` · ${appointment.patients.phone_e164}` : ''} · {appointment.professional_name_snapshot}
-								</p>
-								<p class="mt-1 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
-									{statusLabels[appointment.status] ?? appointment.status}
-								</p>
+								<p class="text-2xl font-bold text-white">{timeOnly(appointment.starts_at)}</p>
+								<p class="text-sm text-white/45">{timeOnly(appointment.ends_at)}</p>
 							</div>
-							<div class="flex flex-wrap gap-2">
-								<a href={`/odonto/turnos/${appointment.id}`} class="rounded-xl border border-neutral-200 px-3 py-2 text-sm font-semibold transition hover:bg-neutral-50 dark:border-[#1f3554] dark:hover:bg-[#0f1f36]">
-									Abrir
-								</a>
+							<div>
+								<p class="text-lg font-bold text-white">{appointment.service_name_snapshot}</p>
+								<p class="mt-1 text-sm text-white/58">
+									{appointment.patients?.full_name ?? 'Paciente'}{appointment.patients?.phone_e164 ? ` · ${appointment.patients.phone_e164}` : ''}
+								</p>
+								<span class={`mt-3 ${statusTone[appointment.status] ?? 'ux-badge'}`}>{statusLabels[appointment.status] ?? appointment.status}</span>
+							</div>
+							<div class="flex flex-wrap gap-2 lg:justify-end">
+								<a href={`/odonto/turnos/${appointment.id}`} class="ux-btn-primary">Abrir</a>
 								{#each ['attended', 'no_show'] as status}
 									<form method="POST" action="?/update_status">
 										<input type="hidden" name="appointment_id" value={appointment.id} />
-										<button name="status" value={status} disabled={['cancelled', 'attended', 'no_show'].includes(appointment.status)} class="rounded-xl border border-neutral-200 px-3 py-2 text-sm font-semibold transition hover:bg-neutral-50 disabled:opacity-50 dark:border-[#1f3554] dark:hover:bg-[#0f1f36]">
+										<button name="status" value={status} disabled={['cancelled', 'attended', 'no_show'].includes(appointment.status)} class="ux-btn-secondary">
 											{statusLabels[status]}
 										</button>
 									</form>
@@ -112,26 +133,23 @@
 					</article>
 				{/each}
 				{#if data.todayAppointments.length === 0}
-					<p class="rounded-xl border border-dashed border-neutral-300 px-4 py-3 text-sm text-neutral-600 dark:border-[#1f3554] dark:text-neutral-200">
-						No tenés turnos asignados para hoy.
-					</p>
+					<p class="ux-empty">No tenés turnos asignados para hoy.</p>
 				{/if}
 			</div>
 		</div>
 
-		<div class="rounded-2xl border border-neutral-100 bg-white/90 p-5 shadow-card dark:border-[#1f3554] dark:bg-[#152642] sm:p-6">
-			<h2 class="text-lg font-semibold text-neutral-900 dark:text-white">Próximos turnos</h2>
-			<div class="mt-4 grid gap-3">
+		<div class="ux-card">
+			<h2 class="ux-section-title">Próximos</h2>
+			<div class="mt-5 grid gap-3">
 				{#each data.upcomingAppointments as appointment}
-					<a href={`/odonto/turnos/${appointment.id}`} class="rounded-xl border border-neutral-200 px-4 py-3 text-sm transition hover:bg-neutral-50 dark:border-[#1f3554] dark:hover:bg-[#0f1f36]">
-						<span class="block font-semibold text-neutral-900 dark:text-white">{formatDateTime(appointment.starts_at)} · {appointment.service_name_snapshot}</span>
-						<span class="text-neutral-600 dark:text-neutral-200">{appointment.patients?.full_name ?? 'Paciente'} · {statusLabels[appointment.status] ?? appointment.status}</span>
+					<a href={`/odonto/turnos/${appointment.id}`} class="ux-choice p-4">
+						<span class="block text-base font-bold text-white">{formatDateTime(appointment.starts_at)}</span>
+						<span class="mt-1 block text-sm text-white/58">{appointment.service_name_snapshot}</span>
+						<span class="mt-3 inline-flex {statusTone[appointment.status] ?? 'ux-badge'}">{statusLabels[appointment.status] ?? appointment.status}</span>
 					</a>
 				{/each}
 				{#if data.upcomingAppointments.length === 0}
-					<p class="rounded-xl border border-dashed border-neutral-300 px-4 py-3 text-sm text-neutral-600 dark:border-[#1f3554] dark:text-neutral-200">
-						Todavía no hay turnos futuros asignados.
-					</p>
+					<p class="ux-empty">Todavía no hay turnos futuros asignados.</p>
 				{/if}
 			</div>
 		</div>

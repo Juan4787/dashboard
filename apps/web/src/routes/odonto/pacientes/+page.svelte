@@ -474,7 +474,7 @@ const isSearching = $derived(search.trim().length > 0);
 		</div>
 		<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
 			<div class="space-y-2">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="dni">DNI (recomendado)</label>
+					<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="dni">DNI (opcional)</label>
 				<input
 					id="dni"
 					name="dni"
@@ -485,7 +485,7 @@ const isSearching = $derived(search.trim().length > 0);
 				/>
 			</div>
 			<div class="space-y-2">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="phone">Teléfono</label>
+					<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="phone">Teléfono (opcional)</label>
 				<input
 					id="phone"
 					name="phone"

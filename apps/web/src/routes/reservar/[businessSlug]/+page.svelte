@@ -8,7 +8,7 @@
 		duration_minutes: number;
 		price_label: string | null;
 	};
-	type Professional = { id: string; name: string; specialty: string | null; avatar_url: string | null };
+	type Professional = { id: string; name: string; specialty: string | null };
 	type Slot = {
 		date: string;
 		time: string;
@@ -67,6 +67,13 @@
 		no_availability: 'No hay horarios disponibles para los próximos días.'
 	};
 	const values = $derived((form?.values ?? {}) as Record<string, unknown>);
+	const serviceMark = (name: string) =>
+		name
+			.split(' ')
+			.filter(Boolean)
+			.slice(0, 2)
+			.map((part) => part[0]?.toUpperCase())
+			.join('');
 </script>
 
 <svelte:head>
@@ -76,74 +83,69 @@
 	{/if}
 </svelte:head>
 
-<main class="min-h-screen bg-neutral-50 text-neutral-900 dark:bg-[#0b1626] dark:text-white">
-	<div class="mx-auto flex w-full max-w-3xl flex-col gap-5 px-4 py-5 sm:py-8">
-		<header class="rounded-2xl border border-neutral-100 bg-white p-5 shadow-sm dark:border-[#1f3554] dark:bg-[#152642]">
+<main class="min-h-screen bg-[#06111f] px-4 py-5 text-white sm:py-8">
+	<div class="mx-auto flex w-full max-w-4xl flex-col gap-5">
+		<header class="ux-hero">
 			<div class="flex items-start gap-4">
 				{#if business?.logo_url}
-					<img src={business.logo_url} alt={business.name} class="h-14 w-14 rounded-xl object-cover" />
+					<img src={business.logo_url} alt={business.name} class="h-16 w-16 rounded-2xl object-cover" />
 				{:else}
-					<div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-[#7c3aed] text-lg font-semibold text-white">
+					<div class="grid h-16 w-16 shrink-0 place-items-center rounded-2xl bg-[#7c3aed] text-lg font-bold text-white">
 						{business?.name?.slice(0, 2).toUpperCase() ?? 'RS'}
 					</div>
 				{/if}
 				<div class="min-w-0">
-					<h1 class="text-2xl font-semibold leading-tight text-neutral-900 dark:text-white">{business?.name ?? 'Reserva online'}</h1>
-					<p class="mt-1 text-sm text-neutral-600 dark:text-neutral-200">
-						Elegí servicio, profesional y horario disponible.
-					</p>
+					<p class="ux-badge">Reserva online</p>
+					<h1 class="mt-3 text-3xl font-bold text-white">{business?.name ?? 'Reserva online'}</h1>
 					{#if business?.address || business?.phone}
-						<p class="mt-2 text-xs text-neutral-500 dark:text-neutral-300">
-							{business.address ?? ''}{business.address && business.phone ? ' · ' : ''}{business.phone ?? ''}
-						</p>
+						<p class="mt-2 text-sm text-white/55">{business.address ?? ''}{business.address && business.phone ? ' · ' : ''}{business.phone ?? ''}</p>
 					{/if}
 				</div>
 			</div>
 		</header>
 
 		{#if data.state.issue}
-			<section class="rounded-2xl border border-dashed border-neutral-300 bg-white p-6 text-sm text-neutral-700 dark:border-[#1f3554] dark:bg-[#152642] dark:text-neutral-200">
-				<p class="font-semibold">{issueMessages[data.state.issue] ?? 'No se pudo cargar la reserva online.'}</p>
+			<section class="ux-card">
+				<p class="text-lg font-bold text-white">{issueMessages[data.state.issue] ?? 'No se pudo cargar la reserva online.'}</p>
 				{#if business?.phone}
-					<p class="mt-2">Contactá al consultorio: {business.phone}</p>
+					<p class="mt-2 text-sm text-white/55">Contactá al consultorio: {business.phone}</p>
 				{/if}
 			</section>
 		{:else}
-			<section class="rounded-2xl border border-neutral-100 bg-white p-4 shadow-sm dark:border-[#1f3554] dark:bg-[#152642]">
-				<div class="grid grid-cols-5 gap-2 text-center text-xs font-semibold">
-					{#each [1, 2, 3, 4, 5] as item}
-						<div class={`rounded-full px-2 py-2 ${step >= item ? 'bg-[#7c3aed] text-white' : 'bg-neutral-100 text-neutral-500 dark:bg-[#0f1f36] dark:text-neutral-300'}`}>
+			<section class="ux-card">
+				<div class="mx-auto flex max-w-md items-center gap-3">
+					{#each [1, 2, 3, 4, 5] as item, index}
+						<span class={`grid h-9 w-9 place-items-center rounded-full text-sm font-bold ${step >= item ? 'bg-[#7c3aed] text-white' : 'bg-white/10 text-white/50'}`}>
 							{item}
-						</div>
+						</span>
+						{#if index < 4}
+							<span class={`h-px flex-1 ${step > item ? 'bg-[#7c3aed]' : 'bg-white/15'}`}></span>
+						{/if}
 					{/each}
 				</div>
 			</section>
 
-			<section class="rounded-2xl border border-neutral-100 bg-white p-5 shadow-sm dark:border-[#1f3554] dark:bg-[#152642]">
-				<h2 class="text-lg font-semibold text-neutral-900 dark:text-white">1. Servicio</h2>
-				<div class="mt-4 grid gap-3">
+			<section class="ux-card">
+				<h2 class="ux-section-title">¿Qué necesitás?</h2>
+				<div class="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
 					{#each data.state.services as service}
-						<a href={queryFor({ service_id: service.id, professional_id: '', date: '', slot: '' })} class={`rounded-xl border p-4 transition ${selectedService?.id === service.id ? 'border-[#7c3aed] bg-[#7c3aed]/10' : 'border-neutral-200 hover:bg-neutral-50 dark:border-[#1f3554] dark:hover:bg-[#0f1f36]'}`}>
-							<p class="font-semibold text-neutral-900 dark:text-white">{service.name}</p>
-							{#if service.description}
-								<p class="mt-1 text-sm text-neutral-600 dark:text-neutral-200">{service.description}</p>
-							{/if}
-							<p class="mt-2 text-xs text-neutral-500 dark:text-neutral-300">
-								{service.duration_minutes} min{service.price_label ? ` · ${service.price_label}` : ''}
-							</p>
+						<a href={queryFor({ service_id: service.id, professional_id: '', date: '', slot: '' })} class={`ux-choice p-5 text-center ${selectedService?.id === service.id ? 'ux-choice-active' : ''}`}>
+							<span class="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-white/10 text-lg font-bold text-white">{serviceMark(service.name)}</span>
+							<p class="mt-4 text-lg font-bold text-white">{service.name}</p>
+							<p class="mt-2 text-sm text-white/55">{service.duration_minutes} min{service.price_label ? ` · ${service.price_label}` : ''}</p>
 						</a>
 					{/each}
 				</div>
 			</section>
 
 			{#if selectedService}
-				<section class="rounded-2xl border border-neutral-100 bg-white p-5 shadow-sm dark:border-[#1f3554] dark:bg-[#152642]">
-					<h2 class="text-lg font-semibold text-neutral-900 dark:text-white">2. Profesional</h2>
-					<div class="mt-4 grid gap-3">
+				<section class="ux-card">
+					<h2 class="ux-section-title">¿Con quién?</h2>
+					<div class="mt-5 grid gap-3 sm:grid-cols-2">
 						{#each data.state.professionals as professional}
-							<a href={queryFor({ professional_id: professional.id, date: '', slot: '' })} class={`rounded-xl border p-4 transition ${selectedProfessional?.id === professional.id ? 'border-[#7c3aed] bg-[#7c3aed]/10' : 'border-neutral-200 hover:bg-neutral-50 dark:border-[#1f3554] dark:hover:bg-[#0f1f36]'}`}>
-								<p class="font-semibold text-neutral-900 dark:text-white">{professional.name}</p>
-								<p class="mt-1 text-sm text-neutral-600 dark:text-neutral-200">{professional.specialty ?? 'Profesional'}</p>
+							<a href={queryFor({ professional_id: professional.id, date: '', slot: '' })} class={`ux-choice p-5 ${selectedProfessional?.id === professional.id ? 'ux-choice-active' : ''}`}>
+								<p class="text-lg font-bold text-white">{professional.name}</p>
+								<p class="mt-1 text-sm text-white/55">{professional.specialty ?? 'Profesional'}</p>
 							</a>
 						{/each}
 					</div>
@@ -151,85 +153,78 @@
 			{/if}
 
 			{#if selectedService && selectedProfessional}
-				<section class="rounded-2xl border border-neutral-100 bg-white p-5 shadow-sm dark:border-[#1f3554] dark:bg-[#152642]">
-					<h2 class="text-lg font-semibold text-neutral-900 dark:text-white">3. Día</h2>
-					<div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+				<section class="ux-card">
+					<h2 class="ux-section-title">Elegí un día</h2>
+					<div class="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
 						{#each data.state.days as day}
-							<a href={queryFor({ date: day.date, slot: '' })} class={`rounded-xl border px-4 py-3 text-sm font-semibold transition ${data.selected.date === day.date ? 'border-[#7c3aed] bg-[#7c3aed]/10 text-[#5b21b6] dark:text-[#e9d5ff]' : 'border-neutral-200 hover:bg-neutral-50 dark:border-[#1f3554] dark:hover:bg-[#0f1f36]'}`}>
-								<span class="block">{day.label}</span>
-								<span class="mt-1 block text-xs font-medium text-neutral-500 dark:text-neutral-300">{day.count} horarios</span>
+							<a href={queryFor({ date: day.date, slot: '' })} class={`ux-choice px-4 py-3 ${data.selected.date === day.date ? 'ux-choice-active' : ''}`}>
+								<span class="block font-bold text-white">{day.label}</span>
+								<span class="mt-1 block text-xs font-bold text-white/50">{day.count} horarios</span>
 							</a>
 						{/each}
 					</div>
 					{#if data.state.days.length === 0}
-						<p class="mt-4 rounded-xl border border-dashed border-neutral-300 px-4 py-3 text-sm text-neutral-600 dark:border-[#1f3554] dark:text-neutral-200">
-							No hay días disponibles para este servicio y profesional.
-						</p>
+						<p class="ux-empty mt-4">No hay días disponibles.</p>
 					{/if}
 				</section>
 			{/if}
 
 			{#if selectedService && selectedProfessional && data.selected.date}
-				<section class="rounded-2xl border border-neutral-100 bg-white p-5 shadow-sm dark:border-[#1f3554] dark:bg-[#152642]">
-					<h2 class="text-lg font-semibold text-neutral-900 dark:text-white">4. Horario</h2>
-					<div class="mt-4 grid grid-cols-3 gap-3 sm:grid-cols-4">
+				<section class="ux-card">
+					<h2 class="ux-section-title">Elegí un horario</h2>
+					<div class="mt-5 grid grid-cols-3 gap-3 sm:grid-cols-4">
 						{#each data.state.slots as slot}
-							<a href={queryFor({ slot: slot.starts_at })} class={`rounded-xl border px-3 py-3 text-center text-sm font-semibold transition ${selectedSlot?.starts_at === slot.starts_at ? 'border-[#7c3aed] bg-[#7c3aed] text-white' : 'border-neutral-200 hover:bg-neutral-50 dark:border-[#1f3554] dark:hover:bg-[#0f1f36]'}`}>
+							<a href={queryFor({ slot: slot.starts_at })} class={`rounded-2xl border px-3 py-3 text-center text-sm font-bold transition ${selectedSlot?.starts_at === slot.starts_at ? 'border-[#8b5cf6] bg-[#7c3aed] text-white' : 'border-white/10 bg-white/[0.04] text-white hover:border-[#8b5cf6]/70'}`}>
 								{slot.time}
 							</a>
 						{/each}
 					</div>
 					{#if data.state.slots.length === 0}
-						<p class="mt-4 rounded-xl border border-dashed border-neutral-300 px-4 py-3 text-sm text-neutral-600 dark:border-[#1f3554] dark:text-neutral-200">
-							No hay horarios disponibles para este día.
-						</p>
+						<p class="ux-empty mt-4">No hay horarios para ese día.</p>
 					{/if}
 				</section>
 			{/if}
 
 			{#if selectedService && selectedProfessional && selectedSlot}
-				<form method="POST" action="?/create_booking" class="rounded-2xl border border-neutral-100 bg-white p-5 shadow-sm dark:border-[#1f3554] dark:bg-[#152642]">
-					<h2 class="text-lg font-semibold text-neutral-900 dark:text-white">5. Tus datos y confirmación</h2>
-					<div class="mt-4 rounded-xl bg-neutral-50 p-4 text-sm text-neutral-700 dark:bg-[#0f1f36] dark:text-neutral-200">
-						<p class="font-semibold text-neutral-900 dark:text-white">Resumen</p>
-						<p class="mt-2">{selectedService.name} con {selectedProfessional.name}</p>
-						<p>{formatDateTime(selectedSlot.starts_at)} · {selectedService.duration_minutes} min</p>
+				<form method="POST" action="?/create_booking" class="ux-card">
+					<h2 class="ux-section-title">Tus datos</h2>
+					<div class="ux-soft-card mt-5 p-5">
+						<p class="text-sm font-bold text-white/55">Resumen</p>
+						<p class="mt-2 text-lg font-bold text-white">{selectedService.name} con {selectedProfessional.name}</p>
+						<p class="mt-1 text-sm text-white/55">{formatDateTime(selectedSlot.starts_at)} · {selectedService.duration_minutes} min</p>
 					</div>
 
 					<input type="hidden" name="service_id" value={selectedService.id} />
 					<input type="hidden" name="professional_id" value={selectedProfessional.id} />
 					<input type="hidden" name="slot_starts_at" value={selectedSlot.starts_at} />
 
-					<div class="mt-4 grid gap-4">
-						<label class="space-y-1">
-							<span class="text-sm font-semibold">Nombre y apellido</span>
-							<input name="patient_name" required minlength="3" value={String(values.patient_name ?? '')} class="w-full rounded-xl border border-neutral-200 px-4 py-3 text-sm dark:border-[#1f3554] dark:bg-[#0f1f36]" />
+					<div class="mt-5 grid gap-4">
+						<label>
+							<span class="ux-label">Nombre y apellido</span>
+							<input name="patient_name" required minlength="3" value={String(values.patient_name ?? '')} class="ux-input" />
 						</label>
-						<label class="space-y-1">
-							<span class="text-sm font-semibold">Teléfono</span>
-							<input name="patient_phone" required inputmode="tel" value={String(values.patient_phone ?? '')} class="w-full rounded-xl border border-neutral-200 px-4 py-3 text-sm dark:border-[#1f3554] dark:bg-[#0f1f36]" />
+						<label>
+							<span class="ux-label">Teléfono</span>
+							<input name="patient_phone" required inputmode="tel" value={String(values.patient_phone ?? '')} class="ux-input" />
 						</label>
-						<label class="space-y-1">
-							<span class="text-sm font-semibold">Email opcional</span>
-							<input name="patient_email" type="email" value={String(values.patient_email ?? '')} class="w-full rounded-xl border border-neutral-200 px-4 py-3 text-sm dark:border-[#1f3554] dark:bg-[#0f1f36]" />
+						<label>
+							<span class="ux-label">Correo opcional</span>
+							<input name="patient_email" type="email" value={String(values.patient_email ?? '')} class="ux-input" />
 						</label>
-						<label class="space-y-1">
-							<span class="text-sm font-semibold">Comentario opcional</span>
-							<textarea name="note" rows="3" class="w-full rounded-xl border border-neutral-200 px-4 py-3 text-sm dark:border-[#1f3554] dark:bg-[#0f1f36]">{String(values.note ?? '')}</textarea>
+						<label>
+							<span class="ux-label">Comentario opcional</span>
+							<textarea name="note" rows="3" class="ux-textarea">{String(values.note ?? '')}</textarea>
 						</label>
 					</div>
 
 					{#if data.turnstileSiteKey}
-						<div class="cf-turnstile mt-4" data-sitekey={data.turnstileSiteKey}></div>
+						<div class="cf-turnstile mt-5" data-sitekey={data.turnstileSiteKey}></div>
 					{/if}
-
 					{#if form?.message}
-						<p class="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 dark:bg-red-500/15 dark:text-red-100">{form.message}</p>
+						<p class="ux-alert mt-5">{form.message}</p>
 					{/if}
 
-					<button type="submit" class="mt-5 w-full rounded-xl bg-[#7c3aed] px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-[#6d28d9]">
-						Confirmar reserva
-					</button>
+					<button type="submit" class="ux-btn-primary mt-5 w-full">Confirmar reserva</button>
 				</form>
 			{/if}
 		{/if}

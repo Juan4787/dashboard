@@ -2,6 +2,7 @@ import { env } from '$env/dynamic/private';
 import { demoBusinessContext } from '$lib/server/business';
 import { writeAuditLog } from '$lib/server/audit';
 import { getOdontoContext } from '$lib/server/odonto-context';
+import { idsFromForm, setProfessionalServices } from '$lib/server/professional-services';
 import { error as kitError, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -55,30 +56,17 @@ export const actions: Actions = {
 		if (!business.canOperate) return fail(403, { message: 'No tenés permisos para asignar servicios.' });
 
 		const form = await request.formData();
-		const serviceIds = form.getAll('service_id').map((value) => String(value).trim()).filter(Boolean);
+		const serviceIds = idsFromForm(form, 'service_id');
 
-		const { error: deleteError } = await supabase
-			.from('professional_services')
-			.delete()
-			.eq('business_id', business.business.id)
-			.eq('professional_id', params.professionalId);
-		if (deleteError) {
-			console.error('Error limpiando servicios del profesional', deleteError);
-			return fail(500, { message: 'No se pudieron actualizar los servicios.' });
-		}
-
-		if (serviceIds.length > 0) {
-			const { error: insertError } = await supabase.from('professional_services').insert(
-				serviceIds.map((serviceId) => ({
-					business_id: business.business.id,
-					professional_id: params.professionalId,
-					service_id: serviceId
-				}))
-			);
-			if (insertError) {
-				console.error('Error asignando servicios al profesional', insertError);
-				return fail(500, { message: 'No se pudieron asignar los servicios.' });
-			}
+		try {
+			await setProfessionalServices(supabase, business.business.id, params.professionalId, serviceIds);
+		} catch (assignmentError) {
+			console.error('Error asignando servicios al profesional', assignmentError);
+			const message =
+				assignmentError instanceof Error && assignmentError.message === 'INVALID_SERVICE_ASSIGNMENT'
+					? 'Algún servicio seleccionado no pertenece a este consultorio.'
+					: 'No se pudieron actualizar los servicios de este profesional.';
+			return fail(500, { message });
 		}
 
 		await writeAuditLog(supabase, {

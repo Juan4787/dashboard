@@ -132,7 +132,7 @@ const handleEditSubmit = (event: SubmitEvent) => {
 					<p class="font-semibold text-neutral-800 dark:text-neutral-100">{data.person?.full_name ?? data.caseFile.person_name}</p>
 					<p>{data.person?.dni ?? data.caseFile.person_dni ?? 'Sin DNI/CUIL'}</p>
 					<p>{data.person?.phone ?? 'Sin teléfono'}</p>
-					<p>{data.person?.email ?? 'Sin email'}</p>
+					<p>{data.person?.email ?? 'Sin correo electrónico'}</p>
 				</div>
 			</div>
 			<div class="rounded-2xl border border-neutral-100 bg-white p-5 shadow-sm dark:border-[#1f3554] dark:bg-[#122641]">

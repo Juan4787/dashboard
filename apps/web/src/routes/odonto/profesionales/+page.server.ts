@@ -14,8 +14,6 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 		return {
 			context: demoBusinessContext(),
 			professionals: [],
-			professionalUsers: [],
-			businessUsers: [],
 			demo: true
 		};
 	}
@@ -24,20 +22,12 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 	if (!business.canOperate) throw redirect(303, business.role === 'professional' ? '/odonto/mis-turnos' : '/odonto/agenda');
 	const businessId = business.business.id;
 
-	const [{ data: professionals, error: professionalsError }, { data: professionalUsers }, { data: businessUsers }] =
-		await Promise.all([
-			supabase
-				.from('professionals')
-				.select('id, name, specialty, phone, email, avatar_url, is_public, is_active, sort_order, created_at')
-				.eq('business_id', businessId)
-				.order('sort_order')
-				.order('name'),
-			supabase
-				.from('professional_users')
-				.select('id, professional_id, user_id')
-				.eq('business_id', businessId),
-			supabase.rpc('list_business_users', { target_business_id: businessId })
-		]);
+	const { data: professionals, error: professionalsError } = await supabase
+		.from('professionals')
+		.select('id, name, specialty, phone, email, avatar_url, is_public, is_active, sort_order, created_at')
+		.eq('business_id', businessId)
+		.order('sort_order')
+		.order('name');
 
 	if (professionalsError) {
 		console.error('Error cargando profesionales', professionalsError);
@@ -46,8 +36,6 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 	return {
 		context: business,
 		professionals: professionals ?? [],
-		professionalUsers: professionalUsers ?? [],
-		businessUsers: businessUsers ?? [],
 		demo: false
 	};
 };
@@ -62,6 +50,7 @@ export const actions: Actions = {
 		const form = await request.formData();
 		const name = String(form.get('name') ?? '').trim();
 		if (!name) return fail(400, { message: 'El nombre es obligatorio.', values: Object.fromEntries(form) });
+		const isAvailable = boolFromForm(form, 'is_available');
 
 		const { data, error } = await supabase
 			.from('professionals')
@@ -71,10 +60,8 @@ export const actions: Actions = {
 				specialty: String(form.get('specialty') ?? '').trim() || null,
 				phone: String(form.get('phone') ?? '').trim() || null,
 				email: String(form.get('email') ?? '').trim() || null,
-				avatar_url: String(form.get('avatar_url') ?? '').trim() || null,
-				is_public: boolFromForm(form, 'is_public'),
-				is_active: boolFromForm(form, 'is_active'),
-				sort_order: Number(form.get('sort_order') ?? 0) || 0
+				is_public: isAvailable,
+				is_active: isAvailable
 			})
 			.select('id')
 			.single();
@@ -106,6 +93,7 @@ export const actions: Actions = {
 		const name = String(form.get('name') ?? '').trim();
 		if (!professionalId) return fail(400, { message: 'Profesional inválido.' });
 		if (!name) return fail(400, { message: 'El nombre es obligatorio.' });
+		const isAvailable = boolFromForm(form, 'is_available');
 
 		const { error } = await supabase
 			.from('professionals')
@@ -114,10 +102,8 @@ export const actions: Actions = {
 				specialty: String(form.get('specialty') ?? '').trim() || null,
 				phone: String(form.get('phone') ?? '').trim() || null,
 				email: String(form.get('email') ?? '').trim() || null,
-				avatar_url: String(form.get('avatar_url') ?? '').trim() || null,
-				is_public: boolFromForm(form, 'is_public'),
-				is_active: boolFromForm(form, 'is_active'),
-				sort_order: Number(form.get('sort_order') ?? 0) || 0,
+				is_public: isAvailable,
+				is_active: isAvailable,
 				updated_at: new Date().toISOString()
 			})
 			.eq('business_id', business.business.id)

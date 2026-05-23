@@ -176,7 +176,7 @@ const normalize = (value: string) =>
 				/>
 			</div>
 			<div class="space-y-2">
-				<label class="text-sm font-semibold text-neutral-800" for="person_email">Email</label>
+				<label class="text-sm font-semibold text-neutral-800" for="person_email">Correo electrónico</label>
 				<input
 					id="person_email"
 					name="person_email"

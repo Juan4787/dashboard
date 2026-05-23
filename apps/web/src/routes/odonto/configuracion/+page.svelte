@@ -2,6 +2,7 @@
 	import { deserialize } from '$app/forms';
 	import { page } from '$app/stores';
 	import { env } from '$env/dynamic/public';
+	import BackLink from '$lib/components/BackLink.svelte';
 	import { createDriveFolder, getUserInfo, requestAccessToken } from '$lib/client/drive';
 
 	let { data } = $props<{
@@ -49,9 +50,7 @@
 		if (result.type === 'failure') {
 			throw new Error((result.data as { message?: string })?.message ?? 'Error inesperado.');
 		}
-		if (result.type === 'error') {
-			throw new Error('Error inesperado.');
-		}
+		if (result.type === 'error') throw new Error('Error inesperado.');
 		if (result.type === 'redirect') {
 			window.location.assign(result.location);
 			throw new Error('Redireccionando...');
@@ -64,17 +63,13 @@
 		successMessage = '';
 		infoMessage = '';
 		if (!googleClientId) {
-			errorMessage = 'Falta configurar PUBLIC_GOOGLE_CLIENT_ID.';
+			errorMessage = 'Falta configurar Google Drive.';
 			return;
 		}
 		busy = true;
 		try {
 			const promptValue = driveConnection?.root_folder_id ? 'select_account' : 'consent';
-			const token = await requestAccessToken({
-				clientId: googleClientId,
-				scopes: DRIVE_SCOPES,
-				prompt: promptValue
-			});
+			const token = await requestAccessToken({ clientId: googleClientId, scopes: DRIVE_SCOPES, prompt: promptValue });
 			const userInfo = await getUserInfo(token);
 			const email = userInfo.email ?? 'Cuenta conectada';
 			const sameAccount =
@@ -85,21 +80,13 @@
 			if (driveConnection?.connected_email && !sameAccount) {
 				await postAction('?/disconnect_drive', new FormData());
 				driveConnection = null;
-				infoMessage = 'Cuenta anterior desconectada. Se va a crear una carpeta nueva.';
+				infoMessage = 'Cuenta anterior desconectada.';
 			}
 
 			let rootFolderId = sameAccount ? driveConnection?.root_folder_id ?? '' : '';
-
 			if (!rootFolderId) {
-				const appFolderId = await createDriveFolder({
-					accessToken: token,
-					name: APP_FOLDER_NAME
-				});
-				rootFolderId = await createDriveFolder({
-					accessToken: token,
-					name: PATIENTS_FOLDER_NAME,
-					parentId: appFolderId
-				});
+				const appFolderId = await createDriveFolder({ accessToken: token, name: APP_FOLDER_NAME });
+				rootFolderId = await createDriveFolder({ accessToken: token, name: PATIENTS_FOLDER_NAME, parentId: appFolderId });
 			}
 
 			const formData = new FormData();
@@ -107,19 +94,11 @@
 			formData.set('root_folder_id', rootFolderId);
 			await postAction('?/save_drive_connection', formData);
 			driveConnection = { connected_email: email, root_folder_id: rootFolderId };
-			successMessage = 'Drive conectado correctamente.';
-			if (returnTarget) {
-				window.location.assign(returnTarget);
-			}
+			successMessage = 'Drive conectado.';
+			if (returnTarget) window.location.assign(returnTarget);
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : 'No se pudo conectar Drive.';
-			if (msg.includes('popup') || msg.includes('popup_blocked_by_browser')) {
-				errorMessage = 'Permiti los popups para conectar Drive.';
-			} else if (msg.includes('popup_closed_by_user') || msg.includes('access_denied')) {
-				errorMessage = 'La autorizacion fue cancelada.';
-			} else {
-				errorMessage = msg;
-			}
+			errorMessage = msg.includes('popup') ? 'Permití los popups para conectar Drive.' : msg;
 		} finally {
 			busy = false;
 		}
@@ -133,7 +112,7 @@
 		try {
 			await postAction('?/disconnect_drive', new FormData());
 			driveConnection = null;
-			successMessage = 'Drive desconectado. Las carpetas por paciente se reiniciaron.';
+			successMessage = 'Drive desconectado.';
 		} catch (err) {
 			errorMessage = err instanceof Error ? err.message : 'No se pudo desconectar Drive.';
 		} finally {
@@ -146,72 +125,45 @@
 	});
 </script>
 
-<section class="flex flex-col gap-6">
-	<div class="rounded-2xl border border-neutral-100 bg-white/90 p-5 shadow-card dark:border-[#1f3554] dark:bg-[#152642] sm:p-6">
-		<a
-			href={returnTarget || '/odonto/pacientes'}
-			class="text-xs font-semibold uppercase tracking-wide text-[#7c3aed] hover:underline"
-		>
-			Volver a pacientes
-		</a>
-		<h1 class="text-2xl font-semibold text-neutral-900 dark:text-white">Configuración</h1>
-		<p class="mt-2 text-sm text-neutral-600 dark:text-neutral-200">
-			Administrá la configuración del consultorio, usuarios y almacenamiento operativo.
-		</p>
+<section class="ux-page">
+	<div class="ux-hero">
+		<BackLink href={returnTarget || '/odonto/pacientes'} label="Volver" class="mb-5" />
+		<p class="ux-badge">Configuración</p>
+		<h1 class="ux-title mt-4">Ajustes del consultorio</h1>
+		<p class="ux-subtitle">Datos, permisos y almacenamiento.</p>
 	</div>
 
 	<div class="grid gap-4 lg:grid-cols-2">
-		<a
-			href="/odonto/configuracion/negocio"
-			class="rounded-2xl border border-neutral-100 bg-white/90 p-5 shadow-card transition hover:-translate-y-0.5 hover:border-[#7c3aed]/40 dark:border-[#1f3554] dark:bg-[#152642]"
-		>
-			<p class="text-xs font-semibold uppercase tracking-wide text-[#7c3aed]">Negocio</p>
-			<h2 class="mt-2 text-lg font-semibold text-neutral-900 dark:text-white">Datos del consultorio</h2>
-			<p class="mt-2 text-sm text-neutral-600 dark:text-neutral-200">
-				Nombre, slug público, contacto, zona horaria y reglas base de reserva.
-			</p>
+		<a href="/odonto/configuracion/negocio" class="ux-choice p-6">
+			<span class="ux-badge">Consultorio</span>
+			<h2 class="mt-4 text-2xl font-bold text-white">Datos y reserva online</h2>
+			<p class="mt-2 text-sm text-white/55">Nombre, enlace público, contacto y reglas de reserva.</p>
 		</a>
-		<a
-			href="/odonto/configuracion/usuarios"
-			class="rounded-2xl border border-neutral-100 bg-white/90 p-5 shadow-card transition hover:-translate-y-0.5 hover:border-[#7c3aed]/40 dark:border-[#1f3554] dark:bg-[#152642]"
-		>
-			<p class="text-xs font-semibold uppercase tracking-wide text-[#7c3aed]">Permisos</p>
-			<h2 class="mt-2 text-lg font-semibold text-neutral-900 dark:text-white">Usuarios y roles</h2>
-			<p class="mt-2 text-sm text-neutral-600 dark:text-neutral-200">
-				Asigná owner, admin, recepción, profesional o solo lectura dentro del negocio activo.
-			</p>
+		<a href="/odonto/configuracion/usuarios" class="ux-choice p-6">
+			<span class="ux-badge">Permisos</span>
+			<h2 class="mt-4 text-2xl font-bold text-white">Usuarios</h2>
+			<p class="mt-2 text-sm text-white/55">Quién puede entrar y qué puede hacer.</p>
 		</a>
 	</div>
 
-	<div class="rounded-2xl border border-neutral-100 bg-white/90 p-5 shadow-card dark:border-[#1f3554] dark:bg-[#152642] sm:p-6">
-		<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+	<div class="ux-card">
+		<div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 			<div>
-				<h2 class="text-lg font-semibold text-neutral-900 dark:text-white">Almacenamiento de radiografías</h2>
-				<p class="mt-1 text-sm text-neutral-600 dark:text-neutral-200">
-					Estado:
+				<h2 class="ux-section-title">Radiografías</h2>
+				<p class="mt-2 text-sm text-white/55">
 					{#if isConnected}
-						<span class="font-semibold">Conectado como {driveConnection?.connected_email ?? 'tu cuenta'}</span>
+						Conectado como {driveConnection?.connected_email ?? 'tu cuenta'}.
 					{:else}
-						<span class="font-semibold">No conectado</span>
+						Google Drive no está conectado.
 					{/if}
 				</p>
 			</div>
-			<div class="flex flex-col gap-2 sm:flex-row">
-				<button
-					type="button"
-					class="rounded-full bg-[#7c3aed] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-[#6d28d9] disabled:cursor-not-allowed disabled:opacity-60"
-					onclick={connectDrive}
-					disabled={busy || data.demo || !hasClientId}
-				>
-					{isConnected ? 'Cambiar cuenta' : 'Conectar Google Drive'}
+			<div class="flex flex-wrap gap-2">
+				<button type="button" class="ux-btn-primary" onclick={connectDrive} disabled={busy || data.demo || !hasClientId}>
+					{isConnected ? 'Cambiar cuenta' : 'Conectar Drive'}
 				</button>
 				{#if isConnected}
-					<button
-						type="button"
-						class="rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 transition hover:-translate-y-0.5 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-[#1f3554] dark:text-neutral-200 dark:hover:bg-[#0f1f36]"
-						onclick={disconnectDrive}
-						disabled={busy || data.demo}
-					>
+					<button type="button" class="ux-btn-secondary" onclick={disconnectDrive} disabled={busy || data.demo}>
 						Desconectar
 					</button>
 				{/if}
@@ -219,43 +171,24 @@
 		</div>
 
 		{#if data.demo}
-			<p class="mt-4 rounded-xl border border-dashed border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-				Conexión a Drive no disponible en modo demo.
-			</p>
+			<p class="ux-alert mt-4">No disponible en modo demo.</p>
 		{/if}
 		{#if !hasClientId}
-			<p class="mt-4 rounded-xl border border-dashed border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-				Falta configurar el Client ID de Google para habilitar la conexión.
-			</p>
+			<p class="ux-alert mt-4">Falta configurar Google Drive.</p>
 		{/if}
-
 		{#if errorMessage}
-			<p class="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-				{errorMessage}
-			</p>
+			<p class="ux-alert mt-4">{errorMessage}</p>
 		{/if}
 		{#if infoMessage}
-			<p class="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-				{infoMessage}
-			</p>
+			<p class="ux-alert mt-4">{infoMessage}</p>
 		{/if}
 		{#if successMessage}
-			<p class="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-				{successMessage}
-			</p>
+			<p class="ux-alert ux-alert-success mt-4">{successMessage}</p>
 		{/if}
 
-		<p class="mt-4 text-xs text-neutral-500 dark:text-neutral-300">
-			La app solo puede ver archivos subidos desde la app (scope drive.file).
-		</p>
 		{#if isConnected}
-			<a
-				href={rootFolderLink}
-				target="_blank"
-				rel="noreferrer"
-				class="mt-2 inline-flex text-xs font-semibold text-[#7c3aed] hover:underline"
-			>
-				Abrir carpeta en Drive
+			<a href={rootFolderLink} target="_blank" rel="noreferrer" class="ux-btn-secondary mt-5">
+				Abrir carpeta
 			</a>
 		{/if}
 	</div>

@@ -141,10 +141,10 @@ export const actions: Actions = {
 		const role = String(form.get('role') ?? '').trim();
 
 		if (!email || !email.includes('@')) {
-			return fail(400, { message: 'Ingresá un email válido.', values: Object.fromEntries(form) });
+			return fail(400, { message: 'Ingresá un correo electrónico válido.', values: Object.fromEntries(form) });
 		}
 		if (!isBusinessRole(role)) {
-			return fail(400, { message: 'El rol seleccionado no es válido.', values: Object.fromEntries(form) });
+			return fail(400, { message: 'El permiso seleccionado no es válido.', values: Object.fromEntries(form) });
 		}
 
 		const { supabase, context } = await getUsersPageContext({ locals, fetch, cookies });
@@ -161,12 +161,12 @@ export const actions: Actions = {
 		if (error) {
 			console.error('Error agregando usuario al negocio', error);
 			const message = error.message?.includes('USER_NOT_FOUND')
-				? 'Ese email todavía no tiene una cuenta creada.'
+				? 'Ese correo electrónico todavía no tiene una cuenta creada.'
 				: 'No se pudo agregar el usuario.';
 			return fail(500, { message, values: Object.fromEntries(form) });
 		}
 
-		return { success: true, message: 'Usuario agregado al negocio.' };
+		return { success: true, message: 'Usuario agregado al consultorio.' };
 	},
 	update_role: async ({ request, locals, fetch, cookies }) => {
 		if (!locals.auth) throw redirect(303, '/login');
@@ -182,7 +182,7 @@ export const actions: Actions = {
 			return fail(400, { message: 'Usuario inválido.' });
 		}
 		if (!isBusinessRole(role)) {
-			return fail(400, { message: 'El rol seleccionado no es válido.' });
+			return fail(400, { message: 'El permiso seleccionado no es válido.' });
 		}
 
 		const { supabase, context } = await getUsersPageContext({ locals, fetch, cookies });
@@ -193,10 +193,10 @@ export const actions: Actions = {
 		const members = await listMembers(supabase, context.business.id);
 		const target = members.find((member) => member.id === membershipId);
 		if (!target) {
-			return fail(404, { message: 'Usuario no encontrado en este negocio.' });
+			return fail(404, { message: 'Usuario no encontrado en este consultorio.' });
 		}
 		if (target.role === 'owner' && role !== 'owner' && countOwners(members) <= 1) {
-			return fail(400, { message: 'El negocio debe conservar al menos un owner.' });
+			return fail(400, { message: 'El consultorio debe conservar al menos un dueño.' });
 		}
 
 		const { error } = await supabase
@@ -207,10 +207,10 @@ export const actions: Actions = {
 
 		if (error) {
 			console.error('Error actualizando rol', error);
-			return fail(500, { message: 'No se pudo actualizar el rol.' });
+			return fail(500, { message: 'No se pudo actualizar el permiso.' });
 		}
 
-		return { success: true, message: 'Rol actualizado.' };
+		return { success: true, message: 'Permiso actualizado.' };
 	},
 	remove_user: async ({ request, locals, fetch, cookies }) => {
 		if (!locals.auth) throw redirect(303, '/login');
@@ -232,13 +232,13 @@ export const actions: Actions = {
 		const members = await listMembers(supabase, context.business.id);
 		const target = members.find((member) => member.id === membershipId);
 		if (!target) {
-			return fail(404, { message: 'Usuario no encontrado en este negocio.' });
+			return fail(404, { message: 'Usuario no encontrado en este consultorio.' });
 		}
 		if (target.user_id === currentUserId) {
 			return fail(400, { message: 'No podés quitar tu propio acceso desde esta pantalla.' });
 		}
 		if (target.role === 'owner' && countOwners(members) <= 1) {
-			return fail(400, { message: 'El negocio debe conservar al menos un owner.' });
+			return fail(400, { message: 'El consultorio debe conservar al menos un dueño.' });
 		}
 
 		const { error } = await supabase
@@ -252,6 +252,6 @@ export const actions: Actions = {
 			return fail(500, { message: 'No se pudo quitar el usuario.' });
 		}
 
-		return { success: true, message: 'Usuario quitado del negocio.' };
+		return { success: true, message: 'Usuario quitado del consultorio.' };
 	}
 };

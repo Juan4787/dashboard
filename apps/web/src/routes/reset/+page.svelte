@@ -1,4 +1,6 @@
 <script lang="ts">
+	import BackLink from '$lib/components/BackLink.svelte';
+
 	let { form } = $props();
 </script>
 
@@ -6,7 +8,7 @@
 	<div class="w-full max-w-lg rounded-3xl border border-white/10 bg-white/5 p-8 shadow-2xl backdrop-blur dark:border-[#1f3554] dark:bg-[#0f1f36]/90">
 		<div class="mb-6 text-center space-y-3">
 			<h1 class="text-3xl font-semibold text-white">Recuperar contraseña</h1>
-			<p class="text-sm text-neutral-200">Ingresá tu email y te enviaremos un enlace para restablecer tu clave.</p>
+			<p class="text-sm text-neutral-200">Ingresá tu correo electrónico y te enviaremos un enlace para restablecer tu clave.</p>
 		</div>
 
 		{#if form?.success}
@@ -20,7 +22,7 @@
 				</div>
 				<div class="space-y-3 rounded-xl bg-green-500/15 px-4 py-3 text-sm font-semibold text-green-100">
 					<p class="text-sm font-semibold text-green-100">
-						Revisá tu correo: Supabase Auth te envió el email para recuperar la contraseña.
+						Revisá tu correo: te enviamos las instrucciones para recuperar la contraseña.
 					</p>
 				</div>
 				<a
@@ -33,13 +35,13 @@
 		{:else}
 			<form method="post" class="space-y-6">
 				<div class="space-y-3">
-					<label for="email" class="text-sm font-medium text-white">Email</label>
+					<label for="email" class="text-sm font-medium text-white">Correo electrónico</label>
 					<input
 						id="email"
 						name="email"
 						type="email"
 						class="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white shadow-sm outline-none transition focus:border-[#7c3aed] focus:ring-2 focus:ring-[#7c3aed]/40 placeholder:text-neutral-400"
-						placeholder="Introduce tu email"
+						placeholder="Ingresá tu correo electrónico"
 						required
 						value={form?.email ?? ''}
 						autocomplete="email"
@@ -62,8 +64,8 @@
 					Enviar enlace
 				</button>
 
-				<div class="text-center text-sm text-neutral-300">
-					<a href="/login" class="hover:underline">Volver al login</a>
+				<div class="flex justify-center">
+					<BackLink href="/login" label="Volver a ingresar" />
 				</div>
 			</form>
 		{/if}

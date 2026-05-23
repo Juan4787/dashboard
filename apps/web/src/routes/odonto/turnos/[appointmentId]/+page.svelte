@@ -1,4 +1,5 @@
 <script lang="ts">
+	import BackLink from '$lib/components/BackLink.svelte';
 	import { formatDateTime } from '$lib/utils/format';
 
 	type Slot = { date: string; time: string; starts_at: string; professional_name: string };
@@ -38,14 +39,43 @@
 	};
 
 	const sourceLabels: Record<string, string> = {
-		public_booking: 'Reserva pública',
+		public_booking: 'Reserva online',
 		manual: 'Manual',
 		whatsapp_bot: 'WhatsApp',
-		admin: 'Admin'
+		admin: 'Administración interna'
+	};
+
+	const statusTone: Record<string, string> = {
+		reserved: 'bg-[#7c3aed]/25 text-[#c4b5fd]',
+		confirmed: 'bg-emerald-400/15 text-emerald-200',
+		cancelled: 'bg-red-500/15 text-red-200',
+		reschedule_requested: 'bg-amber-400/15 text-amber-100',
+		attended: 'bg-sky-400/15 text-sky-100',
+		no_show: 'bg-zinc-400/15 text-zinc-200'
 	};
 
 	const timeOnly = (value: string) =>
 		new Intl.DateTimeFormat('es-AR', { hour: '2-digit', minute: '2-digit' }).format(new Date(value));
+
+	const dateOnly = (value: string) =>
+		new Intl.DateTimeFormat('es-AR', { day: 'numeric', month: 'long', year: 'numeric' }).format(
+			new Date(value)
+		);
+
+	const durationText = (appointment: any) => {
+		const minutes =
+			Number(appointment?.duration_minutes_snapshot) ||
+			Math.round((new Date(appointment?.ends_at).getTime() - new Date(appointment?.starts_at).getTime()) / 60_000);
+		return `${minutes} min`;
+	};
+
+	const serviceMark = (name: string) =>
+		name
+			.split(' ')
+			.filter(Boolean)
+			.slice(0, 2)
+			.map((part) => part[0]?.toUpperCase())
+			.join('');
 
 	const metadataValue = (log: AuditLog, key: string) => {
 		const value = log.metadata?.[key];
@@ -68,206 +98,217 @@
 		if (log.action === 'appointment.rescheduled') {
 			const from = metadataValue(log, 'from_starts_at');
 			const to = metadataValue(log, 'to_starts_at');
-			if (from && to) return `${formatDateTime(from)} → ${formatDateTime(to)}`;
+			if (from && to) return `${formatDateTime(from)} -> ${formatDateTime(to)}`;
 		}
 		const reason = metadataValue(log, 'reason');
 		if (reason) return reason;
 		const fromStatus = metadataValue(log, 'from_status');
 		const toStatus = metadataValue(log, 'to_status');
-		if (fromStatus && toStatus) return `${statusLabels[fromStatus] ?? fromStatus} → ${statusLabels[toStatus] ?? toStatus}`;
+		if (fromStatus && toStatus) return `${statusLabels[fromStatus] ?? fromStatus} -> ${statusLabels[toStatus] ?? toStatus}`;
 		return '';
 	};
+
+	const canUseStatusAction = (status: string) => {
+		if (isClosed || data.appointment.status === status) return false;
+		if (canOperate) return true;
+		return canProfessionalClose && (status === 'attended' || status === 'no_show');
+	};
+
+	const mainActions = [
+		{ status: 'confirmed', label: 'Confirmar', tone: 'text-emerald-200', mark: 'OK' },
+		{ status: 'attended', label: 'Asistió', tone: 'text-sky-200', mark: 'A' },
+		{ status: 'no_show', label: 'No asistió', tone: 'text-amber-100', mark: 'N' },
+		{ status: 'cancelled', label: 'Cancelar', tone: 'text-red-200', mark: 'X' }
+	];
 </script>
 
-<section class="flex flex-col gap-6">
-	<div class="rounded-2xl border border-neutral-100 bg-white/90 p-5 shadow-card dark:border-[#1f3554] dark:bg-[#152642] sm:p-6">
-		<a href={`/odonto/agenda?date=${data.fromDate}`} class="text-xs font-semibold uppercase tracking-wide text-[#7c3aed] hover:underline">
-			Volver a agenda
-		</a>
-		<div class="mt-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-			<div>
-				<h1 class="text-2xl font-semibold text-neutral-900 dark:text-white">Turno</h1>
-				<p class="mt-2 text-sm text-neutral-600 dark:text-neutral-200">
-					Detalle operativo, reprogramación, estado y auditoría.
-				</p>
+<section class="flex flex-col gap-5">
+	<div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+		<div class="flex items-center gap-3 text-sm font-semibold text-neutral-500 dark:text-white/55">
+			<div class="grid h-11 w-11 place-items-center rounded-2xl border border-[#8b5cf6]/35 bg-[#7c3aed]/15 text-sm font-bold text-[#c4b5fd]">
+				{data.appointment ? serviceMark(data.appointment.service_name_snapshot) : 'T'}
 			</div>
-			{#if data.appointment?.patients?.id}
-				<a href={`/odonto/pacientes/${data.appointment.patients.id}`} class="rounded-xl border border-neutral-200 px-4 py-3 text-sm font-semibold transition hover:bg-neutral-50 dark:border-[#1f3554] dark:hover:bg-[#0f1f36]">
-					Abrir paciente
-				</a>
-			{/if}
+			<span>Agenda</span>
+			<span class="text-white/25">/</span>
+			<span>Turno</span>
+			<span class="text-white/25">/</span>
+			<span class="text-[#a78bfa]">Detalle</span>
 		</div>
+		<BackLink href={`/odonto/agenda?date=${data.fromDate}`} label="Volver" />
 	</div>
 
 	{#if form?.message}
-		<p class={`rounded-xl px-4 py-3 text-sm font-semibold ${form.success ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-700'}`}>
+		<p class={`rounded-2xl px-4 py-3 text-sm font-semibold ${form.success ? 'bg-emerald-400/15 text-emerald-100' : 'bg-red-500/15 text-red-100'}`}>
 			{form.message}
 		</p>
 	{/if}
 
 	{#if data.appointment}
-		<div class="grid gap-6 xl:grid-cols-[1fr_380px]">
-			<div class="flex flex-col gap-6">
-				<div class="rounded-2xl border border-neutral-100 bg-white/90 p-5 shadow-card dark:border-[#1f3554] dark:bg-[#152642] sm:p-6">
-					<div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-						<div>
-							<h2 class="text-lg font-semibold text-neutral-900 dark:text-white">
-								{data.appointment.service_name_snapshot}
-							</h2>
-							<p class="mt-1 text-sm text-neutral-600 dark:text-neutral-200">
-								{data.appointment.professional_name_snapshot}
-							</p>
-						</div>
-						<span class="w-fit rounded-full bg-neutral-100 px-3 py-1 text-xs font-semibold text-neutral-700 dark:bg-[#0f1f36] dark:text-neutral-200">
-							{statusLabels[data.appointment.status] ?? data.appointment.status}
-						</span>
+		<article class="rounded-3xl border border-[#244062] bg-[#071626] p-5 shadow-2xl shadow-black/20 sm:p-7 lg:p-9">
+			<div class="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+				<div class="flex items-start gap-5">
+					<div class="grid h-20 w-20 shrink-0 place-items-center rounded-full bg-[#7c3aed]/35 text-2xl font-bold text-white ring-1 ring-[#8b5cf6]/40">
+						{serviceMark(data.appointment.service_name_snapshot)}
 					</div>
-
-					<dl class="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-						<div>
-							<dt class="text-xs font-semibold uppercase tracking-wide text-neutral-500">Paciente</dt>
-							<dd class="mt-1 text-sm font-semibold">{data.appointment.patients?.full_name ?? 'Sin paciente'}</dd>
-						</div>
-						<div>
-							<dt class="text-xs font-semibold uppercase tracking-wide text-neutral-500">Teléfono</dt>
-							<dd class="mt-1 text-sm">{data.appointment.patients?.phone_e164 ?? 'Sin teléfono'}</dd>
-						</div>
-						<div>
-							<dt class="text-xs font-semibold uppercase tracking-wide text-neutral-500">Email</dt>
-							<dd class="mt-1 text-sm">{data.appointment.patients?.email ?? 'Sin email'}</dd>
-						</div>
-						<div>
-							<dt class="text-xs font-semibold uppercase tracking-wide text-neutral-500">Turno visible</dt>
-							<dd class="mt-1 text-sm">{timeOnly(data.appointment.starts_at)} a {timeOnly(data.appointment.ends_at)}</dd>
-						</div>
-						<div>
-							<dt class="text-xs font-semibold uppercase tracking-wide text-neutral-500">Fecha</dt>
-							<dd class="mt-1 text-sm">{formatDateTime(data.appointment.starts_at)}</dd>
-						</div>
-						<div>
-							<dt class="text-xs font-semibold uppercase tracking-wide text-neutral-500">Origen</dt>
-							<dd class="mt-1 text-sm">{sourceLabels[data.appointment.source] ?? data.appointment.source}</dd>
-						</div>
-					</dl>
-
-					<div class="mt-6 grid gap-3 md:grid-cols-2">
-						<div class="rounded-xl bg-neutral-50 p-4 text-sm text-neutral-700 dark:bg-[#0f1f36] dark:text-neutral-200">
-							<p class="font-semibold text-neutral-900 dark:text-white">Rango del turno</p>
-							<p class="mt-1">{formatDateTime(data.appointment.starts_at)} a {timeOnly(data.appointment.ends_at)}</p>
-						</div>
-						<div class="rounded-xl bg-neutral-50 p-4 text-sm text-neutral-700 dark:bg-[#0f1f36] dark:text-neutral-200">
-							<p class="font-semibold text-neutral-900 dark:text-white">Rango bloqueante</p>
-							<p class="mt-1">{formatDateTime(data.appointment.blocking_starts_at)} a {timeOnly(data.appointment.blocking_ends_at)}</p>
-						</div>
+					<div>
+						<h1 class="text-3xl font-semibold tracking-tight text-white md:text-4xl">
+							{data.appointment.service_name_snapshot}
+						</h1>
+						<p class="mt-2 text-lg font-semibold text-white/55">
+							{data.appointment.professional_name_snapshot}
+						</p>
 					</div>
-
-					<div class="mt-6 rounded-xl border border-neutral-200 p-4 dark:border-[#1f3554]">
-						<h3 class="text-sm font-semibold text-neutral-900 dark:text-white">Snapshots del turno</h3>
-						<dl class="mt-3 grid gap-3 text-sm sm:grid-cols-2">
-							<div>
-								<dt class="text-neutral-500">Servicio original</dt>
-								<dd class="font-semibold">{data.appointment.service_name_snapshot}</dd>
-							</div>
-							<div>
-								<dt class="text-neutral-500">Profesional original</dt>
-								<dd class="font-semibold">{data.appointment.professional_name_snapshot}</dd>
-							</div>
-							<div>
-								<dt class="text-neutral-500">Duración</dt>
-								<dd class="font-semibold">{data.appointment.duration_minutes_snapshot} min</dd>
-							</div>
-							<div>
-								<dt class="text-neutral-500">Buffers</dt>
-								<dd class="font-semibold">{data.appointment.buffer_before_minutes_snapshot} min antes · {data.appointment.buffer_after_minutes_snapshot} min después</dd>
-							</div>
-						</dl>
-					</div>
-
-					{#if data.appointment.internal_note}
-						<div class="mt-6 rounded-xl bg-neutral-50 p-4 text-sm text-neutral-700 dark:bg-[#0f1f36] dark:text-neutral-200">
-							<p class="font-semibold text-neutral-900 dark:text-white">Nota interna</p>
-							<p class="mt-1">{data.appointment.internal_note}</p>
-						</div>
-					{/if}
 				</div>
+				<span class={`w-fit rounded-full px-5 py-3 text-sm font-bold ${statusTone[data.appointment.status] ?? 'bg-white/10 text-white'}`}>
+					{statusLabels[data.appointment.status] ?? data.appointment.status}
+				</span>
+			</div>
 
-				<div class="rounded-2xl border border-neutral-100 bg-white/90 p-5 shadow-card dark:border-[#1f3554] dark:bg-[#152642] sm:p-6">
-					<h2 class="text-lg font-semibold text-neutral-900 dark:text-white">Historial</h2>
-					<div class="mt-4 grid gap-3">
-						{#each data.auditLogs as log}
-							<div class="rounded-xl border border-neutral-200 px-4 py-3 text-sm dark:border-[#1f3554]">
-								<p class="font-semibold text-neutral-900 dark:text-white">{auditLabel(log)}</p>
-								<p class="mt-1 text-xs text-neutral-500 dark:text-neutral-300">{formatDateTime(log.created_at)}</p>
-								{#if auditDetail(log)}
-									<p class="mt-2 text-neutral-600 dark:text-neutral-200">{auditDetail(log)}</p>
-								{/if}
-							</div>
-						{/each}
-						{#if data.auditLogs.length === 0}
-							<p class="rounded-xl border border-dashed border-neutral-300 px-4 py-3 text-sm text-neutral-600 dark:border-[#1f3554] dark:text-neutral-200">
-								Todavía no hay eventos de auditoría para este turno.
-							</p>
-						{/if}
-					</div>
+			<div class="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+				<div class="rounded-2xl border border-white/10 bg-white/[0.045] p-5">
+					<p class="text-sm font-semibold text-white/55">Paciente</p>
+					<p class="mt-2 text-lg font-semibold text-white">{data.appointment.patients?.full_name ?? 'Sin paciente'}</p>
+				</div>
+				<div class="rounded-2xl border border-white/10 bg-white/[0.045] p-5">
+					<p class="text-sm font-semibold text-white/55">Fecha</p>
+					<p class="mt-2 text-lg font-semibold capitalize text-white">{dateOnly(data.appointment.starts_at)}</p>
+				</div>
+				<div class="rounded-2xl border border-white/10 bg-white/[0.045] p-5">
+					<p class="text-sm font-semibold text-white/55">Hora</p>
+					<p class="mt-2 text-lg font-semibold text-white">
+						{timeOnly(data.appointment.starts_at)} - {timeOnly(data.appointment.ends_at)}
+					</p>
+				</div>
+				<div class="rounded-2xl border border-white/10 bg-white/[0.045] p-5">
+					<p class="text-sm font-semibold text-white/55">Duración</p>
+					<p class="mt-2 text-lg font-semibold text-white">{durationText(data.appointment)}</p>
 				</div>
 			</div>
 
-			<aside class="flex flex-col gap-6">
-				<form method="POST" action="?/update_status" class="rounded-2xl border border-neutral-100 bg-white/90 p-5 shadow-card dark:border-[#1f3554] dark:bg-[#152642] sm:p-6">
-					<h2 class="text-lg font-semibold text-neutral-900 dark:text-white">Acciones de estado</h2>
-					<div class="mt-4 grid gap-2">
-						{#each ['confirmed', 'reschedule_requested', 'attended', 'no_show'] as status}
-							<button name="status" value={status} disabled={isClosed || data.appointment.status === status || (!canOperate && !(canProfessionalClose && (status === 'attended' || status === 'no_show')))} class="rounded-xl border border-neutral-200 px-4 py-3 text-left text-sm font-semibold transition hover:bg-neutral-50 disabled:opacity-50 dark:border-[#1f3554] dark:hover:bg-[#0f1f36]">
-								{statusLabels[status]}
-							</button>
-						{/each}
-					</div>
-				</form>
-
-				<form method="POST" action="?/update_status" class="rounded-2xl border border-neutral-100 bg-white/90 p-5 shadow-card dark:border-[#1f3554] dark:bg-[#152642] sm:p-6">
-					<h2 class="text-lg font-semibold text-neutral-900 dark:text-white">Cancelar turno</h2>
-					<label class="mt-4 block space-y-1">
-						<span class="text-sm font-semibold">Motivo opcional</span>
-						<textarea name="reason" rows="3" disabled={!canOperate || isClosed} class="w-full rounded-xl border border-neutral-200 px-4 py-3 text-sm disabled:opacity-60 dark:border-[#1f3554] dark:bg-[#0f1f36]">{data.appointment.cancelled_reason ?? ''}</textarea>
-					</label>
-					<button name="status" value="cancelled" type="submit" disabled={!canOperate || isClosed} class="mt-4 w-full rounded-xl bg-red-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">
-						Cancelar
-					</button>
-				</form>
-
-				<div class="rounded-2xl border border-neutral-100 bg-white/90 p-5 shadow-card dark:border-[#1f3554] dark:bg-[#152642] sm:p-6">
-					<h2 class="text-lg font-semibold text-neutral-900 dark:text-white">Reprogramar</h2>
-					<form method="GET" class="mt-4 flex gap-2">
-						<input type="hidden" name="from_date" value={data.fromDate} />
-						<label class="flex-1 space-y-1">
-							<span class="text-sm font-semibold">Día</span>
-							<input type="date" name="reprogram_date" value={data.reprogramDate} disabled={!canOperate || isClosed} class="w-full rounded-xl border border-neutral-200 px-4 py-3 text-sm disabled:opacity-60 dark:border-[#1f3554] dark:bg-[#0f1f36]" />
-						</label>
-						<button disabled={!canOperate || isClosed} class="self-end rounded-xl border border-neutral-200 px-4 py-3 text-sm font-semibold disabled:opacity-60 dark:border-[#1f3554]">
-							Ver
+			<div class="mt-7 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+				{#each mainActions as action}
+					<form method="POST" action="?/update_status">
+						<button
+							name="status"
+							value={action.status}
+							disabled={!canUseStatusAction(action.status)}
+							class="flex w-full items-center justify-center gap-3 rounded-2xl border border-white/10 bg-white/[0.035] px-5 py-5 text-lg font-bold text-white transition hover:border-[#8b5cf6]/60 hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-35"
+						>
+							<span class={`grid h-9 w-9 place-items-center rounded-full bg-white/10 text-sm ${action.tone}`}>{action.mark}</span>
+							{action.label}
 						</button>
 					</form>
+				{/each}
+			</div>
 
-					<form method="POST" action="?/reschedule" class="mt-4">
-						<input type="hidden" name="reprogram_date" value={data.reprogramDate} />
-						<label class="space-y-1">
-							<span class="text-sm font-semibold">Horario disponible</span>
-							<select name="slot_starts_at" disabled={!canOperate || isClosed || data.reprogramSlots.length === 0} class="w-full rounded-xl border border-neutral-200 px-4 py-3 text-sm disabled:opacity-60 dark:border-[#1f3554] dark:bg-[#0f1f36]">
-								<option value="">Seleccionar</option>
-								{#each data.reprogramSlots as slot}
-									<option value={slot.starts_at}>{slot.time} · {slot.professional_name}</option>
-								{/each}
-							</select>
-						</label>
-						{#if data.reprogramSlots.length === 0}
-							<p class="mt-3 text-xs text-neutral-500 dark:text-neutral-300">No hay disponibilidad para ese día con el mismo servicio y profesional.</p>
-						{/if}
-						<button type="submit" disabled={!canOperate || isClosed || data.reprogramSlots.length === 0} class="mt-4 w-full rounded-xl bg-[#7c3aed] px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">
-							Reprogramar
-						</button>
-					</form>
+			<div class="mt-7 grid gap-4 rounded-2xl border border-white/10 bg-white/[0.035] p-5 lg:grid-cols-3">
+				<div>
+					<p class="text-sm font-semibold text-white/45">Teléfono</p>
+					<p class="mt-1 text-base font-semibold text-white">{data.appointment.patients?.phone_e164 ?? 'Sin teléfono'}</p>
 				</div>
-			</aside>
-		</div>
+				<div>
+					<p class="text-sm font-semibold text-white/45">Correo</p>
+					<p class="mt-1 text-base font-semibold text-white">{data.appointment.patients?.email ?? 'Sin correo electrónico'}</p>
+				</div>
+				<div>
+					<p class="text-sm font-semibold text-white/45">Origen</p>
+					<p class="mt-1 text-base font-semibold text-white">{sourceLabels[data.appointment.source] ?? data.appointment.source}</p>
+				</div>
+			</div>
+		</article>
+
+		<details id="reprogramar" class="group rounded-3xl border border-[#244062] bg-[#071626] shadow-xl shadow-black/10">
+			<summary class="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-5 text-lg font-semibold text-white sm:px-7">
+				<span>Más detalles</span>
+				<span class="text-[#a78bfa] transition group-open:rotate-180">v</span>
+			</summary>
+			<div class="border-t border-white/10 px-5 py-6 sm:px-7">
+				<div class="grid gap-5 lg:grid-cols-2">
+					<div class="rounded-2xl border border-white/10 bg-white/[0.035] p-5">
+						<h2 class="text-lg font-semibold text-white">Reprogramar</h2>
+						<form method="GET" class="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]">
+							<input type="hidden" name="from_date" value={data.fromDate} />
+							<label class="space-y-1">
+								<span class="text-sm font-semibold text-white/65">Día</span>
+								<input type="date" name="reprogram_date" value={data.reprogramDate} disabled={!canOperate || isClosed} class="w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white disabled:opacity-50" />
+							</label>
+							<button disabled={!canOperate || isClosed} class="self-end rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/10 disabled:opacity-50">
+								Ver horarios
+							</button>
+						</form>
+
+						<form method="POST" action="?/reschedule" class="mt-4">
+							<input type="hidden" name="reprogram_date" value={data.reprogramDate} />
+							<label class="space-y-1">
+								<span class="text-sm font-semibold text-white/65">Horario</span>
+								<select name="slot_starts_at" disabled={!canOperate || isClosed || data.reprogramSlots.length === 0} class="w-full rounded-2xl border border-white/10 bg-[#0b1d32] px-4 py-3 text-sm text-white disabled:opacity-50">
+									<option value="">Seleccionar horario</option>
+									{#each data.reprogramSlots as slot}
+										<option value={slot.starts_at}>{slot.time}</option>
+									{/each}
+								</select>
+							</label>
+							{#if data.reprogramSlots.length === 0}
+								<p class="mt-3 text-sm text-white/45">No hay horarios para ese día.</p>
+							{/if}
+							<button type="submit" disabled={!canOperate || isClosed || data.reprogramSlots.length === 0} class="mt-4 w-full rounded-2xl bg-[#7c3aed] px-5 py-4 text-sm font-semibold text-white transition hover:bg-[#6d28d9] disabled:opacity-45">
+								Reprogramar
+							</button>
+						</form>
+					</div>
+
+					<div class="rounded-2xl border border-white/10 bg-white/[0.035] p-5">
+						<h2 class="text-lg font-semibold text-white">Información</h2>
+						<div class="mt-4 grid gap-4 text-sm">
+							<div>
+								<p class="font-semibold text-white/45">Horario del turno</p>
+								<p class="mt-1 font-semibold text-white">{formatDateTime(data.appointment.starts_at)} - {timeOnly(data.appointment.ends_at)}</p>
+							</div>
+							<div>
+								<p class="font-semibold text-white/45">Tiempo separado en agenda</p>
+								<p class="mt-1 font-semibold text-white">{formatDateTime(data.appointment.blocking_starts_at)} - {timeOnly(data.appointment.blocking_ends_at)}</p>
+							</div>
+							{#if data.appointment.cancelled_reason}
+								<div>
+									<p class="font-semibold text-white/45">Motivo de cancelación</p>
+									<p class="mt-1 font-semibold text-white">{data.appointment.cancelled_reason}</p>
+								</div>
+							{/if}
+							{#if data.appointment.internal_note}
+								<div>
+									<p class="font-semibold text-white/45">Nota interna</p>
+									<p class="mt-1 font-semibold text-white">{data.appointment.internal_note}</p>
+								</div>
+							{/if}
+						</div>
+					</div>
+				</div>
+			</div>
+		</details>
+
+		<details class="group rounded-3xl border border-[#244062] bg-[#071626] shadow-xl shadow-black/10">
+			<summary class="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-5 text-lg font-semibold text-white sm:px-7">
+				<span>Historial</span>
+				<span class="text-[#a78bfa] transition group-open:rotate-180">v</span>
+			</summary>
+			<div class="border-t border-white/10 px-5 py-6 sm:px-7">
+				<div class="grid gap-3">
+					{#each data.auditLogs as log}
+						<div class="rounded-2xl border border-white/10 bg-white/[0.035] px-4 py-4 text-sm">
+							<p class="font-semibold text-white">{auditLabel(log)}</p>
+							<p class="mt-1 text-xs font-semibold text-white/45">{formatDateTime(log.created_at)}</p>
+							{#if auditDetail(log)}
+								<p class="mt-2 text-white/70">{auditDetail(log)}</p>
+							{/if}
+						</div>
+					{/each}
+					{#if data.auditLogs.length === 0}
+						<p class="rounded-2xl border border-white/10 bg-white/[0.035] px-4 py-4 text-sm text-white/60">
+							Todavía no hay movimientos registrados.
+						</p>
+					{/if}
+				</div>
+			</div>
+		</details>
 	{/if}
 </section>

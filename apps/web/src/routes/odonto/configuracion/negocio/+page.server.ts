@@ -109,7 +109,7 @@ export const actions: Actions = {
 			return fail(400, { message: 'El nombre del consultorio es obligatorio.', values: Object.fromEntries(form) });
 		}
 		if (!slug) {
-			return fail(400, { message: 'El slug público es obligatorio.', values: Object.fromEntries(form) });
+			return fail(400, { message: 'El nombre del enlace público es obligatorio.', values: Object.fromEntries(form) });
 		}
 		if (!isBusinessIndustry(industry)) {
 			return fail(400, { message: 'La industria seleccionada no es válida.', values: Object.fromEntries(form) });
@@ -151,7 +151,7 @@ export const actions: Actions = {
 
 		if (error) {
 			console.error('Error actualizando negocio', error);
-			const message = error.code === '23505' ? 'Ese slug ya está en uso.' : 'No se pudo guardar el negocio.';
+			const message = error.code === '23505' ? 'Ese nombre de enlace público ya está en uso.' : 'No se pudo guardar el negocio.';
 			return fail(500, { message, values: Object.fromEntries(form) });
 		}
 

@@ -1,3 +1,7 @@
+<script lang="ts">
+	import BackLink from '$lib/components/BackLink.svelte';
+</script>
+
 <svelte:head>
 	<title>Terminos del servicio</title>
 </svelte:head>
@@ -5,12 +9,7 @@
 <div class="min-h-screen bg-neutral-50 text-neutral-900 dark:bg-[#0b1626] dark:text-[#eaf1ff]">
 	<main class="mx-auto max-w-3xl px-4 py-10">
 		<div class="rounded-2xl border border-neutral-100 bg-white/90 p-6 shadow-card dark:border-[#1f3554] dark:bg-[#152642] sm:p-8">
-			<a
-				href="/login"
-				class="text-xs font-semibold uppercase tracking-wide text-[#7c3aed] hover:underline"
-			>
-				Volver al ingreso
-			</a>
+			<BackLink href="/login" label="Volver al ingreso" />
 			<h1 class="mt-2 text-2xl font-semibold">Terminos del servicio</h1>
 			<p class="mt-1 text-xs text-neutral-500 dark:text-neutral-300">
 				Ultima actualizacion: 2025-12-31

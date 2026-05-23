@@ -3,6 +3,7 @@
 	import { onMount } from 'svelte';
 	import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 	import { env } from '$env/dynamic/public';
+	import BackLink from '$lib/components/BackLink.svelte';
 
 	let status = $state<'loading' | 'ready' | 'success' | 'error'>('loading');
 	let message = $state('');
@@ -17,14 +18,14 @@
 
 		if (!supabaseUrl || !supabaseKey) {
 			status = 'error';
-			message = 'Falta configurar PUBLIC_ODONTO_SUPABASE_URL y PUBLIC_ODONTO_SUPABASE_ANON_KEY.';
+			message = 'La conexión para recuperar la contraseña no está configurada.';
 			return;
 		}
 		try {
 			new URL(supabaseUrl);
 		} catch {
 			status = 'error';
-			message = 'PUBLIC_ODONTO_SUPABASE_URL es inválida. Revisá tu .env.';
+			message = 'La conexión para recuperar la contraseña no es válida.';
 			return;
 		}
 
@@ -121,8 +122,8 @@
 			<p class="rounded-xl bg-white/10 px-4 py-3 text-sm text-neutral-200">Validando enlace...</p>
 		{:else if status === 'error'}
 			<p class="rounded-xl bg-red-500/15 px-4 py-3 text-sm font-semibold text-red-200">{message}</p>
-			<div class="mt-4 text-center">
-				<a href="/reset" class="text-sm font-semibold text-neutral-200 hover:underline">Volver a recuperar contraseña</a>
+			<div class="mt-4 flex justify-center">
+				<BackLink href="/reset" label="Volver a recuperar contraseña" />
 			</div>
 		{:else if status === 'success'}
 			<div class="space-y-4">

@@ -23,7 +23,7 @@ export const actions: Actions = {
 		const password = String(form.get('password') ?? '');
 
 		if (!email || !password) {
-			return fail(400, { message: 'Completá email y contraseña', email });
+			return fail(400, { message: 'Completá correo electrónico y contraseña.', email });
 		}
 
 		const isMaster = isMasterEmail(email);
@@ -51,14 +51,14 @@ export const actions: Actions = {
 			if (allowedError) {
 				console.error('Error validando email habilitado', allowedError);
 				return fail(500, {
-					message: 'Falta configurar el control de emails habilitados en Supabase.',
+					message: 'Falta configurar el control de correos habilitados.',
 					email
 				});
 			}
 			if (!allowed) {
 				return fail(403, {
 					message:
-						'Este email no está habilitado. Pedile acceso al administrador.',
+						'Este correo electrónico no está habilitado. Pedile acceso al administrador.',
 					email
 				});
 			}
@@ -72,18 +72,18 @@ export const actions: Actions = {
 			if ((error as any)?.code === 'email_provider_disabled' || msg.includes('email logins are disabled')) {
 				return fail(400, {
 					message:
-						'En Supabase está desactivado el login por email. Activá "Email" en Authentication → Providers → Email.',
+						'El ingreso con correo electrónico está desactivado en la configuración de acceso.',
 					email
 				});
 			}
 			if (msg.includes('email not confirmed')) {
 				return fail(400, {
-					message: 'Tu email no está confirmado en Supabase. Confirmalo o desactivá la confirmación de email.',
+					message: 'Tu correo electrónico todavía no está confirmado.',
 					email
 				});
 			}
 			if (msg.includes('invalid api key') || msg.includes('invalid jwt') || msg.includes('jwt')) {
-				return fail(400, { message: 'Configuración de Supabase inválida. Revisá URL y ANON KEY.', email });
+				return fail(400, { message: 'La conexión con la base de datos no está configurada correctamente.', email });
 			}
 			return fail(400, { message: 'Credenciales inválidas', email });
 		}
@@ -117,14 +117,14 @@ export const actions: Actions = {
 		const password = String(form.get('password') ?? '');
 
 		if (!email || !password) {
-			return fail(400, { message: 'Completá email y contraseña', email });
+			return fail(400, { message: 'Completá correo electrónico y contraseña.', email });
 		}
 		if (password.length < 6) {
 			return fail(400, { message: 'La contraseña debe tener al menos 6 caracteres', email });
 		}
 
 		if (isMasterEmail(email)) {
-			return fail(400, { message: `El email maestro (${MASTER_EMAIL}) no se registra acá.`, email });
+			return fail(400, { message: `El correo maestro (${MASTER_EMAIL}) no se registra acá.`, email });
 		}
 
 		const supabase = await createSupabaseServerClient('odonto', null, fetch);
@@ -135,14 +135,14 @@ export const actions: Actions = {
 		if (allowedError) {
 			console.error('Error validando email habilitado', allowedError);
 			return fail(500, {
-				message: 'Falta configurar el control de emails habilitados en Supabase.',
+				message: 'Falta configurar el control de correos habilitados.',
 				email
 			});
 		}
 
 		if (!allowed) {
 			return fail(403, {
-				message: 'Este email no está habilitado para registrarse.',
+				message: 'Este correo electrónico no está habilitado para registrarse.',
 				email
 			});
 		}
@@ -152,7 +152,7 @@ export const actions: Actions = {
 			console.error('Error registro Supabase', { email, error });
 			const msg = error?.message?.toLowerCase() ?? '';
 			if (msg.includes('user already registered') || msg.includes('already registered')) {
-				return fail(400, { message: 'El email ya está registrado. Ingresá con tu contraseña.', email });
+				return fail(400, { message: 'Ese correo electrónico ya está registrado. Ingresá con tu contraseña.', email });
 			}
 			return fail(400, { message: 'No pudimos crear la cuenta. Revisá los datos e intentá de nuevo.', email });
 		}
@@ -160,7 +160,7 @@ export const actions: Actions = {
 		if (!data.session) {
 			return fail(400, {
 				message:
-					'La cuenta se creó pero falta confirmación por email. Desactivá la verificación en Supabase para ingresar automáticamente.',
+					'La cuenta se creó pero falta confirmar el correo electrónico.',
 				email
 			});
 		}

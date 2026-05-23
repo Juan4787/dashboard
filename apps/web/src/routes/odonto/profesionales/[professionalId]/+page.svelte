@@ -1,4 +1,6 @@
 <script lang="ts">
+	import BackLink from '$lib/components/BackLink.svelte';
+
 	type Service = {
 		id: string;
 		name: string;
@@ -21,63 +23,48 @@
 	const canOperate = $derived(data.context.canOperate && !data.demo);
 </script>
 
-<section class="flex flex-col gap-6">
-	<div class="rounded-2xl border border-neutral-100 bg-white/90 p-5 shadow-card dark:border-[#1f3554] dark:bg-[#152642] sm:p-6">
-		<a href="/odonto/profesionales" class="text-xs font-semibold uppercase tracking-wide text-[#7c3aed] hover:underline">
-			Volver a profesionales
-		</a>
-		<h1 class="mt-2 text-2xl font-semibold text-neutral-900 dark:text-white">
-			{data.professional?.name ?? 'Profesional'}
-		</h1>
-		<p class="mt-2 text-sm text-neutral-600 dark:text-neutral-200">
-			Asigná los servicios que este profesional puede atender.
-		</p>
+<section class="ux-page">
+	<div class="ux-hero">
+		<BackLink href="/odonto/profesionales" label="Volver" class="mb-5" />
+		<p class="ux-badge">Servicios del profesional</p>
+		<h1 class="ux-title mt-4">{data.professional?.name ?? 'Profesional'}</h1>
+		<p class="ux-subtitle">{data.professional?.specialty ?? 'Elegí qué servicios atiende.'}</p>
 	</div>
 
 	{#if form?.message}
-		<p class={`rounded-xl px-4 py-3 text-sm font-semibold ${form.success ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-700'}`}>
-			{form.message}
-		</p>
+		<p class={form.success ? 'ux-alert ux-alert-success' : 'ux-alert'}>{form.message}</p>
 	{/if}
 
-	<form method="POST" action="?/save_services" class="rounded-2xl border border-neutral-100 bg-white/90 p-5 shadow-card dark:border-[#1f3554] dark:bg-[#152642] sm:p-6">
-		<div class="flex flex-col gap-1">
-			<h2 class="text-lg font-semibold text-neutral-900 dark:text-white">Servicios ofrecidos</h2>
-			<p class="text-sm text-neutral-600 dark:text-neutral-200">
-				Un servicio solo genera disponibilidad pública si está asignado al profesional.
-			</p>
+	<form method="POST" action="?/save_services" class="ux-card">
+		<div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+			<div>
+				<h2 class="ux-section-title">Servicios que atiende</h2>
+				<p class="mt-1 text-sm text-white/55">Estos cambios se reflejan también en Servicios.</p>
+			</div>
+			<button type="submit" disabled={!canOperate} class="ux-btn-primary">Guardar</button>
 		</div>
 
-		<div class="mt-4 grid gap-3 md:grid-cols-2">
+		<div class="mt-6 grid gap-3 md:grid-cols-2">
 			{#each data.services as service}
-				<label class="flex items-start gap-3 rounded-xl border border-neutral-200 px-4 py-3 dark:border-[#1f3554]">
+				<label class={`ux-choice p-4 ${data.assignedServiceIds.includes(service.id) ? 'ux-choice-active' : ''}`}>
 					<input
 						type="checkbox"
 						name="service_id"
 						value={service.id}
 						checked={data.assignedServiceIds.includes(service.id)}
 						disabled={!canOperate}
-						class="mt-1 accent-[#7c3aed]"
+						class="sr-only"
 					/>
-					<span>
-						<span class="block text-sm font-semibold text-neutral-900 dark:text-white">{service.name}</span>
-						<span class="block text-xs text-neutral-500 dark:text-neutral-300">
-							{service.duration_minutes} min · {service.is_active ? 'Activo' : 'Inactivo'} · {service.is_public ? 'Público' : 'Privado'}
-						</span>
+					<span class="block text-lg font-bold text-white">{service.name}</span>
+					<span class="mt-1 block text-sm text-white/55">{service.duration_minutes} minutos</span>
+					<span class="mt-4 inline-flex rounded-full bg-white/10 px-3 py-1 text-xs font-bold text-white/75">
+						{data.assignedServiceIds.includes(service.id) ? 'Asignado' : 'No asignado'}
 					</span>
 				</label>
 			{/each}
 		</div>
 		{#if data.services.length === 0}
-			<p class="mt-4 rounded-xl border border-dashed border-neutral-300 px-4 py-3 text-sm text-neutral-600 dark:border-[#1f3554] dark:text-neutral-200">
-				Primero cargá servicios en la sección Servicios.
-			</p>
+			<p class="ux-empty mt-5">Primero cargá servicios.</p>
 		{/if}
-
-		<div class="mt-5 flex justify-end">
-			<button type="submit" disabled={!canOperate} class="rounded-xl bg-[#7c3aed] px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">
-				Guardar servicios
-			</button>
-		</div>
 	</form>
 </section>

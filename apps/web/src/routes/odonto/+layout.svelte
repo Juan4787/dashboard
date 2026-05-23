@@ -10,7 +10,20 @@
 	let showReportHelp = $state(false);
 	let showSkeleton = $state(false);
 	let shownAt = $state<number | null>(null);
-	let skeletonKind = $state<'patients' | 'patientDetail' | 'config' | 'master'>('patients');
+	type SkeletonKind =
+		| 'agenda'
+		| 'agendaWeek'
+		| 'appointments'
+		| 'appointmentDetail'
+		| 'availability'
+		| 'config'
+		| 'master'
+		| 'patientDetail'
+		| 'patients'
+		| 'professionalDetail'
+		| 'professionals'
+		| 'services';
+	let skeletonKind = $state<SkeletonKind>('patients');
 
 	const SKELETON_DELAY_MS = 120;
 	const SKELETON_MIN_VISIBLE_MS = 220;
@@ -63,10 +76,26 @@
 	});
 
 	const resolveSkeletonKind = (routeId: string | null | undefined, path: string) => {
+		if (routeId === '/odonto/agenda/semana') return 'agendaWeek';
+		if (routeId === '/odonto/agenda') return 'agenda';
+		if (routeId === '/odonto/turnos/[appointmentId]') return 'appointmentDetail';
+		if (routeId === '/odonto/mis-turnos') return 'appointments';
+		if (routeId === '/odonto/disponibilidad') return 'availability';
+		if (routeId === '/odonto/servicios') return 'services';
+		if (routeId === '/odonto/profesionales/[professionalId]') return 'professionalDetail';
+		if (routeId === '/odonto/profesionales') return 'professionals';
 		if (routeId === '/odonto/pacientes/[id]') return 'patientDetail';
 		if (routeId === '/odonto/configuracion') return 'config';
 		if (routeId === '/odonto/maestro') return 'master';
 		if (routeId === '/odonto/pacientes') return 'patients';
+		if (path.startsWith('/odonto/agenda/semana')) return 'agendaWeek';
+		if (path.startsWith('/odonto/agenda')) return 'agenda';
+		if (path.startsWith('/odonto/turnos/')) return 'appointmentDetail';
+		if (path.startsWith('/odonto/mis-turnos')) return 'appointments';
+		if (path.startsWith('/odonto/disponibilidad')) return 'availability';
+		if (path.startsWith('/odonto/servicios')) return 'services';
+		if (path.startsWith('/odonto/profesionales/')) return 'professionalDetail';
+		if (path.startsWith('/odonto/profesionales')) return 'professionals';
 		if (path.startsWith('/odonto/pacientes/')) return 'patientDetail';
 		if (path.startsWith('/odonto/configuracion')) return 'config';
 		if (path.startsWith('/odonto/maestro')) return 'master';
@@ -85,7 +114,7 @@
 		hideTimer = null;
 	};
 
-	const scheduleShowSkeleton = (kind: 'patients' | 'patientDetail' | 'config' | 'master') => {
+	const scheduleShowSkeleton = (kind: SkeletonKind) => {
 		skeletonKind = kind;
 		clearHideDelay();
 		if (showSkeleton) return;
@@ -194,13 +223,10 @@
 						{#if activeBusiness?.business}
 							<div class="rounded-xl border border-neutral-200 px-4 py-3 text-sm dark:border-white/10">
 								<p class="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
-									Negocio activo
+									Consultorio activo
 								</p>
 								<p class="mt-1 font-semibold text-neutral-900 dark:text-white">
 									{activeBusiness.business.name}
-								</p>
-								<p class="mt-1 text-xs text-neutral-500 dark:text-neutral-300">
-									Rol: {activeBusiness.role}
 								</p>
 							</div>
 						{/if}
@@ -292,7 +318,7 @@
 							{activeBusiness.business.name}
 						</p>
 						<p class="text-xs text-neutral-500 dark:text-neutral-300">
-							/{activeBusiness.business.slug} · {activeBusiness.role}
+							Panel del consultorio
 						</p>
 					</div>
 				{/if}

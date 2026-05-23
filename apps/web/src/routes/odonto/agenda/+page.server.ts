@@ -20,9 +20,15 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 		return {
 			context: demoBusinessContext(),
 			date: today(),
+			selectedProfessionalId: '',
+			selectedStatus: '',
+			selectedServiceId: '',
 			appointments: [],
+			stats: APPOINTMENT_STATUSES.map((status) => ({ status, count: 0 })),
+			totalAppointments: 0,
 			professionals: [],
 			services: [],
+			serviceProfessionalIds: {},
 			patients: [],
 			demo: true
 		};
@@ -62,12 +68,12 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 		count: (dayAppointments ?? []).filter((appointment: any) => appointment.status === appointmentStatus).length
 	}));
 
-	const [{ data: appointments }, { data: professionals }, { data: services }, { data: patients }] =
+	const [{ data: appointments }, { data: professionals }, { data: services }, { data: patients }, { data: assignments }] =
 		await Promise.all([
 			Promise.resolve({ data: filteredAppointments }),
 			supabase
 				.from('professionals')
-				.select('id, name, is_active')
+				.select('id, name, specialty, is_active')
 				.eq('business_id', business.business.id)
 				.eq('is_active', true)
 				.order('sort_order')
@@ -85,8 +91,19 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 				.eq('business_id', business.business.id)
 				.is('archived_at', null)
 				.order('updated_at', { ascending: false })
-				.limit(250)
+				.limit(250),
+			supabase
+				.from('professional_services')
+				.select('service_id, professional_id')
+				.eq('business_id', business.business.id)
 		]);
+
+	const serviceProfessionalIds = (assignments ?? []).reduce<Record<string, string[]>>((acc, assignment: any) => {
+		const service = String(assignment.service_id);
+		acc[service] = acc[service] ?? [];
+		acc[service].push(String(assignment.professional_id));
+		return acc;
+	}, {});
 
 	return {
 		context: business,
@@ -99,6 +116,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 		totalAppointments: (dayAppointments ?? []).length,
 		professionals: professionals ?? [],
 		services: services ?? [],
+		serviceProfessionalIds,
 		patients: patients ?? [],
 		demo: false
 	};

@@ -24,7 +24,7 @@ export const load: PageServerLoad = async ({ locals, fetch }) => {
 
 	if (error) {
 		console.error('Error cargando emails habilitados', error);
-		return { emails: [], loadError: 'No se pudo cargar la lista. Revisá Supabase.', masterEmail: email };
+		return { emails: [], loadError: 'No se pudo cargar la lista. Revisá la conexión.', masterEmail: email };
 	}
 
 	return { emails: data ?? [], masterEmail: email, loadError: null };
@@ -40,7 +40,7 @@ export const actions: Actions = {
 		const enabled = form.get('enabled') === 'true';
 
 		if (!email || !email.includes('@')) {
-			return fail(400, { message: 'Ingresá un email válido.', email });
+			return fail(400, { message: 'Ingresá un correo electrónico válido.', email });
 		}
 
 		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
@@ -50,9 +50,9 @@ export const actions: Actions = {
 			console.error('Error creando email habilitado', error);
 			const msg = error.message?.toLowerCase() ?? '';
 			if (msg.includes('duplicate') || msg.includes('unique')) {
-				return fail(409, { message: 'Ese email ya existe en la lista.', email });
+				return fail(409, { message: 'Ese correo electrónico ya existe en la lista.', email });
 			}
-			return fail(500, { message: 'No pudimos guardar el email.', email });
+			return fail(500, { message: 'No pudimos guardar el correo electrónico.', email });
 		}
 
 		return { success: true };
@@ -66,7 +66,7 @@ export const actions: Actions = {
 		const enabled = String(form.get('enabled') ?? '') === 'true';
 
 		if (!id) {
-			return fail(400, { message: 'Email inválido.' });
+			return fail(400, { message: 'Correo electrónico inválido.' });
 		}
 
 		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
@@ -74,7 +74,7 @@ export const actions: Actions = {
 
 		if (error) {
 			console.error('Error actualizando email', error);
-			return fail(500, { message: 'No pudimos actualizar el email.' });
+			return fail(500, { message: 'No pudimos actualizar el correo electrónico.' });
 		}
 
 		return { success: true };
@@ -87,7 +87,7 @@ export const actions: Actions = {
 		const id = String(form.get('id') ?? '');
 
 		if (!id) {
-			return fail(400, { message: 'Email inválido.' });
+			return fail(400, { message: 'Correo electrónico inválido.' });
 		}
 
 		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
@@ -95,7 +95,7 @@ export const actions: Actions = {
 
 		if (error) {
 			console.error('Error eliminando email', error);
-			return fail(500, { message: 'No pudimos eliminar el email.' });
+			return fail(500, { message: 'No pudimos eliminar el correo electrónico.' });
 		}
 
 		return { success: true };

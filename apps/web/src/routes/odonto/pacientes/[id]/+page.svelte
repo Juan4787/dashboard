@@ -1199,7 +1199,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 							</div>
 						</div>
 						<div class="space-y-1">
-							<p class="text-xs font-semibold text-neutral-500 dark:text-neutral-300">Email</p>
+							<p class="text-xs font-semibold text-neutral-500 dark:text-neutral-300">Correo electrónico</p>
 							<div class="flex items-center gap-2">
 								<p class={`text-[15px] font-semibold break-all ${data.patient.email ? 'text-neutral-800 dark:text-white' : 'text-neutral-400 dark:text-neutral-500'}`}>
 									{data.patient.email ?? 'Sin registrar'}
@@ -1401,7 +1401,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 			{/if}
 			{#if !googleClientId}
 				<p class="mt-5 rounded-xl border border-dashed border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-					Falta configurar el Client ID de Google para habilitar las subidas.
+					Falta configurar la conexión con Google Drive para habilitar las subidas.
 				</p>
 			{/if}
 
@@ -1993,7 +1993,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 	<form method="post" action="?/update_patient" class="space-y-3" onkeydown={preventEnterSubmit} onsubmit={handleEditSubmit}>
 		<div class="grid grid-cols-1 gap-3 md:grid-cols-3">
 			<div class="space-y-1">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="email">Email</label>
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="email">Correo electrónico (opcional)</label>
 				<input
 					id="email"
 					name="email"
@@ -2003,7 +2003,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				/>
 			</div>
 			<div class="space-y-1">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="phone">Teléfono</label>
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="phone">Teléfono (opcional)</label>
 				<input
 					id="phone"
 					name="phone"
@@ -2012,7 +2012,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				/>
 			</div>
 			<div class="space-y-1">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="dni">DNI</label>
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="dni">DNI (opcional)</label>
 				<input
 					id="dni"
 					name="dni"
@@ -2024,7 +2024,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 		</div>
 		<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
 			<div class="space-y-1">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="birth_date-year">Fecha de nacimiento</label>
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="birth_date-year">Fecha de nacimiento (opcional)</label>
 				<DatePartsInput
 					name="birth_date"
 					initialValue={data.patient.birth_date ?? null}
@@ -2034,7 +2034,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				/>
 			</div>
 			<div class="space-y-1">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="address">Dirección</label>
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="address">Dirección (opcional)</label>
 				<input
 					id="address"
 					name="address"
@@ -2046,7 +2046,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 		<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
 			<div class="space-y-3">
 				<div class="space-y-1">
-					<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="insurance">Obra social</label>
+					<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="insurance">Obra social (opcional)</label>
 					<input
 						id="insurance"
 						name="insurance"
@@ -2056,7 +2056,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				</div>
 				<div class="space-y-1">
 					<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="insurance_plan">
-						Plan de la obra social
+						Plan de la obra social (opcional)
 					</label>
 					<input
 						id="insurance_plan"
@@ -2067,7 +2067,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				</div>
 			</div>
 			<div class="space-y-1">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="allergies">Alergias</label>
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="allergies">Alergias (opcional)</label>
 				<input
 					id="allergies"
 					name="allergies"
@@ -2078,7 +2078,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 		</div>
 		<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
 			<div class="space-y-1">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="medication">Medicación</label>
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="medication">Medicación (opcional)</label>
 				<textarea
 					id="medication"
 					name="medication"
@@ -2087,7 +2087,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				>{data.patient.medication ?? ''}</textarea>
 			</div>
 			<div class="space-y-1">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="background">Antecedentes</label>
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="background">Antecedentes (opcional)</label>
 				<textarea
 					id="background"
 					name="background"
