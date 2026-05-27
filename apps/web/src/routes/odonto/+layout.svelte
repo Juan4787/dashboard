@@ -8,6 +8,8 @@
 	let { data, children } = $props();
 	let mobileMenuOpen = $state(false);
 	let showReportHelp = $state(false);
+	let configMenuOpen = $state(false);
+	let userMenuOpen = $state(false);
 	let showSkeleton = $state(false);
 	let shownAt = $state<number | null>(null);
 	type SkeletonKind =
@@ -31,30 +33,84 @@
 	let showDelayTimer: ReturnType<typeof setTimeout> | null = null;
 	let hideTimer: ReturnType<typeof setTimeout> | null = null;
 
-	const nav = [
-		{ label: 'Agenda', href: '/odonto/agenda' },
-		{ label: 'Pacientes', href: '/odonto/pacientes' },
-		{ label: 'Profesionales', href: '/odonto/profesionales' },
-		{ label: 'Servicios', href: '/odonto/servicios' },
-		{ label: 'Disponibilidad', href: '/odonto/disponibilidad' },
-		{ label: 'Recordatorios', href: '/odonto/recordatorios' },
-		{ label: 'Mensajes', href: '/odonto/mensajes' },
-		{ label: 'Mis turnos', href: '/odonto/mis-turnos' },
-		{ label: 'Configuración', href: '/odonto/configuracion' }
+	type NavItem = {
+		label: string;
+		href: string;
+		activePrefixes?: string[];
+	};
+
+	const dailyNav: NavItem[] = [
+		{ label: 'Agenda', href: '/odonto/agenda', activePrefixes: ['/odonto/agenda', '/odonto/turnos'] },
+		{ label: 'Pacientes', href: '/odonto/pacientes', activePrefixes: ['/odonto/pacientes'] },
+		{ label: 'Recordatorios', href: '/odonto/recordatorios', activePrefixes: ['/odonto/recordatorios'] },
+		{ label: 'Mensajes', href: '/odonto/mensajes', activePrefixes: ['/odonto/mensajes'] },
+		{
+			label: 'Configuración',
+			href: '/odonto/configuracion',
+			activePrefixes: [
+				'/odonto/configuracion',
+				'/odonto/profesionales',
+				'/odonto/servicios',
+				'/odonto/disponibilidad'
+			]
+		}
+	];
+
+	const professionalNav: NavItem[] = [
+		{ label: 'Mis turnos', href: '/odonto/mis-turnos', activePrefixes: ['/odonto/mis-turnos'] },
+		{ label: 'Pacientes', href: '/odonto/pacientes', activePrefixes: ['/odonto/pacientes'] }
+	];
+
+	const readonlyNav: NavItem[] = [
+		{ label: 'Agenda', href: '/odonto/agenda', activePrefixes: ['/odonto/agenda', '/odonto/turnos'] },
+		{ label: 'Pacientes', href: '/odonto/pacientes', activePrefixes: ['/odonto/pacientes'] }
+	];
+
+	const configNav: NavItem[] = [
+		{ label: 'Negocio', href: '/odonto/configuracion/negocio' },
+		{ label: 'Usuarios', href: '/odonto/configuracion/usuarios' },
+		{ label: 'Profesionales', href: '/odonto/profesionales', activePrefixes: ['/odonto/profesionales'] },
+		{ label: 'Servicios', href: '/odonto/servicios', activePrefixes: ['/odonto/servicios'] },
+		{ label: 'Disponibilidad', href: '/odonto/disponibilidad', activePrefixes: ['/odonto/disponibilidad'] },
+		{ label: 'WhatsApp', href: '/odonto/configuracion/whatsapp' }
 	];
 
 	const activeBusiness = $derived(data?.activeBusiness);
 	const visibleNav = $derived.by(() => {
 		if (activeBusiness?.role === 'professional') {
-			return nav.filter((item) => item.href === '/odonto/mis-turnos' || item.href === '/odonto/pacientes');
+			return professionalNav;
 		}
 		if (activeBusiness?.role === 'readonly') {
-			return nav.filter((item) => item.href === '/odonto/agenda' || item.href === '/odonto/pacientes');
+			return readonlyNav;
 		}
-		return nav;
+		return dailyNav;
+	});
+
+	const canShowConfigMenu = $derived(
+		activeBusiness?.role !== 'professional' && activeBusiness?.role !== 'readonly'
+	);
+	const primaryMobileNav = $derived.by(() =>
+		visibleNav.filter((item) => item.label !== 'Configuración')
+	);
+
+	const roleLabel = $derived.by(() => {
+		const role = activeBusiness?.role;
+		if (role === 'owner') return 'Dueño';
+		if (role === 'admin') return 'Administrador';
+		if (role === 'reception') return 'Recepción';
+		if (role === 'professional') return 'Profesional';
+		if (role === 'readonly') return 'Lectura';
+		return 'Usuario';
 	});
 
 	const isActive = (href: string) => $page.url.pathname.startsWith(href);
+	const isNavItemActive = (item: NavItem) =>
+		(item.activePrefixes ?? [item.href]).some((prefix) => $page.url.pathname.startsWith(prefix));
+
+	const closeMenus = () => {
+		configMenuOpen = false;
+		userMenuOpen = false;
+	};
 
 	const mobileTitle = $derived.by(() => {
 		const path = $page.url.pathname;
@@ -238,19 +294,65 @@
 								</p>
 							</div>
 						{/if}
-						{#each visibleNav as item}
+						<p class="mt-2 px-1 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
+							Trabajo diario
+						</p>
+						{#each primaryMobileNav as item}
 							<a
 								href={item.href}
 								class={`rounded-xl px-4 py-3 text-sm font-semibold transition ${
-									isActive(item.href)
+									isNavItemActive(item)
 										? 'bg-[#7c3aed] text-white'
 										: 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-white/10'
 								}`}
-								onclick={() => (mobileMenuOpen = false)}
+								onclick={() => {
+									mobileMenuOpen = false;
+									closeMenus();
+								}}
 							>
 								{item.label}
 							</a>
 						{/each}
+						{#if canShowConfigMenu}
+							<p class="mt-4 px-1 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
+								Configuración
+							</p>
+							{#each configNav as item}
+								<a
+									href={item.href}
+									class={`rounded-xl px-4 py-3 text-sm font-semibold transition ${
+										isNavItemActive(item)
+											? 'bg-[#7c3aed] text-white'
+											: 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-white/10'
+									}`}
+									onclick={() => {
+										mobileMenuOpen = false;
+										closeMenus();
+									}}
+								>
+									{item.label}
+								</a>
+							{/each}
+						{/if}
+						<p class="mt-4 px-1 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
+							Cuenta
+						</p>
+						{#if activeBusiness?.role !== 'professional'}
+							<a
+								href="/odonto/mis-turnos"
+								class={`rounded-xl px-4 py-3 text-sm font-semibold transition ${
+									isActive('/odonto/mis-turnos')
+										? 'bg-[#7c3aed] text-white'
+										: 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-white/10'
+								}`}
+								onclick={() => {
+									mobileMenuOpen = false;
+									closeMenus();
+								}}
+							>
+								Mis turnos
+							</a>
+						{/if}
 						{#if data?.isMaster}
 							<a
 								href="/odonto/maestro"
@@ -259,7 +361,10 @@
 										? 'bg-[#7c3aed] text-white'
 										: 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-white/10'
 								}`}
-								onclick={() => (mobileMenuOpen = false)}
+								onclick={() => {
+									mobileMenuOpen = false;
+									closeMenus();
+								}}
 							>
 								Panel maestro
 							</a>
@@ -306,22 +411,22 @@
 				></button>
 			</div>
 		{/if}
-		<div class="mx-auto hidden max-w-6xl items-center justify-between px-6 py-3 md:flex">
-			<div class="flex items-center gap-3">
+		<div class="mx-auto hidden max-w-7xl items-center justify-between gap-6 px-6 py-4 md:flex">
+			<div class="flex min-w-0 items-center gap-3">
 				<picture>
 					<source srcset="/logo-mejorado.webp" type="image/webp" />
 					<img
 						src="/logo-mejorado.png"
 						alt="Dental Suite"
-						class="h-20 w-20"
-						width="80"
-						height="80"
+						class="h-14 w-14 shrink-0 rounded-2xl"
+						width="56"
+						height="56"
 						loading="eager"
 						decoding="async"
 					/>
 				</picture>
 				{#if activeBusiness?.business}
-					<div class="hidden min-w-0 lg:block">
+					<div class="min-w-0">
 						<p class="truncate text-sm font-semibold text-neutral-900 dark:text-white">
 							{activeBusiness.business.name}
 						</p>
@@ -331,55 +436,162 @@
 					</div>
 				{/if}
 			</div>
-			<nav class="flex flex-wrap items-center justify-end gap-2 text-sm font-semibold">
-				<ThemeToggle />
+			<nav class="flex min-w-0 flex-1 items-center justify-center gap-2 text-sm font-semibold">
 				{#each visibleNav as item}
-					<a
-						href={item.href}
-						class={`group rounded-full px-3 py-2 transition-all duration-200 ${
-							isActive(item.href)
-								? 'bg-[#7c3aed] text-white shadow-sm'
-								: 'text-neutral-500 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white'
-						}`}
-					>
-						<span
-							class={`inline-block transition-colors duration-200 ${
-								isActive(item.href) ? 'text-white' : 'group-hover:text-[#7c3aed] dark:group-hover:text-[#c084fc]'
+					{#if item.label === 'Configuración' && canShowConfigMenu}
+						<div class="relative">
+							<button
+								type="button"
+								class={`group rounded-2xl px-4 py-3 transition-all duration-200 ${
+									isNavItemActive(item)
+										? 'bg-[#7c3aed]/90 text-white shadow-sm shadow-[#7c3aed]/20'
+										: 'text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-300 dark:hover:bg-white/10 dark:hover:text-white'
+								}`}
+								aria-haspopup="menu"
+								aria-expanded={configMenuOpen}
+								onclick={() => {
+									configMenuOpen = !configMenuOpen;
+									userMenuOpen = false;
+								}}
+							>
+								<span
+									class={`inline-block transition-colors duration-200 ${
+										isNavItemActive(item)
+											? 'text-white'
+											: 'group-hover:text-[#7c3aed] dark:group-hover:text-[#c084fc]'
+									}`}
+								>
+									{item.label}
+								</span>
+							</button>
+							{#if configMenuOpen}
+								<div
+									class="absolute left-1/2 top-full z-30 mt-3 w-64 -translate-x-1/2 rounded-2xl border border-neutral-200 bg-white p-2 shadow-2xl shadow-black/10 dark:border-white/10 dark:bg-[#101f35] dark:shadow-black/40"
+									role="menu"
+								>
+									{#each configNav as configItem}
+										<a
+											href={configItem.href}
+											class={`block rounded-xl px-4 py-3 text-sm font-semibold transition ${
+												isNavItemActive(configItem)
+													? 'bg-[#7c3aed] text-white'
+													: 'text-neutral-600 hover:bg-neutral-100 hover:text-neutral-950 dark:text-neutral-200 dark:hover:bg-white/10 dark:hover:text-white'
+											}`}
+											role="menuitem"
+											onclick={closeMenus}
+										>
+											{configItem.label}
+										</a>
+									{/each}
+								</div>
+							{/if}
+						</div>
+					{:else}
+						<a
+							href={item.href}
+							class={`group rounded-2xl px-4 py-3 transition-all duration-200 ${
+								isNavItemActive(item)
+									? 'bg-[#7c3aed]/90 text-white shadow-sm shadow-[#7c3aed]/20'
+									: 'text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-300 dark:hover:bg-white/10 dark:hover:text-white'
 							}`}
 						>
-							{item.label}
-						</span>
-					</a>
+							<span
+								class={`inline-block transition-colors duration-200 ${
+									isNavItemActive(item)
+										? 'text-white'
+										: 'group-hover:text-[#7c3aed] dark:group-hover:text-[#c084fc]'
+								}`}
+							>
+								{item.label}
+							</span>
+						</a>
+					{/if}
 				{/each}
-				{#if data?.isMaster}
-					<a
-						href="/odonto/maestro"
-						class={`group rounded-full px-3 py-2 transition-all duration-200 ${
-							isActive('/odonto/maestro')
-								? 'bg-[#7c3aed] text-white shadow-sm'
-								: 'text-neutral-500 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white'
-						}`}
-					>
-						<span
-							class={`inline-block transition-colors duration-200 ${
-								isActive('/odonto/maestro')
-									? 'text-white'
-									: 'group-hover:text-[#7c3aed] dark:group-hover:text-[#c084fc]'
-							}`}
-						>
-							Panel maestro
-						</span>
-					</a>
-				{/if}
-				<a
-					href="/logout"
-					class="group text-neutral-500 transition hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white"
-				>
-					<span class="inline-block transition-colors duration-200 group-hover:text-[#7c3aed] dark:group-hover:text-[#c084fc]">
-						Salir
-					</span>
-				</a>
 			</nav>
+			<div class="relative flex min-w-0 justify-end">
+				<button
+					type="button"
+					class="flex max-w-64 items-center gap-3 rounded-2xl border border-neutral-200 bg-white/70 px-3 py-2 text-left shadow-sm transition hover:border-[#7c3aed]/40 hover:bg-white dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/[0.07]"
+					aria-haspopup="menu"
+					aria-expanded={userMenuOpen}
+					onclick={() => {
+						userMenuOpen = !userMenuOpen;
+						configMenuOpen = false;
+					}}
+				>
+					<picture>
+						<source srcset="/logo-mejorado.webp" type="image/webp" />
+						<img
+							src="/logo-mejorado.png"
+							alt=""
+							class="h-10 w-10 shrink-0 rounded-xl"
+							width="40"
+							height="40"
+							loading="eager"
+							decoding="async"
+						/>
+					</picture>
+					<span class="min-w-0">
+						<span class="block truncate text-sm font-semibold text-neutral-900 dark:text-white">
+							{activeBusiness?.business?.name ?? 'Cuenta'}
+						</span>
+						<span class="block truncate text-xs text-neutral-500 dark:text-neutral-300">{roleLabel}</span>
+					</span>
+					<svg class="h-4 w-4 shrink-0 text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+						<path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6" />
+					</svg>
+				</button>
+				{#if userMenuOpen}
+					<div
+						class="absolute right-0 top-full z-30 mt-3 w-64 rounded-2xl border border-neutral-200 bg-white p-2 shadow-2xl shadow-black/10 dark:border-white/10 dark:bg-[#101f35] dark:shadow-black/40"
+						role="menu"
+					>
+						{#if activeBusiness?.role !== 'professional'}
+							<a
+								href="/odonto/mis-turnos"
+								class={`block rounded-xl px-4 py-3 text-sm font-semibold transition ${
+									isActive('/odonto/mis-turnos')
+										? 'bg-[#7c3aed] text-white'
+										: 'text-neutral-600 hover:bg-neutral-100 hover:text-neutral-950 dark:text-neutral-200 dark:hover:bg-white/10 dark:hover:text-white'
+								}`}
+								role="menuitem"
+								onclick={closeMenus}
+							>
+								Mis turnos
+							</a>
+						{/if}
+						{#if data?.isMaster}
+							<a
+								href="/odonto/maestro"
+								class={`block rounded-xl px-4 py-3 text-sm font-semibold transition ${
+									isActive('/odonto/maestro')
+										? 'bg-[#7c3aed] text-white'
+										: 'text-neutral-600 hover:bg-neutral-100 hover:text-neutral-950 dark:text-neutral-200 dark:hover:bg-white/10 dark:hover:text-white'
+								}`}
+								role="menuitem"
+								onclick={closeMenus}
+							>
+								Panel maestro
+							</a>
+						{/if}
+						<div class="my-2 border-t border-neutral-200 dark:border-white/10"></div>
+						<div class="rounded-xl px-4 py-3">
+							<p class="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
+								Tema
+							</p>
+							<ThemeToggle />
+						</div>
+						<a
+							href="/logout"
+							class="block rounded-xl px-4 py-3 text-sm font-semibold text-red-700 transition hover:bg-red-50 dark:text-red-200 dark:hover:bg-red-500/10"
+							role="menuitem"
+							onclick={closeMenus}
+						>
+							Salir
+						</a>
+					</div>
+				{/if}
+			</div>
 		</div>
 	</header>
 

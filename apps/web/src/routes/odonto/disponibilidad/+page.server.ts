@@ -6,9 +6,69 @@ import { getOdontoContext } from '$lib/server/odonto-context';
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
+const normalizeLocalDate = (date: string) => {
+	const trimmed = date.trim();
+	if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+	const match = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+	if (!match) return '';
+	const [, rawDay, rawMonth, rawYear] = match;
+	const day = rawDay.padStart(2, '0');
+	const month = rawMonth.padStart(2, '0');
+	return `${rawYear}-${month}-${day}`;
+};
+
+const normalizeTime = (value: string) => {
+	const cleaned = value
+		.trim()
+		.toLowerCase()
+		.replace(/\s*(hs?|horas?)\.?$/i, '')
+		.replace('.', ':')
+		.replace(/\s+/g, '');
+	if (!cleaned) return null;
+
+	let hour = '';
+	let minute = '00';
+	const colonMatch = cleaned.match(/^(\d{1,2}):(\d{1,2})$/);
+	if (colonMatch) {
+		hour = colonMatch[1];
+		minute = colonMatch[2];
+	} else if (/^\d{1,2}$/.test(cleaned)) {
+		hour = cleaned;
+	} else if (/^\d{3,4}$/.test(cleaned)) {
+		hour = cleaned.slice(0, cleaned.length - 2);
+		minute = cleaned.slice(-2);
+	} else {
+		return null;
+	}
+
+	const hourNumber = Number(hour);
+	const minuteNumber = Number(minute);
+	if (!Number.isInteger(hourNumber) || !Number.isInteger(minuteNumber)) return null;
+	if (hourNumber < 0 || hourNumber > 23 || minuteNumber < 0 || minuteNumber > 59) return null;
+	return `${String(hourNumber).padStart(2, '0')}:${String(minuteNumber).padStart(2, '0')}`;
+};
+
+const parseTimeRanges = (value: string) => {
+	const rawRanges = value
+		.split(/[,;\n]+/)
+		.map((item) => item.trim())
+		.filter(Boolean);
+
+	return rawRanges.map((range) => {
+		const parts = range.split(/\s+(?:a|hasta)\s+|\s*-\s*/i).map((item) => item.trim());
+		if (parts.length !== 2) return null;
+		const start = normalizeTime(parts[0]);
+		const end = normalizeTime(parts[1]);
+		if (!start || !end || start >= end) return null;
+		return { start, end };
+	});
+};
+
 const parseLocalDateTime = (date: string, time: string, timeZone: string) => {
 	if (!date || !time) return null;
-	const value = zonedDateTimeToUtc(date, time, timeZone);
+	const normalizedDate = normalizeLocalDate(date);
+	if (!normalizedDate) return null;
+	const value = zonedDateTimeToUtc(normalizedDate, time, timeZone);
 	return Number.isNaN(value.getTime()) ? null : value;
 };
 
@@ -67,6 +127,70 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 };
 
 export const actions: Actions = {
+	save_weekly_rules: async ({ request, locals, fetch, cookies }) => {
+		if (!locals.auth) throw redirect(303, '/login');
+		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
+		const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
+		if (!business.canOperate) return fail(403, { message: 'No tenés permisos para editar disponibilidad.' });
+
+		const form = await request.formData();
+		const professionalId = String(form.get('professional_id') ?? '').trim();
+		const weekdays = form
+			.getAll('weekdays')
+			.map((value) => Number(value))
+			.filter((value) => Number.isInteger(value) && value >= 0 && value <= 6);
+		const uniqueWeekdays = [...new Set(weekdays)];
+		const interval = Number(form.get('slot_interval_minutes') ?? 15);
+		const parsedRanges = parseTimeRanges(String(form.get('time_ranges') ?? ''));
+		if (!professionalId || uniqueWeekdays.length === 0) {
+			return fail(400, { message: 'Elegí profesional y al menos un día.' });
+		}
+		if (parsedRanges.length === 0 || parsedRanges.some((range) => !range)) {
+			return fail(400, { message: 'Escribí los horarios con formato 09:00-13:00.' });
+		}
+		const ranges = parsedRanges.filter((range): range is { start: string; end: string } => Boolean(range));
+		const slotInterval = Number.isInteger(interval) && interval > 0 ? interval : 15;
+
+		const { error: deleteError } = await supabase
+			.from('availability_rules')
+			.delete()
+			.eq('business_id', business.business.id)
+			.eq('professional_id', professionalId)
+			.in('weekday', uniqueWeekdays);
+		if (deleteError) {
+			console.error('Error reemplazando horarios', deleteError);
+			return fail(500, { message: 'No se pudieron actualizar los horarios.' });
+		}
+
+		const rows = uniqueWeekdays.flatMap((weekday) =>
+			ranges.map((range) => ({
+				business_id: business.business.id,
+				professional_id: professionalId,
+				weekday,
+				start_time: range.start,
+				end_time: range.end,
+				slot_interval_minutes: slotInterval,
+				is_active: true
+			}))
+		);
+
+		const { error: insertError } = await supabase.from('availability_rules').insert(rows);
+		if (insertError) {
+			console.error('Error guardando horarios', insertError);
+			return fail(500, { message: 'No se pudieron guardar los horarios.' });
+		}
+
+		await writeAuditLog(supabase, {
+			businessId: business.business.id,
+			userId,
+			action: 'availability_rules.replaced',
+			entityType: 'professional',
+			entityId: professionalId,
+			metadata: { weekdays: uniqueWeekdays, ranges, slot_interval_minutes: slotInterval }
+		});
+
+		throw redirect(303, `/odonto/disponibilidad?professional_id=${professionalId}`);
+	},
 	create_rule: async ({ request, locals, fetch, cookies }) => {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
@@ -154,8 +278,14 @@ export const actions: Actions = {
 		const professionalId = String(form.get('professional_id') ?? '').trim() || null;
 		const type = String(form.get('type') ?? '').trim();
 		const date = String(form.get('date') ?? '').trim();
-		const startTime = String(form.get('start_time') ?? '').trim();
-		const endTime = String(form.get('end_time') ?? '').trim();
+		const timeRange = String(form.get('time_range') ?? '').trim();
+		const parsedRange = timeRange ? parseTimeRanges(timeRange)[0] : null;
+		const startTime = parsedRange
+			? parsedRange.start
+			: normalizeTime(String(form.get('start_time') ?? '').trim()) ?? '';
+		const endTime = parsedRange
+			? parsedRange.end
+			: normalizeTime(String(form.get('end_time') ?? '').trim()) ?? '';
 		const startsAt = parseLocalDateTime(date, startTime, business.business.timezone);
 		const endsAt = parseLocalDateTime(date, endTime, business.business.timezone);
 		if (!startsAt || !endsAt || startsAt >= endsAt) return fail(400, { message: 'La franja es inválida.' });
