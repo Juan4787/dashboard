@@ -21,9 +21,11 @@
 			{#if appointment?.business?.logo_url}
 				<img src={appointment.business.logo_url} alt={appointment.business.name} class="mb-5 h-16 w-16 rounded-2xl object-cover" />
 			{/if}
-			<p class="ux-badge">{data.created ? 'Reserva creada' : 'Turno'}</p>
-			<h1 class="ux-title mt-4">{data.created ? 'Turno reservado' : 'Tu turno'}</h1>
-			<p class="ux-subtitle">{data.message}</p>
+			<p class="ux-badge">{data.created ? 'Reserva confirmada' : 'Turno'}</p>
+			<h1 class="ux-title mt-4">{data.created ? 'Listo, tu turno quedó reservado' : 'Tu turno'}</h1>
+			<p class="ux-subtitle">
+				{data.created ? 'Guardá este enlace para consultar, confirmar, reprogramar o cancelar el turno.' : data.message}
+			</p>
 			{#if form?.message}
 				<p class={form.success ? 'ux-alert ux-alert-success mt-5' : 'ux-alert mt-5'}>{form.message}</p>
 			{/if}
@@ -33,8 +35,8 @@
 			<section class="ux-card">
 				<div class="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
 					<div>
-						<h2 class="text-2xl font-bold text-white">{appointment.business.name}</h2>
-						<p class="mt-1 text-sm text-white/55">{appointment.public_status_label}</p>
+						<h2 class="text-2xl font-bold text-white">{data.created ? 'Resumen de la reserva' : appointment.business.name}</h2>
+						<p class="mt-1 text-sm text-white/55">{appointment.business.name}</p>
 					</div>
 					<span class="ux-badge">{appointment.public_status_label}</span>
 				</div>
@@ -69,7 +71,7 @@
 						<summary class="cursor-pointer list-none px-5 py-4 text-base font-bold text-white">Necesito reprogramar</summary>
 						<form method="POST" action="?/request_reschedule" class="border-t border-white/10 p-5">
 							<label>
-								<span class="ux-label">Comentario opcional</span>
+								<span class="ux-label">Comentario (opcional)</span>
 								<textarea name="note" rows="2" disabled={!appointment.can_request_reschedule} class="ux-textarea"></textarea>
 							</label>
 							<button disabled={!appointment.can_request_reschedule} class="ux-btn-secondary mt-4 w-full">
@@ -81,7 +83,7 @@
 						<summary class="cursor-pointer list-none px-5 py-4 text-base font-bold text-red-100">Cancelar turno</summary>
 						<form method="POST" action="?/cancel" class="border-t border-red-400/20 p-5">
 							<label>
-								<span class="ux-label">Motivo opcional</span>
+								<span class="ux-label">Motivo (opcional)</span>
 								<textarea name="note" rows="2" disabled={!appointment.can_cancel} class="ux-textarea"></textarea>
 							</label>
 							<label class="mt-4 flex items-start gap-3 text-sm font-bold text-red-100">

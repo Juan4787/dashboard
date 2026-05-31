@@ -120,14 +120,6 @@
 							</div>
 							<div class="flex flex-wrap gap-2 lg:justify-end">
 								<a href={`/odonto/turnos/${appointment.id}`} class="ux-btn-primary">Abrir</a>
-								{#each ['attended', 'no_show'] as status}
-									<form method="POST" action="?/update_status">
-										<input type="hidden" name="appointment_id" value={appointment.id} />
-										<button name="status" value={status} disabled={['cancelled', 'attended', 'no_show'].includes(appointment.status)} class="ux-btn-secondary">
-											{statusLabels[status]}
-										</button>
-									</form>
-								{/each}
 							</div>
 						</div>
 					</article>

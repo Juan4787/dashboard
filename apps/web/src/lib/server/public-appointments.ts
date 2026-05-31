@@ -6,7 +6,12 @@ import {
 	addMinutes,
 	isAppointmentStatus
 } from './appointments';
-import { PUBLIC_BUSINESS_SELECT, publicHash, recordPublicBookingAttempt } from './public-booking';
+import {
+	PUBLIC_BUSINESS_SELECT,
+	canUsePublicBusiness,
+	publicHash,
+	recordPublicBookingAttempt
+} from './public-booking';
 
 export type PublicAppointmentAction = 'confirm' | 'cancel' | 'reschedule';
 
@@ -31,6 +36,7 @@ export type PublicAppointmentView = {
 	};
 	patient_name: string | null;
 	public_status_label: string;
+	public_actions_available: boolean;
 	can_confirm: boolean;
 	can_cancel: boolean;
 	can_request_reschedule: boolean;
@@ -78,7 +84,10 @@ export const loadPublicAppointmentByToken = async (
 	const startsAt = new Date(data.starts_at);
 	const isPast = startsAt <= now;
 	const isBusinessActive = Boolean(business?.is_active);
-	const canAct = isBusinessActive && !isPast;
+	const canUsePublicTokens = isBusinessActive
+		? await canUsePublicBusiness(supabase, String(business.id), business.created_at ?? null)
+		: false;
+	const canAct = isBusinessActive && canUsePublicTokens && !isPast;
 
 	return {
 		id: String(data.id),
@@ -101,6 +110,7 @@ export const loadPublicAppointmentByToken = async (
 		},
 		patient_name: (data as any).patients?.full_name ?? null,
 		public_status_label: APPOINTMENT_STATUS_LABELS[status],
+		public_actions_available: canUsePublicTokens,
 		can_confirm: canAct && status === 'reserved',
 		can_cancel: canAct && (status === 'reserved' || status === 'confirmed' || status === 'reschedule_requested'),
 		can_request_reschedule: canAct && (status === 'reserved' || status === 'confirmed'),
@@ -111,6 +121,9 @@ export const loadPublicAppointmentByToken = async (
 export const getPublicAppointmentMessage = (appointment: PublicAppointmentView | null) => {
 	if (!appointment) return 'El enlace no es válido o ya no está disponible.';
 	if (!appointment.business.is_active) return 'Este turno no admite cambios online en este momento.';
+	if (!appointment.public_actions_available) {
+		return 'Este enlace no está disponible en este momento. Contactá al consultorio.';
+	}
 	if (appointment.is_past) return 'Este turno ya no admite cambios online.';
 	if (appointment.status === 'cancelled') return 'Este turno ya fue cancelado.';
 	if (appointment.status === 'confirmed') return 'Tu turno está confirmado.';
@@ -128,6 +141,7 @@ const assertCanApplyPublicAction = (
 	action: PublicAppointmentAction
 ) => {
 	if (!appointment.business.is_active) throw new Error('PUBLIC_TOKEN_BUSINESS_DISABLED');
+	if (!appointment.public_actions_available) throw new Error('PUBLIC_TOKEN_COMMERCIAL_UNAVAILABLE');
 	if (appointment.is_past) throw new Error('PUBLIC_TOKEN_APPOINTMENT_PAST');
 	if (!activePublicStatuses.includes(appointment.status as any)) {
 		throw new Error('PUBLIC_TOKEN_APPOINTMENT_CLOSED');
@@ -248,6 +262,9 @@ export const getPublicTokenErrorMessage = (error: unknown) => {
 	const raw = `${(error as { message?: string; details?: string })?.message ?? ''} ${(error as { details?: string })?.details ?? ''}`;
 	if (raw.includes('PUBLIC_TOKEN_NOT_FOUND')) return 'El enlace no es válido o ya no está disponible.';
 	if (raw.includes('PUBLIC_TOKEN_BUSINESS_DISABLED')) return 'Este turno no admite cambios online en este momento.';
+	if (raw.includes('PUBLIC_TOKEN_COMMERCIAL_UNAVAILABLE')) {
+		return 'Este enlace no está disponible en este momento. Contactá al consultorio.';
+	}
 	if (raw.includes('PUBLIC_TOKEN_APPOINTMENT_PAST')) return 'Este turno ya no admite cambios online.';
 	if (raw.includes('PUBLIC_TOKEN_APPOINTMENT_CLOSED')) return 'Este turno ya está cerrado.';
 	if (raw.includes('PUBLIC_TOKEN_CONFIRM_DENIED')) return 'Este turno no se puede confirmar desde este enlace.';

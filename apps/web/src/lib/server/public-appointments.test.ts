@@ -26,6 +26,7 @@ const appointment = (overrides: Partial<PublicAppointmentView>): PublicAppointme
 	},
 	patient_name: 'Paciente',
 	public_status_label: 'Reservado',
+	public_actions_available: true,
 	can_confirm: true,
 	can_cancel: true,
 	can_request_reschedule: true,
@@ -63,6 +64,9 @@ describe('getPublicAppointmentMessage', () => {
 				})
 			)
 		).toBe('Este turno no admite cambios online en este momento.');
+		expect(getPublicAppointmentMessage(appointment({ public_actions_available: false }))).toBe(
+			'Este enlace no está disponible en este momento. Contactá al consultorio.'
+		);
 	});
 });
 
@@ -76,6 +80,9 @@ describe('getPublicTokenErrorMessage', () => {
 		);
 		expect(getPublicTokenErrorMessage(new Error('PUBLIC_TOKEN_CANCEL_DENIED'))).toBe(
 			'Este turno no se puede cancelar desde este enlace.'
+		);
+		expect(getPublicTokenErrorMessage(new Error('PUBLIC_TOKEN_COMMERCIAL_UNAVAILABLE'))).toBe(
+			'Este enlace no está disponible en este momento. Contactá al consultorio.'
 		);
 	});
 });

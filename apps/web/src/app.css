@@ -348,6 +348,12 @@ a {
 		color: #bbf7d0;
 	}
 
+	.ux-alert-warning {
+		border-color: rgba(251, 191, 36, 0.3);
+		background: rgba(251, 191, 36, 0.12);
+		color: #fde68a;
+	}
+
 	.ux-pill-nav {
 		display: inline-flex;
 		border-radius: 999px;

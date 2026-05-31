@@ -19,7 +19,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 			context: demoBusinessContext(),
 			industries: BUSINESS_INDUSTRIES,
 			publicBookingUrl: `${url.origin}/reservar/consultorio-demo`,
-			readiness: { services: 1, professionals: 1, availabilityRules: 1 },
+			readiness: { services: 1, professionals: 1, availabilityRules: 1, reservableServices: 1, reservableProfessionals: 1 },
 			demo: true
 		};
 	}
@@ -36,7 +36,13 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 	}
 	if (context.role === 'professional') throw redirect(303, '/odonto/mis-turnos');
 
-	const [{ count: services }, { count: professionals }, { count: availabilityRules }] = await Promise.all([
+	const [
+		{ count: services },
+		{ count: professionals },
+		{ count: availabilityRules },
+		{ data: assignments },
+		{ data: rules }
+	] = await Promise.all([
 		supabase
 			.from('services')
 			.select('id', { count: 'exact', head: true })
@@ -53,8 +59,29 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 			.from('availability_rules')
 			.select('id', { count: 'exact', head: true })
 			.eq('business_id', context.business.id)
+			.eq('is_active', true),
+		supabase
+			.from('professional_services')
+			.select('service_id, professional_id, services!inner(is_active, is_public), professionals!inner(is_active, is_public)')
+			.eq('business_id', context.business.id),
+		supabase
+			.from('availability_rules')
+			.select('professional_id')
+			.eq('business_id', context.business.id)
 			.eq('is_active', true)
 	]);
+	const professionalsWithRules = new Set((rules ?? []).map((rule: any) => String(rule.professional_id)));
+	const readyServices = new Set<string>();
+	const readyProfessionals = new Set<string>();
+	for (const assignment of assignments ?? []) {
+		const service = (assignment as any).services;
+		const professional = (assignment as any).professionals;
+		if (!service?.is_active || !service?.is_public) continue;
+		if (!professional?.is_active || !professional?.is_public) continue;
+		if (!professionalsWithRules.has(String((assignment as any).professional_id))) continue;
+		readyServices.add(String((assignment as any).service_id));
+		readyProfessionals.add(String((assignment as any).professional_id));
+	}
 	const siteUrl = publicEnv.PUBLIC_SITE_URL?.trim() || url.origin;
 	const publicBookingUrl = `${siteUrl.replace(/\/$/, '')}/reservar/${context.business.slug}`;
 
@@ -65,7 +92,9 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 		readiness: {
 			services: services ?? 0,
 			professionals: professionals ?? 0,
-			availabilityRules: availabilityRules ?? 0
+			availabilityRules: availabilityRules ?? 0,
+			reservableServices: readyServices.size,
+			reservableProfessionals: readyProfessionals.size
 		},
 		demo: false
 	};
@@ -120,11 +149,36 @@ export const actions: Actions = {
 				values: Object.fromEntries(form)
 			});
 		}
-		if (!Number.isInteger(max_booking_days_ahead) || max_booking_days_ahead < 1) {
+		if (min_booking_notice_minutes > 10080) {
 			return fail(400, {
-				message: 'Los días máximos hacia adelante deben ser mayores a 0.',
+				message: 'La anticipación mínima no puede superar 7 días.',
 				values: Object.fromEntries(form)
 			});
+		}
+		if (!Number.isInteger(max_booking_days_ahead) || max_booking_days_ahead < 1 || max_booking_days_ahead > 90) {
+			return fail(400, {
+				message: 'Los días máximos hacia adelante deben estar entre 1 y 90.',
+				values: Object.fromEntries(form)
+			});
+		}
+		try {
+			new Intl.DateTimeFormat('es-AR', { timeZone: timezone }).format(new Date());
+		} catch {
+			return fail(400, {
+				message: 'La zona horaria no es válida.',
+				values: Object.fromEntries(form)
+			});
+		}
+		if (logo_url) {
+			try {
+				const logo = new URL(logo_url);
+				if (logo.protocol !== 'https:') throw new Error('INVALID_PROTOCOL');
+			} catch {
+				return fail(400, {
+					message: 'El logo debe ser una URL segura que empiece con https://.',
+					values: Object.fromEntries(form)
+				});
+			}
 		}
 
 		const { error } = await supabase

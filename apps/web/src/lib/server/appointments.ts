@@ -84,10 +84,11 @@ export const getHumanAppointmentErrorMessage = (error: unknown) => {
 	const raw = `${anyError?.message ?? ''} ${anyError?.details ?? ''}`;
 
 	if (anyError?.code === '23P01' || raw.includes('appointments_no_overlapping_active')) {
-		return 'Ese horario ya fue tomado.';
+		return 'Ese horario ya fue reservado. Elegí otro horario disponible.';
 	}
 	if (raw.includes('APPOINTMENT_NOT_FOUND')) return 'No se encontró el turno.';
 	if (raw.includes('PATIENT_NAME_REQUIRED')) return 'Cargá el nombre del paciente.';
+	if (raw.includes('PATIENT_OWNER_REQUIRED')) return 'No se encontró el responsable del consultorio.';
 	if (raw.includes('PATIENT_NOT_FOUND')) return 'No se encontró el paciente seleccionado.';
 	if (raw.includes('PATIENT_BLOCKED')) return 'Ese paciente está bloqueado.';
 	if (raw.includes('SERVICE_NOT_FOUND')) return 'No se encontró el servicio o está inactivo.';
@@ -104,6 +105,9 @@ export const getHumanAppointmentErrorMessage = (error: unknown) => {
 	if (raw.includes('APPOINTMENT_STATUS_UNCHANGED')) return 'El turno ya tiene ese estado.';
 	if (raw.includes('APPOINTMENT_CANNOT_RESCHEDULE')) return 'Ese turno no se puede reprogramar.';
 	if (raw.includes('APPOINTMENT_ACCESS_DENIED')) return 'No tenés permiso para modificar este turno.';
+	if (raw.includes('BUSINESS_ACCESS_RESTRICTED')) {
+		return 'La cuenta está suspendida. Regularizá la suscripción para volver a operar.';
+	}
 	if (raw.includes('INVALID_PROFESSIONAL_STATUS')) return 'El profesional solo puede marcar asistencia o ausencia.';
 
 	return 'No se pudo completar la acción.';
@@ -154,11 +158,26 @@ export const createOrFindPatientForAppointment = async (
 		if (existing?.id) return existing.id as string;
 	}
 
+	let ownerId = input.ownerId ?? null;
+	if (!ownerId) {
+		const { data: owner, error: ownerError } = await supabase
+			.from('business_users')
+			.select('user_id')
+			.eq('business_id', input.businessId)
+			.eq('role', 'owner')
+			.order('created_at', { ascending: true })
+			.limit(1)
+			.maybeSingle();
+		if (ownerError) throw ownerError;
+		ownerId = owner?.user_id ?? null;
+	}
+	if (!ownerId) throw new Error('PATIENT_OWNER_REQUIRED');
+
 	const { data, error } = await supabase
 		.from('patients')
 		.insert({
 			business_id: input.businessId,
-			owner_id: input.ownerId ?? null,
+			owner_id: ownerId,
 			full_name: fullName,
 			phone: phoneE164?.replace(/\D/g, '') ?? phoneRaw,
 			phone_raw: phoneRaw,
@@ -188,9 +207,6 @@ export const createManualAppointment = async (
 		startsAt: Date;
 		internalNote?: string | null;
 		source?: AppointmentSource;
-		whatsappOptInAt?: Date | null;
-		whatsappOptInSource?: string | null;
-		whatsappOptInText?: string | null;
 	}
 ) => {
 	const patientId = await createOrFindPatientForAppointment(supabase, {
@@ -213,8 +229,6 @@ export const createManualAppointment = async (
 	if (!service?.duration_minutes) throw new Error('SERVICE_NOT_FOUND');
 
 	const endsAt = addMinutes(input.startsAt, Number(service.duration_minutes));
-	const reminderDueAt = addMinutes(input.startsAt, -24 * 60);
-	const now = new Date();
 
 	const { data, error } = await supabase
 		.from('appointments')
@@ -229,11 +243,8 @@ export const createManualAppointment = async (
 			blocking_ends_at: endsAt.toISOString(),
 			status: 'reserved',
 			source: input.source ?? 'manual',
-			reminder_due_at: reminderDueAt > now ? reminderDueAt.toISOString() : null,
+			reminder_due_at: null,
 			internal_note: input.internalNote || null,
-			whatsapp_opt_in_at: input.whatsappOptInAt?.toISOString() ?? null,
-			whatsapp_opt_in_source: input.whatsappOptInSource ?? null,
-			whatsapp_opt_in_text: input.whatsappOptInText ?? null,
 			created_by_user_id: input.createdByUserId ?? null,
 			updated_by_user_id: input.createdByUserId ?? null,
 			service_name_snapshot: 'Pendiente',
@@ -363,7 +374,6 @@ export const rescheduleAppointment = async (
 	if (!service?.duration_minutes || !service.is_active) throw new Error('SERVICE_NOT_FOUND');
 
 	const endsAt = addMinutes(input.startsAt, Number(service.duration_minutes));
-	const reminderDueAt = addMinutes(input.startsAt, -24 * 60);
 	const { error } = await supabase
 		.from('appointments')
 		.update({
@@ -372,7 +382,7 @@ export const rescheduleAppointment = async (
 			status: 'reserved',
 			confirmed_at: null,
 			reschedule_requested_at: null,
-			reminder_due_at: reminderDueAt > now ? reminderDueAt.toISOString() : null,
+			reminder_due_at: null,
 			updated_by_user_id: input.userId,
 			updated_at: now.toISOString()
 		})

@@ -3,6 +3,11 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Business } from './business';
 import { getAvailabilitySlots, type AvailabilitySlot, addMinutes } from './availability';
 import { createManualAppointment, getHumanAppointmentErrorMessage } from './appointments';
+import {
+	getBusinessAccessState,
+	publicBusinessUnavailableMessage,
+	type BusinessSubscriptionRow
+} from './commercial-access';
 import { isLikelyPhoneE164, normalizePhoneE164, normalizePhoneRaw } from './phone';
 
 export type PublicService = {
@@ -18,6 +23,7 @@ export type PublicProfessional = {
 	name: string;
 	specialty: string | null;
 	avatar_url: string | null;
+	next_available_at?: string | null;
 };
 
 export type PublicBookingBusiness = Pick<
@@ -31,6 +37,7 @@ export type PublicBookingBusiness = Pick<
 	| 'timezone'
 	| 'public_booking_enabled'
 	| 'is_active'
+	| 'created_at'
 	| 'min_booking_notice_minutes'
 	| 'max_booking_days_ahead'
 	| 'cancellation_policy'
@@ -39,6 +46,7 @@ export type PublicBookingBusiness = Pick<
 export type PublicBookingIssue =
 	| 'business_not_found'
 	| 'booking_disabled'
+	| 'commercial_unavailable'
 	| 'missing_service_role'
 	| 'no_services'
 	| 'no_professionals'
@@ -53,9 +61,6 @@ export type PublicBookingState = {
 	issue: PublicBookingIssue | null;
 };
 
-export const WHATSAPP_OPERATIONAL_OPT_IN_TEXT =
-	'Al reservar, acepto recibir mensajes relacionados con este turno por WhatsApp.';
-
 type BookingAttemptInput = {
 	businessId?: string | null;
 	phoneE164?: string | null;
@@ -68,7 +73,7 @@ type BookingAttemptInput = {
 };
 
 export const PUBLIC_BUSINESS_SELECT =
-	'id, name, slug, phone, address, logo_url, timezone, public_booking_enabled, is_active, min_booking_notice_minutes, max_booking_days_ahead, cancellation_policy';
+	'id, name, slug, phone, address, logo_url, timezone, public_booking_enabled, is_active, created_at, min_booking_notice_minutes, max_booking_days_ahead, cancellation_policy';
 
 const pad = (value: number) => String(value).padStart(2, '0');
 
@@ -156,6 +161,31 @@ export const getPublicBusinessBySlug = async (
 	return (data as PublicBookingBusiness | null) ?? null;
 };
 
+export const canUsePublicBusiness = async (
+	supabase: SupabaseClient,
+	businessId: string,
+	businessCreatedAt?: string | null
+) => {
+	const { data, error } = await supabase
+		.from('business_subscriptions')
+		.select(
+			'id, business_id, commercial_access_enabled, is_permanent, subscription_status, paid_until, grace_until, restricted_until, archived_at, expiration_notice_enabled'
+		)
+		.eq('business_id', businessId)
+		.maybeSingle();
+
+	if (error) {
+		// Compatibility-first fallback: if the migration is not applied yet, do
+		// not break existing public booking links.
+		console.error('Error cargando acceso comercial público', error);
+		return true;
+	}
+
+	return getBusinessAccessState((data as BusinessSubscriptionRow | null) ?? null, {
+		businessCreatedAt
+	}).allowedCapabilities.canUsePublicBooking;
+};
+
 export const getReservableServices = async (
 	supabase: SupabaseClient,
 	businessId: string
@@ -231,15 +261,128 @@ export const summarizeSlotsByDate = (
 	for (const slot of slots) counts.set(slot.date, (counts.get(slot.date) ?? 0) + 1);
 	const formatter = new Intl.DateTimeFormat('es-AR', {
 		timeZone,
-		weekday: 'short',
-		day: '2-digit',
-		month: 'short'
+		weekday: 'long',
+		day: 'numeric',
+		month: 'long'
 	});
 	return [...counts.entries()].map(([date, count]) => ({
 		date,
 		count,
-		label: formatter.format(new Date(`${date}T12:00:00.000Z`))
+		label: formatter
+			.format(new Date(`${date}T12:00:00.000Z`))
+			.replace(',', '')
+			.replace(/^./, (letter) => letter.toUpperCase())
 	}));
+};
+
+const PUBLIC_DAY_BATCH_DAYS = 14;
+const PUBLIC_DAY_TARGET = 12;
+
+const dateLTE = (a: string, b: string) => a <= b;
+const minDateString = (a: string, b: string) => (a <= b ? a : b);
+
+const uniqueSlots = (slots: AvailabilitySlot[]) => {
+	const seen = new Set<string>();
+	const result: AvailabilitySlot[] = [];
+	for (const slot of slots) {
+		const key = `${slot.professional_id}:${slot.starts_at}`;
+		if (seen.has(key)) continue;
+		seen.add(key);
+		result.push(slot);
+	}
+	return result;
+};
+
+const collectPublicDaySlots = async (
+	supabase: SupabaseClient,
+	input: {
+		business: Business;
+		serviceId: string;
+		professionalId?: string | null;
+		fromDate: string;
+		maxDate: string;
+		targetDays?: number;
+		targetProfessionalIds?: string[];
+	}
+) => {
+	let cursor = input.fromDate;
+	let collected: AvailabilitySlot[] = [];
+	const requiredProfessionals = new Set(input.targetProfessionalIds ?? []);
+	while (dateLTE(cursor, input.maxDate)) {
+		const windowEnd = minDateString(addDaysToDateString(cursor, PUBLIC_DAY_BATCH_DAYS - 1), input.maxDate);
+		const batch = await getAvailabilitySlots(supabase, {
+			business: input.business,
+			serviceId: input.serviceId,
+			professionalId: input.professionalId ?? null,
+			fromDate: cursor,
+			toDate: windowEnd,
+			publicOnly: true
+		});
+		collected = uniqueSlots([...collected, ...batch]);
+		const collectedDates = new Set(collected.map((slot) => slot.date)).size;
+		const collectedProfessionals = new Set(collected.map((slot) => slot.professional_id));
+		const hasAllRequiredProfessionals =
+			requiredProfessionals.size === 0 ||
+			[...requiredProfessionals].every((professionalId) => collectedProfessionals.has(professionalId));
+		if (collectedDates >= (input.targetDays ?? PUBLIC_DAY_TARGET) && hasAllRequiredProfessionals) break;
+		cursor = addDaysToDateString(windowEnd, 1);
+	}
+	return collected;
+};
+
+const getProfessionalsWithPublicAvailability = async (
+	supabase: SupabaseClient,
+	input: {
+		business: PublicBookingBusiness;
+		serviceId: string;
+		professionals: PublicProfessional[];
+		fromDate: string;
+		maxDate: string;
+	}
+) => {
+	if (input.professionals.length === 0) return [];
+	const slots = await collectPublicDaySlots(supabase, {
+		business: input.business as Business,
+		serviceId: input.serviceId,
+		professionalId: null,
+		fromDate: input.fromDate,
+		maxDate: input.maxDate,
+		targetDays: 1,
+		targetProfessionalIds: input.professionals.map((professional) => professional.id)
+	});
+
+	const firstAvailableByProfessional = new Map<string, string>();
+	for (const slot of slots) {
+		const current = firstAvailableByProfessional.get(slot.professional_id);
+		if (!current || slot.starts_at < current) firstAvailableByProfessional.set(slot.professional_id, slot.starts_at);
+	}
+
+	return input.professionals
+		.filter((professional) => firstAvailableByProfessional.has(professional.id))
+		.map((professional) => ({
+			...professional,
+			next_available_at: firstAvailableByProfessional.get(professional.id) ?? null
+		}));
+};
+
+const serviceHasPublicAvailability = async (
+	supabase: SupabaseClient,
+	input: {
+		business: PublicBookingBusiness;
+		serviceId: string;
+		fromDate: string;
+		maxDate: string;
+	}
+) => {
+	const slots = await collectPublicDaySlots(supabase, {
+		business: input.business as Business,
+		serviceId: input.serviceId,
+		professionalId: null,
+		fromDate: input.fromDate,
+		maxDate: input.maxDate,
+		targetDays: 1
+	});
+	return slots.length > 0;
 };
 
 export const loadPublicBookingState = async (
@@ -258,13 +401,49 @@ export const loadPublicBookingState = async (
 	if (!business.is_active || !business.public_booking_enabled) {
 		return { business, services: [], professionals: [], slots: [], days: [], issue: 'booking_disabled' };
 	}
+	if (!(await canUsePublicBusiness(supabase, business.id, business.created_at))) {
+		return { business, services: [], professionals: [], slots: [], days: [], issue: 'commercial_unavailable' };
+	}
 
-	const services = await getReservableServices(supabase, business.id);
-	if (services.length === 0) return { business, services, professionals: [], slots: [], days: [], issue: 'no_services' };
+	const structurallyReservableServices = await getReservableServices(supabase, business.id);
+	if (structurallyReservableServices.length === 0) {
+		return { business, services: [], professionals: [], slots: [], days: [], issue: 'no_services' };
+	}
+
+	const today = todayForBusiness(business);
+	const maxDate = addDaysToDateString(today, Math.min(Math.max(business.max_booking_days_ahead, 1), 90));
+	const requestedServiceId = input.serviceId ?? null;
+	const services = requestedServiceId
+		? structurallyReservableServices
+		: (
+				await Promise.all(
+					structurallyReservableServices.map(async (service) => {
+						const hasAvailability = await serviceHasPublicAvailability(supabase, {
+							business,
+							serviceId: service.id,
+							fromDate: today,
+							maxDate
+						});
+						return hasAvailability ? service : null;
+					})
+				)
+			).filter((service): service is PublicService => service !== null);
+	if (services.length === 0) {
+		return { business, services, professionals: [], slots: [], days: [], issue: 'no_availability' };
+	}
 
 	const selectedService = services.find((service) => service.id === input.serviceId) ?? null;
-	const professionals = selectedService
+	const assignedProfessionals = selectedService
 		? await getReservableProfessionals(supabase, { businessId: business.id, serviceId: selectedService.id })
+		: [];
+	const professionals = selectedService
+		? await getProfessionalsWithPublicAvailability(supabase, {
+				business,
+				serviceId: selectedService.id,
+				professionals: assignedProfessionals,
+				fromDate: today,
+				maxDate
+			})
 		: [];
 	if (selectedService && professionals.length === 0) {
 		return { business, services, professionals, slots: [], days: [], issue: 'no_professionals' };
@@ -275,27 +454,25 @@ export const loadPublicBookingState = async (
 		return { business, services, professionals, slots: [], days: [], issue: null };
 	}
 
-	const today = todayForBusiness(business);
-	const maxDate = addDaysToDateString(today, Math.min(Math.max(business.max_booking_days_ahead, 1), 90));
-	const slots = await getAvailabilitySlots(supabase, {
+	const daySlots = await collectPublicDaySlots(supabase, {
 		business: business as Business,
 		serviceId: selectedService.id,
 		professionalId: selectedProfessional.id,
-		fromDate: input.date ?? today,
-		toDate: input.date ?? maxDate,
-		publicOnly: true
+		fromDate: today,
+		maxDate
 	});
-	const days = summarizeSlotsByDate(
-		input.date ? await getAvailabilitySlots(supabase, {
+	const selectedDateSlots = input.date
+		? await getAvailabilitySlots(supabase, {
 			business: business as Business,
 			serviceId: selectedService.id,
 			professionalId: selectedProfessional.id,
-			fromDate: today,
-			toDate: maxDate,
+			fromDate: input.date,
+			toDate: input.date,
 			publicOnly: true
-		}) : slots,
-		business.timezone
-	);
+		})
+		: [];
+	const slots = input.date ? selectedDateSlots : [];
+	const days = summarizeSlotsByDate(uniqueSlots([...daySlots, ...selectedDateSlots]), business.timezone);
 
 	return {
 		business,
@@ -390,7 +567,6 @@ export const createPublicBooking = async (
 		patientPhone: string;
 		patientEmail?: string | null;
 		note?: string | null;
-		whatsappOptIn?: boolean;
 		ipHash?: string | null;
 		userAgent?: string | null;
 		now?: Date;
@@ -404,6 +580,9 @@ export const createPublicBooking = async (
 		if (!business || !business.is_active || !business.public_booking_enabled) {
 			throw new Error('PUBLIC_BOOKING_UNAVAILABLE');
 		}
+		if (!(await canUsePublicBusiness(supabase, business.id, business.created_at))) {
+			throw new Error('PUBLIC_BUSINESS_COMMERCIAL_UNAVAILABLE');
+		}
 
 		const patientName = input.patientName.trim();
 		const phoneRaw = normalizePhoneRaw(input.patientPhone);
@@ -411,7 +590,6 @@ export const createPublicBooking = async (
 		const email = String(input.patientEmail ?? '').trim();
 		if (patientName.length < 3) throw new Error('PUBLIC_PATIENT_NAME_INVALID');
 		if (!phoneE164 || !isLikelyPhoneE164(phoneE164)) throw new Error('PUBLIC_PATIENT_PHONE_INVALID');
-		if (!input.whatsappOptIn) throw new Error('PUBLIC_WHATSAPP_OPT_IN_REQUIRED');
 
 		await assertPublicBookingRateLimits(supabase, {
 			businessId: business.id,
@@ -445,10 +623,7 @@ export const createPublicBooking = async (
 			professionalId: input.professionalId,
 			startsAt: new Date(selectedSlot.starts_at),
 			internalNote: input.note?.trim() || null,
-			source: 'public_booking',
-			whatsappOptInAt: now,
-			whatsappOptInSource: 'public_booking',
-			whatsappOptInText: WHATSAPP_OPERATIONAL_OPT_IN_TEXT
+			source: 'public_booking'
 		});
 
 		await recordPublicBookingAttempt(supabase, {
@@ -497,9 +672,10 @@ export const createPublicBooking = async (
 export const getPublicBookingErrorMessage = (error: unknown) => {
 	const raw = `${(error as { message?: string; code?: string; details?: string })?.message ?? ''} ${(error as { details?: string })?.details ?? ''}`;
 	if (raw.includes('PUBLIC_BOOKING_UNAVAILABLE')) return 'La reserva online no está disponible en este momento.';
+	if (raw.includes('PUBLIC_BUSINESS_COMMERCIAL_UNAVAILABLE')) return publicBusinessUnavailableMessage;
 	if (raw.includes('PUBLIC_PATIENT_NAME_INVALID')) return 'Ingresá nombre y apellido.';
 	if (raw.includes('PUBLIC_PATIENT_PHONE_INVALID')) return 'Ingresá un teléfono válido.';
-	if (raw.includes('PUBLIC_SLOT_UNAVAILABLE')) return 'Ese horario ya fue tomado. Elegí otro horario.';
+	if (raw.includes('PUBLIC_SLOT_UNAVAILABLE')) return 'Ese horario ya fue reservado. Elegí otro horario disponible.';
 	if (raw.includes('PUBLIC_RATE_LIMIT_IP') || raw.includes('PUBLIC_RATE_LIMIT_PHONE')) {
 		return 'Hubo demasiados intentos de reserva. Probá nuevamente en unos minutos.';
 	}
@@ -511,9 +687,6 @@ export const getPublicBookingErrorMessage = (error: unknown) => {
 	}
 	if (raw.includes('PUBLIC_CAPTCHA_REQUIRED') || raw.includes('PUBLIC_CAPTCHA_FAILED')) {
 		return 'No pudimos validar la protección anti-spam. Intentá nuevamente.';
-	}
-	if (raw.includes('PUBLIC_WHATSAPP_OPT_IN_REQUIRED')) {
-		return 'Aceptá recibir mensajes relacionados con este turno para completar la reserva.';
 	}
 	return getHumanAppointmentErrorMessage(error);
 };

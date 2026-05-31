@@ -4,7 +4,19 @@ import { getOdontoContext } from '$lib/server/odonto-context';
 import { json, redirect } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 
-const isoDate = (date: Date) => date.toISOString().slice(0, 10);
+const localDateFor = (date: Date, timeZone: string) => {
+	const parts = Object.fromEntries(
+		new Intl.DateTimeFormat('en-CA', {
+			timeZone,
+			year: 'numeric',
+			month: '2-digit',
+			day: '2-digit'
+		})
+			.formatToParts(date)
+			.map((part) => [part.type, part.value])
+	);
+	return `${parts.year}-${parts.month}-${parts.day}`;
+};
 
 export const GET: RequestHandler = async ({ url, locals, fetch, cookies }) => {
 	if (!locals.auth) throw redirect(303, '/login');
@@ -13,7 +25,7 @@ export const GET: RequestHandler = async ({ url, locals, fetch, cookies }) => {
 	const { supabase, business } = await getOdontoContext({ locals, fetch, cookies });
 	const serviceId = url.searchParams.get('service_id') ?? '';
 	const professionalId = url.searchParams.get('professional_id') ?? '';
-	const fromDate = url.searchParams.get('from') ?? isoDate(new Date());
+	const fromDate = url.searchParams.get('from') ?? localDateFor(new Date(), business.business.timezone);
 	const toDate = url.searchParams.get('to') ?? fromDate;
 	const publicOnly = url.searchParams.get('public') === 'true';
 

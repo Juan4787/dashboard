@@ -10,7 +10,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 	}
 
 	if (env.DEMO_MODE === 'true') {
-		return { demo: true, driveConnection: null };
+		return { demo: true, driveConnection: null, canLinkExternalFiles: true };
 	}
 
 	const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
@@ -22,7 +22,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 	if (context?.role === 'professional') throw redirect(303, '/odonto/mis-turnos');
 	const ownerId = await getAuthUserId(supabase, locals.auth.access_token);
 	if (!ownerId) {
-		return { demo: false, driveConnection: null };
+		return { demo: false, driveConnection: null, canLinkExternalFiles: false };
 	}
 
 	const { data, error } = await supabase
@@ -35,11 +35,15 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 		console.error('Error cargando Drive connection', error);
 	}
 
-	return { demo: false, driveConnection: data ?? null };
+	return {
+		demo: false,
+		driveConnection: data ?? null,
+		canLinkExternalFiles: Boolean(context?.access.allowedCapabilities.canLinkExternalFiles)
+	};
 };
 
 export const actions: Actions = {
-	save_drive_connection: async ({ request, locals, fetch }) => {
+	save_drive_connection: async ({ request, locals, fetch, cookies }) => {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') {
 			return fail(400, { message: 'No disponible en modo demo.' });
@@ -57,6 +61,16 @@ export const actions: Actions = {
 		const ownerId = await getAuthUserId(supabase, locals.auth.access_token);
 		if (!ownerId) {
 			return fail(401, { message: 'Sesion invalida. Volve a iniciar sesion.' });
+		}
+		const context = await resolveActiveBusiness({
+			supabase,
+			accessToken: locals.auth.access_token,
+			cookies
+		});
+		if (!context?.access.allowedCapabilities.canLinkExternalFiles) {
+			return fail(403, {
+				message: 'La cuenta está suspendida. Regularizá la suscripción para volver a operar.'
+			});
 		}
 		const { error } = await supabase
 			.from('drive_connections')
@@ -95,6 +109,11 @@ export const actions: Actions = {
 		});
 		if (!context) {
 			return fail(500, { message: 'No se pudo resolver el negocio activo.' });
+		}
+		if (!context.access.allowedCapabilities.canLinkExternalFiles) {
+			return fail(403, {
+				message: 'La cuenta está suspendida. Regularizá la suscripción para volver a operar.'
+			});
 		}
 		const { error } = await supabase.from('drive_connections').delete().eq('owner_id', ownerId);
 		const { error: resetError } = await supabase

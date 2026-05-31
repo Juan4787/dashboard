@@ -3,6 +3,7 @@ import { env as publicEnv } from '$env/dynamic/public';
 import crypto from 'crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { writeAuditLog } from './audit';
+import { getBusinessAccessState, type BusinessSubscriptionRow } from './commercial-access';
 import { normalizePhoneE164 } from './phone';
 
 export const MESSAGE_DISPATCH_STATUSES = [
@@ -26,6 +27,7 @@ export type MessagingProviderName = 'mock' | 'meta_cloud' | 'bsp';
 export const REMINDER_TEMPLATE_NAME = 'appointment_reminder_24h';
 export const DEFAULT_REMINDER_TEMPLATE_BODY =
 	'Hola {{1}}, te recordamos tu turno en {{2}} el {{3}} a las {{4}}.\n\nPodés confirmar, cancelar o pedir reprogramación acá:\n{{5}}';
+export const AUTOMATIC_REMINDERS_ENABLED = env.WHATSAPP_AUTOMATIC_REMINDERS_ENABLED === 'true';
 
 export const dispatchStatusLabels: Record<MessageDispatchStatus, string> = {
 	scheduled: 'Programado',
@@ -390,10 +392,35 @@ const hasActiveReminderDispatch = async (
 	return (data ?? []).some((dispatch: any) => activeDispatchStatuses.has(dispatch.status));
 };
 
+const canBusinessUseOperationalMessaging = async (supabase: SupabaseClient, businessId: string) => {
+	const { data, error } = await supabase
+		.from('business_subscriptions')
+		.select(
+			'id, business_id, commercial_access_enabled, is_permanent, subscription_status, access_starts_at, paid_until, grace_until, restricted_until, archived_at, last_payment_at, last_payment_amount, last_grant_duration_seconds, expiration_notice_enabled, access_source, access_note, updated_by, created_at, updated_at'
+		)
+		.eq('business_id', businessId)
+		.maybeSingle();
+
+	if (error) {
+		// Compatibility-first fallback: if the migration is not available yet,
+		// do not break legacy messaging paths.
+		console.error('Error cargando suscripción comercial para mensajería', error);
+		return true;
+	}
+
+	return getBusinessAccessState((data as BusinessSubscriptionRow | null) ?? null, {
+		legacyFallback: false
+	}).canUseBusiness;
+};
+
 export const generateReminderDispatches = async (
 	supabase: SupabaseClient,
 	input: { businessId?: string | null; now?: Date; limit?: number } = {}
 ) => {
+	if (!AUTOMATIC_REMINDERS_ENABLED) {
+		return { created: 0, skipped: 0, failed: 0 };
+	}
+
 	const now = input.now ?? new Date();
 	const nowIso = now.toISOString();
 	let query = supabase
@@ -433,6 +460,10 @@ export const generateReminderDispatches = async (
 			const business = row.businesses;
 			const patient = row.patients;
 			if (!business?.is_active || !business?.whatsapp_enabled) {
+				skipped += 1;
+				continue;
+			}
+			if (!(await canBusinessUseOperationalMessaging(supabase, row.business_id))) {
 				skipped += 1;
 				continue;
 			}
@@ -556,6 +587,12 @@ export const processQueuedMessageDispatches = async (
 
 	for (const dispatch of (claimed ?? []) as MessageDispatch[]) {
 		try {
+			if (!(await canBusinessUseOperationalMessaging(supabase, dispatch.business_id))) {
+				await skipDispatch(supabase, dispatch, 'BUSINESS_ACCESS_RESTRICTED', now);
+				skipped += 1;
+				continue;
+			}
+
 			const { data: account, error: accountError } = await supabase
 				.from('messaging_accounts')
 				.select(
@@ -890,7 +927,8 @@ export const processWhatsAppWebhookPayload = async (
 						!requiresHuman &&
 						accountRow.status === 'active' &&
 						accountRow.bot_enabled &&
-						accountRow.businesses?.is_active
+						accountRow.businesses?.is_active &&
+						(await canBusinessUseOperationalMessaging(supabase, accountRow.business_id))
 					) {
 						await sendBotBookingLinkReply(supabase, {
 							account: accountRow,

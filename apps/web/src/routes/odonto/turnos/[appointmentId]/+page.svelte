@@ -46,24 +46,6 @@
 		admin: 'Administración interna'
 	};
 
-	const messageStatusLabels: Record<string, string> = {
-		scheduled: 'Programado',
-		queued: 'En cola',
-		sending: 'Enviando',
-		sent: 'Enviado',
-		delivered: 'Entregado',
-		read: 'Leído',
-		failed: 'Falló',
-		cancelled: 'Cancelado',
-		skipped: 'Omitido'
-	};
-
-	const messageTypeLabels: Record<string, string> = {
-		appointment_reminder_24h: 'Recordatorio',
-		bot_reply: 'Respuesta automática',
-		manual_test: 'Prueba'
-	};
-
 	const statusTone: Record<string, string> = {
 		reserved: 'bg-[#7c3aed]/25 text-[#c4b5fd]',
 		confirmed: 'bg-emerald-400/15 text-emerald-200',
@@ -74,7 +56,7 @@
 	};
 
 	const timeOnly = (value: string) =>
-		new Intl.DateTimeFormat('es-AR', { hour: '2-digit', minute: '2-digit' }).format(new Date(value));
+		new Intl.DateTimeFormat('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value));
 
 	const dateOnly = (value: string) =>
 		new Intl.DateTimeFormat('es-AR', { day: 'numeric', month: 'long', year: 'numeric' }).format(
@@ -85,16 +67,8 @@
 		const minutes =
 			Number(appointment?.duration_minutes_snapshot) ||
 			Math.round((new Date(appointment?.ends_at).getTime() - new Date(appointment?.starts_at).getTime()) / 60_000);
-		return `${minutes} min`;
+		return `${minutes} ${minutes === 1 ? 'minuto' : 'minutos'}`;
 	};
-
-	const serviceMark = (name: string) =>
-		name
-			.split(' ')
-			.filter(Boolean)
-			.slice(0, 2)
-			.map((part) => part[0]?.toUpperCase())
-			.join('');
 
 	const metadataValue = (log: AuditLog, key: string) => {
 		const value = log.metadata?.[key];
@@ -134,10 +108,7 @@
 	};
 
 	const mainActions = [
-		{ status: 'confirmed', label: 'Confirmar', tone: 'text-emerald-200', mark: 'OK' },
-		{ status: 'attended', label: 'Asistió', tone: 'text-sky-200', mark: 'A' },
-		{ status: 'no_show', label: 'No asistió', tone: 'text-amber-100', mark: 'N' },
-		{ status: 'cancelled', label: 'Cancelar', tone: 'text-red-200', mark: 'X' }
+		{ status: 'confirmed', label: 'Confirmar', tone: 'text-emerald-200', mark: 'OK' }
 	];
 </script>
 
@@ -145,7 +116,7 @@
 	<div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 		<div class="flex items-center gap-3 text-sm font-semibold text-neutral-500 dark:text-white/55">
 			<div class="grid h-11 w-11 place-items-center rounded-2xl border border-[#8b5cf6]/35 bg-[#7c3aed]/15 text-sm font-bold text-[#c4b5fd]">
-				{data.appointment ? serviceMark(data.appointment.service_name_snapshot) : 'T'}
+				<span aria-hidden="true">•</span>
 			</div>
 			<span>Agenda</span>
 			<span class="text-white/25">/</span>
@@ -167,7 +138,7 @@
 			<div class="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
 				<div class="flex items-start gap-5">
 					<div class="grid h-20 w-20 shrink-0 place-items-center rounded-full bg-[#7c3aed]/35 text-2xl font-bold text-white ring-1 ring-[#8b5cf6]/40">
-						{serviceMark(data.appointment.service_name_snapshot)}
+						<span aria-hidden="true">•</span>
 					</div>
 					<div>
 						<h1 class="text-3xl font-semibold tracking-tight text-white md:text-4xl">
@@ -218,6 +189,21 @@
 						</button>
 					</form>
 				{/each}
+				<details class="rounded-2xl border border-red-400/20 bg-red-500/10 md:col-span-2 xl:col-span-3">
+					<summary class="cursor-pointer list-none px-5 py-5 text-lg font-bold text-red-100">Cancelar turno</summary>
+					<form method="POST" action="?/update_status" class="border-t border-red-400/20 p-5">
+						<input type="hidden" name="status" value="cancelled" />
+						<label>
+							<span class="ux-label">Motivo (opcional)</span>
+							<textarea name="reason" rows="2" disabled={!canUseStatusAction('cancelled')} class="ux-textarea"></textarea>
+						</label>
+						<label class="mt-4 flex items-start gap-3 text-sm font-bold text-red-100">
+							<input type="checkbox" required disabled={!canUseStatusAction('cancelled')} class="mt-1 h-4 w-4 accent-red-600 disabled:opacity-60" />
+							<span>Confirmo que quiero cancelar este turno.</span>
+						</label>
+						<button disabled={!canUseStatusAction('cancelled')} class="ux-btn-danger mt-4 w-full">Cancelar turno</button>
+					</form>
+				</details>
 			</div>
 
 			<div class="mt-7 grid gap-4 rounded-2xl border border-white/10 bg-white/[0.035] p-5 lg:grid-cols-3">
@@ -303,30 +289,6 @@
 					</div>
 				</div>
 
-				<div class="mt-5 rounded-2xl border border-white/10 bg-white/[0.035] p-5">
-					<h2 class="text-lg font-semibold text-white">Mensajes</h2>
-					<div class="mt-4 grid gap-3">
-						{#each data.messageDispatches as dispatch}
-							<div class="rounded-2xl border border-white/10 bg-white/[0.035] px-4 py-4 text-sm">
-								<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-									<div>
-										<p class="font-semibold text-white">{messageTypeLabels[dispatch.type] ?? dispatch.type}</p>
-										<p class="mt-1 text-xs font-semibold text-white/45">{formatDateTime(dispatch.created_at)}</p>
-									</div>
-									<span class="ux-badge">{messageStatusLabels[dispatch.status] ?? dispatch.status}</span>
-								</div>
-								{#if dispatch.human_error_message}
-									<p class="mt-2 text-red-200">{dispatch.human_error_message}</p>
-								{/if}
-							</div>
-						{/each}
-						{#if data.messageDispatches.length === 0}
-							<p class="rounded-2xl border border-white/10 bg-white/[0.035] px-4 py-4 text-sm text-white/60">
-								Todavía no hay mensajes asociados a este turno.
-							</p>
-						{/if}
-					</div>
-				</div>
 			</div>
 		</details>
 

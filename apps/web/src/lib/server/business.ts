@@ -2,6 +2,11 @@ import { env } from '$env/dynamic/private';
 import type { Cookies } from '@sveltejs/kit';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getAuthUserId } from './supabase';
+import {
+	getBusinessAccessState,
+	type BusinessAccessState,
+	type BusinessSubscriptionRow
+} from './commercial-access';
 
 export const BUSINESS_ROLES = ['owner', 'admin', 'reception', 'professional', 'readonly'] as const;
 export type BusinessRole = (typeof BUSINESS_ROLES)[number];
@@ -42,6 +47,7 @@ export type BusinessContext = {
 	role: BusinessRole;
 	canManage: boolean;
 	canOperate: boolean;
+	access: BusinessAccessState;
 };
 
 const ACTIVE_BUSINESS_COOKIE = 'active-business-id';
@@ -108,7 +114,13 @@ export const demoBusinessContext = (): BusinessContext => ({
 	},
 	role: 'owner',
 	canManage: true,
-	canOperate: true
+	canOperate: true,
+	access: getBusinessAccessState({
+		business_id: 'demo-business',
+		commercial_access_enabled: true,
+		is_permanent: true,
+		subscription_status: 'active'
+	})
 });
 
 type ResolveBusinessOptions = {
@@ -122,11 +134,30 @@ const mapMembership = (row: any): BusinessContext | null => {
 	const role = String(row?.role ?? '');
 	const business = row?.business;
 	if (!business || !isBusinessRole(role)) return null;
+	const access = getBusinessAccessState(null, { businessCreatedAt: business.created_at });
 	return {
 		business: business as Business,
 		role,
-		canManage: canManageRole(role),
-		canOperate: canOperateRole(role)
+		canManage: canManageRole(role) && access.canUseBusiness,
+		canOperate: canOperateRole(role) && access.canUseBusiness,
+		access
+	};
+};
+
+const applySubscription = (
+	membership: BusinessContext,
+	subscription: BusinessSubscriptionRow | null | undefined,
+	options: { legacyFallback?: boolean } = {}
+): BusinessContext => {
+	const access = getBusinessAccessState(subscription ?? null, {
+		businessCreatedAt: membership.business.created_at,
+		legacyFallback: options.legacyFallback
+	});
+	return {
+		...membership,
+		canManage: canManageRole(membership.role) && access.canUseBusiness,
+		canOperate: canOperateRole(membership.role) && access.canUseBusiness,
+		access
 	};
 };
 
@@ -144,7 +175,34 @@ const loadMemberships = async (
 		throw error;
 	}
 
-	return (data ?? []).map(mapMembership).filter((item): item is BusinessContext => Boolean(item));
+	const memberships = (data ?? []).map(mapMembership).filter((item): item is BusinessContext => Boolean(item));
+	if (memberships.length === 0) return [];
+
+	const businessIds = memberships.map((membership) => membership.business.id);
+	const { data: subscriptions, error: subscriptionError } = await supabase
+		.from('business_subscriptions')
+		.select(
+			'id, business_id, commercial_access_enabled, is_permanent, subscription_status, access_starts_at, paid_until, grace_until, restricted_until, archived_at, last_payment_at, last_payment_amount, last_grant_duration_seconds, expiration_notice_enabled, access_source, access_note, updated_by, created_at, updated_at'
+		)
+		.in('business_id', businessIds);
+
+	if (subscriptionError) {
+		// Compatibility-first fallback: if the migration is not present yet, keep
+		// legacy access active instead of locking out existing consultorios.
+		console.error('Error cargando suscripciones comerciales', subscriptionError);
+		return memberships.map((membership) => applySubscription(membership, null, { legacyFallback: true }));
+	}
+
+	const subscriptionByBusinessId = new Map(
+		((subscriptions ?? []) as BusinessSubscriptionRow[]).map((subscription) => [
+			subscription.business_id,
+			subscription
+		])
+	);
+
+	return memberships.map((membership) =>
+		applySubscription(membership, subscriptionByBusinessId.get(membership.business.id) ?? null)
+	);
 };
 
 export const resolveActiveBusiness = async ({

@@ -14,6 +14,43 @@ import type { Actions, PageServerLoad } from './$types';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
+const todayForTimezone = (timeZone: string) => {
+	const parts = Object.fromEntries(
+		new Intl.DateTimeFormat('en-CA', {
+			timeZone,
+			year: 'numeric',
+			month: '2-digit',
+			day: '2-digit'
+		})
+			.formatToParts(new Date())
+			.map((part) => [part.type, part.value])
+	);
+	return `${parts.year}-${parts.month}-${parts.day}`;
+};
+
+const normalizeSearch = (value: string) =>
+	value
+		.trim()
+		.toLowerCase()
+		.normalize('NFD')
+		.replace(/\p{Diacritic}/gu, '');
+
+const appointmentMatchesQuery = (appointment: any, query: string) => {
+	if (!query) return true;
+	const haystack = [
+		appointment.patients?.full_name,
+		appointment.patients?.phone_e164,
+		appointment.patients?.dni,
+		appointment.patients?.email,
+		appointment.service_name_snapshot,
+		appointment.professional_name_snapshot,
+		appointment.internal_note
+	]
+		.map((value) => normalizeSearch(String(value ?? '')))
+		.join(' ');
+	return haystack.includes(query);
+};
+
 export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 	if (!locals.auth) throw redirect(303, '/login');
 	if (env.DEMO_MODE === 'true') {
@@ -23,6 +60,9 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 			selectedProfessionalId: '',
 			selectedStatus: '',
 			selectedServiceId: '',
+			selectedQuery: '',
+			selectedPatientId: '',
+			searchApplied: false,
 			appointments: [],
 			stats: APPOINTMENT_STATUSES.map((status) => ({ status, count: 0 })),
 			totalAppointments: 0,
@@ -36,17 +76,23 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 
 	const { supabase, business } = await getOdontoContext({ locals, fetch, cookies });
 	if (business.role === 'professional') throw redirect(303, '/odonto/mis-turnos');
-	const date = url.searchParams.get('date') ?? today();
+	const date = url.searchParams.get('date') ?? todayForTimezone(business.business.timezone);
 	const professionalId = url.searchParams.get('professional_id') ?? '';
 	const status = url.searchParams.get('status') ?? '';
 	const serviceId = url.searchParams.get('service_id') ?? '';
+	const query = String(url.searchParams.get('q') ?? '').trim();
+	const patientId = url.searchParams.get('patient_id') ?? '';
+	const normalizedQuery = normalizeSearch(query);
+	const searchApplied =
+		url.searchParams.has('date') ||
+		Boolean(professionalId || status || serviceId || normalizedQuery || patientId);
 	const dayStart = zonedDateTimeToUtc(date, '00:00', business.business.timezone);
 	const dayEnd = zonedDateTimeToUtc(date, '23:59', business.business.timezone);
 
 	const { data: dayAppointments, error: appointmentsError } = await supabase
 		.from('appointments')
 		.select(
-			'id, patient_id, service_id, professional_id, starts_at, ends_at, status, source, service_name_snapshot, professional_name_snapshot, internal_note, cancelled_reason, patients(full_name, phone_e164)'
+			'id, patient_id, service_id, professional_id, starts_at, ends_at, status, source, service_name_snapshot, professional_name_snapshot, internal_note, cancelled_reason, patients(full_name, phone_e164, dni, email)'
 		)
 		.eq('business_id', business.business.id)
 		.gte('starts_at', dayStart.toISOString())
@@ -59,13 +105,15 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 	const filteredAppointments = (dayAppointments ?? []).filter((appointment: any) => {
 		if (professionalId && appointment.professional_id !== professionalId) return false;
 		if (serviceId && appointment.service_id !== serviceId) return false;
+		if (patientId && appointment.patient_id !== patientId) return false;
 		if (status && appointment.status !== status) return false;
+		if (!appointmentMatchesQuery(appointment, normalizedQuery)) return false;
 		return true;
 	});
 
 	const stats = APPOINTMENT_STATUSES.map((appointmentStatus) => ({
 		status: appointmentStatus,
-		count: (dayAppointments ?? []).filter((appointment: any) => appointment.status === appointmentStatus).length
+		count: filteredAppointments.filter((appointment: any) => appointment.status === appointmentStatus).length
 	}));
 
 	const [{ data: appointments }, { data: professionals }, { data: services }, { data: patients }, { data: assignments }] =
@@ -105,19 +153,33 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 		return acc;
 	}, {});
 
+	let patientRows = patients ?? [];
+	if (patientId && !patientRows.some((patient: any) => patient.id === patientId)) {
+		const { data: selectedPatient } = await supabase
+			.from('patients')
+			.select('id, full_name, phone_e164, blocked')
+			.eq('business_id', business.business.id)
+			.eq('id', patientId)
+			.maybeSingle();
+		if (selectedPatient) patientRows = [selectedPatient, ...patientRows];
+	}
+
 	return {
 		context: business,
 		date,
 		selectedProfessionalId: professionalId,
 		selectedStatus: status,
 		selectedServiceId: serviceId,
+		selectedQuery: query,
+		selectedPatientId: patientId,
+		searchApplied,
 		appointments: appointments ?? [],
 		stats,
 		totalAppointments: (dayAppointments ?? []).length,
 		professionals: professionals ?? [],
 		services: services ?? [],
 		serviceProfessionalIds,
-		patients: patients ?? [],
+		patients: patientRows,
 		demo: false
 	};
 };

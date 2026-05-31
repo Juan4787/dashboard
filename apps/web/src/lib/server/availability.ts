@@ -241,8 +241,13 @@ export const getAvailabilitySlots = async (
 	for (const date of dates) {
 		const weekday = weekdayForDate(date, business.timezone);
 		for (const professional of professionals) {
-			const intervals: Interval[] = (rules ?? [])
-				.filter((rule: RuleRow) => rule.professional_id === professional.id && rule.weekday === weekday)
+			const professionalRules = ((rules ?? []) as RuleRow[]).filter((rule) => rule.professional_id === professional.id);
+			const professionalStepOptions = professionalRules
+				.map((rule) => rule.slot_interval_minutes)
+				.filter((value) => value > 0);
+			const defaultStepMinutes = professionalStepOptions.length > 0 ? Math.min(...professionalStepOptions) : 15;
+			const intervals: Interval[] = professionalRules
+				.filter((rule: RuleRow) => rule.weekday === weekday)
 				.map((rule: RuleRow) => ({
 					start: zonedDateTimeToUtc(date, rule.start_time.slice(0, 5), business.timezone),
 					end: zonedDateTimeToUtc(date, rule.end_time.slice(0, 5), business.timezone),
@@ -255,7 +260,7 @@ export const getAvailabilitySlots = async (
 				const start = new Date(exception.starts_at);
 				const end = new Date(exception.ends_at);
 				const localDate = zonedDateParts(start, business.timezone).date;
-				if (localDate === date) intervals.push({ start, end, stepMinutes: 15 });
+				if (localDate === date) intervals.push({ start, end, stepMinutes: defaultStepMinutes });
 			}
 
 			const blockingExceptions = ((exceptions ?? []) as ExceptionRow[]).filter(

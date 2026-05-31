@@ -94,6 +94,11 @@ export const actions: Actions = {
 		if (!appointmentId || (status !== 'attended' && status !== 'no_show')) {
 			return fail(400, { message: 'El profesional solo puede marcar asistencia o ausencia.' });
 		}
+		if (!business.access.allowedCapabilities.canEditAppointment) {
+			return fail(403, {
+				message: 'La cuenta está suspendida. Regularizá la suscripción para volver a operar.'
+			});
+		}
 
 		try {
 			await updateProfessionalAppointmentStatus(supabase, {

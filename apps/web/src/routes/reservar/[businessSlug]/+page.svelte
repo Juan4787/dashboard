@@ -1,5 +1,7 @@
 <script lang="ts">
+	import { afterNavigate } from '$app/navigation';
 	import { formatDateTime } from '$lib/utils/format';
+	import { tick } from 'svelte';
 
 	type Service = {
 		id: string;
@@ -8,7 +10,7 @@
 		duration_minutes: number;
 		price_label: string | null;
 	};
-	type Professional = { id: string; name: string; specialty: string | null };
+	type Professional = { id: string; name: string; specialty: string | null; next_available_at?: string | null };
 	type Slot = {
 		date: string;
 		time: string;
@@ -37,6 +39,7 @@
 	}>();
 
 	const business = $derived(data.state.business);
+	const bookingPath = $derived(business?.slug ? `/reservar/${business.slug}` : '');
 	const selectedService = $derived(
 		data.state.services.find((service: Service) => service.id === data.selected.serviceId) ?? null
 	);
@@ -55,25 +58,74 @@
 		if (date) search.set('date', date);
 		if (slot) search.set('slot', slot);
 		const value = search.toString();
-		return value ? `?${value}` : '';
+		return bookingPath ? `${bookingPath}${value ? `?${value}` : ''}` : value ? `?${value}` : '';
 	};
 	const step = $derived(!selectedService ? 1 : !selectedProfessional ? 2 : !data.selected.date ? 3 : !selectedSlot ? 4 : 5);
+	const createBookingAction = '?/create_booking';
 	const issueMessages: Record<string, string> = {
 		business_not_found: 'El enlace de reserva no está disponible.',
 		booking_disabled: 'La reserva online no está disponible en este momento.',
+		commercial_unavailable: 'La reserva online no está disponible en este momento. Contactá al consultorio.',
 		missing_service_role: 'La reserva online necesita configuración del servidor.',
 		no_services: 'No hay servicios disponibles para reservar online en este momento.',
-		no_professionals: 'No hay profesionales disponibles para ese servicio.',
+		no_professionals: 'No hay profesionales con horarios disponibles para ese servicio.',
 		no_availability: 'No hay horarios disponibles para los próximos días.'
 	};
 	const values = $derived((form?.values ?? {}) as Record<string, unknown>);
-	const serviceMark = (name: string) =>
-		name
-			.split(' ')
-			.filter(Boolean)
-			.slice(0, 2)
-			.map((part) => part[0]?.toUpperCase())
-			.join('');
+	const durationLabel = (minutes: number) => `${minutes} ${minutes === 1 ? 'minuto' : 'minutos'}`;
+	let visibleDayCount = $state(6);
+	let visibleSlotCount = $state(8);
+	let lastSelectedDate = $state('');
+	let bookingSubmitting = $state(false);
+	let servicesSection = $state<HTMLElement | null>(null);
+	let professionalsSection = $state<HTMLElement | null>(null);
+	let daysSection = $state<HTMLElement | null>(null);
+	let slotsSection = $state<HTMLElement | null>(null);
+	let patientSection = $state<HTMLElement | null>(null);
+	const visibleDays = $derived(data.state.days.slice(0, visibleDayCount));
+	const visibleSlots = $derived(data.state.slots.slice(0, visibleSlotCount));
+
+	const currentStepTarget = () => {
+		if (step === 2) return professionalsSection;
+		if (step === 3) return daysSection;
+		if (step === 4) return slotsSection;
+		if (step === 5) return patientSection;
+		return servicesSection;
+	};
+
+	const scrollToCurrentStep = async () => {
+		if (step <= 1) return;
+		await tick();
+		const target = currentStepTarget();
+		if (!target) return;
+		requestAnimationFrame(() => {
+			target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+		});
+	};
+
+	afterNavigate(({ from, to }) => {
+		if (!from || from.url.pathname !== to?.url.pathname) return;
+		if (from.url.search === to.url.search) return;
+		scrollToCurrentStep();
+	});
+
+	$effect(() => {
+		const selectedDayIndex = data.state.days.findIndex((day: Day) => day.date === data.selected.date);
+		if (selectedDayIndex >= visibleDayCount) visibleDayCount = selectedDayIndex + 1;
+	});
+
+	$effect(() => {
+		if (lastSelectedDate !== data.selected.date) {
+			visibleSlotCount = 8;
+			lastSelectedDate = data.selected.date;
+		}
+		const selectedSlotIndex = data.state.slots.findIndex((slot: Slot) => slot.starts_at === data.selected.slot);
+		if (selectedSlotIndex >= visibleSlotCount) visibleSlotCount = selectedSlotIndex + 1;
+	});
+
+	$effect(() => {
+		if (form?.message) bookingSubmitting = false;
+	});
 </script>
 
 <svelte:head>
@@ -125,27 +177,29 @@
 				</div>
 			</section>
 
-			<section class="ux-card">
+			<section class="ux-card scroll-mt-5" bind:this={servicesSection}>
 				<h2 class="ux-section-title">¿Qué necesitás?</h2>
 				<div class="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
 					{#each data.state.services as service}
-						<a href={queryFor({ service_id: service.id, professional_id: '', date: '', slot: '' })} class={`ux-choice p-5 text-center ${selectedService?.id === service.id ? 'ux-choice-active' : ''}`}>
-							<span class="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-white/10 text-lg font-bold text-white">{serviceMark(service.name)}</span>
-							<p class="mt-4 text-lg font-bold text-white">{service.name}</p>
-							<p class="mt-2 text-sm text-white/55">{service.duration_minutes} min{service.price_label ? ` · ${service.price_label}` : ''}</p>
+						<a data-sveltekit-noscroll href={queryFor({ service_id: service.id, professional_id: '', date: '', slot: '' })} class={`ux-choice p-5 ${selectedService?.id === service.id ? 'ux-choice-active' : ''}`}>
+							<p class="text-lg font-bold text-white">{service.name}</p>
+							<p class="mt-2 text-sm font-semibold text-white/55">{durationLabel(service.duration_minutes)}{service.price_label ? ` · ${service.price_label}` : ''}</p>
 						</a>
 					{/each}
 				</div>
 			</section>
 
 			{#if selectedService}
-				<section class="ux-card">
+				<section class="ux-card scroll-mt-5" bind:this={professionalsSection}>
 					<h2 class="ux-section-title">¿Con quién?</h2>
 					<div class="mt-5 grid gap-3 sm:grid-cols-2">
 						{#each data.state.professionals as professional}
-							<a href={queryFor({ professional_id: professional.id, date: '', slot: '' })} class={`ux-choice p-5 ${selectedProfessional?.id === professional.id ? 'ux-choice-active' : ''}`}>
+							<a data-sveltekit-noscroll href={queryFor({ professional_id: professional.id, date: '', slot: '' })} class={`ux-choice p-5 ${selectedProfessional?.id === professional.id ? 'ux-choice-active' : ''}`}>
 								<p class="text-lg font-bold text-white">{professional.name}</p>
 								<p class="mt-1 text-sm text-white/55">{professional.specialty ?? 'Profesional'}</p>
+								{#if professional.next_available_at}
+									<p class="mt-3 text-sm font-semibold text-white/70">Primer horario: {formatDateTime(professional.next_available_at)}</p>
+								{/if}
 							</a>
 						{/each}
 					</div>
@@ -153,32 +207,41 @@
 			{/if}
 
 			{#if selectedService && selectedProfessional}
-				<section class="ux-card">
+				<section class="ux-card scroll-mt-5" bind:this={daysSection}>
 					<h2 class="ux-section-title">Elegí un día</h2>
-					<div class="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
-						{#each data.state.days as day}
-							<a href={queryFor({ date: day.date, slot: '' })} class={`ux-choice px-4 py-3 ${data.selected.date === day.date ? 'ux-choice-active' : ''}`}>
+					<div class="mt-5 grid gap-3 sm:grid-cols-2">
+						{#each visibleDays as day}
+							<a data-sveltekit-noscroll href={queryFor({ date: day.date, slot: '' })} class={`ux-choice px-4 py-3 ${data.selected.date === day.date ? 'ux-choice-active' : ''}`}>
 								<span class="block font-bold text-white">{day.label}</span>
-								<span class="mt-1 block text-xs font-bold text-white/50">{day.count} horarios</span>
 							</a>
 						{/each}
 					</div>
+					{#if visibleDayCount < data.state.days.length}
+						<button type="button" class="ux-btn-secondary mt-4 w-full" onclick={() => (visibleDayCount = Math.min(visibleDayCount + 6, data.state.days.length))}>
+							Ver más días
+						</button>
+					{/if}
 					{#if data.state.days.length === 0}
-						<p class="ux-empty mt-4">No hay días disponibles.</p>
+						<p class="ux-empty mt-4">No hay horarios disponibles.</p>
 					{/if}
 				</section>
 			{/if}
 
 			{#if selectedService && selectedProfessional && data.selected.date}
-				<section class="ux-card">
+				<section class="ux-card scroll-mt-5" bind:this={slotsSection}>
 					<h2 class="ux-section-title">Elegí un horario</h2>
-					<div class="mt-5 grid grid-cols-3 gap-3 sm:grid-cols-4">
-						{#each data.state.slots as slot}
-							<a href={queryFor({ slot: slot.starts_at })} class={`rounded-2xl border px-3 py-3 text-center text-sm font-bold transition ${selectedSlot?.starts_at === slot.starts_at ? 'border-[#8b5cf6] bg-[#7c3aed] text-white' : 'border-white/10 bg-white/[0.04] text-white hover:border-[#8b5cf6]/70'}`}>
+					<div class="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+						{#each visibleSlots as slot}
+							<a data-sveltekit-noscroll href={queryFor({ slot: slot.starts_at })} class={`rounded-2xl border px-3 py-3 text-center text-sm font-bold transition ${selectedSlot?.starts_at === slot.starts_at ? 'border-[#8b5cf6] bg-[#7c3aed] text-white' : 'border-white/10 bg-white/[0.04] text-white hover:border-[#8b5cf6]/70'}`}>
 								{slot.time}
 							</a>
 						{/each}
 					</div>
+					{#if visibleSlotCount < data.state.slots.length}
+						<button type="button" class="ux-btn-secondary mt-4 w-full" onclick={() => (visibleSlotCount = Math.min(visibleSlotCount + 8, data.state.slots.length))}>
+							Ver más horarios
+						</button>
+					{/if}
 					{#if data.state.slots.length === 0}
 						<p class="ux-empty mt-4">No hay horarios para ese día.</p>
 					{/if}
@@ -186,12 +249,12 @@
 			{/if}
 
 			{#if selectedService && selectedProfessional && selectedSlot}
-				<form method="POST" action="?/create_booking" class="ux-card">
+				<form method="POST" action={createBookingAction} class="ux-card scroll-mt-5" bind:this={patientSection} onsubmit={() => (bookingSubmitting = true)}>
 					<h2 class="ux-section-title">Tus datos</h2>
 					<div class="ux-soft-card mt-5 p-5">
 						<p class="text-sm font-bold text-white/55">Resumen</p>
 						<p class="mt-2 text-lg font-bold text-white">{selectedService.name} con {selectedProfessional.name}</p>
-						<p class="mt-1 text-sm text-white/55">{formatDateTime(selectedSlot.starts_at)} · {selectedService.duration_minutes} min</p>
+						<p class="mt-1 text-sm text-white/55">{formatDateTime(selectedSlot.starts_at)} · {durationLabel(selectedService.duration_minutes)}</p>
 					</div>
 
 					<input type="hidden" name="service_id" value={selectedService.id} />
@@ -208,25 +271,12 @@
 							<input name="patient_phone" required inputmode="tel" value={String(values.patient_phone ?? '')} class="ux-input" />
 						</label>
 						<label>
-							<span class="ux-label">Correo opcional</span>
+							<span class="ux-label">Correo electrónico (opcional)</span>
 							<input name="patient_email" type="email" value={String(values.patient_email ?? '')} class="ux-input" />
 						</label>
 						<label>
-							<span class="ux-label">Comentario opcional</span>
+							<span class="ux-label">Comentario (opcional)</span>
 							<textarea name="note" rows="3" class="ux-textarea">{String(values.note ?? '')}</textarea>
-						</label>
-						<label class="ux-soft-card flex items-start gap-3 p-4">
-							<input
-								type="checkbox"
-								name="whatsapp_opt_in"
-								value="true"
-								required
-								checked={String(values.whatsapp_opt_in ?? '') === 'true'}
-								class="mt-1 accent-[#7c3aed]"
-							/>
-							<span class="text-sm font-semibold text-white/75">
-								Acepto recibir mensajes relacionados con este turno por WhatsApp.
-							</span>
 						</label>
 					</div>
 
@@ -237,7 +287,9 @@
 						<p class="ux-alert mt-5">{form.message}</p>
 					{/if}
 
-					<button type="submit" class="ux-btn-primary mt-5 w-full">Confirmar reserva</button>
+					<button type="submit" disabled={bookingSubmitting} class="ux-btn-primary mt-5 w-full">
+						{bookingSubmitting ? 'Confirmando reserva...' : 'Confirmar reserva'}
+					</button>
 				</form>
 			{/if}
 		{/if}

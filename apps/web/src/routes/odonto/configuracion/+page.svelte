@@ -12,6 +12,7 @@
 				connected_email?: string | null;
 				root_folder_id?: string | null;
 			} | null;
+			canLinkExternalFiles?: boolean;
 		};
 	}>();
 
@@ -28,6 +29,7 @@
 	let infoMessage = $state('');
 
 	const isConnected = $derived(Boolean(driveConnection?.root_folder_id));
+	const canLinkExternalFiles = $derived(data.canLinkExternalFiles !== false);
 	const hasClientId = Boolean(googleClientId);
 	const returnTarget = $derived.by(() => {
 		const raw = $page.url.searchParams.get('return') ?? '';
@@ -64,6 +66,10 @@
 		infoMessage = '';
 		if (!googleClientId) {
 			errorMessage = 'Falta configurar Google Drive.';
+			return;
+		}
+		if (!canLinkExternalFiles) {
+			errorMessage = 'La cuenta está suspendida. Regularizá la suscripción para volver a operar.';
 			return;
 		}
 		busy = true;
@@ -108,6 +114,10 @@
 		errorMessage = '';
 		successMessage = '';
 		infoMessage = '';
+		if (!canLinkExternalFiles) {
+			errorMessage = 'La cuenta está suspendida. Regularizá la suscripción para volver a operar.';
+			return;
+		}
 		busy = true;
 		try {
 			await postAction('?/disconnect_drive', new FormData());
@@ -144,10 +154,15 @@
 			<h2 class="mt-4 text-2xl font-bold text-white">Usuarios</h2>
 			<p class="mt-2 text-sm text-white/55">Quién puede entrar y qué puede hacer.</p>
 		</a>
-		<a href="/odonto/configuracion/whatsapp" class="ux-choice p-6">
-			<span class="ux-badge">WhatsApp</span>
-			<h2 class="mt-4 text-2xl font-bold text-white">Mensajes automáticos</h2>
-			<p class="mt-2 text-sm text-white/55">Conexión oficial, bot y recordatorios.</p>
+		<a href="/odonto/configuracion/suscripcion" class="ux-choice p-6">
+			<span class="ux-badge">Acceso</span>
+			<h2 class="mt-4 text-2xl font-bold text-white">Suscripción</h2>
+			<p class="mt-2 text-sm text-white/55">Estado comercial, vencimiento e historial de acceso.</p>
+		</a>
+		<a href="/odonto/configuracion/comunicacion" class="ux-choice p-6">
+			<span class="ux-badge">Comunicación</span>
+			<h2 class="mt-4 text-2xl font-bold text-white">Respuesta automática</h2>
+			<p class="mt-2 text-sm text-white/55">Link de reserva y mensaje que recibe el paciente por WhatsApp.</p>
 		</a>
 	</div>
 
@@ -164,11 +179,11 @@
 				</p>
 			</div>
 			<div class="flex flex-wrap gap-2">
-				<button type="button" class="ux-btn-primary" onclick={connectDrive} disabled={busy || data.demo || !hasClientId}>
+				<button type="button" class="ux-btn-primary" onclick={connectDrive} disabled={busy || data.demo || !hasClientId || !canLinkExternalFiles}>
 					{isConnected ? 'Cambiar cuenta' : 'Conectar Drive'}
 				</button>
 				{#if isConnected}
-					<button type="button" class="ux-btn-secondary" onclick={disconnectDrive} disabled={busy || data.demo}>
+					<button type="button" class="ux-btn-secondary" onclick={disconnectDrive} disabled={busy || data.demo || !canLinkExternalFiles}>
 						Desconectar
 					</button>
 				{/if}
@@ -180,6 +195,9 @@
 		{/if}
 		{#if !hasClientId}
 			<p class="ux-alert mt-4">Falta configurar Google Drive.</p>
+		{/if}
+		{#if !canLinkExternalFiles}
+			<p class="ux-alert mt-4">La cuenta está suspendida. Regularizá la suscripción para volver a operar.</p>
 		{/if}
 		{#if errorMessage}
 			<p class="ux-alert mt-4">{errorMessage}</p>

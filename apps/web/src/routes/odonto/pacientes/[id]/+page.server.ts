@@ -1,9 +1,11 @@
 import { env } from '$env/dynamic/private';
 import { resolveActiveBusiness } from '$lib/server/business';
+import type { BusinessAccessCapabilities } from '$lib/server/commercial-access';
 import { newId, readDemoDb, updateDemoDb } from '$lib/server/demo-store';
 import { normalizePhoneE164, normalizePhoneRaw } from '$lib/server/phone';
 import { createSupabaseServerClient, getAuthUserId } from '$lib/server/supabase';
 import { normalizePhone } from '$lib/utils/format';
+import { parseMoneyInteger } from '$lib/utils/money-input';
 import { fail, redirect, error as kitError } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import type { ClinicalEntry } from '$lib/types';
@@ -23,6 +25,8 @@ const normalizeFilename = (value?: string | null) => {
 
 const ENTRIES_PAGE_SIZE = 30;
 const RADIOGRAPHS_PAGE_SIZE = 24;
+const COMMERCIAL_RESTRICTED_MESSAGE =
+	'La cuenta está suspendida. Regularizá la suscripción para volver a operar.';
 
 const resolveBusinessActionContext = async ({
 	locals,
@@ -47,6 +51,13 @@ const resolveBusinessActionContext = async ({
 
 	return { supabase, ownerId, context };
 };
+
+type BusinessActionSession = NonNullable<Awaited<ReturnType<typeof resolveBusinessActionContext>>>;
+
+const hasCapability = (
+	session: BusinessActionSession,
+	capability: keyof BusinessAccessCapabilities
+) => Boolean(session.context.access.allowedCapabilities[capability]);
 
 export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) => {
 	if (!locals.auth) {
@@ -172,7 +183,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 };
 
 export const actions: Actions = {
-	save_drive_connection: async ({ request, locals, fetch }) => {
+	save_drive_connection: async ({ request, locals, fetch, cookies }) => {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') {
 			return fail(400, { message: 'No disponible en modo demo.' });
@@ -186,11 +197,14 @@ export const actions: Actions = {
 			return fail(400, { message: 'Faltan datos para guardar la conexión.' });
 		}
 
-		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
-		const ownerId = await getAuthUserId(supabase, locals.auth.access_token);
-		if (!ownerId) {
+		const session = await resolveBusinessActionContext({ locals, fetch, cookies });
+		if (!session) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
 		}
+		if (!hasCapability(session, 'canLinkExternalFiles')) {
+			return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
+		}
+		const { supabase, ownerId } = session;
 		const { error } = await supabase
 			.from('drive_connections')
 			.upsert(
@@ -219,6 +233,9 @@ export const actions: Actions = {
 		const session = await resolveBusinessActionContext({ locals, fetch, cookies });
 		if (!session) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
+		}
+		if (!hasCapability(session, 'canLinkExternalFiles')) {
+			return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
 		}
 		const { supabase, ownerId, context } = session;
 		const { error } = await supabase.from('drive_connections').delete().eq('owner_id', ownerId);
@@ -252,6 +269,9 @@ export const actions: Actions = {
 		if (!session) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
 		}
+		if (!hasCapability(session, 'canLinkExternalFiles')) {
+			return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
+		}
 		const { supabase, context } = session;
 		const { error } = await supabase
 			.from('patients')
@@ -282,6 +302,9 @@ export const actions: Actions = {
 		const session = await resolveBusinessActionContext({ locals, fetch, cookies });
 		if (!session) {
 			return fail(401, { message: 'Sesion invalida. Volve a iniciar sesion.' });
+		}
+		if (!hasCapability(session, 'canLinkExternalFiles')) {
+			return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
 		}
 		const { supabase, ownerId, context } = session;
 		const { data, error } = await supabase
@@ -329,6 +352,9 @@ export const actions: Actions = {
 		const session = await resolveBusinessActionContext({ locals, fetch, cookies });
 		if (!session) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
+		}
+		if (!hasCapability(session, 'canLinkExternalFiles')) {
+			return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
 		}
 		const { supabase, context } = session;
 		const { data, error } = await supabase
@@ -383,6 +409,9 @@ export const actions: Actions = {
 		if (!session) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
 		}
+		if (!hasCapability(session, 'canLinkExternalFiles')) {
+			return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
+		}
 		const { supabase, context } = session;
 		const { data, error } = await supabase
 			.from('patient_radiographs')
@@ -423,6 +452,9 @@ export const actions: Actions = {
 		if (!session) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
 		}
+		if (!hasCapability(session, 'canLinkExternalFiles')) {
+			return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
+		}
 		const { supabase, context } = session;
 		const { data, error } = await supabase
 			.from('patient_radiographs')
@@ -457,6 +489,9 @@ export const actions: Actions = {
 		const session = await resolveBusinessActionContext({ locals, fetch, cookies });
 		if (!session) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
+		}
+		if (!hasCapability(session, 'canLinkExternalFiles')) {
+			return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
 		}
 		const { supabase, context } = session;
 		const { error } = await supabase
@@ -517,7 +552,7 @@ export const actions: Actions = {
 			return fail(400, { message: 'Tipo y descripción son obligatorios' });
 		}
 
-		const amount = amountRaw ? Number(amountRaw) : null;
+		const amount = parseMoneyInteger(amountRaw);
 
 		if (env.DEMO_MODE === 'true') {
 			let saved = false;
@@ -550,6 +585,9 @@ export const actions: Actions = {
 		const session = await resolveBusinessActionContext({ locals, fetch, cookies });
 		if (!session) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
+		}
+		if (!hasCapability(session, 'canCreateClinicalEntry')) {
+			return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
 		}
 		const { supabase, ownerId, context } = session;
 
@@ -618,7 +656,7 @@ export const actions: Actions = {
 		}
 
 		const created_at = new Date(y, m - 1, d, hh, mm, 0, 0).toISOString();
-		const amount = amountRaw ? Number(amountRaw) : null;
+		const amount = parseMoneyInteger(amountRaw);
 
 		if (env.DEMO_MODE === 'true') {
 			let updated = false;
@@ -648,6 +686,9 @@ export const actions: Actions = {
 		const session = await resolveBusinessActionContext({ locals, fetch, cookies });
 		if (!session) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
+		}
+		if (!hasCapability(session, 'canEditClinicalEntry')) {
+			return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
 		}
 		const { supabase, context } = session;
 
@@ -743,6 +784,9 @@ export const actions: Actions = {
 		if (!session) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
 		}
+		if (!hasCapability(session, 'canEditPatient')) {
+			return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
+		}
 		const { supabase, context } = session;
 
 		const { error } = await supabase
@@ -781,6 +825,9 @@ export const actions: Actions = {
 		if (!session) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
 		}
+		if (!hasCapability(session, 'canEditPatient')) {
+			return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
+		}
 		const { supabase, context } = session;
 
 		const { error } = await supabase
@@ -818,6 +865,9 @@ export const actions: Actions = {
 		if (!session) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
 		}
+		if (!hasCapability(session, 'canEditPatient')) {
+			return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
+		}
 		const { supabase, context } = session;
 
 		const { error } = await supabase
@@ -854,6 +904,9 @@ export const actions: Actions = {
 		const session = await resolveBusinessActionContext({ locals, fetch, cookies });
 		if (!session) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
+		}
+		if (!hasCapability(session, 'canEditPatient')) {
+			return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
 		}
 		const { supabase, context } = session;
 

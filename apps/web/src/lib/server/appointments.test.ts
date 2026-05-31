@@ -68,7 +68,9 @@ describe('appointment transitions', () => {
 
 describe('appointment error messages', () => {
 	it('maps overlap and domain errors to human messages', () => {
-		expect(getHumanAppointmentErrorMessage({ code: '23P01' })).toBe('Ese horario ya fue tomado.');
+		expect(getHumanAppointmentErrorMessage({ code: '23P01' })).toBe(
+			'Ese horario ya fue reservado. Elegí otro horario disponible.'
+		);
 		expect(getHumanAppointmentErrorMessage(new Error('PROFESSIONAL_SERVICE_NOT_ASSIGNED'))).toBe(
 			'Este profesional no ofrece ese servicio.'
 		);

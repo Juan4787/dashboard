@@ -7,7 +7,13 @@
 			context: BusinessContext;
 			industries: readonly BusinessIndustry[];
 			publicBookingUrl: string;
-			readiness: { services: number; professionals: number; availabilityRules: number };
+			readiness: {
+				services: number;
+				professionals: number;
+				availabilityRules: number;
+				reservableServices: number;
+				reservableProfessionals: number;
+			};
 			demo: boolean;
 		};
 		form?: { success?: boolean; message?: string; values?: Record<string, unknown> };
@@ -30,11 +36,22 @@
 		other: 'Otro'
 	};
 	const industryLabel = (industry: BusinessIndustry) => industryLabels[industry] ?? industry;
+	const minNoticeOptions = [0, 60, 240, 1440, 2880];
+	const maxBookingOptions = [15, 30, 60, 90];
+	const timezoneOptions = [
+		'America/Argentina/Buenos_Aires',
+		'America/Argentina/Cordoba',
+		'America/Argentina/Mendoza',
+		'America/Argentina/Salta',
+		'America/Argentina/Tucuman'
+	];
+	const currentMinNotice = $derived(Number(valueOf('min_booking_notice_minutes', 1440)));
+	const currentMaxBookingDays = $derived(Number(valueOf('max_booking_days_ahead', 60)));
 	const isPublicReady = $derived(
 		business.is_active &&
 			business.public_booking_enabled &&
-			data.readiness.services > 0 &&
-			data.readiness.professionals > 0 &&
+			data.readiness.reservableServices > 0 &&
+			data.readiness.reservableProfessionals > 0 &&
 			data.readiness.availabilityRules > 0
 	);
 </script>
@@ -44,9 +61,8 @@
 		<BackLink href="/odonto/configuracion" label="Volver" class="mb-5" />
 		<div class="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
 			<div>
-				<p class={business.is_active ? 'ux-badge ux-badge-success' : 'ux-badge'}>{business.is_active ? 'Activo' : 'Inactivo'}</p>
-				<h1 class="ux-title mt-4">Consultorio</h1>
-				<p class="ux-subtitle">Datos visibles, reserva online y reglas básicas.</p>
+				<h1 class="ux-title">Negocio</h1>
+				<p class="ux-subtitle">Actualizá los datos que ven tus pacientes al reservar.</p>
 			</div>
 			<span class={isPublicReady ? 'ux-badge ux-badge-success' : 'ux-badge ux-badge-warning'}>
 				{isPublicReady ? 'Reserva lista' : 'Falta configuración'}
@@ -58,7 +74,7 @@
 		<div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
 			<div>
 				<h2 class="ux-section-title">Reserva online</h2>
-				<p class="mt-2 text-sm text-white/55">Link público para compartir.</p>
+				<p class="mt-2 text-sm text-white/55">Tus pacientes pueden reservar desde este enlace.</p>
 			</div>
 			<a href={data.publicBookingUrl} target="_blank" rel="noreferrer" class="ux-btn-secondary">Abrir link</a>
 		</div>
@@ -66,11 +82,11 @@
 		<div class="mt-4 grid gap-3 sm:grid-cols-3">
 			<div class="ux-soft-card p-4">
 				<p class="text-sm font-bold text-white/55">Servicios</p>
-				<p class="mt-1 text-3xl font-bold text-white">{data.readiness.services}</p>
+				<p class="mt-1 text-3xl font-bold text-white">{data.readiness.reservableServices}</p>
 			</div>
 			<div class="ux-soft-card p-4">
 				<p class="text-sm font-bold text-white/55">Profesionales</p>
-				<p class="mt-1 text-3xl font-bold text-white">{data.readiness.professionals}</p>
+				<p class="mt-1 text-3xl font-bold text-white">{data.readiness.reservableProfessionals}</p>
 			</div>
 			<div class="ux-soft-card p-4">
 				<p class="text-sm font-bold text-white/55">Horarios</p>
@@ -80,10 +96,12 @@
 	</div>
 
 	<form method="post" action="?/update_business" class="ux-card">
+		<input type="hidden" name="whatsapp_enabled" value={checkedOf('whatsapp_enabled', business.whatsapp_enabled) ? 'true' : 'false'} />
+		<input type="hidden" name="is_active" value={checkedOf('is_active', business.is_active) ? 'true' : 'false'} />
 		<div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
 			<div>
-				<h2 class="ux-section-title">Datos del consultorio</h2>
-				<p class="mt-1 text-sm text-white/55">Mantené solo lo necesario visible y actualizado.</p>
+				<h2 class="ux-section-title">Datos visibles</h2>
+				<p class="mt-1 text-sm text-white/55">Información básica del consultorio.</p>
 			</div>
 			<button type="submit" disabled={!canManage} class="ux-btn-primary">Guardar</button>
 		</div>
@@ -94,7 +112,7 @@
 				<input name="name" required value={valueOf('name')} disabled={!canManage} class="ux-input" />
 			</label>
 			<label>
-				<span class="ux-label">Enlace público</span>
+				<span class="ux-label">Nombre del enlace público</span>
 				<input name="slug" required value={valueOf('slug')} disabled={!canManage} class="ux-input" />
 			</label>
 			<label>
@@ -107,54 +125,72 @@
 			</label>
 			<label>
 				<span class="ux-label">Zona horaria</span>
-				<input name="timezone" value={valueOf('timezone', 'America/Argentina/Cordoba')} disabled={!canManage} class="ux-input" />
+				<select name="timezone" disabled={!canManage} class="ux-select">
+					{#if !timezoneOptions.includes(valueOf('timezone', 'America/Argentina/Cordoba'))}
+						<option value={valueOf('timezone', 'America/Argentina/Cordoba')} selected>
+							{valueOf('timezone', 'America/Argentina/Cordoba')}
+						</option>
+					{/if}
+					{#each timezoneOptions as timezone}
+						<option value={timezone} selected={valueOf('timezone', 'America/Argentina/Cordoba') === timezone}>{timezone}</option>
+					{/each}
+				</select>
 			</label>
 			<label>
-				<span class="ux-label">Teléfono opcional</span>
+				<span class="ux-label">Teléfono de contacto (opcional)</span>
 				<input name="phone" value={valueOf('phone')} disabled={!canManage} class="ux-input" />
 			</label>
 			<label>
-				<span class="ux-label">Correo opcional</span>
+				<span class="ux-label">Correo de contacto (opcional)</span>
 				<input name="email" type="email" value={valueOf('email')} disabled={!canManage} class="ux-input" />
 			</label>
 			<label class="md:col-span-2">
-				<span class="ux-label">Dirección opcional</span>
+				<span class="ux-label">Dirección (opcional)</span>
 				<input name="address" value={valueOf('address')} disabled={!canManage} class="ux-input" />
 			</label>
 			<label class="md:col-span-2">
-				<span class="ux-label">Logo opcional</span>
+				<span class="ux-label">Logo (opcional)</span>
 				<input name="logo_url" value={valueOf('logo_url')} disabled={!canManage} class="ux-input" />
 			</label>
 			<label>
 				<span class="ux-label">Anticipación mínima</span>
-				<input name="min_booking_notice_minutes" type="number" min="0" value={valueOf('min_booking_notice_minutes', 1440)} disabled={!canManage} class="ux-input" />
+				<select name="min_booking_notice_minutes" disabled={!canManage} class="ux-select">
+					{#if !minNoticeOptions.includes(currentMinNotice)}
+						<option value={currentMinNotice} selected>{currentMinNotice} minutos</option>
+					{/if}
+					<option value="0" selected={valueOf('min_booking_notice_minutes', 1440) === '0'}>Sin anticipación mínima</option>
+					<option value="60" selected={valueOf('min_booking_notice_minutes', 1440) === '60'}>1 hora antes</option>
+					<option value="240" selected={valueOf('min_booking_notice_minutes', 1440) === '240'}>4 horas antes</option>
+					<option value="1440" selected={valueOf('min_booking_notice_minutes', 1440) === '1440'}>24 horas antes</option>
+					<option value="2880" selected={valueOf('min_booking_notice_minutes', 1440) === '2880'}>48 horas antes</option>
+				</select>
 			</label>
 			<label>
-				<span class="ux-label">Días hacia adelante</span>
-				<input name="max_booking_days_ahead" type="number" min="1" value={valueOf('max_booking_days_ahead', 60)} disabled={!canManage} class="ux-input" />
+				<span class="ux-label">Mostrar horarios hasta</span>
+				<select name="max_booking_days_ahead" disabled={!canManage} class="ux-select">
+					{#if !maxBookingOptions.includes(currentMaxBookingDays)}
+						<option value={currentMaxBookingDays} selected>{currentMaxBookingDays} días adelante</option>
+					{/if}
+					<option value="15" selected={valueOf('max_booking_days_ahead', 60) === '15'}>15 días adelante</option>
+					<option value="30" selected={valueOf('max_booking_days_ahead', 60) === '30'}>30 días adelante</option>
+					<option value="60" selected={valueOf('max_booking_days_ahead', 60) === '60'}>60 días adelante</option>
+					<option value="90" selected={valueOf('max_booking_days_ahead', 60) === '90'}>90 días adelante</option>
+				</select>
 			</label>
 			<label class="md:col-span-2">
-				<span class="ux-label">Política de cancelación opcional</span>
+				<span class="ux-label">Política de cancelación (opcional)</span>
 				<textarea name="cancellation_policy" rows="3" disabled={!canManage} class="ux-textarea">{valueOf('cancellation_policy')}</textarea>
 			</label>
 		</div>
 
-		<div class="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+		<div class="mt-6 grid gap-3 sm:grid-cols-2">
 			<label class="ux-choice flex items-center gap-3 px-4 py-3">
 				<input type="checkbox" name="public_booking_enabled" value="true" checked={checkedOf('public_booking_enabled', business.public_booking_enabled)} disabled={!canManage} class="accent-[#7c3aed]" />
-				<span class="font-bold text-white">Reserva online</span>
-			</label>
-			<label class="ux-choice flex items-center gap-3 px-4 py-3">
-				<input type="checkbox" name="whatsapp_enabled" value="true" checked={checkedOf('whatsapp_enabled', business.whatsapp_enabled)} disabled={!canManage} class="accent-[#7c3aed]" />
-				<span class="font-bold text-white">WhatsApp</span>
+				<span class="font-bold text-white">Reserva online activa</span>
 			</label>
 			<label class="ux-choice flex items-center gap-3 px-4 py-3">
 				<input type="checkbox" name="allow_same_day_booking" value="true" checked={checkedOf('allow_same_day_booking', business.allow_same_day_booking)} disabled={!canManage} class="accent-[#7c3aed]" />
-				<span class="font-bold text-white">Mismo día</span>
-			</label>
-			<label class="ux-choice flex items-center gap-3 px-4 py-3">
-				<input type="checkbox" name="is_active" value="true" checked={checkedOf('is_active', business.is_active)} disabled={!canManage} class="accent-[#7c3aed]" />
-				<span class="font-bold text-white">Activo</span>
+				<span class="font-bold text-white">Permitir reservar turnos para hoy</span>
 			</label>
 		</div>
 

@@ -7,6 +7,7 @@
 	import DatePartsInput from '$lib/components/DatePartsInput.svelte';
 	import { CLINICAL_ENTRY_TYPES } from '$lib/constants';
 	import { formatDate, formatDateTime } from '$lib/utils/format';
+	import { formatMoneyInteger, moneyDigits } from '$lib/utils/money-input';
 
 	type DriveClient = typeof import('$lib/client/drive');
 
@@ -745,9 +746,8 @@ let deleteForm: HTMLFormElement | null = null;
 	);
 
 const formatAmountInput = (value: string) => {
-	const digits = value.replace(/\D/g, '');
-	if (!digits) return { digits: '', formatted: '' };
-	const formatted = digits.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+	const digits = moneyDigits(value);
+	const formatted = formatMoneyInteger(digits);
 	return { digits, formatted };
 };
 
@@ -872,6 +872,12 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				>
 					+ Registrar consulta
 				</button>
+				<a
+					href={`/odonto/agenda?patient_id=${data.patient.id}`}
+					class="rounded-full border border-[#7c3aed]/40 px-5 py-2 text-sm font-semibold text-[#7c3aed] transition hover:-translate-y-0.5 hover:bg-[#7c3aed]/10 dark:text-[#c4b5fd] md:col-span-2 md:inline-flex md:justify-self-start lg:col-span-1"
+				>
+					+ Nuevo turno
+				</a>
 			</div>
 		</div>
 		<div class="mt-4 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4 sm:text-sm md:flex md:items-center md:gap-3">

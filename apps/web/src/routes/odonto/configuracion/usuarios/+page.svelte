@@ -47,7 +47,7 @@
 			<div>
 				<p class="ux-badge">Permisos</p>
 				<h1 class="ux-title mt-4">Usuarios</h1>
-				<p class="ux-subtitle">Quién entra al panel y qué puede hacer.</p>
+				<p class="ux-subtitle">Quién puede entrar y qué puede hacer.</p>
 			</div>
 			<div class="ux-soft-card min-w-32 p-5 text-center">
 				<p class="text-sm font-bold text-white/55">Usuarios</p>

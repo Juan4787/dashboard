@@ -22,6 +22,7 @@
 		serviceProfessionalIds,
 		patients,
 		initialDate,
+		initialPatientId = '',
 		canOperate,
 		form
 	} = $props<{
@@ -30,6 +31,7 @@
 		serviceProfessionalIds: Record<string, string[]>;
 		patients: Patient[];
 		initialDate: string;
+		initialPatientId?: string;
 		canOperate: boolean;
 		form?: { values?: Record<string, unknown> };
 	}>();
@@ -47,7 +49,7 @@
 	};
 	const formatTime = (value: string) => value.slice(0, 5);
 	const formatDayName = (date: string) =>
-		new Intl.DateTimeFormat('es-AR', { weekday: 'short' }).format(new Date(`${date}T12:00:00`));
+		new Intl.DateTimeFormat('es-AR', { weekday: 'long' }).format(new Date(`${date}T12:00:00`));
 	const formatDayNumber = (date: string) =>
 		new Intl.DateTimeFormat('es-AR', { day: '2-digit', month: '2-digit' }).format(new Date(`${date}T12:00:00`));
 	const formatLongDate = (date: string) =>
@@ -61,20 +63,7 @@
 		const day = slot.date === current ? 'Hoy' : slot.date === tomorrow ? 'Mañana' : formatDayName(slot.date);
 		return `${day} ${slot.time}`;
 	};
-	const initials = (name: string) =>
-		name
-			.split(' ')
-			.filter(Boolean)
-			.slice(0, 2)
-			.map((part) => part[0]?.toUpperCase())
-			.join('');
-	const serviceMark = (name: string) =>
-		name
-			.split(' ')
-			.filter(Boolean)
-			.slice(0, 2)
-			.map((part) => part[0]?.toUpperCase())
-			.join('');
+	const durationLabel = (minutes: number) => `${minutes} ${minutes === 1 ? 'minuto' : 'minutos'}`;
 
 	const initialStep = () => {
 		if (value('time')) return 4;
@@ -82,14 +71,15 @@
 		if (value('service_id')) return 2;
 		return 1;
 	};
+	const getInitialPatientSelection = () => value('patient_id') || initialPatientId;
 
 	let step = $state(initialStep());
 	let selectedServiceId = $state(value('service_id'));
 	let selectedProfessionalId = $state(value('professional_id'));
 	let visibleWeekStart = $state(value('date') || safeStartDate());
 	let selectedSlotStartsAt = $state('');
-	let patientMode = $state(value('patient_id') ? 'existing' : 'new');
-	let selectedPatientId = $state(value('patient_id'));
+	let patientMode = $state(getInitialPatientSelection() ? 'existing' : 'new');
+	let selectedPatientId = $state(getInitialPatientSelection());
 	let patientName = $state(value('patient_name'));
 	let patientPhone = $state(value('patient_phone'));
 	let patientEmail = $state(value('patient_email'));
@@ -101,6 +91,10 @@
 	let slotsLoaded = $state(false);
 	let slotsError = $state('');
 	let slotRequest = 0;
+	let remotePatients = $state<Patient[]>([]);
+	let patientSearchLoading = $state(false);
+	let patientSearchError = $state('');
+	let patientSearchRequest = 0;
 
 	const selectedService = $derived(
 		services.find((service: Service) => service.id === selectedServiceId) ?? null
@@ -119,7 +113,7 @@
 	);
 	const selectableProfessionals = $derived(
 		offeringProfessionals.filter(
-			(professional: Professional) => !slotsLoaded || Boolean(nextSlotByProfessional[professional.id])
+			(professional: Professional) => slotsLoaded && Boolean(nextSlotByProfessional[professional.id])
 		)
 	);
 	const selectedProfessional = $derived(
@@ -129,13 +123,22 @@
 	const professionalSlots = $derived(
 		slots.filter((slot) => slot.professional_id === selectedProfessionalId && weekDays.includes(slot.date))
 	);
-	const timeRows = $derived([...new Set(professionalSlots.map((slot) => slot.time))].sort());
+	const slotsByDay = $derived(
+		weekDays
+			.map((day) => ({
+				day,
+				slots: professionalSlots.filter((slot) => slot.date === day)
+			}))
+			.filter((day) => day.slots.length > 0)
+	);
 	const selectedSlot = $derived(slots.find((slot) => slot.starts_at === selectedSlotStartsAt) ?? null);
+	const patientCandidates = $derived(patientSearch.trim().length >= 2 ? remotePatients : patients);
 	const visiblePatients = $derived(
-		patients
+		patientCandidates
 			.filter((patient: Patient) => !patient.blocked)
 			.filter((patient: Patient) => {
 				const query = patientSearch.trim().toLowerCase();
+				if (patientSearch.trim().length >= 2) return true;
 				if (!query) return true;
 				return (
 					patient.full_name.toLowerCase().includes(query) ||
@@ -218,8 +221,28 @@
 		}
 	};
 
-	const slotFor = (day: string, time: string) =>
-		professionalSlots.find((slot) => slot.date === day && slot.time === time) ?? null;
+	const loadPatients = async (query: string) => {
+		const request = ++patientSearchRequest;
+		patientSearchLoading = true;
+		patientSearchError = '';
+		try {
+			const response = await fetch(`/odonto/pacientes/buscar?q=${encodeURIComponent(query)}`);
+			const payload = await response.json();
+			if (request !== patientSearchRequest) return;
+			if (!response.ok) {
+				remotePatients = [];
+				patientSearchError = payload?.message ?? 'No se pudo buscar pacientes.';
+				return;
+			}
+			remotePatients = Array.isArray(payload?.patients) ? payload.patients : [];
+		} catch {
+			if (request !== patientSearchRequest) return;
+			remotePatients = [];
+			patientSearchError = 'No se pudo buscar pacientes.';
+		} finally {
+			if (request === patientSearchRequest) patientSearchLoading = false;
+		}
+	};
 
 	$effect(() => {
 		if (!selectedServiceId) {
@@ -247,6 +270,18 @@
 			pendingInitialTime = '';
 			step = 4;
 		}
+	});
+
+	$effect(() => {
+		const query = patientSearch.trim();
+		if (query.length < 2) {
+			remotePatients = [];
+			patientSearchLoading = false;
+			patientSearchError = '';
+			return;
+		}
+		const timeout = window.setTimeout(() => void loadPatients(query), 220);
+		return () => window.clearTimeout(timeout);
 	});
 </script>
 
@@ -300,12 +335,9 @@
 									: 'border-white/10 bg-white/[0.04] hover:border-[#8b5cf6]/70 hover:bg-white/[0.07]'
 							}`}
 						>
-							<span class="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-white/10 text-xl font-bold text-white ring-1 ring-white/10">
-								{serviceMark(service.name)}
-							</span>
-							<span class="mt-5 block text-lg font-semibold leading-tight text-white">{service.name}</span>
+							<span class="block text-lg font-semibold leading-tight text-white">{service.name}</span>
 							<span class="mt-4 inline-flex rounded-full bg-white/10 px-3 py-1 text-sm font-semibold text-white/85">
-								{service.duration_minutes} min
+								{durationLabel(service.duration_minutes)}
 							</span>
 						</button>
 					{/each}
@@ -345,8 +377,11 @@
 									: 'border-white/10 bg-white/[0.04] hover:border-[#8b5cf6]/70 hover:bg-white/[0.07]'
 							}`}
 						>
-							<span class="mx-auto grid h-20 w-20 place-items-center rounded-full bg-white/12 text-xl font-bold text-white ring-1 ring-white/15">
-								{initials(professional.name)}
+							<span class="mx-auto grid h-20 w-20 place-items-center rounded-full bg-[#7c3aed]/25 text-white ring-1 ring-[#8b5cf6]/35">
+								<svg class="h-9 w-9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+									<path stroke-linecap="round" stroke-linejoin="round" d="M20 21a8 8 0 0 0-16 0" />
+									<circle cx="12" cy="8" r="4" />
+								</svg>
 							</span>
 							<span class="mt-5 block text-lg font-semibold text-white">{professional.name}</span>
 							{#if professional.specialty}
@@ -413,24 +448,19 @@
 					</div>
 				</div>
 
-				<div class="mt-7 overflow-x-auto rounded-3xl border border-white/10 bg-white/[0.035] p-4">
+				<div class="mt-7 rounded-3xl border border-white/10 bg-white/[0.035] p-4">
 					{#if loadingSlots}
 						<div class="grid min-h-72 place-items-center text-sm text-white/65">Buscando horarios...</div>
-					{:else if timeRows.length > 0}
-						<div class="min-w-[820px]">
-							<div class="grid grid-cols-[72px_repeat(7,1fr)] gap-2">
-								<div></div>
-								{#each weekDays as day}
-									<div class={`rounded-2xl px-3 py-3 text-center ${selectedSlot?.date === day ? 'bg-[#7c3aed]/35 ring-1 ring-[#8b5cf6]' : 'bg-white/[0.04]'}`}>
-										<p class="text-sm font-semibold capitalize text-white">{formatDayName(day)}</p>
-										<p class="mt-1 text-xs text-white/55">{formatDayNumber(day)}</p>
+					{:else if slotsByDay.length > 0}
+						<div class="grid gap-3">
+							{#each slotsByDay as dayGroup}
+								<section class={`rounded-2xl border p-4 ${selectedSlot?.date === dayGroup.day ? 'border-[#8b5cf6] bg-[#7c3aed]/12' : 'border-white/10 bg-white/[0.035]'}`}>
+									<div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+										<p class="text-base font-bold capitalize text-white">{formatDayName(dayGroup.day)}</p>
+										<p class="text-sm font-semibold text-white/55">{formatDayNumber(dayGroup.day)}</p>
 									</div>
-								{/each}
-								{#each timeRows as time}
-									<div class="py-3 text-right text-sm font-semibold text-white/55">{time}</div>
-									{#each weekDays as day}
-										{@const slot = slotFor(day, time)}
-										{#if slot}
+									<div class="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6">
+										{#each dayGroup.slots as slot}
 											<button
 												type="button"
 												onclick={() => selectSlot(slot)}
@@ -442,14 +472,10 @@
 											>
 												{slot.time}
 											</button>
-										{:else}
-											<div class="rounded-xl border border-white/5 bg-white/[0.025] px-3 py-3 text-center text-xs font-semibold text-white/25">
-												No disponible
-											</div>
-										{/if}
-									{/each}
-								{/each}
-							</div>
+										{/each}
+									</div>
+								</section>
+							{/each}
 						</div>
 					{:else}
 						<div class="grid min-h-72 place-items-center text-center">
@@ -497,7 +523,13 @@
 									: 'border-white/10 bg-white/[0.04] hover:bg-white/[0.07]'
 							}`}
 						>
-							<span class="mx-auto grid h-16 w-16 place-items-center rounded-full bg-white/10 text-2xl font-bold text-white ring-1 ring-white/10">B</span>
+							<span class="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#7c3aed]/25 text-white ring-1 ring-[#8b5cf6]/35">
+								<svg class="h-8 w-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+									<path stroke-linecap="round" stroke-linejoin="round" d="M21 21a7 7 0 0 0-14 0" />
+									<circle cx="14" cy="8" r="4" />
+									<path stroke-linecap="round" stroke-linejoin="round" d="M3 11h5M5.5 8.5v5" />
+								</svg>
+							</span>
 							<span class="mt-4 block text-lg font-semibold text-white">Buscar paciente</span>
 						</button>
 						<button
@@ -512,7 +544,13 @@
 									: 'border-white/10 bg-white/[0.04] hover:bg-white/[0.07]'
 							}`}
 						>
-							<span class="mx-auto grid h-16 w-16 place-items-center rounded-full bg-white/10 text-2xl font-bold text-white ring-1 ring-white/10">N</span>
+							<span class="mx-auto grid h-16 w-16 place-items-center rounded-full bg-white/10 text-white ring-1 ring-white/10">
+								<svg class="h-8 w-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+									<path stroke-linecap="round" stroke-linejoin="round" d="M20 21a8 8 0 0 0-16 0" />
+									<circle cx="12" cy="8" r="4" />
+									<path stroke-linecap="round" stroke-linejoin="round" d="M19 8v6M16 11h6" />
+								</svg>
+							</span>
 							<span class="mt-4 block text-lg font-semibold text-white">Nuevo paciente</span>
 						</button>
 					</div>
@@ -522,12 +560,21 @@
 						<input type="hidden" name="patient_phone" value="" />
 						<input type="hidden" name="patient_email" value="" />
 						<div class="mt-6">
-							<input
-								bind:value={patientSearch}
-								placeholder="Buscar por nombre o teléfono"
-								class="w-full rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-4 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-[#8b5cf6]"
-							/>
+							<label>
+								<span class="mb-2 block text-sm font-bold text-white/70">Buscar por nombre, teléfono o DNI</span>
+								<input
+									bind:value={patientSearch}
+									placeholder="Escribí al menos 2 caracteres"
+									class="w-full rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-4 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-[#8b5cf6]"
+								/>
+							</label>
 							<input type="hidden" name="patient_id" value={selectedPatientId} />
+							{#if patientSearchLoading}
+								<p class="mt-3 text-sm font-semibold text-white/55">Buscando pacientes...</p>
+							{/if}
+							{#if patientSearchError}
+								<p class="mt-3 rounded-2xl border border-red-400/30 bg-red-500/10 p-3 text-sm font-semibold text-red-100">{patientSearchError}</p>
+							{/if}
 							<div class="mt-3 grid gap-2">
 								{#each visiblePatients as patient}
 									<button
@@ -555,30 +602,36 @@
 					{:else}
 						<input type="hidden" name="patient_id" value="" />
 						<div class="mt-6 grid gap-3">
-							<input
-								name="patient_name"
-								bind:value={patientName}
-								required
-								disabled={!canOperate}
-								placeholder="Nombre del paciente"
-								class="rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-4 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-[#8b5cf6] disabled:opacity-60"
-							/>
-							<input
-								name="patient_phone"
-								bind:value={patientPhone}
-								required
-								disabled={!canOperate}
-								placeholder="Teléfono"
-								class="rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-4 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-[#8b5cf6] disabled:opacity-60"
-							/>
-							<input
-								name="patient_email"
-								type="email"
-								bind:value={patientEmail}
-								disabled={!canOperate}
-								placeholder="Correo electrónico opcional"
-								class="rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-4 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-[#8b5cf6] disabled:opacity-60"
-							/>
+							<label>
+								<span class="mb-2 block text-sm font-bold text-white/70">Nombre del paciente</span>
+								<input
+									name="patient_name"
+									bind:value={patientName}
+									required
+									disabled={!canOperate}
+									class="rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-4 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-[#8b5cf6] disabled:opacity-60"
+								/>
+							</label>
+							<label>
+								<span class="mb-2 block text-sm font-bold text-white/70">Teléfono</span>
+								<input
+									name="patient_phone"
+									bind:value={patientPhone}
+									required
+									disabled={!canOperate}
+									class="rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-4 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-[#8b5cf6] disabled:opacity-60"
+								/>
+							</label>
+							<label>
+								<span class="mb-2 block text-sm font-bold text-white/70">Correo electrónico (opcional)</span>
+								<input
+									name="patient_email"
+									type="email"
+									bind:value={patientEmail}
+									disabled={!canOperate}
+									class="rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-4 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-[#8b5cf6] disabled:opacity-60"
+								/>
+							</label>
 						</div>
 					{/if}
 				</div>

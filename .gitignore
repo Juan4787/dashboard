@@ -12,6 +12,7 @@ build
 **/build
 playwright-report
 test-results
+.playwright-cli/
 
 # OS
 .DS_Store

@@ -1,15 +1,16 @@
 const dateFormatter = new Intl.DateTimeFormat('es-AR', {
-	day: '2-digit',
-	month: 'short',
+	day: 'numeric',
+	month: 'long',
 	year: 'numeric'
 });
 
 const dateTimeFormatter = new Intl.DateTimeFormat('es-AR', {
-	day: '2-digit',
-	month: 'short',
+	day: 'numeric',
+	month: 'long',
 	year: 'numeric',
 	hour: '2-digit',
-	minute: '2-digit'
+	minute: '2-digit',
+	hour12: false
 });
 
 export const formatDate = (value?: string | null) => {

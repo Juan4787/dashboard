@@ -30,6 +30,7 @@ let createFullName = $state('');
 let createDni = $state('');
 let createPhone = $state('');
 const isSearching = $derived(search.trim().length > 0);
+const canCreatePatient = $derived(data.canCreatePatient !== false);
 
 	$effect(() => {
 		if ($page.url.searchParams.has('nuevo')) {
@@ -82,6 +83,7 @@ const isSearching = $derived(search.trim().length > 0);
 	};
 
 	const openCreateModal = () => {
+		if (!canCreatePatient) return;
 		createFullName = '';
 		createDni = '';
 		createPhone = '';
@@ -95,7 +97,8 @@ const isSearching = $derived(search.trim().length > 0);
 			<h1 class="text-3xl font-semibold text-neutral-900 dark:text-white">Pacientes</h1>
 		</div>
 		<button
-			class="hidden md:inline-flex rounded-full bg-[#7c3aed] px-4 py-3 text-sm font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed]"
+			disabled={!canCreatePatient}
+			class="hidden md:inline-flex rounded-full bg-[#7c3aed] px-4 py-3 text-sm font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed] disabled:cursor-not-allowed disabled:opacity-45"
 			onclick={openCreateModal}
 		>
 			+ Nuevo paciente
@@ -451,7 +454,8 @@ const isSearching = $derived(search.trim().length > 0);
 
 	<!-- FAB móvil para nuevo paciente -->
 	<button
-		class="fixed bottom-4 left-4 right-4 z-20 rounded-full bg-[#7c3aed] px-4 py-3 text-sm font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed] md:hidden"
+		disabled={!canCreatePatient}
+		class="fixed bottom-4 left-4 right-4 z-20 rounded-full bg-[#7c3aed] px-4 py-3 text-sm font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed] disabled:cursor-not-allowed disabled:opacity-45 md:hidden"
 		onclick={openCreateModal}
 	>
 		+ Nuevo paciente
@@ -461,6 +465,11 @@ const isSearching = $derived(search.trim().length > 0);
 <Modal open={showCreate} title="Alta rápida de paciente" on:close={closeModal}>
 	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <form method="post" action="?/create_patient" use:enhance class="space-y-4" onkeydown={preventEnterSubmit}>
+		{#if !canCreatePatient}
+			<div class="rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+				La cuenta está suspendida. Regularizá la suscripción para volver a operar.
+			</div>
+		{/if}
 		<div class="space-y-2">
 			<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="full_name">Nombre y apellido *</label>
 			<input
@@ -522,7 +531,8 @@ const isSearching = $derived(search.trim().length > 0);
 			</button>
 			<button
 				type="submit"
-				class="w-full rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 sm:w-auto"
+				disabled={!canCreatePatient}
+				class="w-full rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:opacity-45 sm:w-auto"
 			>
 				Crear paciente
 			</button>

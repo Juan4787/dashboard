@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { navigating } from '$app/stores';
-	import { onDestroy } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import OdontoRouteSkeleton from '$lib/components/skeleton/OdontoRouteSkeleton.svelte';
 
@@ -42,17 +42,11 @@
 	const dailyNav: NavItem[] = [
 		{ label: 'Agenda', href: '/odonto/agenda', activePrefixes: ['/odonto/agenda', '/odonto/turnos'] },
 		{ label: 'Pacientes', href: '/odonto/pacientes', activePrefixes: ['/odonto/pacientes'] },
-		{ label: 'Recordatorios', href: '/odonto/recordatorios', activePrefixes: ['/odonto/recordatorios'] },
-		{ label: 'Mensajes', href: '/odonto/mensajes', activePrefixes: ['/odonto/mensajes'] },
+		{ label: 'Profesionales', href: '/odonto/profesionales', activePrefixes: ['/odonto/profesionales'] },
 		{
 			label: 'Configuración',
 			href: '/odonto/configuracion',
-			activePrefixes: [
-				'/odonto/configuracion',
-				'/odonto/profesionales',
-				'/odonto/servicios',
-				'/odonto/disponibilidad'
-			]
+			activePrefixes: ['/odonto/configuracion']
 		}
 	];
 
@@ -69,10 +63,8 @@
 	const configNav: NavItem[] = [
 		{ label: 'Negocio', href: '/odonto/configuracion/negocio' },
 		{ label: 'Usuarios', href: '/odonto/configuracion/usuarios' },
-		{ label: 'Profesionales', href: '/odonto/profesionales', activePrefixes: ['/odonto/profesionales'] },
-		{ label: 'Servicios', href: '/odonto/servicios', activePrefixes: ['/odonto/servicios'] },
-		{ label: 'Disponibilidad', href: '/odonto/disponibilidad', activePrefixes: ['/odonto/disponibilidad'] },
-		{ label: 'WhatsApp', href: '/odonto/configuracion/whatsapp' }
+		{ label: 'Suscripción', href: '/odonto/configuracion/suscripcion' },
+		{ label: 'Comunicación', href: '/odonto/configuracion/comunicacion' }
 	];
 
 	const activeBusiness = $derived(data?.activeBusiness);
@@ -103,6 +95,61 @@
 		return 'Usuario';
 	});
 
+	const accessLabel = $derived.by(() => {
+		const access = activeBusiness?.access;
+		if (!access) return null;
+		if (!access.commercialAccessEnabled) return 'Acceso pausado';
+		if (access.visualStatus === 'permanent') return 'Permanente';
+		if (access.visualStatus === 'expiring') return 'Vence mañana';
+		if (access.commercialStatus === 'grace') return 'Vencido';
+		if (access.commercialStatus === 'restricted') return 'Suspendido';
+		if (access.commercialStatus === 'archived') return 'Archivado';
+		return null;
+	});
+
+	const accessTone = $derived.by(() => {
+		const access = activeBusiness?.access;
+		if (!access?.commercialAccessEnabled || access?.commercialStatus === 'restricted' || access?.commercialStatus === 'archived') {
+			return 'danger';
+		}
+		if (access?.commercialStatus === 'grace' || access?.visualStatus === 'expiring') return 'warning';
+		return 'neutral';
+	});
+
+	const canSeeCommercialNotice = $derived.by(() => {
+		const role = activeBusiness?.role;
+		const access = activeBusiness?.access;
+		if (!access) return false;
+		if (access.commercialStatus === 'restricted' || access.commercialStatus === 'archived') return true;
+		return role === 'owner' || role === 'admin';
+	});
+
+	const commercialNotice = $derived.by(() => {
+		const access = activeBusiness?.access;
+		if (!access || !canSeeCommercialNotice) return null;
+		if (!access.commercialAccessEnabled) return 'La cuenta no está disponible. Contactá soporte.';
+		if (access.commercialStatus === 'archived') {
+			return 'La cuenta está archivada. Contactá soporte para solicitar reactivación o exportación.';
+		}
+		if (access.commercialStatus === 'restricted') {
+			return 'La cuenta está suspendida. Podés consultar información existente, pero las funciones operativas están pausadas.';
+		}
+		if (access.commercialStatus === 'grace') {
+			return access.graceUntil
+				? `La suscripción está vencida. Regularizá el pago antes del ${new Date(access.graceUntil).toLocaleString('es-AR')} para evitar restricciones operativas.`
+				: 'La suscripción está vencida. Regularizá el pago para evitar restricciones operativas.';
+		}
+		if (access.visualStatus === 'expiring') {
+			return 'La suscripción vence mañana. Regularizá el pago para evitar restricciones operativas.';
+		}
+		return null;
+	});
+
+	const shouldShowAccessChip = $derived.by(() => {
+		if (!accessLabel || !canSeeCommercialNotice) return false;
+		return activeBusiness?.access?.visualStatus !== 'active';
+	});
+
 	const isActive = (href: string) => $page.url.pathname.startsWith(href);
 	const isNavItemActive = (item: NavItem) =>
 		(item.activePrefixes ?? [item.href]).some((prefix) => $page.url.pathname.startsWith(prefix));
@@ -112,6 +159,18 @@
 		userMenuOpen = false;
 	};
 
+	onMount(() => {
+		const handleOutsideClick = (event: PointerEvent) => {
+			const target = event.target;
+			if (!(target instanceof Element)) return;
+			if (target.closest('[data-menu-root]')) return;
+			closeMenus();
+		};
+
+		document.addEventListener('pointerdown', handleOutsideClick, true);
+		return () => document.removeEventListener('pointerdown', handleOutsideClick, true);
+	});
+
 	const mobileTitle = $derived.by(() => {
 		const path = $page.url.pathname;
 		if (path.startsWith('/odonto/pacientes/') && $page.data?.patient?.full_name) {
@@ -120,10 +179,10 @@
 		if (path.startsWith('/odonto/agenda')) return 'Agenda';
 		if (path.startsWith('/odonto/pacientes')) return 'Pacientes';
 		if (path.startsWith('/odonto/profesionales')) return 'Profesionales';
-		if (path.startsWith('/odonto/servicios')) return 'Servicios';
-		if (path.startsWith('/odonto/disponibilidad')) return 'Disponibilidad';
-		if (path.startsWith('/odonto/recordatorios')) return 'Recordatorios';
-		if (path.startsWith('/odonto/mensajes')) return 'Mensajes';
+		if (path.startsWith('/odonto/servicios')) return 'Profesionales';
+		if (path.startsWith('/odonto/disponibilidad')) return 'Profesionales';
+		if (path.startsWith('/odonto/recordatorios')) return 'Comunicación';
+		if (path.startsWith('/odonto/mensajes')) return 'Comunicación';
 		if (path.startsWith('/odonto/mis-turnos')) return 'Mis turnos';
 		if (path.startsWith('/odonto/configuracion')) return 'Configuración';
 		if (path.startsWith('/odonto/maestro')) return 'Panel maestro';
@@ -134,16 +193,27 @@
 		const path = $page.url.pathname;
 		return path !== '/odonto/pacientes' && path.startsWith('/odonto');
 	});
+	const mobileBackHref = $derived.by(() => {
+		const path = $page.url.pathname;
+		if (path.startsWith('/odonto/turnos/')) return '/odonto/agenda';
+		if (path.startsWith('/odonto/agenda/semana')) return '/odonto/agenda';
+		if (path.startsWith('/odonto/pacientes/')) return '/odonto/pacientes';
+		if (path.startsWith('/odonto/profesionales/')) return '/odonto/profesionales';
+		if (path.startsWith('/odonto/configuracion/')) return '/odonto/configuracion';
+		if (path.startsWith('/odonto/maestro')) return '/odonto/agenda';
+		if (path.startsWith('/odonto/mis-turnos')) return '/odonto/agenda';
+		return '/odonto/agenda';
+	});
 
 	const resolveSkeletonKind = (routeId: string | null | undefined, path: string) => {
 		if (routeId === '/odonto/agenda/semana') return 'agendaWeek';
 		if (routeId === '/odonto/agenda') return 'agenda';
 		if (routeId === '/odonto/turnos/[appointmentId]') return 'appointmentDetail';
 		if (routeId === '/odonto/mis-turnos') return 'appointments';
-		if (routeId === '/odonto/recordatorios') return 'appointments';
-		if (routeId === '/odonto/mensajes') return 'appointments';
-		if (routeId === '/odonto/disponibilidad') return 'availability';
-		if (routeId === '/odonto/servicios') return 'services';
+		if (routeId === '/odonto/recordatorios') return 'config';
+		if (routeId === '/odonto/mensajes') return 'config';
+		if (routeId === '/odonto/disponibilidad') return 'professionals';
+		if (routeId === '/odonto/servicios') return 'professionals';
 		if (routeId === '/odonto/profesionales/[professionalId]') return 'professionalDetail';
 		if (routeId === '/odonto/profesionales') return 'professionals';
 		if (routeId === '/odonto/pacientes/[id]') return 'patientDetail';
@@ -154,10 +224,10 @@
 		if (path.startsWith('/odonto/agenda')) return 'agenda';
 		if (path.startsWith('/odonto/turnos/')) return 'appointmentDetail';
 		if (path.startsWith('/odonto/mis-turnos')) return 'appointments';
-		if (path.startsWith('/odonto/recordatorios')) return 'appointments';
-		if (path.startsWith('/odonto/mensajes')) return 'appointments';
-		if (path.startsWith('/odonto/disponibilidad')) return 'availability';
-		if (path.startsWith('/odonto/servicios')) return 'services';
+		if (path.startsWith('/odonto/recordatorios')) return 'config';
+		if (path.startsWith('/odonto/mensajes')) return 'config';
+		if (path.startsWith('/odonto/disponibilidad')) return 'professionals';
+		if (path.startsWith('/odonto/servicios')) return 'professionals';
 		if (path.startsWith('/odonto/profesionales/')) return 'professionalDetail';
 		if (path.startsWith('/odonto/profesionales')) return 'professionals';
 		if (path.startsWith('/odonto/pacientes/')) return 'patientDetail';
@@ -225,7 +295,7 @@
 		<div class="flex h-14 items-center justify-between px-4 md:hidden">
 			{#if showBack}
 				<a
-					href="/odonto/pacientes"
+					href={mobileBackHref}
 					class="flex h-11 w-11 items-center justify-center rounded-full text-neutral-700 transition hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-[#13243d]"
 					aria-label="Volver"
 				>
@@ -430,16 +500,13 @@
 						<p class="truncate text-sm font-semibold text-neutral-900 dark:text-white">
 							{activeBusiness.business.name}
 						</p>
-						<p class="text-xs text-neutral-500 dark:text-neutral-300">
-							Panel del consultorio
-						</p>
 					</div>
 				{/if}
 			</div>
 			<nav class="flex min-w-0 flex-1 items-center justify-center gap-2 text-sm font-semibold">
 				{#each visibleNav as item}
 					{#if item.label === 'Configuración' && canShowConfigMenu}
-						<div class="relative">
+							<div class="relative" data-menu-root>
 							<button
 								type="button"
 								class={`group rounded-2xl px-4 py-3 transition-all duration-200 ${
@@ -508,7 +575,7 @@
 					{/if}
 				{/each}
 			</nav>
-			<div class="relative flex min-w-0 justify-end">
+				<div class="relative flex min-w-0 justify-end" data-menu-root>
 				<button
 					type="button"
 					class="flex max-w-64 items-center gap-3 rounded-2xl border border-neutral-200 bg-white/70 px-3 py-2 text-left shadow-sm transition hover:border-[#7c3aed]/40 hover:bg-white dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/[0.07]"
@@ -531,12 +598,27 @@
 							decoding="async"
 						/>
 					</picture>
-					<span class="min-w-0">
-						<span class="block truncate text-sm font-semibold text-neutral-900 dark:text-white">
-							{activeBusiness?.business?.name ?? 'Cuenta'}
+						<span class="min-w-0">
+							<span class="block truncate text-sm font-semibold text-neutral-900 dark:text-white">
+								{activeBusiness?.business?.name ?? 'Cuenta'}
+							</span>
+						<span class="flex items-center gap-2 truncate text-xs text-neutral-500 dark:text-neutral-300">
+							<span>{roleLabel}</span>
+							{#if shouldShowAccessChip}
+								<span
+									class={`rounded-full px-2 py-0.5 text-[10px] font-black ${
+										accessTone === 'danger'
+											? 'bg-red-500/15 text-red-200'
+											: accessTone === 'warning'
+												? 'bg-amber-400/15 text-amber-100'
+												: 'bg-white/10 text-white/70'
+									}`}
+								>
+									{accessLabel}
+								</span>
+							{/if}
 						</span>
-						<span class="block truncate text-xs text-neutral-500 dark:text-neutral-300">{roleLabel}</span>
-					</span>
+						</span>
 					<svg class="h-4 w-4 shrink-0 text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 						<path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6" />
 					</svg>
@@ -599,6 +681,17 @@
 		{#if data?.businessError}
 			<div class="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900 dark:border-amber-400/30 dark:bg-amber-500/15 dark:text-amber-100">
 				{data.businessError}
+			</div>
+		{/if}
+		{#if commercialNotice}
+			<div
+				class={`mb-4 rounded-2xl border px-4 py-3 text-sm font-bold ${
+					accessTone === 'danger'
+						? 'border-red-300 bg-red-50 text-red-900 dark:border-red-400/25 dark:bg-red-500/12 dark:text-red-100'
+						: 'border-amber-300 bg-amber-50 text-amber-950 dark:border-amber-400/25 dark:bg-amber-400/12 dark:text-amber-100'
+				}`}
+			>
+				{commercialNotice}
 			</div>
 		{/if}
 		{#if showSkeleton}
