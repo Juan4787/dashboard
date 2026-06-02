@@ -192,8 +192,7 @@ export const applyPublicAppointmentAction = async (
 		};
 		const metadata: Record<string, unknown> = {
 			source: 'public_token',
-			from_status: appointment.status,
-			note: input.note?.trim() || null
+			from_status: appointment.status
 		};
 		let auditAction = '';
 
@@ -209,7 +208,6 @@ export const applyPublicAppointmentAction = async (
 			updates.cancelled_reason = input.note?.trim() || 'Cancelado por paciente desde link público';
 			auditAction = 'appointment.public_cancelled';
 			metadata.to_status = 'cancelled';
-			metadata.reason = updates.cancelled_reason;
 		} else {
 			updates.status = 'reschedule_requested';
 			updates.reschedule_requested_at = now.toISOString();
@@ -217,12 +215,21 @@ export const applyPublicAppointmentAction = async (
 			metadata.to_status = 'reschedule_requested';
 		}
 
-		const { error } = await supabase
+		let updateQuery = supabase
 			.from('appointments')
 			.update(updates)
 			.eq('id', appointment.id)
 			.eq('business_id', appointment.business.id);
+		if (input.action === 'confirm') {
+			updateQuery = updateQuery.eq('status', 'reserved');
+		} else if (input.action === 'cancel') {
+			updateQuery = updateQuery.in('status', ['reserved', 'confirmed', 'reschedule_requested']);
+		} else {
+			updateQuery = updateQuery.in('status', ['reserved', 'confirmed']);
+		}
+		const { data: updatedAppointment, error } = await updateQuery.select('id').maybeSingle();
 		if (error) throw error;
+		if (!updatedAppointment) throw new Error('PUBLIC_TOKEN_APPOINTMENT_CLOSED');
 
 		await writeAuditLog(supabase, {
 			businessId: appointment.business.id,

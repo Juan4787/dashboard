@@ -1,5 +1,4 @@
 import {
-	BUSINESS_ROLES,
 	demoBusinessContext,
 	isBusinessRole,
 	resolveActiveBusiness,
@@ -103,6 +102,12 @@ const getUsersPageContext = async ({
 const countOwners = (members: BusinessMember[]) =>
 	members.filter((member) => member.role === 'owner').length;
 
+const selectableRolesFor = (role: BusinessRole): BusinessRole[] => {
+	if (role === 'owner') return ['owner', 'admin', 'reception', 'professional'];
+	if (role === 'admin') return ['reception', 'professional'];
+	return [];
+};
+
 export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 	if (!locals.auth) throw redirect(303, '/login');
 
@@ -110,20 +115,20 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 		return {
 			context: demoBusinessContext(),
 			members: DEMO_MEMBERS,
-			roles: BUSINESS_ROLES,
+			roles: ['owner', 'admin', 'reception', 'professional'] as BusinessRole[],
 			currentUserId: 'demo-user',
 			demo: true
 		};
 	}
 
 	const { supabase, context, currentUserId } = await getUsersPageContext({ locals, fetch, cookies });
-	if (context.role === 'professional') throw redirect(303, '/odonto/mis-turnos');
+	if (!context.capabilities.canManageUsers) throw redirect(303, '/odonto/agenda');
 	const members = await listMembers(supabase, context.business.id);
 
 	return {
 		context,
 		members,
-		roles: BUSINESS_ROLES,
+		roles: selectableRolesFor(context.role),
 		currentUserId,
 		demo: false
 	};
@@ -148,7 +153,7 @@ export const actions: Actions = {
 		}
 
 		const { supabase, context } = await getUsersPageContext({ locals, fetch, cookies });
-		if (!context.canManage) {
+		if (!context.capabilities.canManageUsers) {
 			return fail(403, { message: 'No tenés permisos para administrar usuarios.' });
 		}
 
@@ -162,7 +167,11 @@ export const actions: Actions = {
 			console.error('Error agregando usuario al negocio', error);
 			const message = error.message?.includes('USER_NOT_FOUND')
 				? 'Ese correo electrónico todavía no tiene una cuenta creada.'
-				: 'No se pudo agregar el usuario.';
+				: error.message?.includes('ADMIN_OWNER_ACTION_DENIED')
+					? 'Un administrador no puede crear dueños ni otros administradores.'
+					: error.message?.includes('EMAIL_ALREADY_ASSIGNED')
+						? 'Ese email ya está asociado a otro consultorio activo o pendiente.'
+						: 'No se pudo agregar el usuario.';
 			return fail(500, { message, values: Object.fromEntries(form) });
 		}
 
@@ -186,7 +195,7 @@ export const actions: Actions = {
 		}
 
 		const { supabase, context } = await getUsersPageContext({ locals, fetch, cookies });
-		if (!context.canManage) {
+		if (!context.capabilities.canManageUsers) {
 			return fail(403, { message: 'No tenés permisos para administrar usuarios.' });
 		}
 
@@ -199,15 +208,19 @@ export const actions: Actions = {
 			return fail(400, { message: 'El consultorio debe conservar al menos un dueño.' });
 		}
 
-		const { error } = await supabase
-			.from('business_users')
-			.update({ role })
-			.eq('id', membershipId)
-			.eq('business_id', context.business.id);
+		const { error } = await supabase.rpc('change_business_user_role_safely', {
+			p_membership_id: membershipId,
+			p_role: role
+		});
 
 		if (error) {
 			console.error('Error actualizando rol', error);
-			return fail(500, { message: 'No se pudo actualizar el permiso.' });
+			const message = error.message?.includes('LAST_OWNER_BLOCKED')
+				? 'El consultorio debe conservar al menos un dueño activo.'
+				: error.message?.includes('ADMIN_OWNER_ACTION_DENIED')
+					? 'Un administrador no puede modificar dueños ni otros administradores.'
+					: 'No se pudo actualizar el permiso.';
+			return fail(500, { message });
 		}
 
 		return { success: true, message: 'Permiso actualizado.' };
@@ -225,7 +238,7 @@ export const actions: Actions = {
 		}
 
 		const { supabase, context, currentUserId } = await getUsersPageContext({ locals, fetch, cookies });
-		if (!context.canManage) {
+		if (!context.capabilities.canManageUsers) {
 			return fail(403, { message: 'No tenés permisos para administrar usuarios.' });
 		}
 
@@ -241,17 +254,21 @@ export const actions: Actions = {
 			return fail(400, { message: 'El consultorio debe conservar al menos un dueño.' });
 		}
 
-		const { error } = await supabase
-			.from('business_users')
-			.delete()
-			.eq('id', membershipId)
-			.eq('business_id', context.business.id);
+		const { error } = await supabase.rpc('disable_business_user_safely', {
+			p_membership_id: membershipId,
+			p_reason: 'Deshabilitado desde Usuarios'
+		});
 
 		if (error) {
 			console.error('Error quitando usuario', error);
-			return fail(500, { message: 'No se pudo quitar el usuario.' });
+			const message = error.message?.includes('LAST_OWNER_BLOCKED')
+				? 'El consultorio debe conservar al menos un dueño activo.'
+				: error.message?.includes('ADMIN_OWNER_ACTION_DENIED')
+					? 'Un administrador no puede deshabilitar dueños ni otros administradores.'
+					: 'No se pudo quitar el usuario.';
+			return fail(500, { message });
 		}
 
-		return { success: true, message: 'Usuario quitado del consultorio.' };
+		return { success: true, message: 'Usuario deshabilitado del consultorio.' };
 	}
 };

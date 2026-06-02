@@ -39,7 +39,7 @@
 
 	let { data, form } = $props<{
 		data: {
-			context: { canOperate: boolean };
+			context: { capabilities?: Record<string, boolean> };
 			professional: {
 				id: string;
 				name: string;
@@ -59,7 +59,9 @@
 		form?: { success?: boolean; message?: string };
 	}>();
 
-	const canOperate = $derived(data.context.canOperate && !data.demo);
+	const canConfigureProfessionals = $derived(Boolean(data.context.capabilities?.canConfigureProfessionals) && !data.demo);
+	const canConfigureServices = $derived(Boolean(data.context.capabilities?.canConfigureServices) && !data.demo);
+	const canConfigureAvailability = $derived(Boolean(data.context.capabilities?.canConfigureAvailability) && !data.demo);
 	const professional = $derived(data.professional);
 	let activeTab = $state<TabId>('perfil');
 	let selectedServiceIds = $state<string[]>([]);
@@ -190,24 +192,24 @@
 					<h2 class="ux-section-title">Perfil</h2>
 					<p class="mt-1 text-sm text-white/55">Datos básicos del profesional.</p>
 				</div>
-				<button type="submit" disabled={!canOperate} class="ux-btn-primary">Guardar</button>
+				<button type="submit" disabled={!canConfigureProfessionals} class="ux-btn-primary">Guardar</button>
 			</div>
 			<div class="mt-5 grid gap-4 md:grid-cols-2">
 				<label>
 					<span class="ux-label">Nombre</span>
-					<input name="name" value={professional?.name ?? ''} required disabled={!canOperate} class="ux-input" />
+					<input name="name" value={professional?.name ?? ''} required disabled={!canConfigureProfessionals} class="ux-input" />
 				</label>
 				<label>
 					<span class="ux-label">Especialidad (opcional)</span>
-					<input name="specialty" value={professional?.specialty ?? ''} disabled={!canOperate} class="ux-input" />
+					<input name="specialty" value={professional?.specialty ?? ''} disabled={!canConfigureProfessionals} class="ux-input" />
 				</label>
 				<label>
 					<span class="ux-label">Teléfono (opcional)</span>
-					<input name="phone" value={professional?.phone ?? ''} disabled={!canOperate} class="ux-input" />
+					<input name="phone" value={professional?.phone ?? ''} disabled={!canConfigureProfessionals} class="ux-input" />
 				</label>
 				<label>
 					<span class="ux-label">Correo electrónico (opcional)</span>
-					<input name="email" value={professional?.email ?? ''} type="email" disabled={!canOperate} class="ux-input" />
+					<input name="email" value={professional?.email ?? ''} type="email" disabled={!canConfigureProfessionals} class="ux-input" />
 				</label>
 			</div>
 			<label class="mt-5 inline-flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-bold text-white">
@@ -216,7 +218,7 @@
 					name="is_available"
 					value="true"
 					checked={professional?.is_active && professional?.is_public}
-					disabled={!canOperate}
+					disabled={!canConfigureProfessionals}
 					class="accent-[#7c3aed]"
 				/>
 				Disponible para turnos
@@ -232,7 +234,7 @@
 						<h2 class="ux-section-title">Servicios que ofrece</h2>
 						<p class="mt-1 text-sm text-white/55">Estos servicios estarán disponibles para reservar con este profesional.</p>
 					</div>
-					<button type="submit" disabled={!canOperate} class="ux-btn-primary">Guardar servicios</button>
+					<button type="submit" disabled={!canConfigureServices} class="ux-btn-primary">Guardar servicios</button>
 				</div>
 
 				<div class="mt-5 grid gap-3">
@@ -243,7 +245,7 @@
 								name="service_id"
 								value={service.id}
 								checked={selectedServiceIds.includes(service.id)}
-								disabled={!canOperate}
+								disabled={!canConfigureServices}
 								class="accent-[#7c3aed]"
 								onchange={() => toggleService(service.id)}
 							/>
@@ -275,17 +277,17 @@
 					<form method="POST" action="?/create_service" class="mt-5 grid gap-4">
 						<label>
 							<span class="ux-label">Nombre</span>
-							<input name="name" required disabled={!canOperate} class="ux-input" />
+							<input name="name" required disabled={!canConfigureServices} class="ux-input" />
 						</label>
 						<label>
 							<span class="ux-label">Duración</span>
-							<input name="duration_minutes" type="number" min="5" max="480" step="5" value="30" disabled={!canOperate} class="ux-input" />
+							<input name="duration_minutes" type="number" min="5" max="480" step="5" value="30" disabled={!canConfigureServices} class="ux-input" />
 						</label>
 						<label>
 							<span class="ux-label">Precio visible (opcional)</span>
-							<input name="price_label" type="text" inputmode="numeric" disabled={!canOperate} placeholder="$ 35.000" class="ux-input" oninput={handlePriceInput} />
+							<input name="price_label" type="text" inputmode="numeric" disabled={!canConfigureServices} placeholder="$ 35.000" class="ux-input" oninput={handlePriceInput} />
 						</label>
-						<button class="ux-btn-primary" disabled={!canOperate}>Crear y asignar</button>
+						<button class="ux-btn-primary" disabled={!canConfigureServices}>Crear y asignar</button>
 					</form>
 				{/if}
 			</div>
@@ -309,7 +311,7 @@
 						{#each weekdays as day, index}
 							<button
 								type="button"
-								disabled={!canOperate}
+								disabled={!canConfigureAvailability}
 								class={`min-h-14 min-w-0 rounded-2xl border px-3 py-3 text-center text-sm font-black leading-tight whitespace-normal transition disabled:cursor-not-allowed disabled:opacity-50 ${
 									selectedWeekdays.includes(index)
 										? 'border-[#8b5cf6] bg-[#7c3aed] text-white shadow-lg shadow-[#7c3aed]/20'
@@ -337,7 +339,7 @@
 							required
 							placeholder="9 a 13, 15 a 19"
 							bind:value={weeklyTimeRanges}
-							disabled={!canOperate}
+							disabled={!canConfigureAvailability}
 							class="ux-input text-lg font-bold"
 							oninput={handleScheduleTyping}
 							onblur={normalizeScheduleInput}
@@ -354,10 +356,10 @@
 					</label>
 					<label>
 						<span class="ux-label">Intervalo</span>
-						<input name="slot_interval_minutes" type="number" inputmode="numeric" min="5" max="120" step="5" value="15" disabled={!canOperate} class="ux-input text-lg font-bold" />
+						<input name="slot_interval_minutes" type="number" inputmode="numeric" min="5" max="120" step="5" value="15" disabled={!canConfigureAvailability} class="ux-input text-lg font-bold" />
 					</label>
 				</div>
-				<button type="submit" disabled={!canOperate || selectedWeekdays.length === 0} class="ux-btn-primary mt-6 w-full">
+				<button type="submit" disabled={!canConfigureAvailability || selectedWeekdays.length === 0} class="ux-btn-primary mt-6 w-full">
 					Guardar horarios
 				</button>
 			</form>
@@ -394,18 +396,18 @@
 					</div>
 					<label>
 						<span class="ux-label">Fecha</span>
-						<input name="date" type="text" inputmode="numeric" placeholder="24/05/2026" bind:value={exceptionDate} onblur={normalizeExceptionDate} required disabled={!canOperate} class="ux-input" />
+						<input name="date" type="text" inputmode="numeric" placeholder="24/05/2026" bind:value={exceptionDate} onblur={normalizeExceptionDate} required disabled={!canConfigureAvailability} class="ux-input" />
 					</label>
 					<label>
 						<span class="ux-label">Horario</span>
-						<input name="time_range" type="text" placeholder="10 a 12" bind:value={exceptionTimeRange} onblur={normalizeExceptionTime} required disabled={!canOperate} class="ux-input" />
+						<input name="time_range" type="text" placeholder="10 a 12" bind:value={exceptionTimeRange} onblur={normalizeExceptionTime} required disabled={!canConfigureAvailability} class="ux-input" />
 					</label>
 					<label>
 						<span class="ux-label">Motivo (opcional)</span>
-						<input name="reason" placeholder="Vacaciones, feriado, trámite..." disabled={!canOperate} class="ux-input" />
+						<input name="reason" placeholder="Vacaciones, feriado, trámite..." disabled={!canConfigureAvailability} class="ux-input" />
 					</label>
 				</div>
-				<button type="submit" disabled={!canOperate} class="ux-btn-secondary mt-5 w-full">
+				<button type="submit" disabled={!canConfigureAvailability} class="ux-btn-secondary mt-5 w-full">
 					Guardar cambio
 				</button>
 			</form>
@@ -432,7 +434,7 @@
 											}}>
 												<input type="hidden" name="rule_id" value={rule.id} />
 												<span class="text-sm font-bold text-white">{rule.start_time.slice(0, 5)} - {rule.end_time.slice(0, 5)}</span>
-												<button type="submit" disabled={!canOperate} class="text-xs font-black text-red-200 disabled:opacity-50">Quitar</button>
+												<button type="submit" disabled={!canConfigureAvailability} class="text-xs font-black text-red-200 disabled:opacity-50">Quitar</button>
 											</form>
 										{/each}
 									{:else}
@@ -459,7 +461,7 @@
 									<p class="mt-1 text-white/55">{formatDateTime(item.starts_at)} - {formatDateTime(item.ends_at)}</p>
 									{#if item.reason}<p class="mt-1 text-xs text-white/42">{item.reason}</p>{/if}
 								</div>
-								<button type="submit" disabled={!canOperate} class="text-sm font-bold text-red-200 disabled:opacity-50">Eliminar</button>
+								<button type="submit" disabled={!canConfigureAvailability} class="text-sm font-bold text-red-200 disabled:opacity-50">Eliminar</button>
 							</div>
 						</form>
 					{/each}

@@ -32,12 +32,26 @@
 
 	const members = $derived(data.members as Member[]);
 	const roles = $derived(data.roles as readonly BusinessRole[]);
-	const canManage = $derived(data.context.canManage && !data.demo);
+	const canManage = $derived(Boolean(data.context.capabilities?.canManageUsers) && !data.demo);
+	const isOwner = $derived(data.context.role === 'owner');
+	const isAdmin = $derived(data.context.role === 'admin');
 
 	const formatDate = (value: string) =>
 		value
 			? new Intl.DateTimeFormat('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date(value))
 			: 'Sin fecha';
+
+	const memberRoleChoices = (member: Member): readonly BusinessRole[] => {
+		if (isOwner) return roles;
+		if (isAdmin && (member.role === 'reception' || member.role === 'professional')) return roles;
+		return [member.role];
+	};
+
+	const canEditMember = (member: Member) =>
+		canManage && (isOwner || (isAdmin && (member.role === 'reception' || member.role === 'professional')));
+
+	const canRemoveMember = (member: Member) =>
+		canEditMember(member) && member.user_id !== data.currentUserId;
 </script>
 
 <section class="ux-page">
@@ -61,7 +75,7 @@
 	{/if}
 	{#if data.demo}
 		<p class="ux-empty">Los usuarios no se modifican en modo demo.</p>
-	{:else if !data.context.canManage}
+	{:else if !data.context.capabilities?.canManageUsers}
 		<p class="ux-empty">Tu permiso actual permite ver usuarios, pero no administrarlos.</p>
 	{/if}
 
@@ -106,16 +120,16 @@
 					<div class="flex flex-col gap-2 sm:flex-row sm:items-center">
 						<form method="POST" action="?/update_role" class="flex gap-2">
 							<input type="hidden" name="membership_id" value={member.id} />
-							<select name="role" disabled={!canManage} class="ux-select min-w-44">
-								{#each roles as role}
+							<select name="role" disabled={!canEditMember(member)} class="ux-select min-w-44">
+								{#each memberRoleChoices(member) as role}
 									<option value={role} selected={member.role === role}>{roleLabels[role]}</option>
 								{/each}
 							</select>
-							<button type="submit" disabled={!canManage} class="ux-btn-secondary">Guardar</button>
+							<button type="submit" disabled={!canEditMember(member)} class="ux-btn-secondary">Guardar</button>
 						</form>
 						<form method="POST" action="?/remove_user">
 							<input type="hidden" name="membership_id" value={member.id} />
-							<button type="submit" disabled={!canManage || member.user_id === data.currentUserId} class="ux-btn-danger">
+							<button type="submit" disabled={!canRemoveMember(member)} class="ux-btn-danger">
 								Quitar
 							</button>
 						</form>

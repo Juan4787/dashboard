@@ -23,7 +23,7 @@
 		patients,
 		initialDate,
 		initialPatientId = '',
-		canOperate,
+		canCreateAppointment,
 		form
 	} = $props<{
 		services: Service[];
@@ -32,7 +32,7 @@
 		patients: Patient[];
 		initialDate: string;
 		initialPatientId?: string;
-		canOperate: boolean;
+		canCreateAppointment: boolean;
 		form?: { values?: Record<string, unknown> };
 	}>();
 
@@ -327,7 +327,7 @@
 					{#each services as service}
 						<button
 							type="button"
-							disabled={!canOperate}
+							disabled={!canCreateAppointment}
 							onclick={() => selectService(service.id)}
 							class={`group min-h-48 rounded-3xl border p-5 text-center transition disabled:opacity-60 ${
 								selectedServiceId === service.id
@@ -369,7 +369,7 @@
 						{@const nextSlot = nextSlotByProfessional[professional.id] ?? null}
 						<button
 							type="button"
-							disabled={!canOperate || !nextSlot}
+							disabled={!canCreateAppointment || !nextSlot}
 							onclick={() => selectProfessional(professional.id)}
 							class={`relative min-h-56 rounded-3xl border p-5 text-center transition disabled:opacity-50 ${
 								selectedProfessionalId === professional.id
@@ -608,7 +608,7 @@
 									name="patient_name"
 									bind:value={patientName}
 									required
-									disabled={!canOperate}
+									disabled={!canCreateAppointment}
 									class="rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-4 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-[#8b5cf6] disabled:opacity-60"
 								/>
 							</label>
@@ -618,7 +618,7 @@
 									name="patient_phone"
 									bind:value={patientPhone}
 									required
-									disabled={!canOperate}
+									disabled={!canCreateAppointment}
 									class="rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-4 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-[#8b5cf6] disabled:opacity-60"
 								/>
 							</label>
@@ -628,7 +628,7 @@
 									name="patient_email"
 									type="email"
 									bind:value={patientEmail}
-									disabled={!canOperate}
+									disabled={!canCreateAppointment}
 									class="rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-4 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-[#8b5cf6] disabled:opacity-60"
 								/>
 							</label>
@@ -664,7 +664,7 @@
 					</div>
 					<button
 						type="submit"
-						disabled={!canOperate || !canCreate}
+						disabled={!canCreateAppointment || !canCreate}
 						class="mt-6 w-full rounded-2xl bg-[#7c3aed] px-5 py-4 text-base font-semibold text-white shadow-lg shadow-[#7c3aed]/25 transition hover:bg-[#6d28d9] disabled:cursor-not-allowed disabled:opacity-45"
 					>
 						Crear turno

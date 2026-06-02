@@ -1,12 +1,13 @@
 import { env } from '$env/dynamic/private';
 import type { Cookies } from '@sveltejs/kit';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { getAuthUserId } from './supabase';
+import { createSupabaseAdminClient, getAuthUserId } from './supabase';
 import {
 	getBusinessAccessState,
 	type BusinessAccessState,
 	type BusinessSubscriptionRow
 } from './commercial-access';
+import { getEffectiveCapabilities, type CapabilityMap } from './authorization';
 
 export const BUSINESS_ROLES = ['owner', 'admin', 'reception', 'professional', 'readonly'] as const;
 export type BusinessRole = (typeof BUSINESS_ROLES)[number];
@@ -48,6 +49,7 @@ export type BusinessContext = {
 	canManage: boolean;
 	canOperate: boolean;
 	access: BusinessAccessState;
+	capabilities: CapabilityMap;
 };
 
 const ACTIVE_BUSINESS_COOKIE = 'active-business-id';
@@ -120,6 +122,15 @@ export const demoBusinessContext = (): BusinessContext => ({
 		commercial_access_enabled: true,
 		is_permanent: true,
 		subscription_status: 'active'
+	}),
+	capabilities: getEffectiveCapabilities({
+		role: 'owner',
+		access: getBusinessAccessState({
+			business_id: 'demo-business',
+			commercial_access_enabled: true,
+			is_permanent: true,
+			subscription_status: 'active'
+		})
 	})
 });
 
@@ -134,13 +145,17 @@ const mapMembership = (row: any): BusinessContext | null => {
 	const role = String(row?.role ?? '');
 	const business = row?.business;
 	if (!business || !isBusinessRole(role)) return null;
+	if (String(row?.status ?? 'active') !== 'active') return null;
+	if (row?.accepted_at === null) return null;
 	const access = getBusinessAccessState(null, { businessCreatedAt: business.created_at });
+	const capabilities = getEffectiveCapabilities({ role, access });
 	return {
 		business: business as Business,
 		role,
 		canManage: canManageRole(role) && access.canUseBusiness,
 		canOperate: canOperateRole(role) && access.canUseBusiness,
-		access
+		access,
+		capabilities
 	};
 };
 
@@ -153,11 +168,19 @@ const applySubscription = (
 		businessCreatedAt: membership.business.created_at,
 		legacyFallback: options.legacyFallback
 	});
+	const capabilities = getEffectiveCapabilities({ role: membership.role, access });
 	return {
 		...membership,
-		canManage: canManageRole(membership.role) && access.canUseBusiness,
-		canOperate: canOperateRole(membership.role) && access.canUseBusiness,
-		access
+		canManage:
+			capabilities.canConfigureBusiness ||
+			capabilities.canConfigureProfessionals ||
+			capabilities.canManageUsers,
+		canOperate:
+			capabilities.canCreateAppointment ||
+			capabilities.canEditAppointment ||
+			capabilities.canCreateBasicPatient,
+		access,
+		capabilities
 	};
 };
 
@@ -167,8 +190,9 @@ const loadMemberships = async (
 ): Promise<BusinessContext[]> => {
 	const { data, error } = await supabase
 		.from('business_users')
-		.select(`role, business:businesses!inner(${businessSelect})`)
+		.select(`role, status, accepted_at, business:businesses!inner(${businessSelect})`)
 		.eq('user_id', userId)
+		.eq('status', 'active')
 		.order('created_at', { ascending: true });
 
 	if (error) {
@@ -179,7 +203,14 @@ const loadMemberships = async (
 	if (memberships.length === 0) return [];
 
 	const businessIds = memberships.map((membership) => membership.business.id);
-	const { data: subscriptions, error: subscriptionError } = await supabase
+	let subscriptionClient = supabase;
+	try {
+		subscriptionClient = await createSupabaseAdminClient('odonto');
+	} catch (err) {
+		console.warn('No se pudo usar admin client para suscripciones comerciales', err);
+	}
+
+	const { data: subscriptions, error: subscriptionError } = await subscriptionClient
 		.from('business_subscriptions')
 		.select(
 			'id, business_id, commercial_access_enabled, is_permanent, subscription_status, access_starts_at, paid_until, grace_until, restricted_until, archived_at, last_payment_at, last_payment_amount, last_grant_duration_seconds, expiration_notice_enabled, access_source, access_note, updated_by, created_at, updated_at'
@@ -209,7 +240,7 @@ export const resolveActiveBusiness = async ({
 	supabase,
 	accessToken,
 	cookies,
-	ensureDefault = true
+	ensureDefault = false
 }: ResolveBusinessOptions): Promise<BusinessContext | null> => {
 	if (env.DEMO_MODE === 'true') return demoBusinessContext();
 
@@ -218,24 +249,15 @@ export const resolveActiveBusiness = async ({
 
 	let memberships = await loadMemberships(supabase, userId);
 
-	if (memberships.length === 0 && ensureDefault) {
-		const { error } = await supabase.rpc('ensure_user_default_business', {
-			p_name: 'Consultorio',
-			p_industry: 'odontology'
-		});
-		if (error) {
-			throw error;
-		}
-		memberships = await loadMemberships(supabase, userId);
+	if (memberships.length === 0) {
+		return null;
 	}
 
-	const activeBusinessId = cookies?.get(ACTIVE_BUSINESS_COOKIE);
-	const selected =
-		(activeBusinessId
-			? memberships.find((membership) => membership.business.id === activeBusinessId)
-			: null) ??
-		memberships[0] ??
-		null;
+	if (memberships.length > 1) {
+		throw new Error('MULTI_MEMBERSHIP_BLOCKED');
+	}
+
+	const selected = memberships[0] ?? null;
 
 	if (selected && cookies) {
 		cookies.set(ACTIVE_BUSINESS_COOKIE, selected.business.id, {

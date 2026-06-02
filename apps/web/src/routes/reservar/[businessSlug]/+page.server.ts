@@ -103,6 +103,7 @@ export const actions: Actions = {
 		const patientPhone = String(form.get('patient_phone') ?? '').trim();
 		const patientEmail = String(form.get('patient_email') ?? '').trim();
 		const note = String(form.get('note') ?? '').trim();
+		const idempotencyKey = String(form.get('idempotency_key') ?? '').trim();
 		const turnstileToken = String(form.get('cf-turnstile-response') ?? '').trim();
 		const userAgent = request.headers.get('user-agent') ?? null;
 		const ip = getClientAddress();
@@ -129,6 +130,7 @@ export const actions: Actions = {
 				patientPhone,
 				patientEmail,
 				note,
+				idempotencyKey,
 				ipHash: publicHash(ip),
 				userAgent
 			});

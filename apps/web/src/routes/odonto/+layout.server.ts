@@ -27,10 +27,16 @@ export const load: LayoutServerLoad = async ({ locals, fetch, cookies }) => {
 				accessToken: locals.auth.access_token,
 				cookies
 			});
+			if (!activeBusiness && !isMasterEmail(email)) {
+				businessError =
+					'Tu email está habilitado, pero no tiene un consultorio asignado. Contactá soporte.';
+			}
 		} catch (err) {
 			console.error('Error resolviendo negocio activo', err);
 			businessError =
-				'No se pudo cargar el negocio activo. Revisá que la migración multi-tenant esté aplicada.';
+				err instanceof Error && err.message === 'MULTI_MEMBERSHIP_BLOCKED'
+					? 'Este email tiene más de un acceso asociado. Contactá soporte para corregirlo.'
+					: 'No se pudo cargar el negocio activo. Revisá que las migraciones de acceso estén aplicadas.';
 		}
 	}
 

@@ -189,7 +189,9 @@ export const actions: Actions = {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
 		const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
-		if (!business.canOperate) return fail(403, { message: 'No tenés permisos para crear turnos.' });
+		if (!business.capabilities.canCreateAppointment) {
+			return fail(403, { message: 'No tenés permisos para crear turnos.' });
+		}
 
 		const form = await request.formData();
 		const serviceId = String(form.get('service_id') ?? '').trim();
@@ -247,7 +249,6 @@ export const actions: Actions = {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
 		const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
-		if (!business.canOperate) return fail(403, { message: 'No tenés permisos para modificar turnos.' });
 
 		const form = await request.formData();
 		const appointmentId = String(form.get('appointment_id') ?? '').trim();
@@ -257,6 +258,13 @@ export const actions: Actions = {
 		const selectedStatus = String(form.get('selected_status') ?? '').trim();
 		const serviceId = String(form.get('service_id') ?? '').trim();
 		if (!appointmentId || !isAppointmentStatus(status)) return fail(400, { message: 'Estado inválido.' });
+		const canApplyStatus =
+			status === 'cancelled'
+				? business.capabilities.canCancelAppointment
+				: status === 'attended' || status === 'no_show'
+					? business.capabilities.canMarkAppointmentAttendance
+					: business.capabilities.canEditAppointment;
+		if (!canApplyStatus) return fail(403, { message: 'No tenés permisos para modificar turnos.' });
 
 		try {
 			await updateAppointmentStatus(supabase, {

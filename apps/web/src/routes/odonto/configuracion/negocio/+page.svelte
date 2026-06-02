@@ -20,7 +20,7 @@
 	}>();
 
 	const business = $derived(data.context.business);
-	const canManage = $derived(Boolean(data.context.canManage) && !data.demo);
+	const canManage = $derived(Boolean(data.context.capabilities?.canConfigureBusiness) && !data.demo);
 	const businessValues = $derived(business as unknown as Record<string, unknown>);
 	const values = $derived((form?.values ?? {}) as Record<string, unknown>);
 	const valueOf = (key: string, fallback: unknown = '') =>

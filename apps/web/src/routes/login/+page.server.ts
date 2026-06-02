@@ -5,6 +5,7 @@ import {
 	isMasterEmail,
 	MASTER_EMAIL
 } from '$lib/server/supabase';
+import { resolveActiveBusiness } from '$lib/server/business';
 import { dev } from '$app/environment';
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
@@ -89,6 +90,37 @@ export const actions: Actions = {
 		}
 
 		const session = data.session;
+		if (!isMaster) {
+			const sessionSupabase = await createSupabaseServerClient(
+				'odonto',
+				{ access_token: session.access_token, refresh_token: session.refresh_token },
+				fetch
+			);
+			try {
+				const membership = await resolveActiveBusiness({
+					supabase: sessionSupabase,
+					accessToken: session.access_token,
+					ensureDefault: false
+				});
+				if (!membership) {
+					return fail(403, {
+						message:
+							'Tu email está habilitado, pero no tiene un consultorio asignado. Contactá soporte.',
+						email
+					});
+				}
+			} catch (err) {
+				if (err instanceof Error && err.message === 'MULTI_MEMBERSHIP_BLOCKED') {
+					return fail(403, {
+						message:
+							'Este email tiene más de un acceso asociado. Contactá soporte para corregirlo.',
+						email
+					});
+				}
+				throw err;
+			}
+		}
+
 		const cookieOptions = {
 			path: '/',
 			httpOnly: true,
@@ -163,6 +195,35 @@ export const actions: Actions = {
 					'La cuenta se creó pero falta confirmar el correo electrónico.',
 				email
 			});
+		}
+
+		const sessionSupabase = await createSupabaseServerClient(
+			'odonto',
+			{ access_token: data.session.access_token, refresh_token: data.session.refresh_token },
+			fetch
+		);
+		try {
+			const membership = await resolveActiveBusiness({
+				supabase: sessionSupabase,
+				accessToken: data.session.access_token,
+				ensureDefault: false
+			});
+			if (!membership) {
+				return fail(403, {
+					message:
+						'La cuenta se creó, pero tu email todavía no tiene un consultorio asignado. Contactá soporte.',
+					email
+				});
+			}
+		} catch (err) {
+			if (err instanceof Error && err.message === 'MULTI_MEMBERSHIP_BLOCKED') {
+				return fail(403, {
+					message:
+						'Este email tiene más de un acceso asociado. Contactá soporte para corregirlo.',
+					email
+				});
+			}
+			throw err;
 		}
 
 		const cookieOptions = {

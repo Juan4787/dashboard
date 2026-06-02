@@ -292,6 +292,36 @@ export const actions: Actions = {
 			});
 		}
 
+		const { data: activeMembership, error: activeMembershipError } = await admin
+			.from('business_users')
+			.select('id, business_id')
+			.eq('user_id', ownerUserId)
+			.eq('status', 'active')
+			.limit(1)
+			.maybeSingle();
+		if (activeMembershipError) {
+			console.error('Error validando membresía existente del owner', activeMembershipError);
+			return fail(500, { message: 'No pudimos validar si el owner ya pertenece a otro consultorio.' });
+		}
+		if (activeMembership?.id) {
+			return fail(409, { message: 'Ese email ya está asociado a otro consultorio activo.' });
+		}
+
+		const { data: pendingInvite, error: pendingInviteError } = await admin
+			.from('business_user_invites')
+			.select('id')
+			.eq('email', ownerEmail)
+			.eq('status', 'pending')
+			.limit(1)
+			.maybeSingle();
+		if (pendingInviteError) {
+			console.error('Error validando invitación pendiente del owner', pendingInviteError);
+			return fail(500, { message: 'No pudimos validar invitaciones pendientes para ese email.' });
+		}
+		if (pendingInvite?.id) {
+			return fail(409, { message: 'Ese email ya tiene una invitación pendiente en otro consultorio.' });
+		}
+
 		const { data: existingEmail, error: existingEmailError } = await admin
 			.from('allowed_emails')
 			.select('id')
@@ -345,7 +375,11 @@ export const actions: Actions = {
 		const { error: membershipError } = await admin.from('business_users').insert({
 			business_id: business.id,
 			user_id: ownerUserId,
-			role: 'owner'
+			role: 'owner',
+			status: 'active',
+			accepted_at: new Date().toISOString(),
+			created_by: master.userId,
+			updated_by: master.userId
 		});
 
 		if (membershipError) {
@@ -455,18 +489,31 @@ export const actions: Actions = {
 			return fail(403, { message: 'El email maestro no puede deshabilitarse.' });
 		}
 
-		const { error } = await admin
-			.from('allowed_emails')
-			.update({
-				enabled,
-				disabled_at: enabled ? null : new Date().toISOString(),
-				disabled_reason: enabled ? null : reason,
-				updated_by: master.userId
-			})
-			.eq('id', id);
+		const { error } = enabled
+			? await admin
+					.from('allowed_emails')
+					.update({
+						enabled: true,
+						disabled_at: null,
+						disabled_reason: null,
+						updated_by: master.userId
+					})
+					.eq('id', id)
+			: await admin.rpc('disable_allowed_email_as_master_safely', {
+					p_email: String(existingEmail.email ?? ''),
+					p_actor_id: master.userId,
+					p_actor_email: master.email,
+					p_reason: reason
+				});
 
 		if (error) {
 			console.error('Error actualizando email', error);
+			const raw = `${error.message ?? ''} ${error.details ?? ''}`;
+			if (raw.includes('LAST_OWNER_BLOCKED')) {
+				return fail(403, {
+					message: 'No podés deshabilitar este email porque es el único dueño activo de un consultorio.'
+				});
+			}
 			return fail(500, { message: 'No pudimos actualizar el correo electrónico.' });
 		}
 

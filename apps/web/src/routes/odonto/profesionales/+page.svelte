@@ -11,14 +11,14 @@
 
 	let { data, form } = $props<{
 		data: {
-			context: { canOperate: boolean };
+			context: { capabilities?: Record<string, boolean> };
 			professionals: Professional[];
 			demo: boolean;
 		};
 		form?: { success?: boolean; message?: string; values?: Record<string, unknown> };
 	}>();
 
-	const canOperate = $derived(data.context.canOperate && !data.demo);
+	const canConfigureProfessionals = $derived(Boolean(data.context.capabilities?.canConfigureProfessionals) && !data.demo);
 	const activeCount = $derived(data.professionals.filter((item: Professional) => item.is_active && item.is_public).length);
 	let showCreate = $state(false);
 
@@ -34,7 +34,7 @@
 				<h1 class="ux-title">Profesionales</h1>
 				<p class="ux-subtitle">Definí qué atiende cada profesional y cuándo.</p>
 			</div>
-			<button type="button" class="ux-btn-primary" disabled={!canOperate} onclick={() => (showCreate = !showCreate)}>
+			<button type="button" class="ux-btn-primary" disabled={!canConfigureProfessionals} onclick={() => (showCreate = !showCreate)}>
 				{showCreate ? 'Cerrar' : 'Nuevo profesional'}
 			</button>
 		</div>
@@ -51,28 +51,28 @@
 					<h2 class="ux-section-title">Nuevo profesional</h2>
 					<p class="mt-1 text-sm text-white/55">Después cargás sus servicios y horarios.</p>
 				</div>
-				<button type="submit" disabled={!canOperate} class="ux-btn-primary">Crear profesional</button>
+				<button type="submit" disabled={!canConfigureProfessionals} class="ux-btn-primary">Crear profesional</button>
 			</div>
 			<div class="mt-5 grid gap-4 md:grid-cols-2">
 				<label>
 					<span class="ux-label">Nombre</span>
-					<input name="name" required disabled={!canOperate} value={String(form?.values?.name ?? '')} class="ux-input" />
+					<input name="name" required disabled={!canConfigureProfessionals} value={String(form?.values?.name ?? '')} class="ux-input" />
 				</label>
 				<label>
 					<span class="ux-label">Especialidad (opcional)</span>
-					<input name="specialty" disabled={!canOperate} value={String(form?.values?.specialty ?? '')} class="ux-input" />
+					<input name="specialty" disabled={!canConfigureProfessionals} value={String(form?.values?.specialty ?? '')} class="ux-input" />
 				</label>
 				<label>
 					<span class="ux-label">Teléfono (opcional)</span>
-					<input name="phone" disabled={!canOperate} class="ux-input" />
+					<input name="phone" disabled={!canConfigureProfessionals} class="ux-input" />
 				</label>
 				<label>
 					<span class="ux-label">Correo electrónico (opcional)</span>
-					<input name="email" type="email" disabled={!canOperate} class="ux-input" />
+					<input name="email" type="email" disabled={!canConfigureProfessionals} class="ux-input" />
 				</label>
 			</div>
 			<label class="mt-5 inline-flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-bold text-white">
-				<input type="checkbox" name="is_available" value="true" checked disabled={!canOperate} class="accent-[#7c3aed]" />
+				<input type="checkbox" name="is_available" value="true" checked disabled={!canConfigureProfessionals} class="accent-[#7c3aed]" />
 				Disponible para turnos
 			</label>
 		</form>

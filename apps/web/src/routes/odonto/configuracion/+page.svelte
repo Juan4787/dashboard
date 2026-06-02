@@ -8,6 +8,7 @@
 	let { data } = $props<{
 		data: {
 			demo: boolean;
+			context?: any;
 			driveConnection: {
 				connected_email?: string | null;
 				root_folder_id?: string | null;
@@ -30,6 +31,10 @@
 
 	const isConnected = $derived(Boolean(driveConnection?.root_folder_id));
 	const canLinkExternalFiles = $derived(data.canLinkExternalFiles !== false);
+	const caps = $derived(data.context?.capabilities ?? {});
+	const hasConsultorioSettings = $derived(
+		Boolean(caps.canConfigureBusiness || caps.canManageUsers || caps.canManageSubscription || caps.canConfigureCommunication)
+	);
 	const hasClientId = Boolean(googleClientId);
 	const returnTarget = $derived.by(() => {
 		const raw = $page.url.searchParams.get('return') ?? '';
@@ -138,33 +143,49 @@
 <section class="ux-page">
 	<div class="ux-hero">
 		<BackLink href={returnTarget || '/odonto/pacientes'} label="Volver" class="mb-5" />
-		<p class="ux-badge">Configuración</p>
-		<h1 class="ux-title mt-4">Ajustes del consultorio</h1>
-		<p class="ux-subtitle">Datos, permisos y almacenamiento.</p>
+		{#if hasConsultorioSettings}
+			<p class="ux-badge">Configuración</p>
+			<h1 class="ux-title mt-4">Ajustes del consultorio</h1>
+			<p class="ux-subtitle">Datos, permisos y almacenamiento.</p>
+		{:else}
+			<p class="ux-badge">Archivos externos</p>
+			<h1 class="ux-title mt-4">Google Drive</h1>
+			<p class="ux-subtitle">Conectá tu cuenta para vincular archivos en pacientes permitidos.</p>
+		{/if}
 	</div>
 
-	<div class="grid gap-4 lg:grid-cols-2">
-		<a href="/odonto/configuracion/negocio" class="ux-choice p-6">
-			<span class="ux-badge">Consultorio</span>
-			<h2 class="mt-4 text-2xl font-bold text-white">Datos y reserva online</h2>
-			<p class="mt-2 text-sm text-white/55">Nombre, enlace público, contacto y reglas de reserva.</p>
-		</a>
-		<a href="/odonto/configuracion/usuarios" class="ux-choice p-6">
-			<span class="ux-badge">Permisos</span>
-			<h2 class="mt-4 text-2xl font-bold text-white">Usuarios</h2>
-			<p class="mt-2 text-sm text-white/55">Quién puede entrar y qué puede hacer.</p>
-		</a>
-		<a href="/odonto/configuracion/suscripcion" class="ux-choice p-6">
-			<span class="ux-badge">Acceso</span>
-			<h2 class="mt-4 text-2xl font-bold text-white">Suscripción</h2>
-			<p class="mt-2 text-sm text-white/55">Estado comercial, vencimiento e historial de acceso.</p>
-		</a>
-		<a href="/odonto/configuracion/comunicacion" class="ux-choice p-6">
-			<span class="ux-badge">Comunicación</span>
-			<h2 class="mt-4 text-2xl font-bold text-white">Respuesta automática</h2>
-			<p class="mt-2 text-sm text-white/55">Link de reserva y mensaje que recibe el paciente por WhatsApp.</p>
-		</a>
-	</div>
+	{#if hasConsultorioSettings}
+		<div class="grid gap-4 lg:grid-cols-2">
+			{#if caps.canConfigureBusiness}
+				<a href="/odonto/configuracion/negocio" class="ux-choice p-6">
+					<span class="ux-badge">Consultorio</span>
+					<h2 class="mt-4 text-2xl font-bold text-white">Datos y reserva online</h2>
+					<p class="mt-2 text-sm text-white/55">Nombre, enlace público, contacto y reglas de reserva.</p>
+				</a>
+			{/if}
+			{#if caps.canManageUsers}
+				<a href="/odonto/configuracion/usuarios" class="ux-choice p-6">
+					<span class="ux-badge">Permisos</span>
+					<h2 class="mt-4 text-2xl font-bold text-white">Usuarios</h2>
+					<p class="mt-2 text-sm text-white/55">Quién puede entrar y qué puede hacer.</p>
+				</a>
+			{/if}
+			{#if caps.canManageSubscription}
+				<a href="/odonto/configuracion/suscripcion" class="ux-choice p-6">
+					<span class="ux-badge">Acceso</span>
+					<h2 class="mt-4 text-2xl font-bold text-white">Suscripción</h2>
+					<p class="mt-2 text-sm text-white/55">Estado comercial, vencimiento e historial de acceso.</p>
+				</a>
+			{/if}
+			{#if caps.canConfigureCommunication}
+				<a href="/odonto/configuracion/comunicacion" class="ux-choice p-6">
+					<span class="ux-badge">Comunicación</span>
+					<h2 class="mt-4 text-2xl font-bold text-white">Respuesta automática</h2>
+					<p class="mt-2 text-sm text-white/55">Link de reserva y mensaje que recibe el paciente por WhatsApp.</p>
+				</a>
+			{/if}
+		</div>
+	{/if}
 
 	<div class="ux-card">
 		<div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">

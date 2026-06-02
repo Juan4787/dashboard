@@ -823,7 +823,7 @@ export const sendBotBookingLinkReply = async (
 			action: 'bot.booking_link_sent',
 			entityType: 'message_dispatch',
 			entityId: dispatch.id,
-			metadata: { to_phone_e164: input.toPhoneE164 }
+			metadata: { channel: 'whatsapp' }
 		});
 		return { sent: true };
 	} catch (err) {
@@ -1020,7 +1020,7 @@ export const processWhatsAppWebhookPayload = async (
 
 export const verifyWebhookSignature = (body: string, signatureHeader?: string | null) => {
 	const secret = env.WHATSAPP_APP_SECRET?.trim();
-	if (!secret) return true;
+	if (!secret) return false;
 	if (!signatureHeader?.startsWith('sha256=')) return false;
 	const expected =
 		'sha256=' + crypto.createHmac('sha256', secret).update(body, 'utf8').digest('hex');

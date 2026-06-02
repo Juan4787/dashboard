@@ -52,7 +52,8 @@
 
 	const professionalNav: NavItem[] = [
 		{ label: 'Mis turnos', href: '/odonto/mis-turnos', activePrefixes: ['/odonto/mis-turnos'] },
-		{ label: 'Pacientes', href: '/odonto/pacientes', activePrefixes: ['/odonto/pacientes'] }
+		{ label: 'Mis pacientes', href: '/odonto/pacientes', activePrefixes: ['/odonto/pacientes'] },
+		{ label: 'Mi perfil', href: '/odonto/mi-perfil', activePrefixes: ['/odonto/mi-perfil'] }
 	];
 
 	const readonlyNav: NavItem[] = [
@@ -60,14 +61,17 @@
 		{ label: 'Pacientes', href: '/odonto/pacientes', activePrefixes: ['/odonto/pacientes'] }
 	];
 
-	const configNav: NavItem[] = [
-		{ label: 'Negocio', href: '/odonto/configuracion/negocio' },
-		{ label: 'Usuarios', href: '/odonto/configuracion/usuarios' },
-		{ label: 'Suscripción', href: '/odonto/configuracion/suscripcion' },
-		{ label: 'Comunicación', href: '/odonto/configuracion/comunicacion' }
-	];
-
 	const activeBusiness = $derived(data?.activeBusiness);
+	const configNav = $derived.by(() => {
+		const caps = activeBusiness?.capabilities;
+		if (!caps) return [];
+		return [
+			caps.canConfigureBusiness ? { label: 'Negocio', href: '/odonto/configuracion/negocio' } : null,
+			caps.canManageUsers ? { label: 'Usuarios', href: '/odonto/configuracion/usuarios' } : null,
+			caps.canManageSubscription ? { label: 'Suscripción', href: '/odonto/configuracion/suscripcion' } : null,
+			caps.canConfigureCommunication ? { label: 'Comunicación', href: '/odonto/configuracion/comunicacion' } : null
+		].filter((item): item is NavItem => Boolean(item));
+	});
 	const visibleNav = $derived.by(() => {
 		if (activeBusiness?.role === 'professional') {
 			return professionalNav;
@@ -75,11 +79,19 @@
 		if (activeBusiness?.role === 'readonly') {
 			return readonlyNav;
 		}
-		return dailyNav;
+		const caps = activeBusiness?.capabilities;
+		if (!caps) return dailyNav;
+		return dailyNav.filter((item) => {
+			if (item.label === 'Agenda') return caps.canViewAgenda || caps.canCreateAppointment;
+			if (item.label === 'Pacientes') return caps.canViewBasicPatients;
+			if (item.label === 'Profesionales') return caps.canConfigureProfessionals;
+			if (item.label === 'Configuración') return configNav.length > 0;
+			return true;
+		});
 	});
 
 	const canShowConfigMenu = $derived(
-		activeBusiness?.role !== 'professional' && activeBusiness?.role !== 'readonly'
+		configNav.length > 0
 	);
 	const primaryMobileNav = $derived.by(() =>
 		visibleNav.filter((item) => item.label !== 'Configuración')

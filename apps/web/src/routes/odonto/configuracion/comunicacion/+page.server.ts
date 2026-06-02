@@ -1,5 +1,4 @@
 import { env } from '$env/dynamic/private';
-import { ensureMockMessagingSetup } from '$lib/server/messaging';
 import { resolveActiveBusiness } from '$lib/server/business';
 import { createSupabaseServerClient } from '$lib/server/supabase';
 import { error as kitError, fail, redirect } from '@sveltejs/kit';
@@ -20,7 +19,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 	const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
 	const context = await resolveActiveBusiness({ supabase, accessToken: locals.auth.access_token, cookies });
 	if (!context) throw kitError(500, 'No se pudo resolver el negocio activo');
-	if (context.role === 'professional' || context.role === 'readonly') throw redirect(303, '/odonto/agenda');
+	if (!context.capabilities.canConfigureCommunication) throw redirect(303, '/odonto/agenda');
 
 	const [{ data: account }, { data: lastEvent }] = await Promise.all([
 		supabase
@@ -49,22 +48,9 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 };
 
 export const actions: Actions = {
-	activate_test_reply: async ({ locals, fetch, cookies }) => {
+	activate_test_reply: async ({ locals }) => {
 		if (!locals.auth) throw redirect(303, '/login');
-		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
-
-		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
-		const context = await resolveActiveBusiness({ supabase, accessToken: locals.auth.access_token, cookies });
-		if (!context?.canManage) return fail(403, { message: 'No tenés permisos para configurar comunicación.' });
-
-		await ensureMockMessagingSetup(supabase, context.business.id);
-		await supabase
-			.from('messaging_accounts')
-			.update({ bot_enabled: true, reminders_enabled: false, status: 'active' })
-			.eq('business_id', context.business.id);
-		await supabase.from('businesses').update({ whatsapp_enabled: true }).eq('id', context.business.id);
-
-		return { success: true, message: 'Respuesta automática activada para prueba interna.' };
+		return fail(404, { message: 'Esta acción ya no está disponible.' });
 	},
 
 	save_reply: async ({ request, locals, fetch, cookies }) => {
@@ -73,7 +59,7 @@ export const actions: Actions = {
 
 		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
 		const context = await resolveActiveBusiness({ supabase, accessToken: locals.auth.access_token, cookies });
-		if (!context?.canManage) return fail(403, { message: 'No tenés permisos para configurar comunicación.' });
+		if (!context?.capabilities.canConfigureCommunication) return fail(403, { message: 'No tenés permisos para configurar comunicación.' });
 
 		const form = await request.formData();
 		const accountId = String(form.get('account_id') ?? '').trim();

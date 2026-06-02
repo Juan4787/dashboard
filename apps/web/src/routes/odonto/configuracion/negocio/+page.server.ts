@@ -34,7 +34,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 	if (!context) {
 		throw kitError(500, 'No se pudo resolver el negocio activo');
 	}
-	if (context.role === 'professional') throw redirect(303, '/odonto/mis-turnos');
+	if (!context.capabilities.canConfigureBusiness) throw redirect(303, '/odonto/agenda');
 
 	const [
 		{ count: services },
@@ -117,7 +117,7 @@ export const actions: Actions = {
 		if (!context) {
 			return fail(500, { message: 'No se pudo resolver el negocio activo.' });
 		}
-		if (!context.canManage) {
+		if (!context.capabilities.canConfigureBusiness) {
 			return fail(403, { message: 'No tenés permisos para editar el negocio.' });
 		}
 

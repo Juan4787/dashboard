@@ -69,7 +69,9 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 	}
 
 	const { supabase, business } = await getOdontoContext({ locals, fetch, cookies });
-	if (!business.canOperate) throw redirect(303, business.role === 'professional' ? '/odonto/mis-turnos' : '/odonto/agenda');
+	if (!business.capabilities.canConfigureProfessionals) {
+		throw redirect(303, business.role === 'professional' ? '/odonto/mis-turnos' : '/odonto/agenda');
+	}
 	const businessId = business.business.id;
 
 	const [{ data: professional, error: professionalError }, { data: services }, { data: assignments }, { data: rules }, { data: exceptions }] =
@@ -126,7 +128,7 @@ export const actions: Actions = {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
 		const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
-		if (!business.canOperate) return fail(403, { message: 'No tenés permisos para editar profesionales.' });
+		if (!business.capabilities.canConfigureProfessionals) return fail(403, { message: 'No tenés permisos para editar profesionales.' });
 
 		const form = await request.formData();
 		const name = String(form.get('name') ?? '').trim();
@@ -167,7 +169,7 @@ export const actions: Actions = {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
 		const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
-		if (!business.canOperate) return fail(403, { message: 'No tenés permisos para asignar servicios.' });
+		if (!business.capabilities.canConfigureServices) return fail(403, { message: 'No tenés permisos para asignar servicios.' });
 
 		const form = await request.formData();
 		const serviceIds = idsFromForm(form, 'service_id');
@@ -199,7 +201,7 @@ export const actions: Actions = {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
 		const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
-		if (!business.canOperate) return fail(403, { message: 'No tenés permisos para crear servicios.' });
+		if (!business.capabilities.canConfigureServices) return fail(403, { message: 'No tenés permisos para crear servicios.' });
 
 		const form = await request.formData();
 		const name = String(form.get('name') ?? '').trim();
@@ -250,7 +252,7 @@ export const actions: Actions = {
 			action: 'service.created_from_professional',
 			entityType: 'service',
 			entityId: data.id,
-			metadata: { professional_id: params.professionalId, name, duration_minutes: duration }
+			metadata: { professional_id: params.professionalId, duration_minutes: duration }
 		});
 
 		redirectToProfessional(params.professionalId, 'servicios');
@@ -260,7 +262,7 @@ export const actions: Actions = {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
 		const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
-		if (!business.canOperate) return fail(403, { message: 'No tenés permisos para editar horarios.' });
+		if (!business.capabilities.canConfigureAvailability) return fail(403, { message: 'No tenés permisos para editar horarios.' });
 
 		const form = await request.formData();
 		const weekdays = form
@@ -342,7 +344,7 @@ export const actions: Actions = {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
 		const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
-		if (!business.canOperate) return fail(403, { message: 'No tenés permisos para editar horarios.' });
+		if (!business.capabilities.canConfigureAvailability) return fail(403, { message: 'No tenés permisos para editar horarios.' });
 
 		const form = await request.formData();
 		const ruleId = String(form.get('rule_id') ?? '').trim();
@@ -374,7 +376,7 @@ export const actions: Actions = {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
 		const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
-		if (!business.canOperate) return fail(403, { message: 'No tenés permisos para crear excepciones.' });
+		if (!business.capabilities.canConfigureAvailability) return fail(403, { message: 'No tenés permisos para crear excepciones.' });
 
 		const form = await request.formData();
 		const appliesTo = String(form.get('applies_to') ?? 'professional');
@@ -427,7 +429,7 @@ export const actions: Actions = {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
 		const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
-		if (!business.canOperate) return fail(403, { message: 'No tenés permisos para eliminar excepciones.' });
+		if (!business.capabilities.canConfigureAvailability) return fail(403, { message: 'No tenés permisos para eliminar excepciones.' });
 
 		const form = await request.formData();
 		const exceptionId = String(form.get('exception_id') ?? '').trim();

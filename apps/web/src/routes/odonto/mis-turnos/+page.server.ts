@@ -31,6 +31,9 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 	}
 
 	const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
+	if (!business.capabilities.canViewOwnAppointments) {
+		throw redirect(303, '/odonto/agenda');
+	}
 	const { data: links } = await supabase
 		.from('professional_users')
 		.select('professional_id, professionals!inner(id, name, specialty, is_active)')
@@ -94,7 +97,7 @@ export const actions: Actions = {
 		if (!appointmentId || (status !== 'attended' && status !== 'no_show')) {
 			return fail(400, { message: 'El profesional solo puede marcar asistencia o ausencia.' });
 		}
-		if (!business.access.allowedCapabilities.canEditAppointment) {
+		if (!business.capabilities.canMarkAppointmentAttendance) {
 			return fail(403, {
 				message: 'La cuenta está suspendida. Regularizá la suscripción para volver a operar.'
 			});

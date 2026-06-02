@@ -336,7 +336,7 @@ export const updateAppointmentStatus = async (
 		metadata: {
 			from_status: appointment.status,
 			to_status: input.status,
-			reason: input.status === 'cancelled' ? (input.reason ?? null) : null
+			has_reason: input.status === 'cancelled' ? Boolean(input.reason?.trim()) : false
 		}
 	});
 };

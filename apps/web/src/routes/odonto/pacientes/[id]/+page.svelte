@@ -13,6 +13,8 @@
 
 	let { data, form } = $props<{
 		data: {
+			context?: any;
+			viewerUserId?: string | null;
 			patient: any;
 			entries: any[];
 			appointments: any[];
@@ -35,8 +37,8 @@
 	let deleteConfirmText = $state('');
 	let deleteRadiographConfirmText = $state('');
 	let deleteRadiographTargetId = $state<string | null>(null);
-	let tab = $state<'historial' | 'datos' | 'radiografias'>('historial');
-	let filterType = $state<'Todos' | 'Consulta' | 'Tratamiento'>('Todos');
+	let tab = $state<'historial' | 'datos' | 'radiografias'>('datos');
+	let filterType = $state<'Todos' | 'Consulta' | 'Diagnóstico' | 'Tratamiento'>('Todos');
 	let onlyWithNote = $state(false);
 	let timelineSearch = $state('');
 	let expandedId = $state<string | null>(null);
@@ -81,6 +83,33 @@
 	let failedThumbnails = $state<Record<string, boolean>>({});
 	const isDriveConnected = $derived(Boolean(driveConnection?.root_folder_id));
 	const canConnectDrive = $derived(Boolean(googleClientId) && !data.demo);
+	const capabilities = $derived(data.context?.capabilities ?? {});
+	const viewerUserId = $derived(data.viewerUserId ?? null);
+	const canViewBasicPatients = $derived(Boolean(capabilities.canViewBasicPatients));
+	const canEditBasicPatient = $derived(Boolean(capabilities.canEditBasicPatient) && !data.demo);
+	const canViewClinicalProfile = $derived(Boolean(capabilities.canViewClinicalProfile));
+	const canEditClinicalProfile = $derived(Boolean(capabilities.canEditClinicalProfile) && !data.demo);
+	const canViewClinicalEntries = $derived(Boolean(capabilities.canViewClinicalEntries));
+	const canEditAnyClinicalEntry = $derived(Boolean(capabilities.canEditAnyClinicalEntry) && !data.demo);
+	const canEditOwnClinicalEntry = $derived(Boolean(capabilities.canEditOwnClinicalEntry) && !data.demo);
+	const canViewCosts = $derived(Boolean(capabilities.canViewCosts));
+	const canViewRadiologyReferences = $derived(Boolean(capabilities.canViewRadiologyReferences));
+	const canLinkExternalFiles = $derived(Boolean(capabilities.canLinkExternalFiles) && !data.demo);
+	const canUseConfigurationForDrive = $derived(
+		data.context?.role === 'owner' || data.context?.role === 'admin'
+	);
+	const canArchivePatient = $derived(Boolean(capabilities.canArchivePatient) && !data.demo);
+	const canDeletePatient = $derived(Boolean(capabilities.canDeletePatient) && !data.demo);
+	const canCreateClinicalEntry = $derived(Boolean(capabilities.canCreateClinicalEntry) && !data.demo);
+	const canCreateAppointment = $derived(Boolean(capabilities.canCreateAppointment) && !data.demo);
+	const canEditPatientData = $derived(canEditBasicPatient || canEditClinicalProfile);
+	const availableTabs = $derived.by((): Array<'historial' | 'datos' | 'radiografias'> => {
+		const tabs: Array<'historial' | 'datos' | 'radiografias'> = [];
+		if (canViewClinicalEntries) tabs.push('historial');
+		if (canViewBasicPatients) tabs.push('datos');
+		if (canViewRadiologyReferences) tabs.push('radiografias');
+		return tabs.length ? tabs : ['datos'];
+	});
 	const requestedTab = $derived.by(() => $page.url.searchParams.get('tab'));
 	const requestedDelete = $derived.by(() => $page.url.searchParams.has('eliminar'));
 	const returnTo = $derived.by(() => encodeURIComponent(`${$page.url.pathname}?tab=radiografias`));
@@ -93,11 +122,16 @@
 	};
 	$effect(() => {
 		if (
-			requestedTab === 'historial' ||
-			requestedTab === 'datos' ||
-			requestedTab === 'radiografias'
+			(requestedTab === 'historial' ||
+				requestedTab === 'datos' ||
+				requestedTab === 'radiografias') &&
+			availableTabs.includes(requestedTab)
 		) {
 			tab = requestedTab;
+			return;
+		}
+		if (!availableTabs.includes(tab)) {
+			tab = availableTabs[0] ?? 'datos';
 		}
 	});
 	$effect(() => {
@@ -132,6 +166,16 @@
 		entry.internal_note.trim() &&
 		entry.internal_note.trim().toLowerCase() !== (entry.description ?? '').trim().toLowerCase();
 
+	const canEditEntry = (entry: any) => {
+		if (canEditAnyClinicalEntry) return true;
+		if (!canEditOwnClinicalEntry || !viewerUserId) return false;
+		if (entry.created_by_user_id !== viewerUserId) return false;
+		const lockTime = entry.locked_after
+			? Date.parse(entry.locked_after)
+			: Date.parse(entry.created_at) + 24 * 60 * 60 * 1000;
+		return Date.now() <= lockTime;
+	};
+
 	const copyToClipboard = (text?: string) => {
 		if (!text) return;
 		if (navigator?.clipboard) {
@@ -150,10 +194,17 @@
 							intent: 'neutral' as const
 					  }
 					: null,
-				data.patient.allergies
+				canViewClinicalProfile && data.patient.allergies
 					? {
 							label: 'Alergias',
 							value: data.patient.allergies,
+							intent: 'alert' as const
+					  }
+					: null,
+				!canViewClinicalProfile && data.patient.has_clinical_alert
+					? {
+							label: 'Alerta clínica',
+							value: 'Registrada',
 							intent: 'alert' as const
 					  }
 					: null,
@@ -726,9 +777,9 @@ let amountDisplay = $state('');
 let amountRaw = $state('');
 let editAmountDisplay = $state('');
 let editAmountRaw = $state('');
-let archiveForm: HTMLFormElement | null = null;
-let unarchiveForm: HTMLFormElement | null = null;
-let deleteForm: HTMLFormElement | null = null;
+let archiveForm = $state<HTMLFormElement | null>(null);
+let unarchiveForm = $state<HTMLFormElement | null>(null);
+let deleteForm = $state<HTMLFormElement | null>(null);
 	const isArchived = $derived(Boolean(data.patient.archived_at));
 	const hasPatientData = $derived(
 		Boolean(
@@ -739,9 +790,8 @@ let deleteForm: HTMLFormElement | null = null;
 				data.patient.birth_date ||
 				data.patient.insurance ||
 				data.patient.insurance_plan ||
-				data.patient.allergies ||
-				data.patient.medication ||
-				data.patient.background
+				(canViewClinicalProfile &&
+					(data.patient.allergies || data.patient.medication || data.patient.background))
 		)
 	);
 
@@ -844,40 +894,48 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				</button>
 			</div>
 			<div class="hidden md:grid md:grid-cols-2 md:gap-2 md:justify-items-start lg:flex lg:flex-wrap lg:items-center lg:gap-3">
-				<form method="post" action="?/archive_patient" class="contents" bind:this={archiveForm}>
-					<button
-						type="submit"
-						class="rounded-full bg-neutral-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-neutral-800 hover:shadow-card dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white md:inline-flex md:justify-self-start"
-						onclick={(event: MouseEvent) => {
-							event.preventDefault();
-							showArchiveConfirm = true;
-						}}
-					>
-						{isArchived ? 'Desarchivar paciente' : 'Archivar paciente'}
-					</button>
-				</form>
+				{#if canArchivePatient}
+					<form method="post" action="?/archive_patient" class="contents" bind:this={archiveForm}>
+						<button
+							type="submit"
+							class="rounded-full bg-neutral-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-neutral-800 hover:shadow-card dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white md:inline-flex md:justify-self-start"
+							onclick={(event: MouseEvent) => {
+								event.preventDefault();
+								showArchiveConfirm = true;
+							}}
+						>
+							{isArchived ? 'Desarchivar paciente' : 'Archivar paciente'}
+						</button>
+					</form>
+				{/if}
 				<form method="post" action="?/unarchive_patient" class="hidden" bind:this={unarchiveForm}></form>
 				<form method="post" action="?/delete_patient" class="hidden" bind:this={deleteForm}></form>
-				<button
-					class="rounded-full bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-red-700 hover:shadow-card dark:bg-red-700 dark:hover:bg-red-800 md:inline-flex md:justify-self-start"
-					type="button"
-					onclick={() => (showDeleteConfirm = true)}
-				>
-					Eliminar paciente
-				</button>
-				<button
-					class="rounded-full bg-[#7c3aed] px-5 py-2 text-sm font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed] md:col-span-2 md:inline-flex md:justify-self-start lg:col-span-1"
-					type="button"
-					onclick={openNewEntryModal}
-				>
-					+ Registrar consulta
-				</button>
-				<a
-					href={`/odonto/agenda?patient_id=${data.patient.id}`}
-					class="rounded-full border border-[#7c3aed]/40 px-5 py-2 text-sm font-semibold text-[#7c3aed] transition hover:-translate-y-0.5 hover:bg-[#7c3aed]/10 dark:text-[#c4b5fd] md:col-span-2 md:inline-flex md:justify-self-start lg:col-span-1"
-				>
-					+ Nuevo turno
-				</a>
+				{#if canDeletePatient}
+					<button
+						class="rounded-full bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-red-700 hover:shadow-card dark:bg-red-700 dark:hover:bg-red-800 md:inline-flex md:justify-self-start"
+						type="button"
+						onclick={() => (showDeleteConfirm = true)}
+					>
+						Eliminar paciente
+					</button>
+				{/if}
+				{#if canCreateClinicalEntry}
+					<button
+						class="rounded-full bg-[#7c3aed] px-5 py-2 text-sm font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed] md:col-span-2 md:inline-flex md:justify-self-start lg:col-span-1"
+						type="button"
+						onclick={openNewEntryModal}
+					>
+						+ Registrar consulta
+					</button>
+				{/if}
+				{#if canCreateAppointment}
+					<a
+						href={`/odonto/agenda?patient_id=${data.patient.id}`}
+						class="rounded-full border border-[#7c3aed]/40 px-5 py-2 text-sm font-semibold text-[#7c3aed] transition hover:-translate-y-0.5 hover:bg-[#7c3aed]/10 dark:text-[#c4b5fd] md:col-span-2 md:inline-flex md:justify-self-start lg:col-span-1"
+					>
+						+ Nuevo turno
+					</a>
+				{/if}
 			</div>
 		</div>
 		<div class="mt-4 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4 sm:text-sm md:flex md:items-center md:gap-3">
@@ -897,16 +955,18 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				</svg>
 				Atrás
 			</a>
-			<button
-				class={`w-full rounded-full px-2 py-2 text-center text-xs font-semibold transition sm:px-4 sm:text-sm md:w-auto ${
-					tab === 'historial'
-						? 'bg-[#7c3aed] text-white shadow-sm'
-						: 'text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-[#0f1f36]'
-				}`}
-				onclick={() => (tab = 'historial')}
-			>
-				Historial
-			</button>
+			{#if canViewClinicalEntries}
+				<button
+					class={`w-full rounded-full px-2 py-2 text-center text-xs font-semibold transition sm:px-4 sm:text-sm md:w-auto ${
+						tab === 'historial'
+							? 'bg-[#7c3aed] text-white shadow-sm'
+							: 'text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-[#0f1f36]'
+					}`}
+					onclick={() => (tab = 'historial')}
+				>
+					Historial
+				</button>
+			{/if}
 			<button
 				class={`w-full rounded-full px-2 py-2 text-center text-xs font-semibold transition sm:px-4 sm:text-sm md:w-auto ${
 					tab === 'datos'
@@ -917,16 +977,18 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 			>
 				Datos
 			</button>
-			<button
-				class={`w-full rounded-full px-2 py-2 text-center text-xs font-semibold transition sm:px-4 sm:text-sm md:w-auto ${
-					tab === 'radiografias'
-						? 'bg-[#7c3aed] text-white shadow-sm'
-						: 'text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-[#0f1f36]'
-				}`}
-				onclick={() => (tab = 'radiografias')}
-			>
-				Radiografías
-			</button>
+			{#if canViewRadiologyReferences}
+				<button
+					class={`w-full rounded-full px-2 py-2 text-center text-xs font-semibold transition sm:px-4 sm:text-sm md:w-auto ${
+						tab === 'radiografias'
+							? 'bg-[#7c3aed] text-white shadow-sm'
+							: 'text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-[#0f1f36]'
+					}`}
+					onclick={() => (tab = 'radiografias')}
+				>
+					Radiografías
+				</button>
+			{/if}
 		</div>
 		<div class="mt-4 flex flex-wrap gap-3">
 			{#each chips as chip}
@@ -1028,25 +1090,27 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 													</p>
 												</div>
 												<div class="flex w-full items-center justify-end gap-2 sm:w-auto sm:shrink-0 sm:justify-start">
-													{#if entry.amount}
+													{#if canViewCosts && entry.amount}
 														<span class="text-[15px] font-semibold text-neutral-800 whitespace-nowrap dark:text-neutral-100">
 															{formatCurrency(entry.amount)}
 														</span>
 													{/if}
-													<button
-														type="button"
-														class="inline-flex items-center gap-1 rounded-full border border-neutral-200 px-3 py-1 text-xs font-semibold text-neutral-600 transition hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-100 dark:hover:bg-[#122641]"
-														onclick={(event) => {
-															event.stopPropagation();
-															openEditEntry(entry);
-														}}
-													>
-														<svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-															<path stroke-linecap="round" stroke-linejoin="round" d="M12 20h9" />
-															<path stroke-linecap="round" stroke-linejoin="round" d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
-														</svg>
-														Editar
-													</button>
+													{#if canEditEntry(entry)}
+														<button
+															type="button"
+															class="inline-flex items-center gap-1 rounded-full border border-neutral-200 px-3 py-1 text-xs font-semibold text-neutral-600 transition hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-100 dark:hover:bg-[#122641]"
+															onclick={(event) => {
+																event.stopPropagation();
+																openEditEntry(entry);
+															}}
+														>
+															<svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+																<path stroke-linecap="round" stroke-linejoin="round" d="M12 20h9" />
+																<path stroke-linecap="round" stroke-linejoin="round" d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+															</svg>
+															Editar
+														</button>
+													{/if}
 												</div>
 											</div>
 											{#if entry.description && !isDuplicateDescription(entry)}
@@ -1071,7 +1135,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 											{/if}
 											{#if expandedId === (entry.id ?? entry.created_at)}
 												<div class="mt-3 space-y-2 text-sm text-neutral-800 dark:text-neutral-100">
-													{#if entry.amount}
+													{#if canViewCosts && entry.amount}
 														<p><span class="font-semibold">Importe:</span> {formatCurrency(entry.amount)}</p>
 													{/if}
 													{#if entry.internal_note}
@@ -1104,18 +1168,21 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 		<div class="rounded-2xl border border-neutral-100 bg-white p-4 shadow-sm dark:border-[#1f3554] dark:bg-[#122641] sm:p-5">
 			<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 				<h2 class="text-lg font-semibold text-neutral-900 dark:text-white">Datos del paciente</h2>
-				<button
-					type="button"
-					class="w-full rounded-full border border-neutral-200 bg-white px-4 py-2 text-sm font-semibold text-neutral-900 shadow-sm transition hover:-translate-y-0.5 hover:shadow-card sm:w-auto"
-					onclick={() => (showEditModal = true)}
-				>
-					{hasPatientData ? 'Editar datos del paciente' : 'Agregar datos del paciente'}
-				</button>
+				{#if canEditPatientData}
+					<button
+						type="button"
+						class="w-full rounded-full border border-neutral-200 bg-white px-4 py-2 text-sm font-semibold text-neutral-900 shadow-sm transition hover:-translate-y-0.5 hover:shadow-card sm:w-auto"
+						onclick={() => (showEditModal = true)}
+					>
+						{hasPatientData ? 'Editar datos del paciente' : 'Agregar datos del paciente'}
+					</button>
+				{/if}
 			</div>
 			<div class="mt-4 space-y-4">
 				<div class="rounded-xl border border-neutral-100 bg-white/60 p-4 dark:border-[#1f3554] dark:bg-[#0f1f36]">
 					<div class="mb-3 flex items-center justify-between">
 						<p class="text-[13px] font-bold uppercase tracking-wide text-neutral-600 dark:text-neutral-300">Alertas médicas</p>
+						{#if canEditClinicalProfile}
 							<button
 								type="button"
 								class="rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-50 dark:hover:bg-[#122641]"
@@ -1123,67 +1190,78 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 							>
 								Editar
 							</button>
+						{/if}
 					</div>
-					<div class="space-y-3">
-						<div class="flex min-w-0 items-start justify-between gap-3 rounded-lg bg-amber-100/30 px-3 py-2 dark:bg-amber-500/10">
-							<div class="flex items-center gap-2 text-xs font-semibold text-amber-700 dark:text-amber-200">
-								<svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M4.93 19h14.14a1 1 0 0 0 .9-1.45L12.9 4.55a1 1 0 0 0-1.8 0L4.03 17.55A1 1 0 0 0 4.93 19Z" />
-								</svg>
-								Alergias
+					{#if canViewClinicalProfile}
+						<div class="space-y-3">
+							<div class="flex min-w-0 items-start justify-between gap-3 rounded-lg bg-amber-100/30 px-3 py-2 dark:bg-amber-500/10">
+								<div class="flex items-center gap-2 text-xs font-semibold text-amber-700 dark:text-amber-200">
+									<svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M4.93 19h14.14a1 1 0 0 0 .9-1.45L12.9 4.55a1 1 0 0 0-1.8 0L4.03 17.55A1 1 0 0 0 4.93 19Z" />
+									</svg>
+									Alergias
+								</div>
+								<p
+									class={`flex-1 break-words text-right text-[15px] font-semibold ${
+										data.patient.allergies ? 'text-amber-900 dark:text-amber-100' : 'text-amber-700/70 dark:text-amber-200/70'
+									}`}
+								>
+									{data.patient.allergies ?? 'Sin registrar'}
+								</p>
 							</div>
-							<p
-								class={`flex-1 break-words text-right text-[15px] font-semibold ${
-									data.patient.allergies ? 'text-amber-900 dark:text-amber-100' : 'text-amber-700/70 dark:text-amber-200/70'
-								}`}
-							>
-								{data.patient.allergies ?? 'Sin registrar'}
-							</p>
-						</div>
-						<div class="flex min-w-0 items-start justify-between gap-3">
-							<div class="flex items-center gap-2 text-xs font-semibold text-neutral-500 dark:text-neutral-300">
-								<svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" d="M6.75 6.75 17.25 17.25M9 5.25 5.25 9 9 12.75 12.75 9 9 5.25Z" />
-									<path stroke-linecap="round" stroke-linejoin="round" d="M15 11.25 11.25 15 15 18.75 18.75 15 15 11.25Z" />
-								</svg>
-								Medicación
+							<div class="flex min-w-0 items-start justify-between gap-3">
+								<div class="flex items-center gap-2 text-xs font-semibold text-neutral-500 dark:text-neutral-300">
+									<svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" d="M6.75 6.75 17.25 17.25M9 5.25 5.25 9 9 12.75 12.75 9 9 5.25Z" />
+										<path stroke-linecap="round" stroke-linejoin="round" d="M15 11.25 11.25 15 15 18.75 18.75 15 15 11.25Z" />
+									</svg>
+									Medicación
+								</div>
+								<p
+									class={`flex-1 break-words text-left text-[15px] font-semibold ${
+										data.patient.medication ? 'text-neutral-800 dark:text-white' : 'text-neutral-400 dark:text-neutral-500'
+									}`}
+								>
+									{data.patient.medication ?? 'Sin registrar'}
+								</p>
 							</div>
-							<p
-								class={`flex-1 break-words text-left text-[15px] font-semibold ${
-									data.patient.medication ? 'text-neutral-800 dark:text-white' : 'text-neutral-400 dark:text-neutral-500'
-								}`}
-							>
-								{data.patient.medication ?? 'Sin registrar'}
-							</p>
-						</div>
-						<div class="flex min-w-0 items-start justify-between gap-3">
-							<div class="flex items-center gap-2 text-xs font-semibold text-neutral-500 dark:text-neutral-300">
-								<svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" d="M6.75 4.5h10.5a1.5 1.5 0 0 1 1.5 1.5v12.75l-4.5-2.25L9.75 18.75 5.25 21V6A1.5 1.5 0 0 1 6.75 4.5Z" />
-								</svg>
-								Antecedentes
+							<div class="flex min-w-0 items-start justify-between gap-3">
+								<div class="flex items-center gap-2 text-xs font-semibold text-neutral-500 dark:text-neutral-300">
+									<svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" d="M6.75 4.5h10.5a1.5 1.5 0 0 1 1.5 1.5v12.75l-4.5-2.25L9.75 18.75 5.25 21V6A1.5 1.5 0 0 1 6.75 4.5Z" />
+									</svg>
+									Antecedentes
+								</div>
+								<p
+									class={`flex-1 break-words text-left text-[15px] font-semibold whitespace-pre-wrap ${
+										data.patient.background ? 'text-neutral-800 dark:text-white' : 'text-neutral-400 dark:text-neutral-500'
+									}`}
+								>
+									{data.patient.background ?? 'Sin registrar'}
+								</p>
 							</div>
-							<p
-								class={`flex-1 break-words text-left text-[15px] font-semibold whitespace-pre-wrap ${
-									data.patient.background ? 'text-neutral-800 dark:text-white' : 'text-neutral-400 dark:text-neutral-500'
-								}`}
-							>
-								{data.patient.background ?? 'Sin registrar'}
-							</p>
 						</div>
-					</div>
+					{:else if data.patient.has_clinical_alert}
+						<p class="rounded-lg bg-amber-100/40 px-3 py-2 text-sm font-semibold text-amber-900 dark:bg-amber-500/10 dark:text-amber-100">
+							Este paciente tiene una alerta clínica registrada. Tu rol no permite ver el detalle.
+						</p>
+					{:else}
+						<p class="text-sm text-neutral-500 dark:text-neutral-300">No hay alertas clínicas registradas.</p>
+					{/if}
 				</div>
 
 				<div class="rounded-xl border border-neutral-100 bg-white/60 p-4 dark:border-[#1f3554] dark:bg-[#0f1f36]">
 					<div class="mb-3 flex items-center justify-between">
 						<p class="text-[13px] font-bold uppercase tracking-wide text-neutral-600 dark:text-neutral-300">Contacto</p>
-							<button
+							{#if canEditBasicPatient}
+								<button
 								type="button"
 								class="rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-50 dark:hover:bg-[#122641]"
 								onclick={() => (showEditModal = true)}
-							>
-								Editar
-							</button>
+								>
+									Editar
+								</button>
+							{/if}
 					</div>
 					<div class="grid gap-3 md:grid-cols-2">
 						<div class="space-y-1">
@@ -1246,13 +1324,15 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				<div class="rounded-xl border border-neutral-100 bg-white/60 p-4 dark:border-[#1f3554] dark:bg-[#0f1f36]">
 					<div class="mb-3 flex items-center justify-between">
 						<p class="text-[13px] font-bold uppercase tracking-wide text-neutral-600 dark:text-neutral-300">Administrativo</p>
-							<button
+							{#if canEditBasicPatient}
+								<button
 								type="button"
 								class="rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-50 dark:hover:bg-[#122641]"
 								onclick={() => (showEditModal = true)}
-							>
-								Editar
-							</button>
+								>
+									Editar
+								</button>
+							{/if}
 					</div>
 					<div class="grid gap-3 md:grid-cols-2">
 						<div class="space-y-1">
@@ -1289,7 +1369,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				<div>
 					<h2 class="text-lg font-semibold text-neutral-900 dark:text-white">Radiografías</h2>
 				</div>
-				{#if isDriveConnected}
+				{#if isDriveConnected && canLinkExternalFiles}
 					<div class="flex flex-col gap-2 sm:flex-row sm:items-center">
 						<input
 							class="hidden"
@@ -1336,7 +1416,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				{/if}
 			</div>
 
-			{#if isDriveConnected}
+			{#if isDriveConnected && canLinkExternalFiles}
 				<div class="mt-5 flex flex-wrap items-center gap-2 text-xs text-neutral-500 dark:text-neutral-300">
 					<span class="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 font-semibold text-emerald-800 dark:bg-emerald-400/15 dark:text-emerald-200">
 						✓ Google Drive conectado
@@ -1346,11 +1426,22 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 							Cuenta: {maskEmail(driveConnection.connected_email)}
 						</span>
 					{/if}
-					<a href={connectConfigHref} class="font-semibold text-[#7c3aed] hover:underline">
-						Cambiar o desconectar
-					</a>
+					{#if canUseConfigurationForDrive}
+						<a href={connectConfigHref} class="font-semibold text-[#7c3aed] hover:underline">
+							Cambiar o desconectar
+						</a>
+					{:else}
+						<button
+							type="button"
+							class="font-semibold text-[#7c3aed] hover:underline disabled:opacity-60"
+							onclick={connectDriveInline}
+							disabled={!canConnectDrive || connectingDrive}
+						>
+							{connectingDrive ? 'Conectando...' : 'Cambiar cuenta'}
+						</button>
+					{/if}
 				</div>
-			{:else}
+			{:else if canLinkExternalFiles}
 				<div class="mt-5 rounded-2xl border border-dashed border-neutral-200 bg-neutral-50/80 p-5 dark:border-[#1f3554] dark:bg-[#0f1f36] sm:p-6">
 					<h3 class="text-lg font-semibold text-neutral-900 dark:text-white">
 						Para subir radiografías, primero conectá Google Drive
@@ -1405,7 +1496,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 					Subidas a Drive no disponibles en modo demo.
 				</p>
 			{/if}
-			{#if !googleClientId}
+			{#if canLinkExternalFiles && !googleClientId}
 				<p class="mt-5 rounded-xl border border-dashed border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
 					Falta configurar la conexión con Google Drive para habilitar las subidas.
 				</p>
@@ -1499,7 +1590,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 										Ver
 									</button>
 								{/if}
-								{#if !isRadiographReady(radiograph)}
+								{#if canLinkExternalFiles && !isRadiographReady(radiograph)}
 									<button
 										type="button"
 										class="rounded-full border border-neutral-200 px-4 py-2 text-center text-sm font-semibold text-neutral-700 transition hover:-translate-y-0.5 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-200 dark:hover:bg-[#122641]"
@@ -1509,21 +1600,27 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 										Reintentar
 									</button>
 								{/if}
-								<button
-									type="button"
-									class="inline-flex items-center justify-center gap-1 rounded-full border border-neutral-200 px-4 py-2 text-center text-sm font-semibold text-neutral-500 transition hover:border-red-200 hover:text-red-600 dark:border-[#1f3554] dark:text-neutral-300 dark:hover:border-red-400/40 dark:hover:text-red-300"
-									onclick={() => openRadiographDeleteConfirm(radiograph.id)}
-								>
-									<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-										<path stroke-linecap="round" stroke-linejoin="round" d="M3 6h18" />
-										<path stroke-linecap="round" stroke-linejoin="round" d="M8 6V4h8v2" />
-										<path stroke-linecap="round" stroke-linejoin="round" d="M7 6l1 14h8l1-14" />
-									</svg>
-									Quitar
-								</button>
+								{#if canLinkExternalFiles}
+									<button
+										type="button"
+										class="inline-flex items-center justify-center gap-1 rounded-full border border-neutral-200 px-4 py-2 text-center text-sm font-semibold text-neutral-500 transition hover:border-red-200 hover:text-red-600 dark:border-[#1f3554] dark:text-neutral-300 dark:hover:border-red-400/40 dark:hover:text-red-300"
+										onclick={() => openRadiographDeleteConfirm(radiograph.id)}
+									>
+										<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+											<path stroke-linecap="round" stroke-linejoin="round" d="M3 6h18" />
+											<path stroke-linecap="round" stroke-linejoin="round" d="M8 6V4h8v2" />
+											<path stroke-linecap="round" stroke-linejoin="round" d="M7 6l1 14h8l1-14" />
+										</svg>
+										Quitar
+									</button>
+								{/if}
 							</div>
 						</div>
 					{/each}
+				{:else}
+					<p class="rounded-xl border border-dashed border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-neutral-200">
+						No hay radiografías vinculadas a este paciente.
+					</p>
 				{/if}
 			</div>
 			{#if hasMoreRadiographs}
@@ -1560,7 +1657,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 </div>
 
 <!-- FAB móvil para nueva entrada -->
-{#if tab === 'historial'}
+{#if tab === 'historial' && canCreateClinicalEntry}
 	<button
 		class="fixed bottom-20 right-4 z-20 flex h-14 w-14 items-center justify-center rounded-full bg-[#7c3aed] text-2xl font-bold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed] md:hidden"
 		onclick={openNewEntryModal}
@@ -1572,26 +1669,30 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 
 <Modal open={showMobileActions} title="Acciones del paciente" on:close={() => (showMobileActions = false)}>
 	<div class="space-y-3">
-		<button
-			type="button"
-			class="w-full rounded-xl border border-neutral-200 px-4 py-3 text-sm font-semibold text-neutral-800 transition hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-100 dark:hover:bg-[#122641]"
-			onclick={() => {
-				showMobileActions = false;
-				showArchiveConfirm = true;
-			}}
-		>
-			{isArchived ? 'Desarchivar paciente' : 'Archivar paciente'}
-		</button>
-		<button
-			type="button"
-			class="w-full rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700"
-			onclick={() => {
-				showMobileActions = false;
-				showDeleteConfirm = true;
-			}}
-		>
-			Eliminar paciente
-		</button>
+		{#if canArchivePatient}
+			<button
+				type="button"
+				class="w-full rounded-xl border border-neutral-200 px-4 py-3 text-sm font-semibold text-neutral-800 transition hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-100 dark:hover:bg-[#122641]"
+				onclick={() => {
+					showMobileActions = false;
+					showArchiveConfirm = true;
+				}}
+			>
+				{isArchived ? 'Desarchivar paciente' : 'Archivar paciente'}
+			</button>
+		{/if}
+		{#if canDeletePatient}
+			<button
+				type="button"
+				class="w-full rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700"
+				onclick={() => {
+					showMobileActions = false;
+					showDeleteConfirm = true;
+				}}
+			>
+				Eliminar paciente
+			</button>
+		{/if}
 		<button
 			type="button"
 			class="w-full rounded-xl px-4 py-3 text-sm font-semibold text-neutral-600 transition hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-[#122641]"
@@ -1603,7 +1704,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 </Modal>
 
 <Modal
-	open={showRadiographModal}
+	open={canLinkExternalFiles && showRadiographModal}
 	title={retryTargetId ? 'Reintentar radiografía' : 'Añadir radiografía'}
 	on:close={closeRadiographModal}
 >
@@ -1672,7 +1773,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 	</div>
 </Modal>
 
-<Modal open={showEntryModal} title={`Registrar consulta - ${data.patient.full_name}`} on:close={() => (showEntryModal = false)}>
+<Modal open={canCreateClinicalEntry && showEntryModal} title={`Registrar consulta - ${data.patient.full_name}`} on:close={() => (showEntryModal = false)}>
 	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 	<form method="post" action="?/add_entry" class="space-y-4" onkeydown={preventEnterSubmit} onsubmit={handleEntrySubmit}>
 		<div class="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-5">
@@ -1706,7 +1807,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				placeholder="Motivo de consulta, hallazgos, indicaciones..."
 			></textarea>
 		</div>
-		<div class="grid grid-cols-1 gap-3 md:grid-cols-3">
+		<div class={`grid grid-cols-1 gap-3 ${canViewCosts ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
 			<div class="space-y-2">
 				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="teeth">Dientes / zona (opcional)</label>
 				<input
@@ -1716,20 +1817,22 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 					placeholder="Ej: 11-12"
 				/>
 			</div>
-			<div class="space-y-2">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="amount">Importe (opcional)</label>
-				<input type="hidden" name="amount" value={amountRaw} />
-				<input
-					id="amount"
-					name="amount_display"
-					type="text"
-					inputmode="numeric"
-					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
-					placeholder="Ej: 18.000"
-					value={amountDisplay}
-					oninput={(event) => handleAmountChange(event, 'new')}
-				/>
-			</div>
+			{#if canViewCosts}
+				<div class="space-y-2">
+					<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="amount">Importe (opcional)</label>
+					<input type="hidden" name="amount" value={amountRaw} />
+					<input
+						id="amount"
+						name="amount_display"
+						type="text"
+						inputmode="numeric"
+						class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+						placeholder="Ej: 18.000"
+						value={amountDisplay}
+						oninput={(event) => handleAmountChange(event, 'new')}
+					/>
+				</div>
+			{/if}
 			<div class="space-y-2">
 				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="internal_note">Nota interna (opcional)</label>
 				<input
@@ -1842,7 +1945,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 </Modal>
 
 <Modal
-	open={showRadiographDeleteConfirm}
+	open={canLinkExternalFiles && showRadiographDeleteConfirm}
 	title="Quitar de la ficha"
 	on:close={() => (showRadiographDeleteConfirm = false)}
 	dismissible
@@ -1900,7 +2003,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 	</div>
 </Modal>
 
-<Modal open={showEditEntryModal} title="Editar entrada" on:close={() => (showEditEntryModal = false)}>
+<Modal open={(canEditAnyClinicalEntry || canEditOwnClinicalEntry) && showEditEntryModal} title="Editar entrada" on:close={() => (showEditEntryModal = false)}>
 	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 	<form method="post" action="?/update_entry" class="space-y-4" onkeydown={preventEnterSubmit} onsubmit={handleEditEntrySubmit}>
 		<input type="hidden" name="entry_id" value={editingEntry?.id ?? ''} />
@@ -1937,7 +2040,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				placeholder="Motivo de consulta, hallazgos, indicaciones..."
 			></textarea>
 		</div>
-		<div class="grid grid-cols-1 gap-3 md:grid-cols-3">
+		<div class={`grid grid-cols-1 gap-3 ${canViewCosts ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
 			<div class="space-y-2">
 				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="edit_teeth">Dientes / zona (opcional)</label>
 				<input
@@ -1948,20 +2051,22 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 					placeholder="Ej: 11-12"
 				/>
 			</div>
-			<div class="space-y-2">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="edit_amount">Importe (opcional)</label>
-				<input type="hidden" name="amount" value={editAmountRaw} />
-				<input
-					id="edit_amount"
-					name="amount_display"
-					type="text"
-					inputmode="numeric"
-					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
-					value={editAmountDisplay}
-					oninput={(event) => handleAmountChange(event, 'edit')}
-					placeholder="Ej: 18.000"
-				/>
-			</div>
+			{#if canViewCosts}
+				<div class="space-y-2">
+					<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="edit_amount">Importe (opcional)</label>
+					<input type="hidden" name="amount" value={editAmountRaw} />
+					<input
+						id="edit_amount"
+						name="amount_display"
+						type="text"
+						inputmode="numeric"
+						class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+						value={editAmountDisplay}
+						oninput={(event) => handleAmountChange(event, 'edit')}
+						placeholder="Ej: 18.000"
+					/>
+				</div>
+			{/if}
 			<div class="space-y-2">
 				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="edit_internal_note">Nota interna (opcional)</label>
 				<input
@@ -1994,63 +2099,63 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 	</form>
 </Modal>
 
-<Modal open={showEditModal} title="Editar datos" on:close={() => (showEditModal = false)}>
+<Modal open={canEditPatientData && showEditModal} title="Editar datos" on:close={() => (showEditModal = false)}>
 	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 	<form method="post" action="?/update_patient" class="space-y-3" onkeydown={preventEnterSubmit} onsubmit={handleEditSubmit}>
-		<div class="grid grid-cols-1 gap-3 md:grid-cols-3">
-			<div class="space-y-1">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="email">Correo electrónico (opcional)</label>
-				<input
-					id="email"
-					name="email"
-					type="email"
-					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
-					value={data.patient.email ?? ''}
-				/>
+		{#if canEditBasicPatient}
+			<div class="grid grid-cols-1 gap-3 md:grid-cols-3">
+				<div class="space-y-1">
+					<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="email">Correo electrónico (opcional)</label>
+					<input
+						id="email"
+						name="email"
+						type="email"
+						class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+						value={data.patient.email ?? ''}
+					/>
+				</div>
+				<div class="space-y-1">
+					<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="phone">Teléfono (opcional)</label>
+					<input
+						id="phone"
+						name="phone"
+						class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+						value={data.patient.phone ?? ''}
+					/>
+				</div>
+				<div class="space-y-1">
+					<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="dni">DNI (opcional)</label>
+					<input
+						id="dni"
+						name="dni"
+						inputmode="numeric"
+						class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+						value={data.patient.dni ?? ''}
+					/>
+				</div>
 			</div>
-			<div class="space-y-1">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="phone">Teléfono (opcional)</label>
-				<input
-					id="phone"
-					name="phone"
-					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
-					value={data.patient.phone ?? ''}
-				/>
+			<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+				<div class="space-y-1">
+					<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="birth_date-year">Fecha de nacimiento (opcional)</label>
+					<DatePartsInput
+						name="birth_date"
+						initialValue={data.patient.birth_date ?? null}
+						minYear={1900}
+						maxYear={currentYear}
+						showErrors={showEditErrors}
+					/>
+				</div>
+				<div class="space-y-1">
+					<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="address">Dirección (opcional)</label>
+					<input
+						id="address"
+						name="address"
+						class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+						value={data.patient.address ?? ''}
+					/>
+				</div>
 			</div>
-			<div class="space-y-1">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="dni">DNI (opcional)</label>
-				<input
-					id="dni"
-					name="dni"
-					inputmode="numeric"
-					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
-					value={data.patient.dni ?? ''}
-				/>
-			</div>
-		</div>
-		<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-			<div class="space-y-1">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="birth_date-year">Fecha de nacimiento (opcional)</label>
-				<DatePartsInput
-					name="birth_date"
-					initialValue={data.patient.birth_date ?? null}
-					minYear={1900}
-					maxYear={currentYear}
-					showErrors={showEditErrors}
-				/>
-			</div>
-			<div class="space-y-1">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="address">Dirección (opcional)</label>
-				<input
-					id="address"
-					name="address"
-					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
-					value={data.patient.address ?? ''}
-				/>
-			</div>
-		</div>
-		<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-			<div class="space-y-3">
+			<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
 				<div class="space-y-1">
 					<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="insurance">Obra social (opcional)</label>
 					<input
@@ -2072,40 +2177,48 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 					/>
 				</div>
 			</div>
-			<div class="space-y-1">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="allergies">Alergias (opcional)</label>
-				<input
-					id="allergies"
-					name="allergies"
-					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
-					value={data.patient.allergies ?? ''}
-				/>
+		{/if}
+		{#if canEditClinicalProfile}
+			<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+				<div class="space-y-1">
+					<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="allergies">Alergias (opcional)</label>
+					<input
+						id="allergies"
+						name="allergies"
+						class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+						value={data.patient.allergies ?? ''}
+					/>
+				</div>
+				<div class="space-y-1">
+					<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="medication">Medicación (opcional)</label>
+					<textarea
+						id="medication"
+						name="medication"
+						rows="2"
+						class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+					>{data.patient.medication ?? ''}</textarea>
+				</div>
+				<div class="space-y-1 md:col-span-2">
+					<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="background">Antecedentes (opcional)</label>
+					<textarea
+						id="background"
+						name="background"
+						rows="2"
+						class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+					>{data.patient.background ?? ''}</textarea>
+				</div>
 			</div>
-		</div>
-		<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-			<div class="space-y-1">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="medication">Medicación (opcional)</label>
-				<textarea
-					id="medication"
-					name="medication"
-					rows="2"
-					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
-				>{data.patient.medication ?? ''}</textarea>
-			</div>
-			<div class="space-y-1">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="background">Antecedentes (opcional)</label>
-				<textarea
-					id="background"
-					name="background"
-					rows="2"
-					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
-				>{data.patient.background ?? ''}</textarea>
-			</div>
-		</div>
+		{/if}
 		{#if form?.message}
 			<p class="rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{form.message}</p>
 		{/if}
-		<p class="text-xs text-neutral-500 dark:text-neutral-300">Todos los datos son opcionales.</p>
+		{#if !canEditPatientData}
+			<p class="rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-neutral-200">
+				Tu rol no permite modificar estos datos.
+			</p>
+		{:else}
+			<p class="text-xs text-neutral-500 dark:text-neutral-300">Todos los datos son opcionales.</p>
+		{/if}
 		<div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
 			<button
 				type="button"
@@ -2114,12 +2227,14 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 			>
 				Cancelar
 			</button>
-			<button
-				type="submit"
-				class="w-full rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 sm:w-auto"
-			>
-				Guardar cambios
-			</button>
+			{#if canEditPatientData}
+				<button
+					type="submit"
+					class="w-full rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 sm:w-auto"
+				>
+					Guardar cambios
+				</button>
+			{/if}
 		</div>
 	</form>
 </Modal>

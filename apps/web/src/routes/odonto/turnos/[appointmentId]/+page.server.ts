@@ -64,23 +64,31 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 	const reprogramDate =
 		url.searchParams.get('reprogram_date') ?? localDateFor(data.starts_at, business.business.timezone);
 	const fromDate = url.searchParams.get('from_date') ?? localDateFor(data.starts_at, business.business.timezone);
+	const canViewOperationalHistory =
+		business.role === 'owner' || business.role === 'admin' || business.capabilities.canConfigureCommunication;
 
 	const [auditResult, usersResult, messageResult, reprogramSlots] = await Promise.all([
-		supabase
-			.from('audit_logs')
-			.select('id, user_id, action, entity_type, entity_id, metadata, created_at')
-			.eq('business_id', business.business.id)
-			.eq('entity_type', 'appointment')
-			.eq('entity_id', params.appointmentId)
-			.order('created_at', { ascending: false }),
-		supabase.rpc('list_business_users', { target_business_id: business.business.id }),
-		supabase
-			.from('message_dispatches')
-			.select('id, type, status, scheduled_for, sent_at, delivered_at, read_at, failed_at, human_error_message, created_at')
-			.eq('business_id', business.business.id)
-			.eq('appointment_id', params.appointmentId)
-			.order('created_at', { ascending: false }),
-		business.canOperate && !['cancelled', 'attended', 'no_show'].includes(data.status)
+		canViewOperationalHistory
+			? supabase
+					.from('audit_logs')
+					.select('id, user_id, action, entity_type, entity_id, metadata, created_at')
+					.eq('business_id', business.business.id)
+					.eq('entity_type', 'appointment')
+					.eq('entity_id', params.appointmentId)
+					.order('created_at', { ascending: false })
+			: Promise.resolve({ data: [], error: null }),
+		canViewOperationalHistory
+			? supabase.rpc('list_business_users', { target_business_id: business.business.id })
+			: Promise.resolve({ data: [], error: null }),
+		canViewOperationalHistory
+			? supabase
+					.from('message_dispatches')
+					.select('id, type, status, scheduled_for, sent_at, delivered_at, read_at, failed_at, human_error_message, created_at')
+					.eq('business_id', business.business.id)
+					.eq('appointment_id', params.appointmentId)
+					.order('created_at', { ascending: false })
+			: Promise.resolve({ data: [], error: null }),
+		business.capabilities.canRescheduleAppointment && !['cancelled', 'attended', 'no_show'].includes(data.status)
 			? getAvailabilitySlots(supabase, {
 					business: business.business,
 					serviceId: data.service_id,
@@ -107,6 +115,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 		auditLogs: auditResult.data ?? [],
 		messageDispatches: messageResult.data ?? [],
 		userLabels,
+		canViewOperationalHistory,
 		reprogramDate,
 		reprogramSlots,
 		fromDate,
@@ -125,7 +134,13 @@ export const actions: Actions = {
 		if (!isAppointmentStatus(status)) return fail(400, { message: 'Estado inválido.' });
 
 		try {
-			if (business.canOperate) {
+			const canApplyStatus =
+				status === 'cancelled'
+					? business.capabilities.canCancelAppointment
+					: status === 'attended' || status === 'no_show'
+						? business.capabilities.canMarkAppointmentAttendance
+						: business.capabilities.canEditAppointment;
+			if (canApplyStatus && business.role !== 'professional') {
 				await updateAppointmentStatus(supabase, {
 					businessId: business.business.id,
 					appointmentId: params.appointmentId,
@@ -133,7 +148,7 @@ export const actions: Actions = {
 					userId,
 					reason: String(form.get('reason') ?? '').trim() || null
 				});
-			} else if (canUseProfessionalStatusAction(business.role, status)) {
+			} else if (business.capabilities.canMarkAppointmentAttendance && canUseProfessionalStatusAction(business.role, status)) {
 				await updateProfessionalAppointmentStatus(supabase, {
 					businessId: business.business.id,
 					appointmentId: params.appointmentId,
@@ -153,7 +168,9 @@ export const actions: Actions = {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
 		const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
-		if (!business.canOperate) return fail(403, { message: 'No tenés permiso para reprogramar turnos.' });
+		if (!business.capabilities.canRescheduleAppointment) {
+			return fail(403, { message: 'No tenés permiso para reprogramar turnos.' });
+		}
 
 		const form = await request.formData();
 		const slotStartsAt = String(form.get('slot_starts_at') ?? '').trim();

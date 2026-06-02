@@ -69,6 +69,8 @@ type BookingAttemptInput = {
 	success: boolean;
 	errorCode?: string | null;
 	userAgent?: string | null;
+	idempotencyKey?: string | null;
+	appointmentId?: string | null;
 	metadata?: Record<string, unknown> | null;
 };
 
@@ -115,6 +117,8 @@ export const recordPublicBookingAttempt = async (
 		success: input.success,
 		error_code: input.errorCode ?? null,
 		user_agent: input.userAgent?.slice(0, 500) ?? null,
+		idempotency_key: input.idempotencyKey ?? null,
+		appointment_id: input.appointmentId ?? null,
 		metadata: input.metadata ?? null
 	});
 
@@ -570,6 +574,7 @@ export const createPublicBooking = async (
 		ipHash?: string | null;
 		userAgent?: string | null;
 		now?: Date;
+		idempotencyKey?: string | null;
 	}
 ) => {
 	const now = input.now ?? new Date();
@@ -579,6 +584,10 @@ export const createPublicBooking = async (
 	try {
 		if (!business || !business.is_active || !business.public_booking_enabled) {
 			throw new Error('PUBLIC_BOOKING_UNAVAILABLE');
+		}
+		const idempotencyKey = String(input.idempotencyKey ?? '').trim();
+		if (!/^[a-zA-Z0-9_-]{12,160}$/.test(idempotencyKey)) {
+			throw new Error('PUBLIC_IDEMPOTENCY_REQUIRED');
 		}
 		if (!(await canUsePublicBusiness(supabase, business.id, business.created_at))) {
 			throw new Error('PUBLIC_BUSINESS_COMMERCIAL_UNAVAILABLE');
@@ -590,6 +599,27 @@ export const createPublicBooking = async (
 		const email = String(input.patientEmail ?? '').trim();
 		if (patientName.length < 3) throw new Error('PUBLIC_PATIENT_NAME_INVALID');
 		if (!phoneE164 || !isLikelyPhoneE164(phoneE164)) throw new Error('PUBLIC_PATIENT_PHONE_INVALID');
+
+		const { data: duplicateAttempt, error: duplicateAttemptError } = await supabase
+			.from('public_booking_attempts')
+			.select('appointment_id, phone_e164')
+			.eq('business_id', business.id)
+			.eq('action', 'booking_create')
+			.eq('success', true)
+			.eq('idempotency_key', idempotencyKey)
+			.maybeSingle();
+		if (duplicateAttemptError) throw duplicateAttemptError;
+		if (duplicateAttempt?.appointment_id) {
+			if (duplicateAttempt.phone_e164 !== phoneE164) throw new Error('PUBLIC_DUPLICATE_SUBMIT');
+			const { data: existingAppointment, error: existingAppointmentError } = await supabase
+				.from('appointments')
+				.select('id, confirmation_token, starts_at, ends_at, service_name_snapshot, professional_name_snapshot, patients(full_name, phone_e164)')
+				.eq('business_id', business.id)
+				.eq('id', duplicateAttempt.appointment_id)
+				.maybeSingle();
+			if (existingAppointmentError) throw existingAppointmentError;
+			if (existingAppointment?.id) return { business, appointment: existingAppointment };
+		}
 
 		await assertPublicBookingRateLimits(supabase, {
 			businessId: business.id,
@@ -633,6 +663,8 @@ export const createPublicBooking = async (
 			action: 'booking_create',
 			success: true,
 			userAgent: input.userAgent,
+			idempotencyKey,
+			appointmentId: created?.id ?? null,
 			metadata: {
 				appointment_id: created?.id ?? null,
 				service_id: input.serviceId,
@@ -658,6 +690,7 @@ export const createPublicBooking = async (
 			success: false,
 			errorCode: (error as Error)?.message ?? 'UNKNOWN',
 			userAgent: input.userAgent,
+			idempotencyKey: input.idempotencyKey ?? null,
 			metadata: {
 				slug: input.slug,
 				service_id: input.serviceId,
@@ -675,12 +708,15 @@ export const getPublicBookingErrorMessage = (error: unknown) => {
 	if (raw.includes('PUBLIC_BUSINESS_COMMERCIAL_UNAVAILABLE')) return publicBusinessUnavailableMessage;
 	if (raw.includes('PUBLIC_PATIENT_NAME_INVALID')) return 'Ingresá nombre y apellido.';
 	if (raw.includes('PUBLIC_PATIENT_PHONE_INVALID')) return 'Ingresá un teléfono válido.';
+	if (raw.includes('PUBLIC_IDEMPOTENCY_REQUIRED') || raw.includes('PUBLIC_DUPLICATE_SUBMIT')) {
+		return 'No pudimos validar esta solicitud. Actualizá la página e intentá nuevamente.';
+	}
 	if (raw.includes('PUBLIC_SLOT_UNAVAILABLE')) return 'Ese horario ya fue reservado. Elegí otro horario disponible.';
 	if (raw.includes('PUBLIC_RATE_LIMIT_IP') || raw.includes('PUBLIC_RATE_LIMIT_PHONE')) {
 		return 'Hubo demasiados intentos de reserva. Probá nuevamente en unos minutos.';
 	}
 	if (raw.includes('PUBLIC_BOOKING_ACTIVE_LIMIT')) {
-		return 'Ya existe un turno activo para ese teléfono. Contactá al consultorio si necesitás otro.';
+		return 'No se pudo completar la reserva online. Contactá al consultorio.';
 	}
 	if (raw.includes('PUBLIC_BOOKING_BLOCKED_PATIENT') || raw.includes('PATIENT_BLOCKED')) {
 		return 'No se pudo completar la reserva online. Contactá al consultorio.';

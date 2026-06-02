@@ -24,7 +24,7 @@
 
 	let { data, form } = $props<{
 		data: {
-			context: { canOperate: boolean };
+			context: { capabilities?: Record<string, boolean> };
 			date: string;
 			selectedProfessionalId: string;
 			selectedStatus: string;
@@ -44,7 +44,7 @@
 		form?: { message?: string; values?: Record<string, unknown> };
 	}>();
 
-	const canOperate = $derived(data.context.canOperate && !data.demo);
+	const canCreateAppointment = $derived(Boolean((data.context as any).capabilities?.canCreateAppointment) && !data.demo);
 	let showCreate = $state(false);
 	let showSearch = $state(false);
 	let showDayAppointments = $state(false);
@@ -243,7 +243,7 @@
 				patients={data.patients}
 				initialDate={data.date}
 				initialPatientId={data.selectedPatientId}
-				{canOperate}
+				{canCreateAppointment}
 				{form}
 			/>
 		</div>

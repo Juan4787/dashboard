@@ -13,11 +13,12 @@
 
 	let { data, form } = $props<{
 		data: {
-			context: { canOperate: boolean; role: string };
+			context: { capabilities?: Record<string, boolean>; role: string };
 			appointment: any;
 			auditLogs: AuditLog[];
 			messageDispatches: any[];
 			userLabels: Record<string, string>;
+			canViewOperationalHistory?: boolean;
 			reprogramDate: string;
 			reprogramSlots: Slot[];
 			fromDate: string;
@@ -26,8 +27,12 @@
 		form?: { success?: boolean; message?: string };
 	}>();
 
-	const canOperate = $derived(data.context.canOperate && !data.demo);
-	const canProfessionalClose = $derived(data.context.role === 'professional' && !data.demo);
+	const capabilities = $derived((data.context as any).capabilities ?? {});
+	const canEditAppointment = $derived(Boolean(capabilities.canEditAppointment) && !data.demo);
+	const canCancelAppointment = $derived(Boolean(capabilities.canCancelAppointment) && !data.demo);
+	const canRescheduleAppointment = $derived(Boolean(capabilities.canRescheduleAppointment) && !data.demo);
+	const canMarkAttendance = $derived(Boolean(capabilities.canMarkAppointmentAttendance) && !data.demo);
+	const canProfessionalClose = $derived(data.context.role === 'professional' && canMarkAttendance);
 	const isClosed = $derived(['cancelled', 'attended', 'no_show'].includes(data.appointment?.status));
 
 	const statusLabels: Record<string, string> = {
@@ -103,7 +108,9 @@
 
 	const canUseStatusAction = (status: string) => {
 		if (isClosed || data.appointment.status === status) return false;
-		if (canOperate) return true;
+		if (status === 'cancelled') return canCancelAppointment;
+		if (status === 'attended' || status === 'no_show') return canMarkAttendance;
+		if (canEditAppointment) return true;
 		return canProfessionalClose && (status === 'attended' || status === 'no_show');
 	};
 
@@ -235,9 +242,9 @@
 							<input type="hidden" name="from_date" value={data.fromDate} />
 							<label class="space-y-1">
 								<span class="text-sm font-semibold text-white/65">Día</span>
-								<input type="date" name="reprogram_date" value={data.reprogramDate} disabled={!canOperate || isClosed} class="w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white disabled:opacity-50" />
+								<input type="date" name="reprogram_date" value={data.reprogramDate} disabled={!canRescheduleAppointment || isClosed} class="w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white disabled:opacity-50" />
 							</label>
-							<button disabled={!canOperate || isClosed} class="self-end rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/10 disabled:opacity-50">
+							<button disabled={!canRescheduleAppointment || isClosed} class="self-end rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/10 disabled:opacity-50">
 								Ver horarios
 							</button>
 						</form>
@@ -246,7 +253,7 @@
 							<input type="hidden" name="reprogram_date" value={data.reprogramDate} />
 							<label class="space-y-1">
 								<span class="text-sm font-semibold text-white/65">Horario</span>
-								<select name="slot_starts_at" disabled={!canOperate || isClosed || data.reprogramSlots.length === 0} class="w-full rounded-2xl border border-white/10 bg-[#0b1d32] px-4 py-3 text-sm text-white disabled:opacity-50">
+								<select name="slot_starts_at" disabled={!canRescheduleAppointment || isClosed || data.reprogramSlots.length === 0} class="w-full rounded-2xl border border-white/10 bg-[#0b1d32] px-4 py-3 text-sm text-white disabled:opacity-50">
 									<option value="">Seleccionar horario</option>
 									{#each data.reprogramSlots as slot}
 										<option value={slot.starts_at}>{slot.time}</option>
@@ -256,7 +263,7 @@
 							{#if data.reprogramSlots.length === 0}
 								<p class="mt-3 text-sm text-white/45">No hay horarios para ese día.</p>
 							{/if}
-							<button type="submit" disabled={!canOperate || isClosed || data.reprogramSlots.length === 0} class="mt-4 w-full rounded-2xl bg-[#7c3aed] px-5 py-4 text-sm font-semibold text-white transition hover:bg-[#6d28d9] disabled:opacity-45">
+							<button type="submit" disabled={!canRescheduleAppointment || isClosed || data.reprogramSlots.length === 0} class="mt-4 w-full rounded-2xl bg-[#7c3aed] px-5 py-4 text-sm font-semibold text-white transition hover:bg-[#6d28d9] disabled:opacity-45">
 								Reprogramar
 							</button>
 						</form>
@@ -292,29 +299,31 @@
 			</div>
 		</details>
 
-		<details class="group rounded-3xl border border-[#244062] bg-[#071626] shadow-xl shadow-black/10">
-			<summary class="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-5 text-lg font-semibold text-white sm:px-7">
-				<span>Historial</span>
-				<span class="text-[#a78bfa] transition group-open:rotate-180">v</span>
-			</summary>
-			<div class="border-t border-white/10 px-5 py-6 sm:px-7">
-				<div class="grid gap-3">
-					{#each data.auditLogs as log}
-						<div class="rounded-2xl border border-white/10 bg-white/[0.035] px-4 py-4 text-sm">
-							<p class="font-semibold text-white">{auditLabel(log)}</p>
-							<p class="mt-1 text-xs font-semibold text-white/45">{formatDateTime(log.created_at)}</p>
-							{#if auditDetail(log)}
-								<p class="mt-2 text-white/70">{auditDetail(log)}</p>
-							{/if}
-						</div>
-					{/each}
-					{#if data.auditLogs.length === 0}
-						<p class="rounded-2xl border border-white/10 bg-white/[0.035] px-4 py-4 text-sm text-white/60">
-							Todavía no hay movimientos registrados.
-						</p>
-					{/if}
+		{#if data.canViewOperationalHistory}
+			<details class="group rounded-3xl border border-[#244062] bg-[#071626] shadow-xl shadow-black/10">
+				<summary class="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-5 text-lg font-semibold text-white sm:px-7">
+					<span>Historial</span>
+					<span class="text-[#a78bfa] transition group-open:rotate-180">v</span>
+				</summary>
+				<div class="border-t border-white/10 px-5 py-6 sm:px-7">
+					<div class="grid gap-3">
+						{#each data.auditLogs as log}
+							<div class="rounded-2xl border border-white/10 bg-white/[0.035] px-4 py-4 text-sm">
+								<p class="font-semibold text-white">{auditLabel(log)}</p>
+								<p class="mt-1 text-xs font-semibold text-white/45">{formatDateTime(log.created_at)}</p>
+								{#if auditDetail(log)}
+									<p class="mt-2 text-white/70">{auditDetail(log)}</p>
+								{/if}
+							</div>
+						{/each}
+						{#if data.auditLogs.length === 0}
+							<p class="rounded-2xl border border-white/10 bg-white/[0.035] px-4 py-4 text-sm text-white/60">
+								Todavía no hay movimientos registrados.
+							</p>
+						{/if}
+					</div>
 				</div>
-			</div>
-		</details>
+			</details>
+		{/if}
 	{/if}
 </section>
