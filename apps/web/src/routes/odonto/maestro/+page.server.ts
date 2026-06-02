@@ -80,6 +80,162 @@ const uniqueBusinessSlug = async (
 	return `${base}-${randomUUID().slice(0, 8)}`.slice(0, 80);
 };
 
+const findAuthUserIdByEmail = async (
+	admin: Awaited<ReturnType<typeof createSupabaseAdminClient>>,
+	email: string
+) => {
+	const normalizedEmail = email.trim().toLowerCase();
+	const perPage = 200;
+	let page = 1;
+	while (true) {
+		const { data, error } = await admin.auth.admin.listUsers({ page, perPage });
+		if (error) throw error;
+		const users = data?.users ?? [];
+		const match = users.find((user) => (user.email ?? '').trim().toLowerCase() === normalizedEmail);
+		if (match?.id) return match.id;
+		if (users.length < perPage) return null;
+		page += 1;
+	}
+};
+
+const ensureAllowedEmail = async ({
+	admin,
+	email,
+	note,
+	actorId
+}: {
+	admin: Awaited<ReturnType<typeof createSupabaseAdminClient>>;
+	email: string;
+	note: string | null;
+	actorId: string | null;
+}) => {
+	const { data: existingEmail, error: existingError } = await admin
+		.from('allowed_emails')
+		.select('id')
+		.eq('email', email)
+		.maybeSingle();
+	if (existingError) throw existingError;
+
+	const write = existingEmail
+		? await admin
+				.from('allowed_emails')
+				.update({
+					enabled: true,
+					note,
+					disabled_at: null,
+					disabled_reason: null,
+					updated_by: actorId
+				})
+				.eq('id', existingEmail.id)
+		: await admin.from('allowed_emails').insert({
+				email,
+				enabled: true,
+				note,
+				disabled_at: null,
+				disabled_reason: null,
+				updated_by: actorId,
+				created_by: actorId
+			});
+	if (write.error) throw write.error;
+};
+
+const ensureOwnerMembershipOrInvite = async ({
+	admin,
+	businessId,
+	email,
+	userId,
+	actorId
+}: {
+	admin: Awaited<ReturnType<typeof createSupabaseAdminClient>>;
+	businessId: string;
+	email: string;
+	userId: string | null;
+	actorId: string | null;
+}) => {
+	const now = new Date().toISOString();
+	const { data: existingPending, error: pendingError } = await admin
+		.from('business_user_invites')
+		.select('id, business_id')
+		.eq('email', email)
+		.eq('status', 'pending')
+		.limit(1)
+		.maybeSingle();
+	if (pendingError) throw pendingError;
+	if (existingPending?.id && existingPending.business_id !== businessId) {
+		throw new Error('EMAIL_ALREADY_INVITED');
+	}
+
+	if (userId) {
+		const { data: activeMembership, error: activeMembershipError } = await admin
+			.from('business_users')
+			.select('id, business_id')
+			.eq('user_id', userId)
+			.eq('status', 'active')
+			.limit(1)
+			.maybeSingle();
+		if (activeMembershipError) throw activeMembershipError;
+		if (activeMembership?.id && activeMembership.business_id !== businessId) {
+			throw new Error('EMAIL_ALREADY_ASSIGNED');
+		}
+
+		const { error } = await admin.from('business_users').upsert(
+			{
+				business_id: businessId,
+				user_id: userId,
+				role: 'owner',
+				status: 'active',
+				accepted_at: now,
+				disabled_at: null,
+				disabled_reason: null,
+				created_by: actorId,
+				updated_by: actorId,
+				updated_at: now
+			},
+			{ onConflict: 'business_id,user_id' }
+		);
+		if (error) throw error;
+
+		await admin
+			.from('business_user_invites')
+			.update({
+				status: 'accepted',
+				accepted_user_id: userId,
+				accepted_at: now,
+				updated_at: now
+			})
+			.eq('email', email)
+			.eq('business_id', businessId)
+			.eq('status', 'pending');
+		return 'assigned' as const;
+	}
+
+	if (existingPending?.id) {
+		const { error } = await admin
+			.from('business_user_invites')
+			.update({
+				business_id: businessId,
+				role: 'owner',
+				invited_by: actorId,
+				expires_at: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+				updated_at: now
+			})
+			.eq('id', existingPending.id);
+		if (error) throw error;
+		return 'invited' as const;
+	}
+
+	const { error } = await admin.from('business_user_invites').insert({
+		business_id: businessId,
+		email,
+		role: 'owner',
+		status: 'pending',
+		invited_by: actorId,
+		expires_at: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
+	});
+	if (error) throw error;
+	return 'invited' as const;
+};
+
 const listAuthEmailsById = async (admin: Awaited<ReturnType<typeof createSupabaseAdminClient>>) => {
 	const result = new Map<string, string>();
 	const perPage = 200;
@@ -145,6 +301,11 @@ const buildMasterData = async (
 			'id, business_id, commercial_access_enabled, is_permanent, subscription_status, access_starts_at, paid_until, grace_until, restricted_until, archived_at, last_payment_at, last_payment_amount, last_grant_duration_seconds, expiration_notice_enabled, access_source, access_note, updated_by, created_at, updated_at'
 		);
 	const membershipsRes = await admin.from('business_users').select('id, business_id, user_id, role, created_at');
+	const invitesRes = await admin
+		.from('business_user_invites')
+		.select('id, business_id, email, role, status, expires_at, created_at')
+		.eq('status', 'pending')
+		.order('created_at', { ascending: false });
 	const grantsRes = await admin
 		.from('access_grants')
 		.select('id, business_id, operation, duration_unit, duration_seconds, amount, source, note, admin_email, paid_until_before, paid_until_after, status_before, status_after, created_at')
@@ -158,6 +319,7 @@ const buildMasterData = async (
 		console.error('Error cargando business_subscriptions', subscriptionsRes.error);
 	}
 	if (membershipsRes.error) throw membershipsRes.error;
+	if (invitesRes.error) throw invitesRes.error;
 	if (grantsRes.error) {
 		console.error('Error cargando access_grants', grantsRes.error);
 	}
@@ -193,6 +355,13 @@ const buildMasterData = async (
 		const email = String(value ?? '').trim().toLowerCase();
 		return Boolean(email && (email === normalizedMasterEmail || isMasterEmail(email)));
 	};
+	const authEmails = Array.from(
+		new Set(
+			Array.from(emailsByUserId.values())
+				.map((email) => String(email ?? '').trim().toLowerCase())
+				.filter((email) => email && !isProtectedEmail(email))
+		)
+	).sort();
 
 	const businesses = (businessesRes.data ?? []).map((business: any) => {
 		const subscription = subscriptionsByBusinessId.get(String(business.id)) ?? null;
@@ -218,6 +387,8 @@ const buildMasterData = async (
 
 	return {
 		emails: (emailsRes.data ?? []).filter((item: any) => !isProtectedEmail(String(item.email ?? ''))),
+		authEmails,
+		pendingInvites: (invitesRes.data ?? []).filter((item: any) => !isProtectedEmail(String(item.email ?? ''))),
 		businesses,
 		statuses: COMMERCIAL_STATUSES
 	};
@@ -238,6 +409,8 @@ export const load: PageServerLoad = async ({ locals, fetch }) => {
 		console.error('Error cargando panel maestro', error);
 		return {
 			emails: [],
+			authEmails: [],
+			pendingInvites: [],
 			businesses: [],
 			statuses: COMMERCIAL_STATUSES,
 			masterEmail: master.email,
@@ -247,6 +420,134 @@ export const load: PageServerLoad = async ({ locals, fetch }) => {
 };
 
 export const actions: Actions = {
+	provision_owner_access: async ({ request, locals, fetch }) => {
+		if (!locals.auth) throw redirect(303, '/login');
+		const master = ensureMaster(locals.auth.access_token);
+		const form = await request.formData();
+		const email = normalizeEmail(form.get('email'));
+		const destination = String(form.get('destination') ?? '').trim();
+		const businessIdInput = String(form.get('business_id') ?? '').trim();
+		const businessName = String(form.get('business_name') ?? '').trim();
+		const durationKey = String(form.get('duration') ?? '').trim();
+		const note = String(form.get('note') ?? '').trim() || null;
+
+		if (!EMAIL_FORMAT_REGEX.test(email)) {
+			return fail(400, { message: 'Ingresá un correo electrónico válido.', email });
+		}
+		if (isMasterEmail(email)) {
+			return fail(403, { message: 'El email maestro no se gestiona desde este panel.', email });
+		}
+		if (destination !== 'existing' && destination !== 'new') {
+			return fail(400, { message: 'Elegí si va a un consultorio existente o nuevo.', email });
+		}
+
+		const admin = await createSupabaseAdminClient('odonto', fetch);
+		let ownerUserId: string | null = null;
+		try {
+			ownerUserId = await findAuthUserIdByEmail(admin, email);
+		} catch (error) {
+			console.error('Error buscando usuario auth para alta guiada', error);
+			return fail(500, { message: 'No pudimos validar si la cuenta ya existe.', email });
+		}
+
+		let businessId = businessIdInput;
+		let createdBusinessId: string | null = null;
+		let duration: (typeof DURATION_SECONDS)[string] | null = null;
+
+		if (destination === 'existing') {
+			if (!businessId) return fail(400, { message: 'Elegí un consultorio.', email });
+			const { data: business, error } = await admin
+				.from('businesses')
+				.select('id')
+				.eq('id', businessId)
+				.maybeSingle();
+			if (error) {
+				console.error('Error validando consultorio existente', error);
+				return fail(500, { message: 'No pudimos validar el consultorio.', email });
+			}
+			if (!business?.id) return fail(404, { message: 'Consultorio no encontrado.', email });
+			if (await businessHasMasterOwner(admin, businessId, master.userId, master.email)) {
+				return fail(403, { message: 'El consultorio interno del email maestro no se gestiona desde este panel.', email });
+			}
+		} else {
+			if (!businessName) return fail(400, { message: 'Ingresá el nombre del consultorio.', email });
+			duration = DURATION_SECONDS[durationKey] ?? null;
+			if (!duration) return fail(400, { message: 'Elegí la duración inicial.', email });
+
+			const slug = await uniqueBusinessSlug(admin, businessName);
+			const { data: business, error } = await admin
+				.from('businesses')
+				.insert({
+					name: businessName,
+					slug,
+					industry: 'odontology',
+					email
+				})
+				.select('id')
+				.single();
+			if (error || !business?.id) {
+				console.error('Error creando consultorio desde alta guiada', error);
+				return fail(500, { message: 'No pudimos crear el consultorio.', email });
+			}
+			businessId = business.id;
+			createdBusinessId = business.id;
+		}
+
+		try {
+			await ensureAllowedEmail({
+				admin,
+				email,
+				note,
+				actorId: master.userId
+			});
+
+			const assignment = await ensureOwnerMembershipOrInvite({
+				admin,
+				businessId,
+				email,
+				userId: ownerUserId,
+				actorId: master.userId
+			});
+
+			if (destination === 'new' && duration) {
+				const operation = durationKey === 'permanent' ? 'set_permanent' : 'grant_access';
+				const { error: grantError } = await admin.rpc('grant_business_access', {
+					p_business_id: businessId,
+					p_operation: operation,
+					p_duration_seconds: duration.seconds,
+					p_duration_unit: duration.unit,
+					p_is_permanent: durationKey === 'permanent',
+					p_amount: null,
+					p_source: 'internal',
+					p_note: note ?? `Alta guiada con acceso inicial: ${duration.label}.`,
+					p_admin_id: master.userId,
+					p_admin_email: master.email,
+					p_idempotency_key: randomUUID()
+				});
+				if (grantError) throw grantError;
+			}
+
+			const target = destination === 'new' ? 'Consultorio creado' : 'Consultorio vinculado';
+			const suffix =
+				assignment === 'assigned'
+					? 'La cuenta ya existe y quedó asignada.'
+					: 'La cuenta queda asignada automáticamente cuando se registre.';
+			return { success: true, message: `${target}. Email habilitado. ${suffix}` };
+		} catch (error) {
+			if (createdBusinessId) {
+				await admin.from('businesses').delete().eq('id', createdBusinessId);
+			}
+			console.error('Error en alta guiada de acceso', error);
+			const raw = error instanceof Error ? error.message : '';
+			if (raw.includes('EMAIL_ALREADY_ASSIGNED')) {
+				return fail(409, { message: 'Ese email ya está asociado a otro consultorio activo.', email });
+			}
+			if (raw.includes('EMAIL_ALREADY_INVITED')) {
+				return fail(409, { message: 'Ese email ya tiene una asignación pendiente en otro consultorio.', email });
+			}
+			return fail(500, { message: 'No pudimos completar el alta guiada.', email });
+		}
+	},
 	create_business: async ({ request, locals, fetch }) => {
 		if (!locals.auth) throw redirect(303, '/login');
 		const master = ensureMaster(locals.auth.access_token);

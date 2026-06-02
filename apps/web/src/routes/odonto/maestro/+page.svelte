@@ -45,6 +45,16 @@
 		updated_at?: string | null;
 	};
 
+	type PendingInvite = {
+		id: string;
+		business_id: string;
+		email: string;
+		role: string;
+		status: string;
+		expires_at?: string | null;
+		created_at?: string | null;
+	};
+
 	const durationOptions = [
 		{ value: 'hour_1', label: '1 hora' },
 		{ value: 'day_1', label: '1 día' },
@@ -68,8 +78,12 @@
 
 	let activeTab = $state('all');
 	let search = $state('');
-	let showCreatePanel = $state(false);
-	let createOwnerEmail = $state('');
+	let provisionEmail = $state('');
+	let provisionDestination = $state<'existing' | 'new' | null>(null);
+	let provisionBusinessId = $state('');
+	let provisionBusinessName = $state('');
+	let provisionDuration = $state('month_1');
+	let provisionNote = $state('');
 	let showEmailPanel = $state(false);
 	let showHistory = $state<Record<string, boolean>>({});
 	let expandedBusinessId = $state<string | null>(null);
@@ -98,34 +112,31 @@
 	const emails = $derived(
 		((data.emails ?? []) as EmailRow[]).filter((item) => !isMasterEmailRow(item.email))
 	);
-	const normalizedSearch = $derived(search.trim().toLowerCase());
-	const searchLooksLikeEmail = $derived(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedSearch));
-	const matchingEmail = $derived(
-		emails.find((item) => item.email.toLowerCase() === normalizedSearch) ?? null
+	const authEmailSet = $derived(
+		new Set(((data.authEmails ?? []) as string[]).map((email) => email.trim().toLowerCase()))
 	);
-
-	const linkedEmails = $derived.by(() => {
-		const linked = new Set<string>();
-		for (const business of businesses) {
-			if (business.primaryOwnerEmail) linked.add(business.primaryOwnerEmail.toLowerCase());
-			for (const owner of business.owners) {
-				if (owner.email) linked.add(owner.email.toLowerCase());
-			}
-			for (const member of business.members) {
-				if (member.email) linked.add(member.email.toLowerCase());
-			}
-		}
-		return linked;
-	});
-
-	const unlinkedEnabledEmails = $derived.by(() => {
-		return emails.filter((item) => {
-			if (!item.enabled) return false;
-			if (linkedEmails.has(item.email.toLowerCase())) return false;
-			if (!normalizedSearch) return true;
-			return `${item.email} ${item.note ?? ''}`.toLowerCase().includes(normalizedSearch);
-		});
-	});
+	const pendingInvites = $derived(
+		((data.pendingInvites ?? []) as PendingInvite[]).filter((item) => !isMasterEmailRow(item.email))
+	);
+	const normalizedSearch = $derived(search.trim().toLowerCase());
+	const normalizedProvisionEmail = $derived(provisionEmail.trim().toLowerCase());
+	const provisionEmailValid = $derived(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedProvisionEmail));
+	const provisionEmailRow = $derived(
+		emails.find((item) => item.email.toLowerCase() === normalizedProvisionEmail) ?? null
+	);
+	const provisionEmailEnabled = $derived(Boolean(provisionEmailRow?.enabled));
+	const provisionAuthExists = $derived(authEmailSet.has(normalizedProvisionEmail));
+	const provisionPendingInvite = $derived(
+		pendingInvites.find((item) => item.email.toLowerCase() === normalizedProvisionEmail) ?? null
+	);
+	const provisionPendingBusiness = $derived(
+		provisionPendingInvite
+			? businesses.find((business) => business.id === provisionPendingInvite.business_id) ?? null
+			: null
+	);
+	const provisionStepLabel = $derived(
+		!provisionEmailValid ? 'Paso 1' : provisionDestination ? 'Paso 3' : 'Paso 2'
+	);
 
 	const formatDateTime = (value?: string | null) => (value ? new Date(value).toLocaleString() : 'No vence');
 	const money = (value?: number | string | null) => {
@@ -181,10 +192,6 @@
 				.includes(normalizedSearch);
 		});
 	});
-
-	const shouldShowInlineEmailAction = $derived(
-		activeTab === 'all' && filteredBusinesses.length === 0 && searchLooksLikeEmail
-	);
 
 	const criticalOperation = (operation: string, duration: string) =>
 		[
@@ -252,16 +259,30 @@
 		const input = event.currentTarget as HTMLInputElement;
 		input.value = formatMoneyInteger(input.value);
 	};
+
+	$effect(() => {
+		if (form?.success === true) {
+			provisionEmail = '';
+			provisionDestination = null;
+			provisionBusinessId = '';
+			provisionBusinessName = '';
+			provisionNote = '';
+			return;
+		}
+		if (form?.email) provisionEmail = String(form.email);
+	});
 </script>
 
 <section class="ux-page">
-	<div class="ux-hero">
-		<p class="ux-badge">Panel maestro</p>
-		<h1 class="ux-title mt-4">Accesos a Dental Suite</h1>
-		<p class="ux-subtitle">
-			Gestioná acceso global por email y licencia comercial por consultorio. Los accesos existentes se preservan como permanentes.
-		</p>
-	</div>
+	<header class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+		<div>
+			<p class="ux-badge">Panel maestro</p>
+			<h1 class="mt-3 text-3xl font-black text-white">Accesos</h1>
+		</div>
+		<button type="button" class="ux-btn-secondary w-fit" onclick={() => (showEmailPanel = !showEmailPanel)}>
+			{showEmailPanel ? 'Ocultar emails' : 'Ver emails'}
+		</button>
+	</header>
 
 	{#if form?.message}
 		<p class={form?.success === true ? 'ux-alert ux-alert-success' : 'ux-alert'}>{form.message}</p>
@@ -270,226 +291,218 @@
 		<p class="ux-alert">{data.loadError}</p>
 	{/if}
 
-	<div class="grid gap-5 lg:grid-cols-[1fr_auto]">
-		<div class="ux-card">
-			<div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-				<div>
-					<h2 class="ux-section-title">Consultorios</h2>
-					<p class="mt-1 text-sm text-white/55">La suscripción se evalúa por negocio, no por usuario.</p>
-				</div>
-				<div class="flex flex-wrap gap-3">
-					<button type="button" class="ux-btn-primary" onclick={() => (showCreatePanel = !showCreatePanel)}>
-						{showCreatePanel ? 'Cerrar alta' : 'Crear consultorio'}
-					</button>
-					<button type="button" class="ux-btn-secondary" onclick={() => (showEmailPanel = !showEmailPanel)}>
-						{showEmailPanel ? 'Ocultar emails' : 'Gestionar emails'}
-					</button>
-				</div>
-			</div>
-
-			<div class="mt-5 grid gap-3 lg:grid-cols-[1fr_auto]">
-				<input class="ux-input" placeholder="Buscar por consultorio, slug o email..." bind:value={search} />
-				<span class="ux-badge">
-					{filteredBusinesses.length} consultorios
-					{#if activeTab === 'all' && unlinkedEnabledEmails.length > 0}
-						· {unlinkedEnabledEmails.length} emails sin consultorio
-					{/if}
-				</span>
-			</div>
-
-			<div class="mt-5 grid gap-3 md:grid-cols-4">
-				{#each [
-					['all', 'Todos'],
-					['active', 'Activo'],
-					['expiring', 'Vence pronto'],
-					['grace', 'Vencido'],
-					['restricted', 'Suspendido'],
-					['archived', 'Archivado'],
-					['permanent', 'Permanente'],
-					['disabled', 'Deshabilitado']
-				] as tab}
-					<button
-						type="button"
-						class={activeTab === tab[0] ? 'ux-choice ux-choice-active px-4 py-3 text-sm font-bold' : 'ux-choice px-4 py-3 text-sm font-bold'}
-						onclick={() => (activeTab = tab[0])}
-					>
-						{tab[1]}
-					</button>
-				{/each}
-			</div>
+	<section class="ux-card">
+		<div class="flex items-center justify-between gap-3">
+			<h2 class="ux-section-title">Alta guiada</h2>
+			<span class="ux-badge">{provisionStepLabel}</span>
 		</div>
 
-		{#if showCreatePanel}
-			<div class="ux-card lg:w-[30rem]">
-				<h2 class="ux-section-title">Nuevo consultorio</h2>
-				<p class="mt-2 text-sm text-white/55">
-					El owner debe tener cuenta creada. Elegí el acceso inicial antes de crear el negocio.
-				</p>
-				<form method="post" action="?/create_business" class="mt-5 space-y-3">
-					<input name="name" required class="ux-input" placeholder="Nombre del consultorio" />
-					<input name="owner_email" type="email" required class="ux-input" placeholder="Email del owner" bind:value={createOwnerEmail} />
-					<select name="duration" required class="ux-select">
-						<option value="" disabled selected>Duración inicial</option>
+		<div class="mt-5">
+			<label class="ux-label" for="provision-email">1. Email</label>
+			<input
+				id="provision-email"
+				class="ux-input"
+				type="email"
+				placeholder="email@consultorio.com"
+				bind:value={provisionEmail}
+				oninput={() => {
+					provisionDestination = null;
+					provisionBusinessId = '';
+				}}
+			/>
+			{#if provisionEmail && !provisionEmailValid}
+				<p class="mt-2 text-sm font-bold text-red-200">Email inválido.</p>
+			{/if}
+		</div>
+
+		{#if provisionEmailValid}
+			<div class="mt-4 grid gap-2 md:grid-cols-3">
+				<div class="ux-soft-card p-3">
+					<p class="text-xs font-black uppercase text-white/40">Email</p>
+					<p class="mt-1 font-black text-white">{provisionEmailEnabled ? 'Habilitado' : 'Por habilitar'}</p>
+				</div>
+				<div class="ux-soft-card p-3">
+					<p class="text-xs font-black uppercase text-white/40">Cuenta</p>
+					<p class="mt-1 font-black text-white">{provisionAuthExists ? 'Creada' : 'Pendiente'}</p>
+				</div>
+				<div class="ux-soft-card p-3">
+					<p class="text-xs font-black uppercase text-white/40">Destino</p>
+					<p class="mt-1 font-black text-white">{provisionPendingInvite ? 'Pendiente' : 'Sin asignar'}</p>
+				</div>
+			</div>
+
+			{#if provisionPendingInvite}
+				<div class="ux-empty mt-5">
+					<p class="font-bold text-white">
+						Asignación pendiente: {provisionPendingBusiness?.name ?? 'consultorio seleccionado'}.
+					</p>
+				</div>
+			{:else if !provisionDestination}
+				<div class="mt-5">
+					<p class="ux-label">2. Destino</p>
+					<div class="grid gap-3 md:grid-cols-2">
+						<button
+							type="button"
+							class="ux-choice px-4 py-5 text-left"
+							onclick={() => {
+								provisionDestination = 'existing';
+								provisionBusinessId = businesses[0]?.id ?? '';
+							}}
+						>
+							<span class="block text-lg font-black text-white">Consultorio existente</span>
+						</button>
+						<button
+							type="button"
+							class="ux-choice px-4 py-5 text-left"
+							onclick={() => {
+								provisionDestination = 'new';
+								provisionBusinessId = '';
+							}}
+						>
+							<span class="block text-lg font-black text-white">Consultorio nuevo</span>
+						</button>
+					</div>
+				</div>
+			{:else if provisionDestination === 'existing'}
+				<form method="post" action="?/provision_owner_access" class="mt-5 space-y-4">
+					<input type="hidden" name="email" value={normalizedProvisionEmail} />
+					<input type="hidden" name="destination" value="existing" />
+					<div>
+						<label class="ux-label" for="provision-business">2. Consultorio</label>
+						<select id="provision-business" name="business_id" required class="ux-select" bind:value={provisionBusinessId}>
+							<option value="" disabled>Elegí consultorio</option>
+							{#each businesses as business}
+								<option value={business.id}>{business.name}</option>
+							{/each}
+						</select>
+					</div>
+					<input name="note" class="ux-input" placeholder="Nota interna opcional" bind:value={provisionNote} />
+					<div class="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+						<button type="button" class="ux-btn-secondary" onclick={() => (provisionDestination = null)}>
+							Volver
+						</button>
+						<button class="ux-btn-primary" disabled={!provisionBusinessId}>
+							{provisionEmailEnabled
+								? provisionAuthExists
+									? 'Asignar'
+									: 'Crear invitación'
+								: provisionAuthExists
+									? 'Habilitar y asignar'
+									: 'Habilitar e invitar'}
+						</button>
+					</div>
+				</form>
+			{:else}
+				<form method="post" action="?/provision_owner_access" class="mt-5 space-y-4">
+					<input type="hidden" name="email" value={normalizedProvisionEmail} />
+					<input type="hidden" name="destination" value="new" />
+					<div>
+						<label class="ux-label" for="provision-business-name">2. Nuevo consultorio</label>
+						<input
+							id="provision-business-name"
+							name="business_name"
+							required
+							class="ux-input"
+							placeholder="Nombre del consultorio"
+							bind:value={provisionBusinessName}
+						/>
+					</div>
+					<select name="duration" required class="ux-select" bind:value={provisionDuration}>
 						{#each durationOptions as option}
 							<option value={option.value}>{option.label}</option>
 						{/each}
 					</select>
-					<input name="note" class="ux-input" placeholder="Nota interna opcional" />
-					<button class="ux-btn-primary w-full">Crear consultorio</button>
-				</form>
-			</div>
-		{/if}
-
-		{#if showEmailPanel}
-			<div class="ux-card lg:w-[28rem]">
-				<h2 class="ux-section-title">Emails habilitados</h2>
-				<form method="post" action="?/add_email" class="mt-5 space-y-3">
-					<input name="email" type="email" required class="ux-input" placeholder="email@consultorio.com" />
-					<input name="note" class="ux-input" placeholder="Nota interna opcional" />
-					<button class="ux-btn-primary w-full">Habilitar email</button>
-				</form>
-				<div class="mt-5 max-h-80 space-y-2 overflow-auto pr-1">
-					{#each emails as item}
-						<div class="ux-soft-card p-3">
-							<div class="flex items-start justify-between gap-3">
-								<div class="min-w-0">
-									<p class="truncate text-sm font-bold text-white">{item.email}</p>
-									<span class={item.enabled ? 'ux-badge ux-badge-success mt-2' : 'ux-badge ux-badge-danger mt-2'}>
-										{item.enabled ? 'Habilitado' : 'Deshabilitado'}
-									</span>
-								</div>
-								{#if item.enabled}
-									<button
-										type="button"
-										class="ux-btn-danger px-3 py-2 text-xs"
-										onclick={() => {
-											disableEmailTarget = item;
-											disableReason = '';
-										}}
-									>
-										Deshabilitar
-									</button>
-								{:else}
-									<form method="post" action="?/toggle_email">
-										<input type="hidden" name="id" value={item.id} />
-										<input type="hidden" name="enabled" value="true" />
-										<button class="ux-btn-secondary px-3 py-2 text-xs">Habilitar</button>
-									</form>
-								{/if}
-							</div>
-						</div>
-					{/each}
-				</div>
-			</div>
-		{/if}
-	</div>
-
-	<div class="space-y-4">
-		{#if activeTab === 'all' && unlinkedEnabledEmails.length > 0}
-			<section class="ux-card">
-				<div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-					<div>
-						<h2 class="ux-section-title">Emails habilitados sin consultorio</h2>
-						<p class="mt-2 text-sm text-white/55">
-							Estos correos pueden entrar a la app, pero todavía no tienen un consultorio vinculado.
-						</p>
+					<input name="note" class="ux-input" placeholder="Nota interna opcional" bind:value={provisionNote} />
+					<div class="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+						<button type="button" class="ux-btn-secondary" onclick={() => (provisionDestination = null)}>
+							Volver
+						</button>
+						<button class="ux-btn-primary" disabled={!provisionBusinessName.trim()}>
+							{provisionAuthExists ? 'Habilitar y crear' : 'Habilitar, crear e invitar'}
+						</button>
 					</div>
-					<span class="ux-badge ux-badge-success">Habilitados</span>
-				</div>
-
-				<div class="mt-5 grid gap-3 md:grid-cols-2">
-					{#each unlinkedEnabledEmails as item}
-						<div class="ux-soft-card p-4">
-							<div class="flex flex-wrap items-center gap-2">
-								<p class="font-black text-white">{item.email}</p>
-								<span class="ux-badge ux-badge-success">Habilitado</span>
-								<span class="ux-badge">Sin consultorio</span>
-							</div>
-							<p class="mt-2 text-sm text-white/55">
-								No aparece como permanente porque la permanencia se asigna al consultorio, no al email.
-							</p>
-							{#if item.note}
-								<p class="mt-2 text-sm text-white/70">{item.note}</p>
-							{/if}
-						</div>
-					{/each}
-				</div>
-			</section>
+				</form>
+			{/if}
 		{/if}
+	</section>
 
-		{#if filteredBusinesses.length === 0}
-			{#if shouldShowInlineEmailAction}
-				<section class="ux-card">
-					<div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-						<div class="min-w-0">
-							<p class="ux-badge">Email detectado</p>
-							<h2 class="ux-section-title mt-3">No hay consultorio vinculado a este email</h2>
-							<p class="mt-2 break-all text-lg font-black text-white">{normalizedSearch}</p>
-							<p class="mt-2 text-sm text-white/55">
-								Gestioná el acceso desde acá. El panel de emails queda para auditoría y mantenimiento masivo.
-							</p>
-						</div>
-						{#if matchingEmail?.enabled}
-							<span class="ux-badge ux-badge-success">Email habilitado</span>
-						{:else if matchingEmail}
-							<span class="ux-badge ux-badge-danger">Email deshabilitado</span>
-						{:else}
-							<span class="ux-badge">Sin habilitar</span>
-						{/if}
-					</div>
-
-					<div class="mt-5 grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
-						{#if matchingEmail?.enabled}
-							<div class="ux-soft-card p-4">
-								<p class="font-bold text-white">Este email ya puede iniciar sesión.</p>
-								<p class="mt-1 text-sm text-white/55">
-									Todavía no aparece como consultorio porque falta crear o vincular el negocio correspondiente.
-								</p>
+	{#if showEmailPanel}
+		<section class="ux-card">
+			<h2 class="ux-section-title">Emails</h2>
+			<div class="mt-5 max-h-80 space-y-2 overflow-auto pr-1">
+				{#each emails as item}
+					<div class="ux-soft-card p-3">
+						<div class="flex items-start justify-between gap-3">
+							<div class="min-w-0">
+								<p class="truncate text-sm font-bold text-white">{item.email}</p>
+								<span class={item.enabled ? 'ux-badge ux-badge-success mt-2' : 'ux-badge ux-badge-danger mt-2'}>
+									{item.enabled ? 'Habilitado' : 'Deshabilitado'}
+								</span>
 							</div>
-							<button
-								type="button"
-								class="ux-btn-primary"
-								onclick={() => {
-									createOwnerEmail = normalizedSearch;
-									showCreatePanel = true;
-								}}
-							>
-								Crear consultorio
-							</button>
-						{:else if matchingEmail}
-							<form method="post" action="?/toggle_email" class="grid gap-3 md:grid-cols-[1fr_auto]">
-								<input type="hidden" name="id" value={matchingEmail.id} />
-								<input type="hidden" name="enabled" value="true" />
-								<div class="ux-soft-card p-4">
-									<p class="font-bold text-white">Este email existe, pero está deshabilitado.</p>
-									{#if matchingEmail.disabled_reason}
-										<p class="mt-1 text-sm text-white/55">Motivo: {matchingEmail.disabled_reason}</p>
-									{/if}
-								</div>
-								<button class="ux-btn-primary">Habilitar email</button>
-							</form>
-						{:else}
-							<form method="post" action="?/add_email" class="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
-								<input type="hidden" name="email" value={normalizedSearch} />
-								<input name="note" class="ux-input" placeholder="Nota interna opcional" />
-								<button class="ux-btn-primary">Habilitar email</button>
+							{#if item.enabled}
 								<button
 									type="button"
-									class="ux-btn-secondary"
+									class="ux-btn-danger px-3 py-2 text-xs"
 									onclick={() => {
-										createOwnerEmail = normalizedSearch;
-										showCreatePanel = true;
+										disableEmailTarget = item;
+										disableReason = '';
 									}}
 								>
-									Crear consultorio
+									Deshabilitar
 								</button>
-							</form>
-						{/if}
+							{:else}
+								<form method="post" action="?/toggle_email">
+									<input type="hidden" name="id" value={item.id} />
+									<input type="hidden" name="enabled" value="true" />
+									<button class="ux-btn-secondary px-3 py-2 text-xs">Habilitar</button>
+								</form>
+							{/if}
+						</div>
 					</div>
-				</section>
-			{:else}
-				<p class="ux-empty">No hay consultorios para este filtro.</p>
-			{/if}
+				{:else}
+					<p class="ux-empty">Sin emails registrados.</p>
+				{/each}
+			</div>
+		</section>
+	{/if}
+
+	<section class="ux-card">
+		<div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+			<div>
+				<h2 class="ux-section-title">Consultorios</h2>
+			</div>
+			<span class="ux-badge">{filteredBusinesses.length} consultorios</span>
+		</div>
+
+		<div class="mt-5">
+			<input class="ux-input" placeholder="Buscar consultorio, slug o email..." bind:value={search} />
+		</div>
+
+		<div class="mt-5 grid gap-3 md:grid-cols-4">
+			{#each [
+				['all', 'Todos'],
+				['active', 'Activo'],
+				['expiring', 'Vence pronto'],
+				['grace', 'Vencido'],
+				['restricted', 'Suspendido'],
+				['archived', 'Archivado'],
+				['permanent', 'Permanente'],
+				['disabled', 'Deshabilitado']
+			] as tab}
+				<button
+					type="button"
+					class={activeTab === tab[0] ? 'ux-choice ux-choice-active px-4 py-3 text-sm font-bold' : 'ux-choice px-4 py-3 text-sm font-bold'}
+					onclick={() => (activeTab = tab[0])}
+				>
+					{tab[1]}
+				</button>
+			{/each}
+		</div>
+	</section>
+
+	<div class="space-y-4">
+		{#if filteredBusinesses.length === 0}
+			<p class="ux-empty">No hay consultorios para este filtro.</p>
 		{/if}
 
 		{#each filteredBusinesses as business}

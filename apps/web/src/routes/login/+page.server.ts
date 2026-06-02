@@ -5,6 +5,7 @@ import {
 	isMasterEmail,
 	MASTER_EMAIL
 } from '$lib/server/supabase';
+import { consumePendingBusinessInvites } from '$lib/server/business-invites';
 import { resolveActiveBusiness } from '$lib/server/business';
 import { dev } from '$app/environment';
 import { fail, redirect } from '@sveltejs/kit';
@@ -91,6 +92,14 @@ export const actions: Actions = {
 
 		const session = data.session;
 		if (!isMaster) {
+			if (data.user?.id) {
+				try {
+					await consumePendingBusinessInvites({ email, userId: data.user.id, fetch });
+				} catch (err) {
+					console.error('Error consumiendo invitación pendiente en login', { email, err });
+					return fail(500, { message: 'No pudimos asignar el consultorio pendiente.', email });
+				}
+			}
 			const sessionSupabase = await createSupabaseServerClient(
 				'odonto',
 				{ access_token: session.access_token, refresh_token: session.refresh_token },
@@ -195,6 +204,15 @@ export const actions: Actions = {
 					'La cuenta se creó pero falta confirmar el correo electrónico.',
 				email
 			});
+		}
+
+		if (data.user?.id) {
+			try {
+				await consumePendingBusinessInvites({ email, userId: data.user.id, fetch });
+			} catch (err) {
+				console.error('Error consumiendo invitación pendiente en registro', { email, err });
+				return fail(500, { message: 'La cuenta se creó, pero no pudimos asignar el consultorio.', email });
+			}
 		}
 
 		const sessionSupabase = await createSupabaseServerClient(
