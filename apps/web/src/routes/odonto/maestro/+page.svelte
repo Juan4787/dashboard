@@ -69,6 +69,7 @@
 	let activeTab = $state('all');
 	let search = $state('');
 	let showCreatePanel = $state(false);
+	let createOwnerEmail = $state('');
 	let showEmailPanel = $state(false);
 	let showHistory = $state<Record<string, boolean>>({});
 	let expandedBusinessId = $state<string | null>(null);
@@ -97,6 +98,11 @@
 	const emails = $derived(
 		((data.emails ?? []) as EmailRow[]).filter((item) => !isMasterEmailRow(item.email))
 	);
+	const normalizedSearch = $derived(search.trim().toLowerCase());
+	const searchLooksLikeEmail = $derived(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedSearch));
+	const matchingEmail = $derived(
+		emails.find((item) => item.email.toLowerCase() === normalizedSearch) ?? null
+	);
 
 	const linkedEmails = $derived.by(() => {
 		const linked = new Set<string>();
@@ -113,12 +119,11 @@
 	});
 
 	const unlinkedEnabledEmails = $derived.by(() => {
-		const normalized = search.trim().toLowerCase();
 		return emails.filter((item) => {
 			if (!item.enabled) return false;
 			if (linkedEmails.has(item.email.toLowerCase())) return false;
-			if (!normalized) return true;
-			return `${item.email} ${item.note ?? ''}`.toLowerCase().includes(normalized);
+			if (!normalizedSearch) return true;
+			return `${item.email} ${item.note ?? ''}`.toLowerCase().includes(normalizedSearch);
 		});
 	});
 
@@ -162,10 +167,9 @@
 	};
 
 	const filteredBusinesses = $derived.by(() => {
-		const normalized = search.trim().toLowerCase();
 		return businesses.filter((business) => {
 			if (!matchesTab(business)) return false;
-			if (!normalized) return true;
+			if (!normalizedSearch) return true;
 			return [
 				business.name,
 				business.slug,
@@ -174,9 +178,13 @@
 			]
 				.join(' ')
 				.toLowerCase()
-				.includes(normalized);
+				.includes(normalizedSearch);
 		});
 	});
+
+	const shouldShowInlineEmailAction = $derived(
+		activeTab === 'all' && filteredBusinesses.length === 0 && searchLooksLikeEmail
+	);
 
 	const criticalOperation = (operation: string, duration: string) =>
 		[
@@ -274,7 +282,7 @@
 						{showCreatePanel ? 'Cerrar alta' : 'Crear consultorio'}
 					</button>
 					<button type="button" class="ux-btn-secondary" onclick={() => (showEmailPanel = !showEmailPanel)}>
-						{showEmailPanel ? 'Ocultar emails' : 'Emails'}
+						{showEmailPanel ? 'Ocultar emails' : 'Gestionar emails'}
 					</button>
 				</div>
 			</div>
@@ -319,7 +327,7 @@
 				</p>
 				<form method="post" action="?/create_business" class="mt-5 space-y-3">
 					<input name="name" required class="ux-input" placeholder="Nombre del consultorio" />
-					<input name="owner_email" type="email" required class="ux-input" placeholder="Email del owner" />
+					<input name="owner_email" type="email" required class="ux-input" placeholder="Email del owner" bind:value={createOwnerEmail} />
 					<select name="duration" required class="ux-select">
 						<option value="" disabled selected>Duración inicial</option>
 						{#each durationOptions as option}
@@ -410,7 +418,78 @@
 		{/if}
 
 		{#if filteredBusinesses.length === 0}
-			<p class="ux-empty">No hay consultorios para este filtro.</p>
+			{#if shouldShowInlineEmailAction}
+				<section class="ux-card">
+					<div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+						<div class="min-w-0">
+							<p class="ux-badge">Email detectado</p>
+							<h2 class="ux-section-title mt-3">No hay consultorio vinculado a este email</h2>
+							<p class="mt-2 break-all text-lg font-black text-white">{normalizedSearch}</p>
+							<p class="mt-2 text-sm text-white/55">
+								Gestioná el acceso desde acá. El panel de emails queda para auditoría y mantenimiento masivo.
+							</p>
+						</div>
+						{#if matchingEmail?.enabled}
+							<span class="ux-badge ux-badge-success">Email habilitado</span>
+						{:else if matchingEmail}
+							<span class="ux-badge ux-badge-danger">Email deshabilitado</span>
+						{:else}
+							<span class="ux-badge">Sin habilitar</span>
+						{/if}
+					</div>
+
+					<div class="mt-5 grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+						{#if matchingEmail?.enabled}
+							<div class="ux-soft-card p-4">
+								<p class="font-bold text-white">Este email ya puede iniciar sesión.</p>
+								<p class="mt-1 text-sm text-white/55">
+									Todavía no aparece como consultorio porque falta crear o vincular el negocio correspondiente.
+								</p>
+							</div>
+							<button
+								type="button"
+								class="ux-btn-primary"
+								onclick={() => {
+									createOwnerEmail = normalizedSearch;
+									showCreatePanel = true;
+								}}
+							>
+								Crear consultorio
+							</button>
+						{:else if matchingEmail}
+							<form method="post" action="?/toggle_email" class="grid gap-3 md:grid-cols-[1fr_auto]">
+								<input type="hidden" name="id" value={matchingEmail.id} />
+								<input type="hidden" name="enabled" value="true" />
+								<div class="ux-soft-card p-4">
+									<p class="font-bold text-white">Este email existe, pero está deshabilitado.</p>
+									{#if matchingEmail.disabled_reason}
+										<p class="mt-1 text-sm text-white/55">Motivo: {matchingEmail.disabled_reason}</p>
+									{/if}
+								</div>
+								<button class="ux-btn-primary">Habilitar email</button>
+							</form>
+						{:else}
+							<form method="post" action="?/add_email" class="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+								<input type="hidden" name="email" value={normalizedSearch} />
+								<input name="note" class="ux-input" placeholder="Nota interna opcional" />
+								<button class="ux-btn-primary">Habilitar email</button>
+								<button
+									type="button"
+									class="ux-btn-secondary"
+									onclick={() => {
+										createOwnerEmail = normalizedSearch;
+										showCreatePanel = true;
+									}}
+								>
+									Crear consultorio
+								</button>
+							</form>
+						{/if}
+					</div>
+				</section>
+			{:else}
+				<p class="ux-empty">No hay consultorios para este filtro.</p>
+			{/if}
 		{/if}
 
 		{#each filteredBusinesses as business}
