@@ -33,15 +33,17 @@
 	const canRescheduleAppointment = $derived(Boolean(capabilities.canRescheduleAppointment) && !data.demo);
 	const canMarkAttendance = $derived(Boolean(capabilities.canMarkAppointmentAttendance) && !data.demo);
 	const canProfessionalClose = $derived(data.context.role === 'professional' && canMarkAttendance);
-	const isClosed = $derived(['cancelled', 'attended', 'no_show'].includes(data.appointment?.status));
+	const isClosed = $derived(['cancelled', 'attended', 'no_show', 'expired'].includes(data.appointment?.status));
 
 	const statusLabels: Record<string, string> = {
+		pending_confirmation: 'Pendiente',
 		reserved: 'Reservado',
 		confirmed: 'Confirmado',
 		cancelled: 'Cancelado',
 		reschedule_requested: 'Quiere reprogramar',
 		attended: 'Asistió',
-		no_show: 'No asistió'
+		no_show: 'No asistió',
+		expired: 'Expirado'
 	};
 
 	const sourceLabels: Record<string, string> = {
@@ -52,12 +54,14 @@
 	};
 
 	const statusTone: Record<string, string> = {
+		pending_confirmation: 'bg-amber-400/15 text-amber-100',
 		reserved: 'bg-[#7c3aed]/25 text-[#c4b5fd]',
 		confirmed: 'bg-emerald-400/15 text-emerald-200',
 		cancelled: 'bg-red-500/15 text-red-200',
 		reschedule_requested: 'bg-amber-400/15 text-amber-100',
 		attended: 'bg-sky-400/15 text-sky-100',
-		no_show: 'bg-zinc-400/15 text-zinc-200'
+		no_show: 'bg-zinc-400/15 text-zinc-200',
+		expired: 'bg-zinc-500/15 text-zinc-200'
 	};
 
 	const timeOnly = (value: string) =>

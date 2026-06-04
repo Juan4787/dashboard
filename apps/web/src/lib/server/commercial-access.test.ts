@@ -3,6 +3,8 @@ import { getBusinessAccessState } from './commercial-access';
 
 const now = new Date('2026-05-28T12:00:00.000Z');
 const isoFromNow = (hours: number) => new Date(now.getTime() + hours * 60 * 60 * 1000).toISOString();
+const isoPlusDays = (iso: string, days: number) =>
+	new Date(new Date(iso).getTime() + days * 24 * 60 * 60 * 1000).toISOString();
 
 const baseSubscription = {
 	business_id: 'business-1',
@@ -94,6 +96,65 @@ describe('getBusinessAccessState', () => {
 		expect(state.commercialStatus).toBe('grace');
 		expect(state.canUseBusiness).toBe(true);
 		expect(state.allowedCapabilities.canCreatePatient).toBe(true);
+	});
+
+	it('bloquea directo una suscripción de 1 hora vencida aunque conserve grace legacy', () => {
+		const paidUntil = isoFromNow(-1);
+		const state = getBusinessAccessState(
+			{
+				...baseSubscription,
+				paid_until: paidUntil,
+				grace_until: isoFromNow(47),
+				restricted_until: isoFromNow(47 + 24 * 30),
+				last_grant_duration_seconds: 60 * 60,
+				expiration_notice_enabled: true
+			},
+			{ now }
+		);
+
+		expect(state.commercialStatus).toBe('restricted');
+		expect(state.canUseBusiness).toBe(false);
+		expect(state.graceUntil).toBe(paidUntil);
+		expect(state.restrictedUntil).toBe(isoPlusDays(paidUntil, 30));
+		expect(state.shouldShowExpiringWarning).toBe(false);
+		expect(state.allowedCapabilities.canCreateAppointment).toBe(false);
+	});
+
+	it('bloquea directo una suscripción de 1 día vencida aunque conserve grace legacy', () => {
+		const paidUntil = isoFromNow(-2);
+		const state = getBusinessAccessState(
+			{
+				...baseSubscription,
+				paid_until: paidUntil,
+				grace_until: isoFromNow(46),
+				restricted_until: isoFromNow(46 + 24 * 30),
+				last_grant_duration_seconds: 24 * 60 * 60
+			},
+			{ now }
+		);
+
+		expect(state.commercialStatus).toBe('restricted');
+		expect(state.canUseBusiness).toBe(false);
+		expect(state.graceUntil).toBe(paidUntil);
+		expect(state.allowedCapabilities.canUsePublicBooking).toBe(false);
+	});
+
+	it('mantiene grace normal para suscripciones de 7 días vencidas', () => {
+		const state = getBusinessAccessState(
+			{
+				...baseSubscription,
+				paid_until: isoFromNow(-2),
+				grace_until: isoFromNow(46),
+				restricted_until: isoFromNow(46 + 24 * 30),
+				last_grant_duration_seconds: 7 * 24 * 60 * 60,
+				expiration_notice_enabled: true
+			},
+			{ now }
+		);
+
+		expect(state.commercialStatus).toBe('grace');
+		expect(state.canUseBusiness).toBe(true);
+		expect(state.allowedCapabilities.canCreateAppointment).toBe(true);
 	});
 
 	it('bloquea acciones operativas en restricted pero mantiene lectura/exportación', () => {

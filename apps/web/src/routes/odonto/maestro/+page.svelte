@@ -58,6 +58,7 @@
 	const durationOptions = [
 		{ value: 'hour_1', label: '1 hora' },
 		{ value: 'day_1', label: '1 día' },
+		{ value: 'day_7', label: '7 días' },
 		...Array.from({ length: 12 }, (_, index) => ({
 			value: `month_${index + 1}`,
 			label: `${index + 1} mes${index === 0 ? '' : 'es'}`

@@ -26,7 +26,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 
 	const { data: professionals, error: professionalsError } = await supabase
 		.from('professionals')
-		.select('id, name, specialty, phone, email, avatar_url, is_public, is_active, sort_order, created_at')
+		.select('id, name, specialty, phone, email, avatar_url, is_public, is_active, sort_order, created_at, profile_status, name_source')
 		.eq('business_id', businessId)
 		.order('sort_order')
 		.order('name');
@@ -63,7 +63,9 @@ export const actions: Actions = {
 				phone: String(form.get('phone') ?? '').trim() || null,
 				email: String(form.get('email') ?? '').trim() || null,
 				is_public: isAvailable,
-				is_active: isAvailable
+				is_active: isAvailable,
+				profile_status: 'complete',
+				name_source: 'manual'
 			})
 			.select('id')
 			.single();
@@ -105,6 +107,8 @@ export const actions: Actions = {
 				email: String(form.get('email') ?? '').trim() || null,
 				is_public: isAvailable,
 				is_active: isAvailable,
+				profile_status: 'complete',
+				name_source: 'manual',
 				updated_at: new Date().toISOString()
 			})
 			.eq('business_id', business.business.id)

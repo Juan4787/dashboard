@@ -78,7 +78,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 		await Promise.all([
 			supabase
 				.from('professionals')
-				.select('id, name, specialty, phone, email, is_active, is_public')
+				.select('id, name, specialty, phone, email, is_active, is_public, profile_status, name_source')
 				.eq('business_id', businessId)
 				.eq('id', params.professionalId)
 				.maybeSingle(),
@@ -144,6 +144,8 @@ export const actions: Actions = {
 				email: String(form.get('email') ?? '').trim() || null,
 				is_public: isAvailable,
 				is_active: isAvailable,
+				profile_status: 'complete',
+				name_source: 'manual',
 				updated_at: new Date().toISOString()
 			})
 			.eq('business_id', business.business.id)

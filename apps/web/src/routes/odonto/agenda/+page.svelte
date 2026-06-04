@@ -54,12 +54,14 @@
 	let dayAppointmentsSection = $state<HTMLElement | null>(null);
 
 	const statusLabels: Record<string, string> = {
+		pending_confirmation: 'Pendiente',
 		reserved: 'Reservado',
 		confirmed: 'Confirmado',
 		cancelled: 'Cancelado',
 		reschedule_requested: 'Reprogramar',
 		attended: 'Asistió',
-		no_show: 'No asistió'
+		no_show: 'No asistió',
+		expired: 'Expirado'
 	};
 
 	const sourceLabels: Record<string, string> = {
@@ -70,12 +72,14 @@
 	};
 
 	const statusTone: Record<string, string> = {
+		pending_confirmation: 'ux-badge ux-badge-warning',
 		reserved: 'ux-badge',
 		confirmed: 'ux-badge ux-badge-success',
 		cancelled: 'ux-badge ux-badge-danger',
 		reschedule_requested: 'ux-badge ux-badge-warning',
 		attended: 'ux-badge ux-badge-success',
-		no_show: 'ux-badge ux-badge-danger'
+		no_show: 'ux-badge ux-badge-danger',
+		expired: 'ux-badge ux-badge-danger'
 	};
 
 	const timeOnly = (value: string) =>

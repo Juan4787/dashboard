@@ -165,9 +165,9 @@
 			{/if}
 			{#if caps.canManageUsers}
 				<a href="/odonto/configuracion/usuarios" class="ux-choice p-6">
-					<span class="ux-badge">Permisos</span>
-					<h2 class="mt-4 text-2xl font-bold text-white">Usuarios</h2>
-					<p class="mt-2 text-sm text-white/55">Quién puede entrar y qué puede hacer.</p>
+					<span class="ux-badge">Accesos</span>
+					<h2 class="mt-4 text-2xl font-bold text-white">Roles</h2>
+					<p class="mt-2 text-sm text-white/55">Emails, roles y profesionales.</p>
 				</a>
 			{/if}
 			{#if caps.canManageSubscription}

@@ -30,10 +30,12 @@ const loadDemoAppointment = (token: string) => ({
 	},
 	patient_name: 'Paciente demo',
 	public_status_label: 'Reservado',
+	public_actions_available: true,
 	can_confirm: true,
 	can_cancel: true,
 	can_request_reschedule: true,
-	is_past: false
+	is_past: false,
+	is_hold_expired: false
 });
 
 export const load: PageServerLoad = async ({ params, fetch, url }) => {

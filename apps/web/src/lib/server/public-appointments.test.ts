@@ -8,7 +8,9 @@ import {
 const appointment = (overrides: Partial<PublicAppointmentView>): PublicAppointmentView => ({
 	id: 'appointment-1',
 	token: 'token-1',
+	patient_id: 'patient-1',
 	status: 'reserved',
+	hold_expires_at: null,
 	starts_at: '2026-05-14T12:00:00.000Z',
 	ends_at: '2026-05-14T12:30:00.000Z',
 	service_name_snapshot: 'Consulta',
@@ -31,6 +33,7 @@ const appointment = (overrides: Partial<PublicAppointmentView>): PublicAppointme
 	can_cancel: true,
 	can_request_reschedule: true,
 	is_past: false,
+	is_hold_expired: false,
 	...overrides
 });
 

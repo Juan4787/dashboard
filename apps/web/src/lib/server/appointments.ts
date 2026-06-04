@@ -3,12 +3,14 @@ import { writeAuditLog } from './audit';
 import { normalizePhoneE164, normalizePhoneRaw } from './phone';
 
 export const APPOINTMENT_STATUSES = [
+	'pending_confirmation',
 	'reserved',
 	'confirmed',
 	'cancelled',
 	'reschedule_requested',
 	'attended',
-	'no_show'
+	'no_show',
+	'expired'
 ] as const;
 export type AppointmentStatus = (typeof APPOINTMENT_STATUSES)[number];
 
@@ -16,12 +18,14 @@ export const APPOINTMENT_SOURCES = ['public_booking', 'manual', 'whatsapp_bot', 
 export type AppointmentSource = (typeof APPOINTMENT_SOURCES)[number];
 
 export const APPOINTMENT_STATUS_LABELS: Record<AppointmentStatus, string> = {
+	pending_confirmation: 'Pendiente de confirmación',
 	reserved: 'Reservado',
 	confirmed: 'Confirmado',
 	cancelled: 'Cancelado',
 	reschedule_requested: 'Quiere reprogramar',
 	attended: 'Asistió',
-	no_show: 'No asistió'
+	no_show: 'No asistió',
+	expired: 'Expirado'
 };
 
 export const APPOINTMENT_SOURCE_LABELS: Record<AppointmentSource, string> = {
@@ -38,16 +42,18 @@ export const addMinutes = (date: Date, minutes: number) =>
 	new Date(date.getTime() + minutes * 60_000);
 
 const transitionMap: Record<AppointmentStatus, AppointmentStatus[]> = {
+	pending_confirmation: ['confirmed', 'cancelled', 'expired'],
 	reserved: ['confirmed', 'cancelled', 'reschedule_requested', 'attended', 'no_show'],
 	confirmed: ['cancelled', 'reschedule_requested', 'attended', 'no_show'],
 	reschedule_requested: ['cancelled', 'attended', 'no_show'],
 	cancelled: [],
 	attended: [],
-	no_show: []
+	no_show: [],
+	expired: []
 };
 
 export const isTerminalAppointmentStatus = (status: AppointmentStatus) =>
-	status === 'cancelled' || status === 'attended' || status === 'no_show';
+	status === 'cancelled' || status === 'attended' || status === 'no_show' || status === 'expired';
 
 export const assertCanTransitionAppointment = (input: {
 	currentStatus: AppointmentStatus;
@@ -109,6 +115,7 @@ export const getHumanAppointmentErrorMessage = (error: unknown) => {
 		return 'La cuenta está suspendida. Regularizá la suscripción para volver a operar.';
 	}
 	if (raw.includes('INVALID_PROFESSIONAL_STATUS')) return 'El profesional solo puede marcar asistencia o ausencia.';
+	if (raw.includes('PUBLIC_HOLD_EXPIRED')) return 'Ese turno pendiente expiró. Elegí otro horario disponible.';
 
 	return 'No se pudo completar la acción.';
 };
@@ -119,10 +126,12 @@ export const createOrFindPatientForAppointment = async (
 		businessId: string;
 		ownerId?: string | null;
 		patientId?: string | null;
-		name?: string | null;
-		phone?: string | null;
-		email?: string | null;
-	}
+			name?: string | null;
+			phone?: string | null;
+			email?: string | null;
+			origin?: 'manual' | 'public_hold' | 'public_booking' | 'import';
+			originMetadata?: Record<string, unknown> | null;
+		}
 ) => {
 	if (input.patientId) {
 		const { data: patient, error } = await supabase
@@ -179,11 +188,14 @@ export const createOrFindPatientForAppointment = async (
 			business_id: input.businessId,
 			owner_id: ownerId,
 			full_name: fullName,
-			phone: phoneE164?.replace(/\D/g, '') ?? phoneRaw,
-			phone_raw: phoneRaw,
-			phone_e164: phoneE164,
-			email: email || null
-		})
+				phone: phoneE164?.replace(/\D/g, '') ?? phoneRaw,
+				phone_raw: phoneRaw,
+				phone_e164: phoneE164,
+				email: email || null,
+				origin: input.origin ?? 'manual',
+				origin_metadata: input.originMetadata ?? {},
+				created_from_public_hold_at: input.origin === 'public_hold' ? new Date().toISOString() : null
+			})
 		.select('id')
 		.single();
 
@@ -200,23 +212,37 @@ export const createManualAppointment = async (
 		createdByUserId?: string | null;
 		patientId?: string | null;
 		patientName?: string | null;
-		patientPhone?: string | null;
-		patientEmail?: string | null;
-		serviceId: string;
-		professionalId: string;
-		startsAt: Date;
-		internalNote?: string | null;
-		source?: AppointmentSource;
-	}
+			patientPhone?: string | null;
+			patientEmail?: string | null;
+			patientOrigin?: 'manual' | 'public_hold' | 'public_booking' | 'import';
+			patientOriginMetadata?: Record<string, unknown> | null;
+			serviceId: string;
+			professionalId: string;
+			startsAt: Date;
+			internalNote?: string | null;
+			source?: AppointmentSource;
+			status?: AppointmentStatus;
+			holdExpiresAt?: Date | null;
+			publicIdentityHash?: string | null;
+			publicPhoneHash?: string | null;
+			publicEmailHash?: string | null;
+			publicIpHash?: string | null;
+			publicDeviceHash?: string | null;
+			publicIdentityBundleHash?: string | null;
+			publicRiskScore?: number | null;
+			publicRiskFlags?: unknown;
+		}
 ) => {
 	const patientId = await createOrFindPatientForAppointment(supabase, {
 		businessId: input.businessId,
 		ownerId: input.ownerId,
-		patientId: input.patientId,
-		name: input.patientName,
-		phone: input.patientPhone,
-		email: input.patientEmail
-	});
+			patientId: input.patientId,
+			name: input.patientName,
+			phone: input.patientPhone,
+			email: input.patientEmail,
+			origin: input.patientOrigin,
+			originMetadata: input.patientOriginMetadata
+		});
 
 	const { data: service, error: serviceError } = await supabase
 		.from('services')
@@ -241,16 +267,25 @@ export const createManualAppointment = async (
 			ends_at: endsAt.toISOString(),
 			blocking_starts_at: input.startsAt.toISOString(),
 			blocking_ends_at: endsAt.toISOString(),
-			status: 'reserved',
-			source: input.source ?? 'manual',
+				status: input.status ?? 'reserved',
+				source: input.source ?? 'manual',
 			reminder_due_at: null,
 			internal_note: input.internalNote || null,
 			created_by_user_id: input.createdByUserId ?? null,
 			updated_by_user_id: input.createdByUserId ?? null,
 			service_name_snapshot: 'Pendiente',
 			professional_name_snapshot: 'Pendiente',
-			duration_minutes_snapshot: Number(service.duration_minutes)
-		})
+				duration_minutes_snapshot: Number(service.duration_minutes),
+				hold_expires_at: input.holdExpiresAt?.toISOString() ?? null,
+				public_identity_hash: input.publicIdentityHash ?? null,
+				public_phone_hash: input.publicPhoneHash ?? null,
+				public_email_hash: input.publicEmailHash ?? null,
+				public_ip_hash: input.publicIpHash ?? null,
+				public_device_hash: input.publicDeviceHash ?? null,
+				public_identity_bundle_hash: input.publicIdentityBundleHash ?? null,
+				public_risk_score: input.publicRiskScore ?? 0,
+				public_risk_flags: input.publicRiskFlags ?? []
+			})
 		.select('id')
 		.single();
 
@@ -319,6 +354,7 @@ export const updateAppointmentStatus = async (
 	if (input.status === 'reschedule_requested') updates.reschedule_requested_at = now.toISOString();
 	if (input.status === 'attended') updates.attended_at = now.toISOString();
 	if (input.status === 'no_show') updates.no_show_at = now.toISOString();
+	if (input.status === 'expired') updates.expired_at = now.toISOString();
 
 	const { error } = await supabase
 		.from('appointments')

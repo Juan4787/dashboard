@@ -4,6 +4,7 @@ import path from 'node:path';
 
 const email = process.env.E2E_EMAIL;
 const password = process.env.E2E_PASSWORD;
+const destructiveAllowed = process.env.E2E_ALLOW_DESTRUCTIVE === 'true';
 
 const uniqueSuffix = () => `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
@@ -38,7 +39,7 @@ const cleanupRecentHeadlessBookingAttempts = async () => {
 	if (!url || !key) return;
 	const since = encodeURIComponent(new Date(Date.now() - 15 * 60_000).toISOString());
 	const response = await fetch(
-		`${url}/rest/v1/public_booking_attempts?action=eq.booking_create&created_at=gte.${since}&user_agent=ilike.*HeadlessChrome*`,
+		`${url}/rest/v1/public_booking_attempts?action=eq.booking_create&created_at=gte.${since}`,
 		{
 			method: 'DELETE',
 			headers: {
@@ -61,6 +62,23 @@ const restEnv = () => {
 	return { url, key };
 };
 
+const safeSupabaseTarget = () => {
+	const env = readEnvFile();
+	const url = process.env.ODONTO_SUPABASE_URL ?? env.ODONTO_SUPABASE_URL ?? '';
+	if (!url) return false;
+	const parsed = new URL(url);
+	if (['127.0.0.1', 'localhost'].includes(parsed.hostname)) return true;
+	const projectRef =
+		process.env.E2E_SUPABASE_PROJECT_REF ??
+		env.E2E_SUPABASE_PROJECT_REF ??
+		(parsed.hostname.endsWith('.supabase.co') ? parsed.hostname.split('.')[0] : '');
+	const allowlist = (process.env.E2E_SUPABASE_PROJECT_REF_ALLOWLIST ?? env.E2E_SUPABASE_PROJECT_REF_ALLOWLIST ?? '')
+		.split(',')
+		.map((item) => item.trim())
+		.filter(Boolean);
+	return Boolean(projectRef && allowlist.includes(projectRef));
+};
+
 const restHeaders = (key: string) => ({
 	apikey: key,
 	authorization: `Bearer ${key}`,
@@ -76,6 +94,15 @@ const restGetSingle = async <T>(path: string): Promise<T> => {
 	const rows = (await response.json()) as T[];
 	if (!rows[0]) throw new Error(`GET ${path} no devolvió registros.`);
 	return rows[0];
+};
+
+const restGet = async <T>(path: string): Promise<T[]> => {
+	const { url, key } = restEnv();
+	const response = await fetch(`${url}/rest/v1/${path}`, {
+		headers: restHeaders(key)
+	});
+	if (!response.ok) throw new Error(`GET ${path} falló: ${await response.text()}`);
+	return (await response.json()) as T[];
 };
 
 const restInsertSingle = async <T>(table: string, row: Record<string, unknown>, select = 'id'): Promise<T> => {
@@ -107,6 +134,32 @@ const restUpsert = async (table: string, row: Record<string, unknown>, onConflic
 	if (!response.ok) throw new Error(`UPSERT ${table} falló: ${await response.text()}`);
 };
 
+const restDelete = async (path: string) => {
+	const { url, key } = restEnv();
+	const response = await fetch(`${url}/rest/v1/${path}`, {
+		method: 'DELETE',
+		headers: {
+			...restHeaders(key),
+			prefer: 'return=minimal'
+		}
+	});
+	if (!response.ok) throw new Error(`DELETE ${path} falló: ${await response.text()}`);
+};
+
+const inFilter = (ids: string[]) => `(${ids.map((id) => `"${id}"`).join(',')})`;
+
+const cleanupStep = async (label: string, action: () => Promise<unknown>, errors: string[]) => {
+	try {
+		await action();
+	} catch (error) {
+		errors.push(`${label}: ${(error as Error).message}`);
+	}
+};
+
+const assertCleanupSucceeded = (errors: string[]) => {
+	if (errors.length > 0) throw new Error(`Limpieza E2E incompleta: ${errors.join(' | ')}`);
+};
+
 const createAuthUser = async (input: { email: string; password: string }) => {
 	const { url, key } = restEnv();
 	const response = await fetch(`${url}/auth/v1/admin/users`, {
@@ -122,94 +175,155 @@ const createAuthUser = async (input: { email: string; password: string }) => {
 	return (await response.json()) as { id: string; email: string };
 };
 
+const deleteAuthUser = async (userId: string) => {
+	const { url, key } = restEnv();
+	const response = await fetch(`${url}/auth/v1/admin/users/${userId}`, {
+		method: 'DELETE',
+		headers: restHeaders(key)
+	});
+	if (!response.ok && response.status !== 404) {
+		throw new Error(`No se pudo borrar usuario auth ${userId}: ${await response.text()}`);
+	}
+};
+
 const createRoleFixtures = async (suffix: string) => {
 	const password = `Role-Test-${suffix}-1998!`;
-	const users = {
-		owner: await createAuthUser({ email: `owner-${suffix}@roles.test`, password }),
-		admin: await createAuthUser({ email: `admin-${suffix}@roles.test`, password }),
-		reception: await createAuthUser({ email: `recepcion-${suffix}@roles.test`, password }),
-		professional: await createAuthUser({ email: `profesional-${suffix}@roles.test`, password })
-	};
-	const business = await restInsertSingle<{ id: string; slug: string }>(
-		'businesses',
-		{
-			name: `Roles UX ${suffix}`,
-			slug: `roles-ux-${suffix}`.replace(/[^a-z0-9-]/g, '-').slice(0, 60),
-			industry: 'odontology',
-			email: `roles-${suffix}@test.local`,
-			is_active: true
-		},
-		'id,slug'
-	);
-	await restUpsert('business_subscriptions', {
-		business_id: business.id,
-		is_permanent: true,
-		subscription_status: 'active',
-		commercial_access_enabled: true,
-		access_note: 'e2e roles fixture'
-	}, 'business_id');
-	for (const user of Object.values(users)) {
-		await restInsertSingle('allowed_emails', { email: user.email, enabled: true }, 'email');
-	}
-	const now = new Date().toISOString();
-	for (const [role, user] of Object.entries(users)) {
-		await restInsertSingle(
-			'business_users',
+	const createdUsers: Array<{ id: string; email: string }> = [];
+	let business: { id: string; slug: string } | null = null;
+	try {
+		const owner = await createAuthUser({ email: `owner-${suffix}@roles.test`, password });
+		createdUsers.push(owner);
+		const admin = await createAuthUser({ email: `admin-${suffix}@roles.test`, password });
+		createdUsers.push(admin);
+		const reception = await createAuthUser({ email: `recepcion-${suffix}@roles.test`, password });
+		createdUsers.push(reception);
+		const professionalUser = await createAuthUser({ email: `profesional-${suffix}@roles.test`, password });
+		createdUsers.push(professionalUser);
+		const users = { owner, admin, reception, professional: professionalUser };
+		business = await restInsertSingle<{ id: string; slug: string }>(
+			'businesses',
 			{
-				business_id: business.id,
-				user_id: user.id,
-				role,
-				status: 'active',
-				accepted_at: now,
-				created_at: now,
-				updated_at: now
+				name: `Roles UX ${suffix}`,
+				slug: `roles-ux-${suffix}`.replace(/[^a-z0-9-]/g, '-').slice(0, 60),
+				industry: 'odontology',
+				email: `roles-${suffix}@test.local`,
+				is_active: true
 			},
-			'id'
+			'id,slug'
 		);
+		await restUpsert('business_subscriptions', {
+			business_id: business.id,
+			is_permanent: true,
+			subscription_status: 'active',
+			commercial_access_enabled: true,
+			access_note: 'e2e roles fixture'
+		}, 'business_id');
+		for (const user of Object.values(users)) {
+			await restInsertSingle('allowed_emails', { email: user.email, enabled: true }, 'email');
+		}
+		const now = new Date().toISOString();
+		for (const [role, user] of Object.entries(users)) {
+			await restInsertSingle(
+				'business_users',
+				{
+					business_id: business.id,
+					user_id: user.id,
+					role,
+					status: 'active',
+					accepted_at: now,
+					created_at: now,
+					updated_at: now
+				},
+				'id'
+			);
+		}
+		const professional = await restInsertSingle<{ id: string }>('professionals', {
+			business_id: business.id,
+			name: `Dra. Rol ${suffix}`,
+			specialty: 'Odontología general',
+			email: users.professional.email,
+			is_active: true,
+			is_public: true
+		});
+		await restInsertSingle('professional_users', {
+			business_id: business.id,
+			professional_id: professional.id,
+			user_id: users.professional.id
+		});
+		const linkedPatient = await restInsertSingle<{ id: string }>('patients', {
+			business_id: business.id,
+			owner_id: users.owner.id,
+			full_name: `Paciente Vinculado ${suffix}`,
+			phone: `1100${suffix.replace(/\D/g, '').slice(-6).padStart(6, '0')}`,
+			email: `vinculado-${suffix}@test.local`
+		});
+		const hiddenPatient = await restInsertSingle<{ id: string }>('patients', {
+			business_id: business.id,
+			owner_id: users.owner.id,
+			full_name: `Paciente Oculto ${suffix}`,
+			phone: `1199${suffix.replace(/\D/g, '').slice(-6).padStart(6, '0')}`,
+			email: `oculto-${suffix}@test.local`
+		});
+		await restInsertSingle('patient_clinical_profiles', {
+			business_id: business.id,
+			patient_id: linkedPatient.id,
+			allergies: 'Alergia secreta e2e',
+			medication: 'Medicación sensible e2e',
+			background: 'Antecedente sensible e2e'
+		});
+		await restInsertSingle('professional_patient_links', {
+			business_id: business.id,
+			professional_id: professional.id,
+			patient_id: linkedPatient.id,
+			source: 'manual',
+			is_active: true,
+			created_by: users.owner.id
+		});
+		return { password, users, business, linkedPatient, hiddenPatient };
+	} catch (error) {
+		const cleanupErrors: string[] = [];
+		if (business) {
+			await cleanupStep('business parcial', () => restDelete(`businesses?id=eq.${encodeURIComponent(business.id)}`), cleanupErrors);
+		}
+		if (createdUsers.length > 0) {
+			await cleanupStep(
+				'allowed_emails parciales',
+				() => restDelete(`allowed_emails?email=in.${inFilter(createdUsers.map((user) => user.email))}`),
+				cleanupErrors
+			);
+			await cleanupStep(
+				'auth users parciales',
+				() => Promise.all(createdUsers.map((user) => deleteAuthUser(user.id))),
+				cleanupErrors
+			);
+		}
+		assertCleanupSucceeded(cleanupErrors);
+		throw error;
 	}
-	const professional = await restInsertSingle<{ id: string }>('professionals', {
-		business_id: business.id,
-		name: `Dra. Rol ${suffix}`,
-		specialty: 'Odontología general',
-		email: users.professional.email,
-		is_active: true,
-		is_public: true
-	});
-	await restInsertSingle('professional_users', {
-		business_id: business.id,
-		professional_id: professional.id,
-		user_id: users.professional.id
-	});
-	const linkedPatient = await restInsertSingle<{ id: string }>('patients', {
-		business_id: business.id,
-		owner_id: users.owner.id,
-		full_name: `Paciente Vinculado ${suffix}`,
-		phone: `1100${suffix.replace(/\D/g, '').slice(-6).padStart(6, '0')}`,
-		email: `vinculado-${suffix}@test.local`
-	});
-	const hiddenPatient = await restInsertSingle<{ id: string }>('patients', {
-		business_id: business.id,
-		owner_id: users.owner.id,
-		full_name: `Paciente Oculto ${suffix}`,
-		phone: `1199${suffix.replace(/\D/g, '').slice(-6).padStart(6, '0')}`,
-		email: `oculto-${suffix}@test.local`
-	});
-	await restInsertSingle('patient_clinical_profiles', {
-		business_id: business.id,
-		patient_id: linkedPatient.id,
-		allergies: 'Alergia secreta e2e',
-		medication: 'Medicación sensible e2e',
-		background: 'Antecedente sensible e2e'
-	});
-	await restInsertSingle('professional_patient_links', {
-		business_id: business.id,
-		professional_id: professional.id,
-		patient_id: linkedPatient.id,
-		source: 'manual',
-		is_active: true,
-		created_by: users.owner.id
-	});
-	return { password, users, business, linkedPatient, hiddenPatient };
+};
+
+const cleanupRoleFixtures = async (fixture: Awaited<ReturnType<typeof createRoleFixtures>> | null) => {
+	if (!fixture) return;
+	const cleanupErrors: string[] = [];
+	const userIds = Object.values(fixture.users).map((user) => user.id);
+	const emails = Object.values(fixture.users).map((user) => user.email);
+	await cleanupStep('business roles', () => restDelete(`businesses?id=eq.${encodeURIComponent(fixture.business.id)}`), cleanupErrors);
+	await cleanupStep('allowed_emails roles', () => restDelete(`allowed_emails?email=in.${inFilter(emails)}`), cleanupErrors);
+	await cleanupStep('auth users roles', () => Promise.all(userIds.map((userId) => deleteAuthUser(userId))), cleanupErrors);
+	assertCleanupSucceeded(cleanupErrors);
+};
+
+type BusinessRateLimitRow = {
+	id: string;
+	business_id: string;
+	surface: string;
+	action: string;
+	scope_type: string;
+	window_seconds: number;
+	limit_count: number;
+	enabled: boolean;
+	created_at?: string;
+	updated_at?: string;
 };
 
 const createPublicBookingFixtures = async (input: {
@@ -223,85 +337,167 @@ const createPublicBookingFixtures = async (input: {
 	const business = await restGetSingle<{ id: string }>(
 		`businesses?slug=eq.${encodeURIComponent(input.slug)}&select=id`
 	);
+	const previousRateLimits = await restGet<BusinessRateLimitRow>(
+		`business_rate_limits?business_id=eq.${encodeURIComponent(business.id)}&surface=eq.public&action=eq.booking_create&select=*`
+	);
+	const serviceIds: string[] = [];
+	const professionalIds: string[] = [];
 
-	const professional = await restInsertSingle<{ id: string }>('professionals', {
-		business_id: business.id,
-		name: input.professionalName,
-		specialty: 'Odontología preventiva',
-		phone: '1122334455',
-		email: null,
-		is_active: true,
-		is_public: true
-	});
-	const unavailableProfessional = await restInsertSingle<{ id: string }>('professionals', {
-		business_id: business.id,
-		name: input.unavailableProfessionalName,
-		specialty: 'Sin agenda cargada',
-		is_active: true,
-		is_public: true
-	});
-	const unassignedProfessional = await restInsertSingle<{ id: string }>('professionals', {
-		business_id: business.id,
-		name: input.unassignedProfessionalName,
-		specialty: 'No ofrece el servicio elegido',
-		is_active: true,
-		is_public: true
-	});
-
-	const service = await restInsertSingle<{ id: string }>('services', {
-		business_id: business.id,
-		name: input.serviceName,
-		duration_minutes: 45,
-		buffer_before_minutes: 0,
-		buffer_after_minutes: 0,
-		price_label: '$ 350.000',
-		description: null,
-		is_active: true,
-		is_public: true
-	});
-	const unavailableService = await restInsertSingle<{ id: string }>('services', {
-		business_id: business.id,
-		name: input.unavailableServiceName,
-		duration_minutes: 30,
-		buffer_before_minutes: 0,
-		buffer_after_minutes: 0,
-		price_label: null,
-		description: null,
-		is_active: true,
-		is_public: true
-	});
-
-	await restInsertSingle('professional_services', {
-		business_id: business.id,
-		professional_id: professional.id,
-		service_id: service.id
-	}, 'business_id');
-	await restInsertSingle('professional_services', {
-		business_id: business.id,
-		professional_id: unavailableProfessional.id,
-		service_id: service.id
-	}, 'business_id');
-	await restInsertSingle('professional_services', {
-		business_id: business.id,
-		professional_id: unavailableProfessional.id,
-		service_id: unavailableService.id
-	}, 'business_id');
-
-	for (const professionalId of [professional.id, unassignedProfessional.id]) {
-		for (const weekday of [1, 2, 3, 4, 5]) {
-			await restInsertSingle('availability_rules', {
-				business_id: business.id,
-				professional_id: professionalId,
-				weekday,
-				start_time: '09:00:00',
-				end_time: '10:00:00',
-				slot_interval_minutes: 15,
-				is_active: true
-			});
+	try {
+		for (const scopeType of ['ip', 'phone', 'identity_bundle']) {
+			await restUpsert(
+				'business_rate_limits',
+				{
+					business_id: business.id,
+					surface: 'public',
+					action: 'booking_create',
+					scope_type: scopeType,
+					window_seconds: scopeType === 'phone' ? 86400 : 3600,
+					limit_count: 100,
+					enabled: true
+				},
+				'business_id,surface,action,scope_type,window_seconds'
+			);
 		}
-	}
 
-	return { businessId: business.id, serviceId: service.id, professionalId: professional.id };
+		const professional = await restInsertSingle<{ id: string }>('professionals', {
+			business_id: business.id,
+			name: input.professionalName,
+			specialty: 'Odontología preventiva',
+			phone: '1122334455',
+			email: null,
+			is_active: true,
+			is_public: true
+		});
+		professionalIds.push(professional.id);
+		const unavailableProfessional = await restInsertSingle<{ id: string }>('professionals', {
+			business_id: business.id,
+			name: input.unavailableProfessionalName,
+			specialty: 'Sin agenda cargada',
+			is_active: true,
+			is_public: true
+		});
+		professionalIds.push(unavailableProfessional.id);
+		const unassignedProfessional = await restInsertSingle<{ id: string }>('professionals', {
+			business_id: business.id,
+			name: input.unassignedProfessionalName,
+			specialty: 'No ofrece el servicio elegido',
+			is_active: true,
+			is_public: true
+		});
+		professionalIds.push(unassignedProfessional.id);
+
+		const service = await restInsertSingle<{ id: string }>('services', {
+			business_id: business.id,
+			name: input.serviceName,
+			duration_minutes: 45,
+			buffer_before_minutes: 0,
+			buffer_after_minutes: 0,
+			price_label: '$ 350.000',
+			description: null,
+			is_active: true,
+			is_public: true
+		});
+		serviceIds.push(service.id);
+		const unavailableService = await restInsertSingle<{ id: string }>('services', {
+			business_id: business.id,
+			name: input.unavailableServiceName,
+			duration_minutes: 30,
+			buffer_before_minutes: 0,
+			buffer_after_minutes: 0,
+			price_label: null,
+			description: null,
+			is_active: true,
+			is_public: true
+		});
+		serviceIds.push(unavailableService.id);
+
+		await restInsertSingle('professional_services', {
+			business_id: business.id,
+			professional_id: professional.id,
+			service_id: service.id
+		}, 'business_id');
+		await restInsertSingle('professional_services', {
+			business_id: business.id,
+			professional_id: unavailableProfessional.id,
+			service_id: service.id
+		}, 'business_id');
+		await restInsertSingle('professional_services', {
+			business_id: business.id,
+			professional_id: unavailableProfessional.id,
+			service_id: unavailableService.id
+		}, 'business_id');
+
+		for (const professionalId of [professional.id, unassignedProfessional.id]) {
+			for (const weekday of [1, 2, 3, 4, 5]) {
+				await restInsertSingle('availability_rules', {
+					business_id: business.id,
+					professional_id: professionalId,
+					weekday,
+					start_time: '09:00:00',
+					end_time: '10:00:00',
+					slot_interval_minutes: 15,
+					is_active: true
+				});
+			}
+		}
+
+		return {
+			businessId: business.id,
+			previousRateLimits,
+			serviceIds,
+			professionalIds,
+			serviceId: service.id,
+			professionalId: professional.id
+		};
+	} catch (error) {
+		if (serviceIds.length > 0) await restDelete(`services?id=in.${inFilter(serviceIds)}`);
+		if (professionalIds.length > 0) await restDelete(`professionals?id=in.${inFilter(professionalIds)}`);
+		await restDelete(
+			`business_rate_limits?business_id=eq.${encodeURIComponent(business.id)}&surface=eq.public&action=eq.booking_create`
+		);
+		for (const row of previousRateLimits) {
+			await restInsertSingle('business_rate_limits', row, 'id');
+		}
+		throw error;
+	}
+};
+
+const restoreBusinessRateLimits = async (fixture: Awaited<ReturnType<typeof createPublicBookingFixtures>>) => {
+	await restDelete(
+		`business_rate_limits?business_id=eq.${encodeURIComponent(fixture.businessId)}&surface=eq.public&action=eq.booking_create`
+	);
+	for (const row of fixture.previousRateLimits) {
+		await restInsertSingle('business_rate_limits', row, 'id');
+	}
+};
+
+const cleanupPublicBookingFixtures = async (
+	fixture: Awaited<ReturnType<typeof createPublicBookingFixtures>> | null,
+	input: { patientName: string; overlapPatient: string }
+) => {
+	if (!fixture) return;
+	const cleanupErrors: string[] = [];
+	try {
+		const appointments = await restGet<{ id: string }>(
+			`appointments?business_id=eq.${encodeURIComponent(fixture.businessId)}&professional_id=in.${inFilter(fixture.professionalIds)}&select=id`
+		);
+		const appointmentIds = appointments.map((appointment) => appointment.id);
+		if (appointmentIds.length > 0) {
+			await cleanupStep('public booking attempts', () => restDelete(`public_booking_attempts?appointment_id=in.${inFilter(appointmentIds)}`), cleanupErrors);
+			await cleanupStep('appointments', () => restDelete(`appointments?id=in.${inFilter(appointmentIds)}`), cleanupErrors);
+		}
+		await cleanupStep(
+			'patients',
+			() => restDelete(`patients?business_id=eq.${encodeURIComponent(fixture.businessId)}&full_name=in.${inFilter([input.patientName, input.overlapPatient])}`),
+			cleanupErrors
+		);
+		await cleanupStep('services', () => restDelete(`services?id=in.${inFilter(fixture.serviceIds)}`), cleanupErrors);
+		await cleanupStep('professionals', () => restDelete(`professionals?id=in.${inFilter(fixture.professionalIds)}`), cleanupErrors);
+	} finally {
+		await cleanupStep('business rate limits restore', () => restoreBusinessRateLimits(fixture), cleanupErrors);
+	}
+	assertCleanupSucceeded(cleanupErrors);
 };
 
 const login = async (page: import('@playwright/test').Page) => {
@@ -333,8 +529,25 @@ const navItem = (page: import('@playwright/test').Page, name: RegExp | string) =
 const section = (page: import('@playwright/test').Page, text: string) =>
 	page.locator('section, div.ux-card').filter({ hasText: text }).first();
 
-const addUserRoleSelect = (page: import('@playwright/test').Page) =>
-	page.locator('form').filter({ hasText: 'Agregar usuario' }).locator('select[name="role"]');
+const newAccessForm = (page: import('@playwright/test').Page) =>
+	page.locator('form').filter({ hasText: 'Nuevo acceso' }).first();
+
+const openNewAccessRoleStep = async (page: import('@playwright/test').Page) => {
+	const form = newAccessForm(page);
+	const emailInput = form.getByLabel('Email');
+	if (await emailInput.isVisible({ timeout: 500 }).catch(() => false)) {
+		await emailInput.fill(`roles-e2e-${uniqueSuffix()}@example.test`);
+	}
+	for (let attempt = 0; attempt < 3; attempt += 1) {
+		if (await form.getByRole('button', { name: 'Atrás' }).isVisible({ timeout: 500 }).catch(() => false)) {
+			return form;
+		}
+		await expect(form.getByRole('button', { name: 'Siguiente' }).first()).toBeEnabled();
+		await form.getByRole('button', { name: 'Siguiente' }).first().click();
+	}
+	await expect(form.getByRole('button', { name: 'Atrás' })).toBeVisible();
+	return form;
+};
 
 const openDayAppointmentsPanel = async (page: import('@playwright/test').Page) => {
 	const heading = page.getByRole('heading', { name: /Turnos del día|Resultado de búsqueda/ });
@@ -349,6 +562,8 @@ test.describe.configure({ mode: 'serial' });
 
 test.describe('Dental Suite - flujo operativo completo', () => {
 	test.skip(!email || !password, 'Definí E2E_EMAIL y E2E_PASSWORD para correr el flujo completo.');
+	test.skip(!destructiveAllowed, 'Definí E2E_ALLOW_DESTRUCTIVE=true para pruebas que crean datos.');
+	test.skip(!safeSupabaseTarget(), 'Definí un Supabase local o E2E_SUPABASE_PROJECT_REF_ALLOWLIST para E2E destructivo.');
 
 	test('profesional, servicio, disponibilidad, reserva pública, agenda y protección contra solapamiento', async ({ page }) => {
 		test.setTimeout(300_000);
@@ -363,113 +578,118 @@ test.describe('Dental Suite - flujo operativo completo', () => {
 		const overlapPatient = `E2E Solapado ${suffix}`;
 		const patientPhone = `+54911${String(Math.floor(10000000 + Math.random() * 90000000)).slice(0, 8)}`;
 		const overlapPhone = `+54911${String(Math.floor(10000000 + Math.random() * 90000000)).slice(0, 8)}`;
+		let fixture: Awaited<ReturnType<typeof createPublicBookingFixtures>> | null = null;
 
-		await login(page);
+		try {
+			await login(page);
 
-		await expect(page.getByRole('link', { name: 'Recordatorios' })).toHaveCount(0);
-		await expect(page.getByRole('link', { name: 'Mensajes' })).toHaveCount(0);
-		await expect(page.getByText('Panel del consultorio')).toHaveCount(0);
+			await expect(page.getByRole('link', { name: 'Recordatorios' })).toHaveCount(0);
+			await expect(page.getByRole('link', { name: 'Mensajes' })).toHaveCount(0);
+			await expect(page.getByText('Panel del consultorio')).toHaveCount(0);
 
-		await page.goto('/odonto/configuracion/comunicacion');
-		const linkText = (await page.locator('p').filter({ hasText: '/reservar/' }).first().textContent())?.trim();
-		expect(linkText).toBeTruthy();
-		const bookingUrl = new URL(linkText ?? '', page.url());
-		const bookingSlug = bookingUrl.pathname.split('/').filter(Boolean).at(-1);
-		expect(bookingSlug).toBeTruthy();
-		await createPublicBookingFixtures({
-			slug: bookingSlug ?? '',
-			professionalName,
-			unavailableProfessionalName,
-			unassignedProfessionalName,
-			serviceName,
-			unavailableServiceName
-		});
-		await cleanupRecentHeadlessBookingAttempts();
+			await page.goto('/odonto/configuracion/comunicacion');
+			const linkText = (await page.locator('p').filter({ hasText: '/reservar/' }).first().textContent())?.trim();
+			expect(linkText).toBeTruthy();
+			const bookingUrl = new URL(linkText ?? '', page.url());
+			const bookingSlug = bookingUrl.pathname.split('/').filter(Boolean).at(-1);
+			expect(bookingSlug).toBeTruthy();
+			fixture = await createPublicBookingFixtures({
+				slug: bookingSlug ?? '',
+				professionalName,
+				unavailableProfessionalName,
+				unassignedProfessionalName,
+				serviceName,
+				unavailableServiceName
+			});
+			await cleanupRecentHeadlessBookingAttempts();
 
-		await page.goto(bookingUrl.pathname);
-		await expect(page.getByRole('heading', { name: '¿Qué necesitás?' })).toBeVisible();
-		await expect(page.getByText('recibir mensajes relacionados')).toHaveCount(0);
-		await expect(page.getByRole('link', { name: new RegExp(serviceName) })).toBeVisible();
-		await expect(page.getByText(unavailableServiceName)).toHaveCount(0);
-		await page.getByRole('link', { name: new RegExp(serviceName) }).click();
-		const professionalStep = section(page, '¿Con quién?');
-		await expect(professionalStep.getByRole('link', { name: new RegExp(professionalName) })).toBeVisible();
-		await expect(professionalStep.getByText('Primer horario:')).toBeVisible();
-		await expect(professionalStep.getByText(unavailableProfessionalName)).toHaveCount(0);
-		await expect(professionalStep.getByText(unassignedProfessionalName)).toHaveCount(0);
-		await professionalStep.getByRole('link', { name: new RegExp(professionalName) }).click();
-		await section(page, 'Elegí un día').getByRole('link').first().click();
-		await section(page, 'Elegí un horario').getByRole('link', { name: '09:00' }).click();
+			await page.goto(bookingUrl.pathname);
+			await expect(page.getByRole('heading', { name: '¿Qué necesitás?' })).toBeVisible();
+			await expect(page.getByText('recibir mensajes relacionados')).toHaveCount(0);
+			await expect(page.getByRole('link', { name: new RegExp(serviceName) })).toBeVisible();
+			await expect(page.getByText(unavailableServiceName)).toHaveCount(0);
+			await page.getByRole('link', { name: new RegExp(serviceName) }).click();
+			const professionalStep = section(page, '¿Con quién?');
+			await expect(professionalStep.getByRole('link', { name: new RegExp(professionalName) })).toBeVisible();
+			await expect(professionalStep.getByText('Primer horario:')).toBeVisible();
+			await expect(professionalStep.getByText(unavailableProfessionalName)).toHaveCount(0);
+			await expect(professionalStep.getByText(unassignedProfessionalName)).toHaveCount(0);
+			await professionalStep.getByRole('link', { name: new RegExp(professionalName) }).click();
+			await section(page, 'Elegí un día').getByRole('link').first().click();
+			await section(page, 'Elegí un horario').getByRole('link', { name: '09:00' }).click();
 
-		const selectedBookingUrl = new URL(page.url());
-		const selectedDate = selectedBookingUrl.searchParams.get('date') ?? '';
-		const serviceId = selectedBookingUrl.searchParams.get('service_id') ?? '';
-		const professionalId = selectedBookingUrl.searchParams.get('professional_id') ?? '';
-		expect(selectedDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-		expect(serviceId).toBeTruthy();
-		expect(professionalId).toBeTruthy();
+			const selectedBookingUrl = new URL(page.url());
+			const selectedDate = selectedBookingUrl.searchParams.get('date') ?? '';
+			const serviceId = selectedBookingUrl.searchParams.get('service_id') ?? '';
+			const professionalId = selectedBookingUrl.searchParams.get('professional_id') ?? '';
+			expect(selectedDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+			expect(serviceId).toBeTruthy();
+			expect(professionalId).toBeTruthy();
 
-		await page.getByLabel('Nombre y apellido').fill(patientName);
-		await page.getByLabel('Teléfono').fill(patientPhone);
-		await page.getByLabel('Correo electrónico (opcional)').fill(`paciente-${suffix}@example.com`);
-		await page.getByRole('button', { name: 'Confirmar reserva' }).click();
-		await expect(page.getByRole('heading', { name: 'Listo, tu turno quedó reservado' })).toBeVisible();
-		await expect(page.getByText('Resumen de la reserva')).toBeVisible();
-		await expect(page.getByText(serviceName)).toBeVisible();
-		await expect(page.getByText(professionalName)).toBeVisible();
-		const publicTokenUrl = page.url();
+			await page.getByLabel('Nombre y apellido').fill(patientName);
+			await page.getByLabel('Teléfono').fill(patientPhone);
+			await page.getByLabel('Correo electrónico (opcional)').fill(`paciente-${suffix}@example.com`);
+			await page.getByRole('button', { name: 'Reservar horario' }).click();
+			await expect(page.getByRole('heading', { name: 'Horario reservado por unos minutos' })).toBeVisible();
+			await expect(page.getByText('Resumen de la reserva')).toBeVisible();
+			await expect(page.getByText(serviceName)).toBeVisible();
+			await expect(page.getByText(professionalName)).toBeVisible();
+			const publicTokenUrl = page.url();
 
-		await page.goto(selectedBookingUrl.toString());
-		await expect(section(page, 'Elegí un horario').getByRole('link', { name: '09:00' })).toHaveCount(0);
+			await page.goto(selectedBookingUrl.toString());
+			await expect(section(page, 'Elegí un horario').getByRole('link', { name: '09:00' })).toHaveCount(0);
 
-		const overlapResult = await page.evaluate(
-			async ({ serviceId, professionalId, selectedDate, overlapPatient, overlapPhone }) => {
-				const form = new FormData();
-				form.set('service_id', serviceId);
-				form.set('professional_id', professionalId);
-				form.set('date', selectedDate);
-				form.set('time', '09:00');
-				form.set('patient_name', overlapPatient);
-				form.set('patient_phone', overlapPhone);
-				const response = await fetch('/odonto/agenda?/create_appointment', {
-					method: 'POST',
-					body: form,
-					credentials: 'include'
-				});
-				return { status: response.status, text: await response.text() };
-			},
-			{ serviceId, professionalId, selectedDate, overlapPatient, overlapPhone }
-		);
-		expect(overlapResult.text).toContain('Ese horario no está disponible');
+			const overlapResult = await page.evaluate(
+				async ({ serviceId, professionalId, selectedDate, overlapPatient, overlapPhone }) => {
+					const form = new FormData();
+					form.set('service_id', serviceId);
+					form.set('professional_id', professionalId);
+					form.set('date', selectedDate);
+					form.set('time', '09:00');
+					form.set('patient_name', overlapPatient);
+					form.set('patient_phone', overlapPhone);
+					const response = await fetch('/odonto/agenda?/create_appointment', {
+						method: 'POST',
+						body: form,
+						credentials: 'include'
+					});
+					return { status: response.status, text: await response.text() };
+				},
+				{ serviceId, professionalId, selectedDate, overlapPatient, overlapPhone }
+			);
+			expect(overlapResult.text).toContain('Ese horario no está disponible');
 
-		await page.goto(`/odonto/agenda?date=${selectedDate}`);
-		await page.waitForLoadState('networkidle');
-		await openDayAppointmentsPanel(page);
-		await expect(page.getByText(patientName)).toBeVisible();
-		await expect(page.getByText(overlapPatient)).toHaveCount(0);
-		await expect(page.getByText(serviceName)).toBeVisible();
-		await expect(page.getByText(professionalName)).toBeVisible();
-		await expect(page.getByText('Reserva online').first()).toBeVisible();
+			await page.goto(`/odonto/agenda?date=${selectedDate}`);
+			await page.waitForLoadState('networkidle');
+			await openDayAppointmentsPanel(page);
+			await expect(page.getByText(patientName)).toBeVisible();
+			await expect(page.getByText(overlapPatient)).toHaveCount(0);
+			await expect(page.getByText(serviceName)).toBeVisible();
+			await expect(page.getByText(professionalName)).toBeVisible();
+			await expect(page.getByText('Reserva online').first()).toBeVisible();
 
-		await page.goto(publicTokenUrl);
-		await page.getByRole('button', { name: 'Confirmo que voy' }).click();
-		await expect(page.getByText('Turno confirmado.')).toBeVisible();
-		await page.goto(`/odonto/agenda?date=${selectedDate}&status=confirmed`);
-		await page.waitForLoadState('networkidle');
-		await openDayAppointmentsPanel(page);
-		const confirmedAppointment = page.locator('details, article').filter({ hasText: patientName }).first();
-		await expect(confirmedAppointment).toBeVisible();
-		await expect(confirmedAppointment.getByText('Confirmado')).toBeVisible();
+			await page.goto(publicTokenUrl);
+			await page.getByRole('button', { name: 'Confirmar turno' }).click();
+			await expect(page.getByText('Turno confirmado.')).toBeVisible();
+			await page.goto(`/odonto/agenda?date=${selectedDate}&status=confirmed`);
+			await page.waitForLoadState('networkidle');
+			await openDayAppointmentsPanel(page);
+			const confirmedAppointment = page.locator('details, article').filter({ hasText: patientName }).first();
+			await expect(confirmedAppointment).toBeVisible();
+			await expect(confirmedAppointment.getByText('Confirmado')).toBeVisible();
 
-		await page.goto('/odonto/maestro');
-		if (page.url().includes('/odonto/maestro')) {
-			const manage = page.getByRole('button', { name: 'Gestionar' }).first();
-			if (await manage.isVisible()) {
-				await manage.click();
-				const amount = page.getByPlaceholder('Monto opcional').first();
-				await amount.fill('1250000');
-				await expect(amount).toHaveValue('1.250.000');
+			await page.goto('/odonto/maestro');
+			if (page.url().includes('/odonto/maestro')) {
+				const manage = page.getByRole('button', { name: 'Gestionar' }).first();
+				if (await manage.isVisible()) {
+					await manage.click();
+					const amount = page.getByPlaceholder('Monto opcional').first();
+					await amount.fill('1250000');
+					await expect(amount).toHaveValue('1.250.000');
+				}
 			}
+		} finally {
+			await cleanupPublicBookingFixtures(fixture, { patientName, overlapPatient });
 		}
 	});
 
@@ -477,66 +697,74 @@ test.describe('Dental Suite - flujo operativo completo', () => {
 		test.setTimeout(240_000);
 
 		const suffix = uniqueSuffix().replace(/[^a-zA-Z0-9]/g, '').slice(-10);
-		const fixture = await createRoleFixtures(suffix);
+		let fixture: Awaited<ReturnType<typeof createRoleFixtures>> | null = null;
 
-		await loginAs(
-			page,
-			{ email: fixture.users.owner.email, password: fixture.password },
-			'Configuración'
-		);
-		await expect(page.getByRole('link', { name: 'Agenda' })).toBeVisible();
-		await expect(page.getByRole('link', { name: 'Pacientes' })).toBeVisible();
-		await expect(page.getByRole('link', { name: 'Profesionales' })).toBeVisible();
-		await expect(navItem(page, 'Configuración')).toBeVisible();
-		await page.goto('/odonto/configuracion/usuarios');
-		await expect(page.getByRole('heading', { name: 'Usuarios' })).toBeVisible();
-		await expect(addUserRoleSelect(page).locator('option', { hasText: 'Dueño' })).toHaveCount(1);
+		try {
+			fixture = await createRoleFixtures(suffix);
 
-		await loginAs(
-			page,
-			{ email: fixture.users.admin.email, password: fixture.password },
-			'Configuración'
-		);
-		await expect(page.getByRole('link', { name: 'Agenda' })).toBeVisible();
-		await expect(page.getByRole('link', { name: 'Profesionales' })).toBeVisible();
-		await page.goto('/odonto/configuracion/usuarios');
-		await expect(addUserRoleSelect(page).locator('option', { hasText: 'Dueño' })).toHaveCount(0);
-		await expect(addUserRoleSelect(page).locator('option', { hasText: 'Administrador' })).toHaveCount(0);
-		const adminSubscriptionResponse = await page.goto('/odonto/configuracion/suscripcion');
-		expect(adminSubscriptionResponse?.status()).toBe(403);
-		await expect(page.getByText('No tenés permisos para ver la suscripción.')).toBeVisible();
+			await loginAs(
+				page,
+				{ email: fixture.users.owner.email, password: fixture.password },
+				'Configuración'
+			);
+			await expect(page.getByRole('link', { name: 'Agenda' })).toBeVisible();
+			await expect(page.getByRole('link', { name: 'Pacientes' })).toBeVisible();
+			await expect(page.getByRole('link', { name: 'Profesionales' })).toBeVisible();
+			await expect(navItem(page, 'Configuración')).toBeVisible();
+			await page.goto('/odonto/configuracion/usuarios');
+			await expect(page.getByRole('heading', { name: 'Accesos' })).toBeVisible();
+			const ownerNewAccess = await openNewAccessRoleStep(page);
+			await expect(ownerNewAccess.getByRole('button', { name: 'Dueño', exact: true })).toBeVisible();
 
-		await loginAs(
-			page,
-			{ email: fixture.users.reception.email, password: fixture.password },
-			'Agenda'
-		);
-		await expect(page.getByRole('link', { name: 'Agenda' })).toBeVisible();
-		await expect(page.getByRole('link', { name: 'Pacientes' })).toBeVisible();
-		await expect(navItem(page, 'Configuración')).toHaveCount(0);
-		await expect(navItem(page, 'Profesionales')).toHaveCount(0);
-		await page.goto('/odonto/configuracion');
-		await expect(page).not.toHaveURL(/\/odonto\/configuracion$/);
-		await page.goto(`/odonto/pacientes/${fixture.linkedPatient.id}`);
-		await expect(page.getByRole('heading', { name: `Paciente Vinculado ${suffix}` })).toBeVisible();
-		await expect(page.getByText('Alergia secreta e2e')).toHaveCount(0);
+			await loginAs(
+				page,
+				{ email: fixture.users.admin.email, password: fixture.password },
+				'Configuración'
+			);
+			await expect(page.getByRole('link', { name: 'Agenda' })).toBeVisible();
+			await expect(page.getByRole('link', { name: 'Profesionales' })).toBeVisible();
+			await page.goto('/odonto/configuracion/usuarios');
+			const adminNewAccess = await openNewAccessRoleStep(page);
+			await expect(adminNewAccess.getByRole('button', { name: 'Dueño', exact: true })).toHaveCount(0);
+			await expect(adminNewAccess.getByRole('button', { name: 'Administrador', exact: true })).toHaveCount(0);
+			const adminSubscriptionResponse = await page.goto('/odonto/configuracion/suscripcion');
+			expect(adminSubscriptionResponse?.status()).toBe(403);
+			await expect(page.getByText('No tenés permisos para ver la suscripción.')).toBeVisible();
 
-		await loginAs(
-			page,
-			{ email: fixture.users.professional.email, password: fixture.password },
-			/Mis turnos|Mi perfil/
-		);
-		await expect(page.getByRole('link', { name: 'Mis turnos' })).toBeVisible();
-		await expect(page.getByRole('link', { name: 'Mis pacientes' })).toBeVisible();
-		await expect(page.getByRole('link', { name: 'Mi perfil' })).toBeVisible();
-		await expect(navItem(page, 'Configuración')).toHaveCount(0);
-		await expect(navItem(page, 'Profesionales')).toHaveCount(0);
-		await page.goto('/odonto/configuracion');
-		await expect(page).toHaveURL(/\/odonto\/mi-perfil/);
-		await page.goto(`/odonto/pacientes/${fixture.linkedPatient.id}`);
-		await expect(page.getByRole('heading', { name: `Paciente Vinculado ${suffix}` })).toBeVisible();
-		await expect(page.getByText('Alergia secreta e2e').first()).toBeVisible();
-		await page.goto(`/odonto/pacientes/${fixture.hiddenPatient.id}`);
-		await expect(page.getByText(/No tenés acceso a este paciente|No tienes acceso a este paciente/)).toBeVisible();
+			await loginAs(
+				page,
+				{ email: fixture.users.reception.email, password: fixture.password },
+				'Agenda'
+			);
+			await expect(page.getByRole('link', { name: 'Agenda' })).toBeVisible();
+			await expect(page.getByRole('link', { name: 'Pacientes' })).toBeVisible();
+			await expect(navItem(page, 'Configuración')).toHaveCount(0);
+			await expect(navItem(page, 'Profesionales')).toHaveCount(0);
+			await page.goto('/odonto/configuracion');
+			await expect(page).not.toHaveURL(/\/odonto\/configuracion$/);
+			await page.goto(`/odonto/pacientes/${fixture.linkedPatient.id}`);
+			await expect(page.getByRole('heading', { name: `Paciente Vinculado ${suffix}` })).toBeVisible();
+			await expect(page.getByText('Alergia secreta e2e')).toHaveCount(0);
+
+			await loginAs(
+				page,
+				{ email: fixture.users.professional.email, password: fixture.password },
+				/Mis turnos|Mi perfil/
+			);
+			await expect(page.getByRole('link', { name: 'Mis turnos' })).toBeVisible();
+			await expect(page.getByRole('link', { name: 'Mis pacientes' })).toBeVisible();
+			await expect(page.getByRole('link', { name: 'Mi perfil' })).toBeVisible();
+			await expect(navItem(page, 'Configuración')).toHaveCount(0);
+			await expect(navItem(page, 'Profesionales')).toHaveCount(0);
+			await page.goto('/odonto/configuracion');
+			await expect(page).toHaveURL(/\/odonto\/mi-perfil/);
+			await page.goto(`/odonto/pacientes/${fixture.linkedPatient.id}`);
+			await expect(page.getByRole('heading', { name: `Paciente Vinculado ${suffix}` })).toBeVisible();
+			await expect(page.getByText('Alergia secreta e2e').first()).toBeVisible();
+			await page.goto(`/odonto/pacientes/${fixture.hiddenPatient.id}`);
+			await expect(page.getByText(/No tenés acceso a este paciente|No tienes acceso a este paciente/)).toBeVisible();
+		} finally {
+			await cleanupRoleFixtures(fixture);
+		}
 	});
 });

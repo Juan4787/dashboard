@@ -19,12 +19,14 @@
 	}>();
 
 	const statusLabels: Record<string, string> = {
-		reserved: 'Pendientes',
+		pending_confirmation: 'Por confirmar',
+		reserved: 'Reservados',
 		confirmed: 'Confirmados',
 		cancelled: 'Cancelados',
 		reschedule_requested: 'Reprogramar',
 		attended: 'Asistieron',
-		no_show: 'No asistieron'
+		no_show: 'No asistieron',
+		expired: 'Expirados'
 	};
 
 	const statusText = (day: DaySummary) =>

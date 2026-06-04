@@ -6,6 +6,7 @@ import {
 import { normalizeSlug } from '$lib/server/business';
 import {
 	createSupabaseAdminClient,
+	createSupabaseServerClient,
 	getEmailFromAccessToken,
 	getUserIdFromAccessToken,
 	isMasterEmail
@@ -30,6 +31,7 @@ const EMAIL_FORMAT_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DURATION_SECONDS: Record<string, { seconds: number | null; unit: string; label: string }> = {
 	hour_1: { seconds: 60 * 60, unit: 'hour', label: '1 hora' },
 	day_1: { seconds: 24 * 60 * 60, unit: 'day', label: '1 día' },
+	day_7: { seconds: 7 * 24 * 60 * 60, unit: 'day', label: '7 días' },
 	month_1: { seconds: 30 * 24 * 60 * 60, unit: 'month', label: '1 mes' },
 	month_2: { seconds: 2 * 30 * 24 * 60 * 60, unit: 'month', label: '2 meses' },
 	month_3: { seconds: 3 * 30 * 24 * 60 * 60, unit: 'month', label: '3 meses' },
@@ -790,22 +792,26 @@ export const actions: Actions = {
 			return fail(403, { message: 'El email maestro no puede deshabilitarse.' });
 		}
 
-		const { error } = enabled
-			? await admin
-					.from('allowed_emails')
-					.update({
-						enabled: true,
-						disabled_at: null,
-						disabled_reason: null,
-						updated_by: master.userId
-					})
-					.eq('id', id)
-			: await admin.rpc('disable_allowed_email_as_master_safely', {
-					p_email: String(existingEmail.email ?? ''),
-					p_actor_id: master.userId,
-					p_actor_email: master.email,
-					p_reason: reason
-				});
+		let error: { message?: string; details?: string } | null = null;
+		if (enabled) {
+			const result = await admin
+				.from('allowed_emails')
+				.update({
+					enabled: true,
+					disabled_at: null,
+					disabled_reason: null,
+					updated_by: master.userId
+				})
+				.eq('id', id);
+			error = result.error;
+		} else {
+			const authenticatedMaster = await createSupabaseServerClient('odonto', locals.auth, fetch);
+			const result = await authenticatedMaster.rpc('disable_allowed_email_as_authenticated_master_safely', {
+				p_email: String(existingEmail.email ?? ''),
+				p_reason: reason
+			});
+			error = result.error;
+		}
 
 		if (error) {
 			console.error('Error actualizando email', error);

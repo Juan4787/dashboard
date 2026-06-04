@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Business } from './business';
 
-const BLOCKING_STATUSES = ['reserved', 'confirmed', 'reschedule_requested'] as const;
+const BLOCKING_STATUSES = ['pending_confirmation', 'reserved', 'confirmed', 'reschedule_requested'] as const;
 
 export type AvailabilitySlot = {
 	date: string;
@@ -28,6 +28,8 @@ type ProfessionalRow = {
 	name: string;
 	is_public: boolean;
 	is_active: boolean;
+	profile_status?: string | null;
+	name_source?: string | null;
 };
 
 type RuleRow = {
@@ -167,6 +169,12 @@ export const getAvailabilitySlots = async (
 ): Promise<AvailabilitySlot[]> => {
 	const { business, serviceId, professionalId, publicOnly = false } = input;
 
+	try {
+		await supabase.rpc('expire_public_booking_holds');
+	} catch {
+		// La expiracion es best-effort para compatibilidad con entornos sin la migracion aplicada.
+	}
+
 	if (publicOnly && (!business.is_active || !business.public_booking_enabled)) return [];
 
 	const { data: service, error: serviceError } = await supabase
@@ -181,7 +189,7 @@ export const getAvailabilitySlots = async (
 
 	let assignmentQuery = supabase
 		.from('professional_services')
-		.select('professional_id, professionals!inner(id, name, is_public, is_active)')
+		.select('professional_id, professionals!inner(id, name, is_public, is_active, profile_status, name_source)')
 		.eq('business_id', business.id)
 		.eq('service_id', service.id);
 	if (professionalId) assignmentQuery = assignmentQuery.eq('professional_id', professionalId);
@@ -191,7 +199,14 @@ export const getAvailabilitySlots = async (
 
 	const professionals = (assignments ?? [])
 		.map((row: any) => row.professionals as ProfessionalRow)
-		.filter((professional) => professional?.is_active && (!publicOnly || professional.is_public));
+		.filter(
+			(professional) =>
+				professional?.is_active &&
+				(!publicOnly ||
+					(professional.is_public &&
+						(professional.profile_status ?? 'complete') === 'complete' &&
+						(professional.name_source ?? 'manual') === 'manual'))
+		);
 
 	if (professionals.length === 0) return [];
 	const professionalIds = professionals.map((professional) => professional.id);

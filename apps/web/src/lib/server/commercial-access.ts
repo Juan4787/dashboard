@@ -76,6 +76,8 @@ export const BUSINESS_SUBSCRIPTIONS_LEGACY_CUTOFF_ISO = '2026-05-28T05:21:36.000
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const ONE_DAY_MS = 24 * ONE_HOUR_MS;
 const BUSINESS_SUBSCRIPTIONS_LEGACY_CUTOFF_MS = Date.parse(BUSINESS_SUBSCRIPTIONS_LEGACY_CUTOFF_ISO);
+const SHORT_ACCESS_WITHOUT_GRACE_SECONDS = new Set([60 * 60, 24 * 60 * 60]);
+const RESTRICTED_WINDOW_MS = 30 * ONE_DAY_MS;
 
 const fullCapabilities = (): BusinessAccessCapabilities => ({
 	canViewExistingPatients: true,
@@ -151,6 +153,24 @@ const parseTs = (value?: string | null) => {
 
 const isoOrNull = (value?: string | null) => value ?? null;
 
+const isShortAccessWithoutGrace = (subscription?: BusinessSubscriptionRow | null) =>
+	SHORT_ACCESS_WITHOUT_GRACE_SECONDS.has(Number(subscription?.last_grant_duration_seconds ?? 0));
+
+const effectiveGraceUntil = (subscription?: BusinessSubscriptionRow | null) => {
+	if (!subscription) return null;
+	if (isShortAccessWithoutGrace(subscription)) return subscription.paid_until ?? null;
+	return subscription.grace_until ?? null;
+};
+
+const effectiveRestrictedUntil = (subscription?: BusinessSubscriptionRow | null) => {
+	if (!subscription) return null;
+	if (!isShortAccessWithoutGrace(subscription)) return subscription.restricted_until ?? null;
+
+	const paidUntil = parseTs(subscription.paid_until);
+	if (paidUntil === null) return subscription.restricted_until ?? null;
+	return new Date(paidUntil + RESTRICTED_WINDOW_MS).toISOString();
+};
+
 const computeCommercialStatus = (
 	subscription: BusinessSubscriptionRow | null,
 	nowMs: number,
@@ -164,10 +184,10 @@ const computeCommercialStatus = (
 	const paidUntil = parseTs(subscription.paid_until);
 	if (paidUntil !== null && nowMs <= paidUntil) return 'active';
 
-	const graceUntil = parseTs(subscription.grace_until);
+	const graceUntil = parseTs(effectiveGraceUntil(subscription));
 	if (graceUntil !== null && nowMs <= graceUntil) return 'grace';
 
-	const restrictedUntil = parseTs(subscription.restricted_until);
+	const restrictedUntil = parseTs(effectiveRestrictedUntil(subscription));
 	if (restrictedUntil !== null && nowMs <= restrictedUntil) return 'restricted';
 
 	return 'archived';
@@ -231,8 +251,8 @@ export const getBusinessAccessState = (
 		isPermanent,
 		commercialAccessEnabled,
 		paidUntil: isoOrNull(safeSubscription?.paid_until),
-		graceUntil: isoOrNull(safeSubscription?.grace_until),
-		restrictedUntil: isoOrNull(safeSubscription?.restricted_until),
+		graceUntil: isoOrNull(effectiveGraceUntil(safeSubscription)),
+		restrictedUntil: isoOrNull(effectiveRestrictedUntil(safeSubscription)),
 		archivedAt: isoOrNull(safeSubscription?.archived_at),
 		daysUntilExpiration,
 		hoursUntilExpiration,

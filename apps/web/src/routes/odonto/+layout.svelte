@@ -62,17 +62,29 @@
 	];
 
 	const activeBusiness = $derived(data?.activeBusiness);
+	const isCommercialBlocked = $derived.by(() => {
+		const access = activeBusiness?.access;
+		return Boolean(
+			access &&
+				(!access.commercialAccessEnabled ||
+					access.commercialStatus === 'restricted' ||
+					access.commercialStatus === 'archived')
+		);
+	});
+
 	const configNav = $derived.by(() => {
+		if (isCommercialBlocked) return [];
 		const caps = activeBusiness?.capabilities;
 		if (!caps) return [];
 		return [
 			caps.canConfigureBusiness ? { label: 'Negocio', href: '/odonto/configuracion/negocio' } : null,
-			caps.canManageUsers ? { label: 'Usuarios', href: '/odonto/configuracion/usuarios' } : null,
+			caps.canManageUsers ? { label: 'Roles', href: '/odonto/configuracion/usuarios' } : null,
 			caps.canManageSubscription ? { label: 'Suscripción', href: '/odonto/configuracion/suscripcion' } : null,
 			caps.canConfigureCommunication ? { label: 'Comunicación', href: '/odonto/configuracion/comunicacion' } : null
 		].filter((item): item is NavItem => Boolean(item));
 	});
 	const visibleNav = $derived.by(() => {
+		if (isCommercialBlocked) return [];
 		if (activeBusiness?.role === 'professional') {
 			return professionalNav;
 		}
@@ -138,13 +150,13 @@
 
 	const commercialNotice = $derived.by(() => {
 		const access = activeBusiness?.access;
-		if (!access || !canSeeCommercialNotice) return null;
+		if (!access || !canSeeCommercialNotice || isCommercialBlocked) return null;
 		if (!access.commercialAccessEnabled) return 'La cuenta no está disponible. Contactá soporte.';
 		if (access.commercialStatus === 'archived') {
 			return 'La cuenta está archivada. Contactá soporte para solicitar reactivación o exportación.';
 		}
 		if (access.commercialStatus === 'restricted') {
-			return 'La cuenta está suspendida. Podés consultar información existente, pero las funciones operativas están pausadas.';
+			return 'La cuenta está suspendida. Regularizá la suscripción para continuar.';
 		}
 		if (access.commercialStatus === 'grace') {
 			return access.graceUntil
@@ -156,6 +168,26 @@
 		}
 		return null;
 	});
+
+	const blockedCommercialTitle = $derived.by(() =>
+		activeBusiness?.access?.commercialStatus === 'archived'
+			? 'Cuenta archivada'
+			: 'Suscripción pendiente de regularización'
+	);
+
+	const blockedCommercialMessage = $derived.by(() =>
+		activeBusiness?.access?.commercialStatus === 'archived'
+			? 'Contactá soporte para solicitar reactivación o exportación.'
+			: 'Para volver a operar el consultorio, regularizá la suscripción.'
+	);
+
+	const blockedCommercialBadge = $derived.by(() =>
+		activeBusiness?.access?.commercialStatus === 'archived' ? 'Archivado' : 'Regularización pendiente'
+	);
+
+	const blockedCommercialTone = $derived.by(() =>
+		activeBusiness?.access?.commercialStatus === 'archived' ? 'danger' : 'warning'
+	);
 
 	const shouldShowAccessChip = $derived.by(() => {
 		if (!accessLabel || !canSeeCommercialNotice) return false;
@@ -690,26 +722,40 @@
 	</header>
 
 	<main class="mx-auto max-w-6xl px-4 py-6" aria-busy={showSkeleton}>
-		{#if data?.businessError}
-			<div class="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900 dark:border-amber-400/30 dark:bg-amber-500/15 dark:text-amber-100">
-				{data.businessError}
-			</div>
-		{/if}
-		{#if commercialNotice}
-			<div
-				class={`mb-4 rounded-2xl border px-4 py-3 text-sm font-bold ${
-					accessTone === 'danger'
-						? 'border-red-300 bg-red-50 text-red-900 dark:border-red-400/25 dark:bg-red-500/12 dark:text-red-100'
-						: 'border-amber-300 bg-amber-50 text-amber-950 dark:border-amber-400/25 dark:bg-amber-400/12 dark:text-amber-100'
-				}`}
-			>
-				{commercialNotice}
-			</div>
-		{/if}
-		{#if showSkeleton}
-			<OdontoRouteSkeleton kind={skeletonKind} />
+		{#if isCommercialBlocked}
+			<section class="mx-auto flex min-h-[55vh] w-full max-w-2xl items-center">
+				<div class="ux-card w-full text-center">
+					<span class={`ux-badge mx-auto ${blockedCommercialTone === 'danger' ? 'ux-badge-danger' : 'ux-badge-warning'}`}>
+						{blockedCommercialBadge}
+					</span>
+					<h1 class="mt-5 text-3xl font-black text-white">{blockedCommercialTitle}</h1>
+					<p class="mx-auto mt-3 max-w-md text-base font-bold text-white/75">
+						{blockedCommercialMessage}
+					</p>
+					<p class={`mt-6 text-left ${blockedCommercialTone === 'danger' ? 'ux-alert' : 'ux-alert ux-alert-warning'}`}>
+						Contactá soporte del sistema para regularizar el acceso.
+					</p>
+				</div>
+			</section>
 		{:else}
-			{@render children()}
+			{#if data?.businessError}
+				<div class="ux-alert ux-alert-warning mb-4" role="status">
+					{data.businessError}
+				</div>
+			{/if}
+			{#if commercialNotice}
+				<div
+					class={`mb-4 ${accessTone === 'danger' ? 'ux-alert' : 'ux-alert ux-alert-warning'}`}
+					role={accessTone === 'danger' ? 'alert' : 'status'}
+				>
+					{commercialNotice}
+				</div>
+			{/if}
+			{#if showSkeleton}
+				<OdontoRouteSkeleton kind={skeletonKind} />
+			{:else}
+				{@render children()}
+			{/if}
 		{/if}
 	</main>
 </div>

@@ -13,6 +13,9 @@
 	}>();
 
 	const appointment = $derived(data.appointment);
+	const isPending = $derived(appointment?.status === 'pending_confirmation');
+	const createdTitle = $derived(isPending ? 'Horario reservado por unos minutos' : 'Tu turno');
+	const createdBadge = $derived(isPending ? 'Falta confirmar' : data.created ? 'Reserva' : 'Turno');
 </script>
 
 <main class="min-h-screen bg-[#06111f] px-4 py-6 text-white sm:py-10">
@@ -21,10 +24,10 @@
 			{#if appointment?.business?.logo_url}
 				<img src={appointment.business.logo_url} alt={appointment.business.name} class="mb-5 h-16 w-16 rounded-2xl object-cover" />
 			{/if}
-			<p class="ux-badge">{data.created ? 'Reserva confirmada' : 'Turno'}</p>
-			<h1 class="ux-title mt-4">{data.created ? 'Listo, tu turno quedó reservado' : 'Tu turno'}</h1>
+			<p class="ux-badge">{createdBadge}</p>
+			<h1 class="ux-title mt-4">{data.created ? createdTitle : 'Tu turno'}</h1>
 			<p class="ux-subtitle">
-				{data.created ? 'Guardá este enlace para consultar, confirmar, reprogramar o cancelar el turno.' : data.message}
+				{data.created && isPending ? 'Confirmalo ahora para fijarlo.' : data.created ? 'Guardá este enlace para consultar, reprogramar o cancelar el turno.' : data.message}
 			</p>
 			{#if form?.message}
 				<p class={form.success ? 'ux-alert ux-alert-success mt-5' : 'ux-alert mt-5'}>{form.message}</p>
@@ -55,6 +58,9 @@
 						<p class="mt-2 text-lg font-bold text-white">{formatDateTime(appointment.starts_at)}</p>
 					</div>
 				</div>
+				{#if isPending && appointment.hold_expires_at}
+					<p class="ux-alert mt-5">Disponible hasta {formatDateTime(appointment.hold_expires_at)}.</p>
+				{/if}
 
 				{#if appointment.business.cancellation_policy}
 					<p class="ux-empty mt-5">{appointment.business.cancellation_policy}</p>
@@ -65,7 +71,9 @@
 				<h2 class="ux-section-title">Acciones</h2>
 				<div class="mt-5 grid gap-3">
 					<form method="POST" action="?/confirm">
-						<button disabled={!appointment.can_confirm} class="ux-btn-primary w-full">Confirmo que voy</button>
+						<button disabled={!appointment.can_confirm} class="ux-btn-primary w-full">
+							{isPending ? 'Confirmar turno' : 'Confirmo que voy'}
+						</button>
 					</form>
 					<details class="rounded-2xl border border-white/10 bg-white/[0.035]">
 						<summary class="cursor-pointer list-none px-5 py-4 text-base font-bold text-white">Necesito reprogramar</summary>

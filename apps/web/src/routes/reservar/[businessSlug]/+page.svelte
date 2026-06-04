@@ -33,9 +33,10 @@
 			};
 			selected: { serviceId: string; professionalId: string; date: string; slot: string };
 			turnstileSiteKey: string | null;
+			deviceReady: boolean;
 			demo: boolean;
 		};
-		form?: { message?: string; values?: Record<string, unknown> };
+		form?: { message?: string; requiresStepUp?: boolean; values?: Record<string, unknown> };
 	}>();
 
 	const business = $derived(data.state.business);
@@ -289,7 +290,7 @@
 						</label>
 					</div>
 
-					{#if data.turnstileSiteKey}
+					{#if data.turnstileSiteKey && form?.requiresStepUp}
 						<div class="cf-turnstile mt-5" data-sitekey={data.turnstileSiteKey}></div>
 					{/if}
 					{#if form?.message}
@@ -297,7 +298,7 @@
 					{/if}
 
 					<button type="submit" disabled={bookingSubmitting} class="ux-btn-primary mt-5 w-full">
-						{bookingSubmitting ? 'Confirmando reserva...' : 'Confirmar reserva'}
+						{bookingSubmitting ? 'Reservando horario...' : 'Reservar horario'}
 					</button>
 				</form>
 			{/if}

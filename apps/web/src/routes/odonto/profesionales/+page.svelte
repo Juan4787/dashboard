@@ -7,6 +7,8 @@
 		email: string | null;
 		is_public: boolean;
 		is_active: boolean;
+		profile_status?: 'incomplete' | 'complete';
+		name_source?: 'manual' | 'email_placeholder';
 	};
 
 	let { data, form } = $props<{
@@ -20,6 +22,7 @@
 
 	const canConfigureProfessionals = $derived(Boolean(data.context.capabilities?.canConfigureProfessionals) && !data.demo);
 	const activeCount = $derived(data.professionals.filter((item: Professional) => item.is_active && item.is_public).length);
+	const incompleteCount = $derived(data.professionals.filter((item: Professional) => item.profile_status === 'incomplete' || item.name_source === 'email_placeholder').length);
 	let showCreate = $state(false);
 
 	$effect(() => {
@@ -42,6 +45,9 @@
 
 	{#if form?.message}
 		<p class={form.success ? 'ux-alert ux-alert-success' : 'ux-alert'}>{form.message}</p>
+	{/if}
+	{#if incompleteCount > 0}
+		<p class="ux-alert">{incompleteCount} {incompleteCount === 1 ? 'profesional necesita' : 'profesionales necesitan'} configuración.</p>
 	{/if}
 
 	{#if showCreate}
@@ -95,11 +101,13 @@
 						<div class="min-w-0">
 							<div class="flex flex-wrap items-center gap-2">
 								<h3 class="truncate text-xl font-black text-white">{professional.name}</h3>
-								<span class={professional.is_active && professional.is_public ? 'ux-badge ux-badge-success' : 'ux-badge'}>
-									{professional.is_active && professional.is_public ? 'Disponible' : 'No disponible'}
+								<span class={professional.profile_status === 'incomplete' || professional.name_source === 'email_placeholder' ? 'ux-badge' : professional.is_active && professional.is_public ? 'ux-badge ux-badge-success' : 'ux-badge'}>
+									{professional.profile_status === 'incomplete' || professional.name_source === 'email_placeholder' ? 'Incompleto' : professional.is_active && professional.is_public ? 'Disponible' : 'No disponible'}
 								</span>
 							</div>
-							<p class="mt-1 text-sm text-white/55">{professional.specialty ?? 'Sin especialidad cargada'}</p>
+							<p class="mt-1 text-sm text-white/55">
+								{professional.name_source === 'email_placeholder' ? professional.email ?? 'Email pendiente' : professional.specialty ?? 'Sin especialidad cargada'}
+							</p>
 						</div>
 						<span class="ux-btn-secondary shrink-0">Configurar</span>
 					</div>

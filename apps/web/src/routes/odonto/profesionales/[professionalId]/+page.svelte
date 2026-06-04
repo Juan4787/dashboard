@@ -48,6 +48,8 @@
 				email: string | null;
 				is_active: boolean;
 				is_public: boolean;
+				profile_status?: 'incomplete' | 'complete';
+				name_source?: 'manual' | 'email_placeholder';
 			} | null;
 			services: Service[];
 			assignedServiceIds: string[];
@@ -63,6 +65,7 @@
 	const canConfigureServices = $derived(Boolean(data.context.capabilities?.canConfigureServices) && !data.demo);
 	const canConfigureAvailability = $derived(Boolean(data.context.capabilities?.canConfigureAvailability) && !data.demo);
 	const professional = $derived(data.professional);
+	const isIncomplete = $derived(professional?.profile_status === 'incomplete' || professional?.name_source === 'email_placeholder');
 	let activeTab = $state<TabId>('perfil');
 	let selectedServiceIds = $state<string[]>([]);
 	let selectedWeekdays = $state<number[]>([1, 2, 3, 4, 5]);
@@ -157,14 +160,17 @@
 				<h1 class="ux-title mt-4">{professional?.name ?? 'Profesional'}</h1>
 				<p class="ux-subtitle">{professional?.specialty ?? 'Definí qué atiende y cuándo.'}</p>
 			</div>
-			<span class={professional?.is_active && professional?.is_public ? 'ux-badge ux-badge-success' : 'ux-badge'}>
-				{professional?.is_active && professional?.is_public ? 'Disponible' : 'No disponible'}
+			<span class={isIncomplete ? 'ux-badge' : professional?.is_active && professional?.is_public ? 'ux-badge ux-badge-success' : 'ux-badge'}>
+				{isIncomplete ? 'Incompleto' : professional?.is_active && professional?.is_public ? 'Disponible' : 'No disponible'}
 			</span>
 		</div>
 	</div>
 
 	{#if form?.message}
 		<p class={form.success ? 'ux-alert ux-alert-success' : 'ux-alert'}>{form.message}</p>
+	{/if}
+	{#if isIncomplete}
+		<p class="ux-alert">Completá el perfil para usarlo en la reserva online.</p>
 	{/if}
 
 	<div class="ux-card p-2">

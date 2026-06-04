@@ -1,8 +1,9 @@
 import crypto from 'crypto';
+import { env } from '$env/dynamic/private';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Business } from './business';
 import { getAvailabilitySlots, type AvailabilitySlot, addMinutes } from './availability';
-import { createManualAppointment, getHumanAppointmentErrorMessage } from './appointments';
+import { getHumanAppointmentErrorMessage } from './appointments';
 import {
 	getBusinessAccessState,
 	publicBusinessUnavailableMessage,
@@ -65,12 +66,17 @@ type BookingAttemptInput = {
 	businessId?: string | null;
 	phoneE164?: string | null;
 	ipHash?: string | null;
+	emailHash?: string | null;
+	deviceHash?: string | null;
+	identityBundleHash?: string | null;
 	action: 'booking_create' | 'token_confirm' | 'token_cancel' | 'token_reschedule';
 	success: boolean;
 	errorCode?: string | null;
 	userAgent?: string | null;
 	idempotencyKey?: string | null;
 	appointmentId?: string | null;
+	riskScore?: number | null;
+	riskFlags?: string[] | null;
 	metadata?: Record<string, unknown> | null;
 };
 
@@ -99,10 +105,24 @@ export const addDaysToDateString = (date: string, days: number) => {
 export const todayForBusiness = (business: Pick<Business, 'timezone'>) =>
 	localDateParts(new Date(), business.timezone);
 
+const hashSecret = () =>
+	env.PUBLIC_BOOKING_HASH_SECRET ??
+	env.RATE_LIMIT_HASH_SECRET ??
+	env.ODONTO_PUBLIC_HASH_SECRET ??
+	env.ODONTO_SUPABASE_SERVICE_ROLE_KEY ??
+	'public-booking-development-secret';
+
 export const publicHash = (value?: string | null) => {
 	const normalized = String(value ?? '').trim();
 	if (!normalized) return null;
-	return crypto.createHash('sha256').update(normalized).digest('hex');
+	return crypto.createHmac('sha256', hashSecret()).update(normalized).digest('hex');
+};
+
+export const expirePublicBookingHolds = async (supabase: SupabaseClient) => {
+	const { error } = await supabase.rpc('expire_public_booking_holds');
+	if (error) {
+		console.error('Error expirando holds publicos', error);
+	}
 };
 
 export const recordPublicBookingAttempt = async (
@@ -113,12 +133,17 @@ export const recordPublicBookingAttempt = async (
 		business_id: input.businessId ?? null,
 		phone_e164: input.phoneE164 ?? null,
 		ip_hash: input.ipHash ?? null,
+		email_hash: input.emailHash ?? null,
+		device_hash: input.deviceHash ?? null,
+		identity_bundle_hash: input.identityBundleHash ?? null,
 		action: input.action,
 		success: input.success,
 		error_code: input.errorCode ?? null,
 		user_agent: input.userAgent?.slice(0, 500) ?? null,
 		idempotency_key: input.idempotencyKey ?? null,
 		appointment_id: input.appointmentId ?? null,
+		risk_score: input.riskScore ?? 0,
+		risk_flags: input.riskFlags ?? [],
 		metadata: input.metadata ?? null
 	});
 
@@ -173,7 +198,7 @@ export const canUsePublicBusiness = async (
 	const { data, error } = await supabase
 		.from('business_subscriptions')
 		.select(
-			'id, business_id, commercial_access_enabled, is_permanent, subscription_status, paid_until, grace_until, restricted_until, archived_at, expiration_notice_enabled'
+			'id, business_id, commercial_access_enabled, is_permanent, subscription_status, paid_until, grace_until, restricted_until, archived_at, last_grant_duration_seconds, expiration_notice_enabled'
 		)
 		.eq('business_id', businessId)
 		.maybeSingle();
@@ -206,10 +231,12 @@ export const getReservableServices = async (
 				.order('name'),
 			supabase
 				.from('professionals')
-				.select('id, is_active, is_public')
+				.select('id, is_active, is_public, profile_status, name_source')
 				.eq('business_id', businessId)
 				.eq('is_active', true)
-				.eq('is_public', true),
+				.eq('is_public', true)
+				.eq('profile_status', 'complete')
+				.eq('name_source', 'manual'),
 			supabase.from('professional_services').select('service_id, professional_id').eq('business_id', businessId)
 		]);
 	if (servicesError) throw servicesError;
@@ -240,14 +267,20 @@ export const getReservableProfessionals = async (
 ): Promise<PublicProfessional[]> => {
 	const { data, error } = await supabase
 		.from('professional_services')
-		.select('professional_id, professionals!inner(id, name, specialty, avatar_url, is_active, is_public, sort_order)')
+		.select('professional_id, professionals!inner(id, name, specialty, avatar_url, is_active, is_public, sort_order, profile_status, name_source)')
 		.eq('business_id', input.businessId)
 		.eq('service_id', input.serviceId);
 	if (error) throw error;
 
 	return (data ?? [])
 		.map((row: any) => row.professionals)
-		.filter((professional: any) => professional?.is_active && professional?.is_public)
+		.filter(
+			(professional: any) =>
+				professional?.is_active &&
+				professional?.is_public &&
+				(professional.profile_status ?? 'complete') === 'complete' &&
+				(professional.name_source ?? 'manual') === 'manual'
+		)
 		.sort((a: any, b: any) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0) || String(a.name).localeCompare(String(b.name)))
 		.map((professional: any) => ({
 			id: String(professional.id),
@@ -398,6 +431,7 @@ export const loadPublicBookingState = async (
 		date?: string | null;
 	}
 ): Promise<PublicBookingState> => {
+	await expirePublicBookingHolds(supabase);
 	const business = await getPublicBusinessBySlug(supabase, input.slug);
 	if (!business) {
 		return { business: null, services: [], professionals: [], slots: [], days: [], issue: 'business_not_found' };
@@ -522,23 +556,6 @@ const assertPublicBookingRateLimits = async (
 	}
 ) => {
 	const now = input.now ?? new Date();
-	const ipAttempts = input.ipHash
-		? await countPublicAttempts(supabase, {
-				action: 'booking_create',
-				ipHash: input.ipHash,
-				since: addMinutes(now, -10)
-			})
-		: 0;
-	if (ipAttempts >= 3) throw new Error('PUBLIC_RATE_LIMIT_IP');
-
-	const phoneAttempts = await countPublicAttempts(supabase, {
-		action: 'booking_create',
-		businessId: input.businessId,
-		phoneE164: input.phoneE164,
-		since: addMinutes(now, -30)
-	});
-	if (phoneAttempts >= 5) throw new Error('PUBLIC_RATE_LIMIT_PHONE');
-
 	const { data: patient, error: patientError } = await supabase
 		.from('patients')
 		.select('id, blocked')
@@ -554,10 +571,69 @@ const assertPublicBookingRateLimits = async (
 		.select('id', { count: 'exact', head: true })
 		.eq('business_id', input.businessId)
 		.eq('patient_id', patient.id)
-		.in('status', ['reserved', 'confirmed', 'reschedule_requested'])
+		.in('status', ['pending_confirmation', 'reserved', 'confirmed', 'reschedule_requested'])
 		.gte('starts_at', now.toISOString());
 	if (error) throw error;
-	if ((count ?? 0) >= 1) throw new Error('PUBLIC_BOOKING_ACTIVE_LIMIT');
+	if ((count ?? 0) >= 2) throw new Error('PUBLIC_BOOKING_ACTIVE_LIMIT');
+};
+
+export type PublicBookingRisk = {
+	score: number;
+	flags: string[];
+	requiresStepUp: boolean;
+};
+
+export const assessPublicBookingRisk = async (
+	supabase: SupabaseClient,
+	input: {
+		businessId: string;
+		phoneE164: string;
+		ipHash?: string | null;
+		deviceHash?: string | null;
+		userAgent?: string | null;
+		now?: Date;
+	}
+): Promise<PublicBookingRisk> => {
+	const now = input.now ?? new Date();
+	const flags: string[] = [];
+	let score = 0;
+
+	if (!input.deviceHash) {
+		flags.push('missing_device');
+		score += 15;
+	}
+	if (!input.userAgent || input.userAgent.length < 12) {
+		flags.push('thin_user_agent');
+		score += 20;
+	}
+
+	const ipAttempts = input.ipHash
+		? await countPublicAttempts(supabase, {
+				action: 'booking_create',
+				ipHash: input.ipHash,
+				since: addMinutes(now, -60)
+			})
+		: 0;
+	if (ipAttempts >= 3) {
+		flags.push('ip_velocity');
+		score += 45;
+	} else if (ipAttempts >= 2) {
+		flags.push('ip_reuse');
+		score += 25;
+	}
+
+	const phoneAttempts = await countPublicAttempts(supabase, {
+		action: 'booking_create',
+		businessId: input.businessId,
+		phoneE164: input.phoneE164,
+		since: addMinutes(now, -24 * 60)
+	});
+	if (phoneAttempts >= 2) {
+		flags.push('phone_daily_velocity');
+		score += 35;
+	}
+
+	return { score, flags, requiresStepUp: score >= 45 };
 };
 
 export const createPublicBooking = async (
@@ -572,6 +648,7 @@ export const createPublicBooking = async (
 		patientEmail?: string | null;
 		note?: string | null;
 		ipHash?: string | null;
+		deviceHash?: string | null;
 		userAgent?: string | null;
 		now?: Date;
 		idempotencyKey?: string | null;
@@ -580,6 +657,10 @@ export const createPublicBooking = async (
 	const now = input.now ?? new Date();
 	const business = await getPublicBusinessBySlug(supabase, input.slug);
 	let phoneE164: string | null = null;
+	let emailHash: string | null = null;
+	let phoneHash: string | null = null;
+	let identityBundleHash: string | null = null;
+	let risk: PublicBookingRisk = { score: 0, flags: [], requiresStepUp: false };
 
 	try {
 		if (!business || !business.is_active || !business.public_booking_enabled) {
@@ -599,6 +680,9 @@ export const createPublicBooking = async (
 		const email = String(input.patientEmail ?? '').trim();
 		if (patientName.length < 3) throw new Error('PUBLIC_PATIENT_NAME_INVALID');
 		if (!phoneE164 || !isLikelyPhoneE164(phoneE164)) throw new Error('PUBLIC_PATIENT_PHONE_INVALID');
+		phoneHash = publicHash(phoneE164);
+		emailHash = publicHash(email.toLowerCase());
+		identityBundleHash = publicHash([phoneE164, email.toLowerCase(), input.deviceHash ?? ''].join('|'));
 
 		const { data: duplicateAttempt, error: duplicateAttemptError } = await supabase
 			.from('public_booking_attempts')
@@ -621,6 +705,15 @@ export const createPublicBooking = async (
 			if (existingAppointment?.id) return { business, appointment: existingAppointment };
 		}
 
+		risk = await assessPublicBookingRisk(supabase, {
+			businessId: business.id,
+			phoneE164,
+			ipHash: input.ipHash ?? null,
+			deviceHash: input.deviceHash ?? null,
+			userAgent: input.userAgent,
+			now
+		});
+
 		await assertPublicBookingRateLimits(supabase, {
 			businessId: business.id,
 			phoneE164,
@@ -642,42 +735,35 @@ export const createPublicBooking = async (
 		);
 		if (!selectedSlot) throw new Error('PUBLIC_SLOT_UNAVAILABLE');
 
-		const created = await createManualAppointment(supabase, {
-			businessId: business.id,
-			ownerId: null,
-			createdByUserId: null,
-			patientName,
-			patientPhone: phoneRaw,
-			patientEmail: email || null,
-			serviceId: input.serviceId,
-			professionalId: input.professionalId,
-			startsAt: new Date(selectedSlot.starts_at),
-			internalNote: input.note?.trim() || null,
-			source: 'public_booking'
+		const { data: holdRows, error: holdError } = await supabase.rpc('reserve_public_booking_hold_safely', {
+			p_business_id: business.id,
+			p_service_id: input.serviceId,
+			p_professional_id: input.professionalId,
+			p_slot_starts_at: selectedSlot.starts_at,
+			p_patient_name: patientName,
+			p_phone_raw: phoneRaw,
+			p_phone_e164: phoneE164,
+			p_patient_email: email || null,
+			p_note: input.note?.trim() || null,
+			p_ip_hash: input.ipHash ?? null,
+			p_phone_hash: phoneHash,
+			p_email_hash: emailHash,
+			p_device_hash: input.deviceHash ?? null,
+			p_identity_bundle_hash: identityBundleHash,
+			p_risk_score: risk.score,
+			p_risk_flags: risk.flags,
+			p_idempotency_key: idempotencyKey,
+			p_now: now.toISOString()
 		});
-
-		await recordPublicBookingAttempt(supabase, {
-			businessId: business.id,
-			phoneE164,
-			ipHash: input.ipHash ?? null,
-			action: 'booking_create',
-			success: true,
-			userAgent: input.userAgent,
-			idempotencyKey,
-			appointmentId: created?.id ?? null,
-			metadata: {
-				appointment_id: created?.id ?? null,
-				service_id: input.serviceId,
-				professional_id: input.professionalId,
-				starts_at: selectedSlot.starts_at
-			}
-		});
+		if (holdError) throw holdError;
+		const created = Array.isArray(holdRows) ? holdRows[0] : holdRows;
+		if (!created?.appointment_id) throw new Error('PUBLIC_BOOKING_CREATE_FAILED');
 
 		const { data: appointment, error } = await supabase
 			.from('appointments')
 			.select('id, confirmation_token, starts_at, ends_at, service_name_snapshot, professional_name_snapshot, patients(full_name, phone_e164)')
 			.eq('business_id', business.id)
-			.eq('id', created?.id)
+			.eq('id', created.appointment_id)
 			.single();
 		if (error) throw error;
 		return { business, appointment };
@@ -686,11 +772,16 @@ export const createPublicBooking = async (
 			businessId: business?.id ?? null,
 			phoneE164,
 			ipHash: input.ipHash ?? null,
+			emailHash,
+			deviceHash: input.deviceHash ?? null,
+			identityBundleHash,
 			action: 'booking_create',
 			success: false,
 			errorCode: (error as Error)?.message ?? 'UNKNOWN',
 			userAgent: input.userAgent,
 			idempotencyKey: input.idempotencyKey ?? null,
+			riskScore: risk.score,
+			riskFlags: risk.flags,
 			metadata: {
 				slug: input.slug,
 				service_id: input.serviceId,
@@ -716,7 +807,7 @@ export const getPublicBookingErrorMessage = (error: unknown) => {
 		return 'Hubo demasiados intentos de reserva. Probá nuevamente en unos minutos.';
 	}
 	if (raw.includes('PUBLIC_BOOKING_ACTIVE_LIMIT')) {
-		return 'No se pudo completar la reserva online. Contactá al consultorio.';
+		return 'Ya tenés turnos activos en este consultorio. Si necesitás cambiar uno, comunicate con el consultorio.';
 	}
 	if (raw.includes('PUBLIC_BOOKING_BLOCKED_PATIENT') || raw.includes('PATIENT_BLOCKED')) {
 		return 'No se pudo completar la reserva online. Contactá al consultorio.';
