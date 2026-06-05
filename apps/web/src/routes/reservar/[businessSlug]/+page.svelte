@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { afterNavigate } from '$app/navigation';
 	import { formatDateTime } from '$lib/utils/format';
-	import { tick } from 'svelte';
+	import { onMount, tick } from 'svelte';
 
 	type Service = {
 		id: string;
@@ -33,9 +33,10 @@
 			};
 			selected: { serviceId: string; professionalId: string; date: string; slot: string };
 			turnstileSiteKey: string | null;
+			deviceReady: boolean;
 			demo: boolean;
 		};
-		form?: { message?: string; values?: Record<string, unknown> };
+		form?: { message?: string; requiresStepUp?: boolean; values?: Record<string, unknown> };
 	}>();
 
 	const business = $derived(data.state.business);
@@ -82,8 +83,16 @@
 	let daysSection = $state<HTMLElement | null>(null);
 	let slotsSection = $state<HTMLElement | null>(null);
 	let patientSection = $state<HTMLElement | null>(null);
+	let bookingIdempotencyKey = $state('');
 	const visibleDays = $derived(data.state.days.slice(0, visibleDayCount));
 	const visibleSlots = $derived(data.state.slots.slice(0, visibleSlotCount));
+
+	onMount(() => {
+		if (bookingIdempotencyKey) return;
+		bookingIdempotencyKey =
+			globalThis.crypto?.randomUUID?.() ??
+			`${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
+	});
 
 	const currentStepTarget = () => {
 		if (step === 2) return professionalsSection;
@@ -260,6 +269,7 @@
 					<input type="hidden" name="service_id" value={selectedService.id} />
 					<input type="hidden" name="professional_id" value={selectedProfessional.id} />
 					<input type="hidden" name="slot_starts_at" value={selectedSlot.starts_at} />
+					<input type="hidden" name="idempotency_key" value={bookingIdempotencyKey} />
 
 					<div class="mt-5 grid gap-4">
 						<label>
@@ -280,7 +290,7 @@
 						</label>
 					</div>
 
-					{#if data.turnstileSiteKey}
+					{#if data.turnstileSiteKey && form?.requiresStepUp}
 						<div class="cf-turnstile mt-5" data-sitekey={data.turnstileSiteKey}></div>
 					{/if}
 					{#if form?.message}
@@ -288,7 +298,7 @@
 					{/if}
 
 					<button type="submit" disabled={bookingSubmitting} class="ux-btn-primary mt-5 w-full">
-						{bookingSubmitting ? 'Confirmando reserva...' : 'Confirmar reserva'}
+						{bookingSubmitting ? 'Reservando horario...' : 'Reservar horario'}
 					</button>
 				</form>
 			{/if}

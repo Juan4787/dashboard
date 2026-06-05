@@ -1,4 +1,5 @@
 import { env } from '$env/dynamic/private';
+import { failFromAuthorization, requireCapability, requirePatientAccess } from '$lib/server/authorization';
 import { readDemoDb } from '$lib/server/demo-store';
 import { resolveActiveBusiness } from '$lib/server/business';
 import { createSupabaseServerClient } from '$lib/server/supabase';
@@ -53,6 +54,16 @@ export const GET: RequestHandler = async ({ params, url, locals, fetch, cookies 
 	});
 	if (!context) {
 		return json({ message: 'No se pudo resolver el negocio activo.' }, { status: 500 });
+	}
+	try {
+		requireCapability(context, 'canViewRadiologyReferences');
+		await requirePatientAccess(supabase, context, params.id, 'radiology');
+	} catch (err) {
+		const auth = failFromAuthorization(err);
+		return json(
+			{ message: auth?.message ?? 'No tenés acceso a los archivos de este paciente.' },
+			{ status: auth?.status ?? 403 }
+		);
 	}
 	let query = supabase
 		.from('patient_radiographs')

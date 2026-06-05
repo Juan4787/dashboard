@@ -24,7 +24,7 @@
 
 	let { data, form } = $props<{
 		data: {
-			context: { canOperate: boolean };
+			context: { capabilities?: Record<string, boolean> };
 			date: string;
 			selectedProfessionalId: string;
 			selectedStatus: string;
@@ -44,7 +44,7 @@
 		form?: { message?: string; values?: Record<string, unknown> };
 	}>();
 
-	const canOperate = $derived(data.context.canOperate && !data.demo);
+	const canCreateAppointment = $derived(Boolean((data.context as any).capabilities?.canCreateAppointment) && !data.demo);
 	let showCreate = $state(false);
 	let showSearch = $state(false);
 	let showDayAppointments = $state(false);
@@ -54,12 +54,14 @@
 	let dayAppointmentsSection = $state<HTMLElement | null>(null);
 
 	const statusLabels: Record<string, string> = {
+		pending_confirmation: 'Pendiente',
 		reserved: 'Reservado',
 		confirmed: 'Confirmado',
 		cancelled: 'Cancelado',
 		reschedule_requested: 'Reprogramar',
 		attended: 'Asistió',
-		no_show: 'No asistió'
+		no_show: 'No asistió',
+		expired: 'Expirado'
 	};
 
 	const sourceLabels: Record<string, string> = {
@@ -70,12 +72,14 @@
 	};
 
 	const statusTone: Record<string, string> = {
+		pending_confirmation: 'ux-badge ux-badge-warning',
 		reserved: 'ux-badge',
 		confirmed: 'ux-badge ux-badge-success',
 		cancelled: 'ux-badge ux-badge-danger',
 		reschedule_requested: 'ux-badge ux-badge-warning',
 		attended: 'ux-badge ux-badge-success',
-		no_show: 'ux-badge ux-badge-danger'
+		no_show: 'ux-badge ux-badge-danger',
+		expired: 'ux-badge ux-badge-danger'
 	};
 
 	const timeOnly = (value: string) =>
@@ -243,7 +247,7 @@
 				patients={data.patients}
 				initialDate={data.date}
 				initialPatientId={data.selectedPatientId}
-				{canOperate}
+				{canCreateAppointment}
 				{form}
 			/>
 		</div>

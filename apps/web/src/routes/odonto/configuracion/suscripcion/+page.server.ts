@@ -23,7 +23,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 	});
 	if (!context) throw kitError(500, 'No se pudo resolver el negocio activo');
 
-	if (context.role !== 'owner' && context.role !== 'admin') {
+	if (!context.capabilities.canManageSubscription) {
 		throw kitError(403, 'No tenés permisos para ver la suscripción.');
 	}
 

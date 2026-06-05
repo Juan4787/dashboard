@@ -10,7 +10,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 	}
 
 	if (env.DEMO_MODE === 'true') {
-		return { demo: true, driveConnection: null, canLinkExternalFiles: true };
+		return { demo: true, context: null, driveConnection: null, canLinkExternalFiles: true };
 	}
 
 	const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
@@ -19,7 +19,15 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 		accessToken: locals.auth.access_token,
 		cookies
 	});
-	if (context?.role === 'professional') throw redirect(303, '/odonto/mis-turnos');
+	const hasConsultorioSettings = Boolean(
+		context?.capabilities.canConfigureBusiness ||
+			context?.capabilities.canManageUsers ||
+			context?.capabilities.canManageSubscription ||
+			context?.capabilities.canConfigureCommunication
+	);
+	if (!context || !hasConsultorioSettings) {
+		throw redirect(303, context?.role === 'professional' ? '/odonto/mi-perfil' : '/odonto/agenda');
+	}
 	const ownerId = await getAuthUserId(supabase, locals.auth.access_token);
 	if (!ownerId) {
 		return { demo: false, driveConnection: null, canLinkExternalFiles: false };
@@ -37,8 +45,9 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 
 	return {
 		demo: false,
+		context,
 		driveConnection: data ?? null,
-		canLinkExternalFiles: Boolean(context?.access.allowedCapabilities.canLinkExternalFiles)
+		canLinkExternalFiles: Boolean(context?.capabilities.canLinkExternalFiles)
 	};
 };
 
@@ -64,14 +73,20 @@ export const actions: Actions = {
 		}
 		const context = await resolveActiveBusiness({
 			supabase,
-			accessToken: locals.auth.access_token,
-			cookies
+		accessToken: locals.auth.access_token,
+		cookies
+	});
+	const hasConsultorioSettings = Boolean(
+		context?.capabilities.canConfigureBusiness ||
+			context?.capabilities.canManageUsers ||
+			context?.capabilities.canManageSubscription ||
+			context?.capabilities.canConfigureCommunication
+	);
+	if (!context || !hasConsultorioSettings || !context.capabilities.canLinkExternalFiles) {
+		return fail(403, {
+			message: 'No tenés permisos para administrar esta configuración.'
 		});
-		if (!context?.access.allowedCapabilities.canLinkExternalFiles) {
-			return fail(403, {
-				message: 'La cuenta está suspendida. Regularizá la suscripción para volver a operar.'
-			});
-		}
+	}
 		const { error } = await supabase
 			.from('drive_connections')
 			.upsert(
@@ -104,22 +119,30 @@ export const actions: Actions = {
 		}
 		const context = await resolveActiveBusiness({
 			supabase,
-			accessToken: locals.auth.access_token,
-			cookies
-		});
-		if (!context) {
-			return fail(500, { message: 'No se pudo resolver el negocio activo.' });
-		}
-		if (!context.access.allowedCapabilities.canLinkExternalFiles) {
+		accessToken: locals.auth.access_token,
+		cookies
+	});
+	const hasConsultorioSettings = Boolean(
+		context?.capabilities.canConfigureBusiness ||
+			context?.capabilities.canManageUsers ||
+			context?.capabilities.canManageSubscription ||
+			context?.capabilities.canConfigureCommunication
+	);
+	if (!context || !hasConsultorioSettings) {
+		return fail(500, { message: 'No se pudo resolver el negocio activo.' });
+	}
+		if (!context.capabilities.canLinkExternalFiles) {
 			return fail(403, {
 				message: 'La cuenta está suspendida. Regularizá la suscripción para volver a operar.'
 			});
 		}
 		const { error } = await supabase.from('drive_connections').delete().eq('owner_id', ownerId);
-		const { error: resetError } = await supabase
-			.from('patients')
-			.update({ drive_folder_id: null })
-			.eq('business_id', context.business.id);
+		const { error: resetError } =
+			context.role === 'owner' || context.role === 'admin'
+				? await supabase.rpc('clear_patient_drive_folders_safely', {
+						p_business_id: context.business.id
+					})
+				: { error: null };
 
 		if (error) {
 			console.error('Error desconectando Drive', error);

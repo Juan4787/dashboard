@@ -302,26 +302,30 @@ a {
 		width: fit-content;
 		align-items: center;
 		border-radius: 999px;
+		border: 1px solid rgba(196, 181, 253, 0.24);
 		background: rgba(124, 58, 237, 0.22);
 		padding: 0.45rem 0.8rem;
-		color: #c4b5fd;
+		color: #ddd6fe;
 		font-size: 0.78rem;
 		font-weight: 800;
 	}
 
 	.ux-badge-success {
-		background: rgba(52, 211, 153, 0.16);
-		color: #bbf7d0;
+		border-color: rgba(74, 222, 128, 0.34);
+		background: rgba(22, 101, 52, 0.45);
+		color: #dcfce7;
 	}
 
 	.ux-badge-warning {
-		background: rgba(251, 191, 36, 0.16);
-		color: #fde68a;
+		border-color: rgba(251, 191, 36, 0.42);
+		background: rgba(120, 53, 15, 0.56);
+		color: #fffbeb;
 	}
 
 	.ux-badge-danger {
-		background: rgba(248, 113, 113, 0.16);
-		color: #fecaca;
+		border-color: rgba(248, 113, 113, 0.42);
+		background: rgba(127, 29, 29, 0.56);
+		color: #fff1f2;
 	}
 
 	.ux-empty {
@@ -334,24 +338,26 @@ a {
 
 	.ux-alert {
 		border-radius: 1.1rem;
-		border: 1px solid rgba(248, 113, 113, 0.28);
-		background: rgba(248, 113, 113, 0.12);
+		border: 1px solid rgba(248, 113, 113, 0.48);
+		background: linear-gradient(135deg, rgba(127, 29, 29, 0.78), rgba(69, 10, 10, 0.68));
 		padding: 0.85rem 1rem;
-		color: #fecaca;
+		color: #fff1f2;
 		font-size: 0.9rem;
 		font-weight: 700;
+		line-height: 1.45;
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 	}
 
 	.ux-alert-success {
-		border-color: rgba(52, 211, 153, 0.3);
-		background: rgba(52, 211, 153, 0.12);
-		color: #bbf7d0;
+		border-color: rgba(74, 222, 128, 0.46);
+		background: linear-gradient(135deg, rgba(22, 101, 52, 0.76), rgba(5, 46, 22, 0.66));
+		color: #ecfdf5;
 	}
 
 	.ux-alert-warning {
-		border-color: rgba(251, 191, 36, 0.3);
-		background: rgba(251, 191, 36, 0.12);
-		color: #fde68a;
+		border-color: rgba(251, 191, 36, 0.5);
+		background: linear-gradient(135deg, rgba(120, 53, 15, 0.78), rgba(69, 26, 3, 0.68));
+		color: #fffbeb;
 	}
 
 	.ux-pill-nav {

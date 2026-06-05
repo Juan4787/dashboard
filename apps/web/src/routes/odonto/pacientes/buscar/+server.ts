@@ -13,6 +13,9 @@ export const GET: RequestHandler = async ({ url, locals, fetch, cookies }) => {
 	if (query.length < 2) return json({ patients: [] });
 
 	const { supabase, business } = await getOdontoContext({ locals, fetch, cookies });
+	if (!business.capabilities.canViewBasicPatients) {
+		return json({ message: 'No tenés permiso para buscar pacientes.' }, { status: 403 });
+	}
 	const safeQuery = query.replace(/[%_]/g, '\\$&');
 	const digits = query.replace(/\D/g, '');
 	const filters = [

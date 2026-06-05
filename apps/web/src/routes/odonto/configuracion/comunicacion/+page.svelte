@@ -12,7 +12,7 @@
 		form?: { success?: boolean; message?: string };
 	}>();
 
-	const canManage = $derived(Boolean(data.context?.canManage));
+	const canManage = $derived(Boolean(data.context?.capabilities?.canConfigureCommunication));
 	const replyEnabled = $derived(Boolean(data.account?.bot_enabled && data.account?.status === 'active'));
 	const siteUrl = $derived(typeof window === 'undefined' ? '' : window.location.origin);
 	const bookingUrl = $derived(`${siteUrl}${data.bookingPath}`);

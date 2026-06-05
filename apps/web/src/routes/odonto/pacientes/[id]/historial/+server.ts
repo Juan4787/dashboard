@@ -1,4 +1,5 @@
 import { env } from '$env/dynamic/private';
+import { failFromAuthorization, requirePatientAccess } from '$lib/server/authorization';
 import { readDemoDb } from '$lib/server/demo-store';
 import { resolveActiveBusiness } from '$lib/server/business';
 import { createSupabaseServerClient } from '$lib/server/supabase';
@@ -48,9 +49,21 @@ export const GET: RequestHandler = async ({ params, url, locals, fetch, cookies 
 	if (!context) {
 		return json({ message: 'No se pudo resolver el negocio activo.' }, { status: 500 });
 	}
+	if (!context.capabilities.canViewClinicalEntries) {
+		return json({ message: 'Tu rol no permite ver esta información clínica.' }, { status: 403 });
+	}
+	try {
+		await requirePatientAccess(supabase, context, params.id, 'clinical');
+	} catch (err) {
+		const auth = failFromAuthorization(err);
+		return json(
+			{ message: auth?.message ?? 'No tenés acceso a este historial clínico.' },
+			{ status: auth?.status ?? 403 }
+		);
+	}
 	let query = supabase
 		.from('clinical_entries')
-		.select('id, created_at, entry_type, description, teeth, amount, internal_note')
+		.select('id, created_at, entry_type, description, teeth, internal_note, created_by_user_id, created_by_professional_id, locked_after')
 		.eq('patient_id', params.id)
 		.eq('business_id', context.business.id)
 		.is('archived_at', null)
@@ -74,7 +87,21 @@ export const GET: RequestHandler = async ({ params, url, locals, fetch, cookies 
 
 	const rows = data ?? [];
 	const hasMore = rows.length > PAGE_SIZE;
-	const items = hasMore ? rows.slice(0, PAGE_SIZE) : rows;
+	let items = hasMore ? rows.slice(0, PAGE_SIZE) : rows;
+	if (context.capabilities.canViewCosts && items.length > 0) {
+		const { data: costs, error: costsError } = await supabase
+			.from('clinical_entry_costs')
+			.select('clinical_entry_id, amount')
+			.eq('business_id', context.business.id)
+			.in('clinical_entry_id', items.map((item: any) => item.id));
+		if (costsError) {
+			console.error('Error cargando costos paginados', costsError);
+		}
+		const costByEntryId = new Map((costs ?? []).map((item: any) => [String(item.clinical_entry_id), item.amount]));
+		items = items.map((item: any) => ({ ...item, amount: costByEntryId.get(String(item.id)) ?? null }));
+	} else {
+		items = items.map((item: any) => ({ ...item, amount: null }));
+	}
 	const last = items.at(-1);
 
 	return json({

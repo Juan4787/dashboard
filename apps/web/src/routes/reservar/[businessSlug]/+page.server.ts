@@ -2,18 +2,37 @@ import { env } from '$env/dynamic/private';
 import { env as publicEnv } from '$env/dynamic/public';
 import { createSupabaseAdminClient } from '$lib/server/supabase';
 import {
+	assessPublicBookingRisk,
 	createPublicBooking,
+	getPublicBusinessBySlug,
 	getPublicBookingErrorMessage,
 	loadPublicBookingState,
 	publicHash,
 	verifyTurnstileIfConfigured
 } from '$lib/server/public-booking';
+import { isLikelyPhoneE164, normalizePhoneE164 } from '$lib/server/phone';
 import { fail, redirect } from '@sveltejs/kit';
+import crypto from 'node:crypto';
 import type { Actions, PageServerLoad } from './$types';
 
 const valuesFromForm = (form: FormData) => Object.fromEntries(form.entries());
+const DEVICE_COOKIE = 'dz_public_device';
 
-export const load: PageServerLoad = async ({ params, fetch, url }) => {
+const getOrSetPublicDeviceId = (cookies: import('@sveltejs/kit').Cookies, secure: boolean) => {
+	const existing = cookies.get(DEVICE_COOKIE);
+	const deviceId = existing && /^[a-f0-9-]{20,80}$/i.test(existing) ? existing : crypto.randomUUID();
+	cookies.set(DEVICE_COOKIE, deviceId, {
+		path: '/',
+		httpOnly: true,
+		sameSite: 'lax',
+		secure,
+		maxAge: 60 * 60 * 24 * 180
+	});
+	return deviceId;
+};
+
+export const load: PageServerLoad = async ({ params, fetch, url, cookies }) => {
+	const deviceId = getOrSetPublicDeviceId(cookies, url.protocol === 'https:');
 	if (env.DEMO_MODE === 'true') {
 		return {
 			state: {
@@ -49,6 +68,7 @@ export const load: PageServerLoad = async ({ params, fetch, url }) => {
 				slot: url.searchParams.get('slot') ?? ''
 			},
 			turnstileSiteKey: null,
+			deviceReady: Boolean(deviceId),
 			demo: true
 		};
 	}
@@ -71,6 +91,7 @@ export const load: PageServerLoad = async ({ params, fetch, url }) => {
 				slot: url.searchParams.get('slot') ?? ''
 			},
 			turnstileSiteKey: publicEnv.PUBLIC_TURNSTILE_SITE_KEY ?? null,
+			deviceReady: Boolean(deviceId),
 			demo: false
 		};
 	} catch (error) {
@@ -86,13 +107,14 @@ export const load: PageServerLoad = async ({ params, fetch, url }) => {
 			},
 			selected: { serviceId: '', professionalId: '', date: '', slot: '' },
 			turnstileSiteKey: null,
+			deviceReady: Boolean(deviceId),
 			demo: false
 		};
 	}
 };
 
 export const actions: Actions = {
-	create_booking: async ({ request, params, fetch, getClientAddress }) => {
+	create_booking: async ({ request, params, fetch, getClientAddress, cookies, url }) => {
 		if (env.DEMO_MODE === 'true') return fail(400, { message: 'La demo no crea turnos reales.' });
 
 		const form = await request.formData();
@@ -103,23 +125,45 @@ export const actions: Actions = {
 		const patientPhone = String(form.get('patient_phone') ?? '').trim();
 		const patientEmail = String(form.get('patient_email') ?? '').trim();
 		const note = String(form.get('note') ?? '').trim();
+		const idempotencyKey = String(form.get('idempotency_key') ?? '').trim();
 		const turnstileToken = String(form.get('cf-turnstile-response') ?? '').trim();
 		const userAgent = request.headers.get('user-agent') ?? null;
 		const ip = getClientAddress();
+		const deviceHash = publicHash(getOrSetPublicDeviceId(cookies, url.protocol === 'https:'));
 
 		if (!serviceId || !professionalId || !slotStartsAt) {
 			return fail(400, { message: 'Elegí servicio, profesional y horario.', values: valuesFromForm(form) });
 		}
 
 		try {
-			await verifyTurnstileIfConfigured({
-				secret: env.TURNSTILE_SECRET_KEY,
-				token: turnstileToken,
-				remoteIp: ip,
-				fetchImpl: fetch
-			});
-
 			const supabase = await createSupabaseAdminClient('odonto', fetch);
+			const business = await getPublicBusinessBySlug(supabase, params.businessSlug);
+			const phoneE164 = normalizePhoneE164(patientPhone);
+			if (business?.id && phoneE164 && isLikelyPhoneE164(phoneE164)) {
+				const risk = await assessPublicBookingRisk(supabase, {
+					businessId: business.id,
+					phoneE164,
+					ipHash: publicHash(ip),
+					deviceHash,
+					userAgent
+				});
+				if (risk.requiresStepUp && env.TURNSTILE_SECRET_KEY?.trim()) {
+					if (!turnstileToken) {
+						return fail(400, {
+							message: 'Necesitamos validar esta reserva antes de continuar.',
+							requiresStepUp: true,
+							values: valuesFromForm(form)
+						});
+					}
+					await verifyTurnstileIfConfigured({
+						secret: env.TURNSTILE_SECRET_KEY,
+						token: turnstileToken,
+						remoteIp: ip,
+						fetchImpl: fetch
+					});
+				}
+			}
+
 			const result = await createPublicBooking(supabase, {
 				slug: params.businessSlug,
 				serviceId,
@@ -129,7 +173,9 @@ export const actions: Actions = {
 				patientPhone,
 				patientEmail,
 				note,
+				idempotencyKey,
 				ipHash: publicHash(ip),
+				deviceHash,
 				userAgent
 			});
 			throw redirect(303, `/turno/${result.appointment.confirmation_token}?creado=1`);

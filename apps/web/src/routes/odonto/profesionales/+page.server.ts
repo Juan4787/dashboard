@@ -19,12 +19,14 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 	}
 
 	const { supabase, business } = await getOdontoContext({ locals, fetch, cookies });
-	if (!business.canOperate) throw redirect(303, business.role === 'professional' ? '/odonto/mis-turnos' : '/odonto/agenda');
+	if (!business.capabilities.canConfigureProfessionals) {
+		throw redirect(303, business.role === 'professional' ? '/odonto/mis-turnos' : '/odonto/agenda');
+	}
 	const businessId = business.business.id;
 
 	const { data: professionals, error: professionalsError } = await supabase
 		.from('professionals')
-		.select('id, name, specialty, phone, email, avatar_url, is_public, is_active, sort_order, created_at')
+		.select('id, name, specialty, phone, email, avatar_url, is_public, is_active, sort_order, created_at, profile_status, name_source')
 		.eq('business_id', businessId)
 		.order('sort_order')
 		.order('name');
@@ -45,7 +47,7 @@ export const actions: Actions = {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
 		const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
-		if (!business.canOperate) return fail(403, { message: 'No tenés permisos para crear profesionales.' });
+		if (!business.capabilities.canConfigureProfessionals) return fail(403, { message: 'No tenés permisos para crear profesionales.' });
 
 		const form = await request.formData();
 		const name = String(form.get('name') ?? '').trim();
@@ -61,7 +63,9 @@ export const actions: Actions = {
 				phone: String(form.get('phone') ?? '').trim() || null,
 				email: String(form.get('email') ?? '').trim() || null,
 				is_public: isAvailable,
-				is_active: isAvailable
+				is_active: isAvailable,
+				profile_status: 'complete',
+				name_source: 'manual'
 			})
 			.select('id')
 			.single();
@@ -76,8 +80,7 @@ export const actions: Actions = {
 			userId,
 			action: 'professional.created',
 			entityType: 'professional',
-			entityId: data?.id ?? null,
-			metadata: { name }
+			entityId: data?.id ?? null
 		});
 
 		return { success: true, message: 'Profesional creado.' };
@@ -86,7 +89,7 @@ export const actions: Actions = {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
 		const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
-		if (!business.canOperate) return fail(403, { message: 'No tenés permisos para editar profesionales.' });
+		if (!business.capabilities.canConfigureProfessionals) return fail(403, { message: 'No tenés permisos para editar profesionales.' });
 
 		const form = await request.formData();
 		const professionalId = String(form.get('professional_id') ?? '').trim();
@@ -104,6 +107,8 @@ export const actions: Actions = {
 				email: String(form.get('email') ?? '').trim() || null,
 				is_public: isAvailable,
 				is_active: isAvailable,
+				profile_status: 'complete',
+				name_source: 'manual',
 				updated_at: new Date().toISOString()
 			})
 			.eq('business_id', business.business.id)
@@ -127,68 +132,55 @@ export const actions: Actions = {
 	link_user: async ({ request, locals, fetch, cookies }) => {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
-		const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
-		if (!business.canOperate) return fail(403, { message: 'No tenés permisos para vincular usuarios.' });
+		const { supabase, business } = await getOdontoContext({ locals, fetch, cookies });
+		if (!business.capabilities.canManageUsers) return fail(403, { message: 'No tenés permisos para vincular usuarios.' });
 
 		const form = await request.formData();
 		const professionalId = String(form.get('professional_id') ?? '').trim();
 		const targetUserId = String(form.get('user_id') ?? '').trim();
 		if (!professionalId || !targetUserId) return fail(400, { message: 'Faltan datos para vincular.' });
 
-		const { error } = await supabase.from('professional_users').upsert(
-			{
-				business_id: business.business.id,
-				professional_id: professionalId,
-				user_id: targetUserId
-			},
-			{ onConflict: 'business_id,professional_id,user_id' }
-		);
+		const { error } = await supabase.rpc('link_professional_user_safely', {
+			p_business_id: business.business.id,
+			p_professional_id: professionalId,
+			p_user_id: targetUserId
+		});
 
 		if (error) {
 			console.error('Error vinculando usuario profesional', error);
-			return fail(500, { message: 'No se pudo vincular el usuario.' });
+			const message = error.message?.includes('PROFESSIONAL_USER_ROLE_REQUIRED')
+				? 'Ese usuario debe tener rol Profesional antes de vincularlo.'
+				: error.message?.includes('USER_ALREADY_LINKED_TO_PROFESSIONAL')
+					? 'Ese usuario ya está vinculado a otro profesional.'
+					: error.message?.includes('PROFESSIONAL_ALREADY_LINKED_TO_USER')
+						? 'Ese profesional ya tiene un usuario vinculado.'
+						: 'No se pudo vincular el usuario.';
+			return fail(500, { message });
 		}
-
-		await writeAuditLog(supabase, {
-			businessId: business.business.id,
-			userId,
-			action: 'professional.user_linked',
-			entityType: 'professional',
-			entityId: professionalId,
-			metadata: { user_id: targetUserId }
-		});
 
 		return { success: true, message: 'Usuario vinculado.' };
 	},
 	unlink_user: async ({ request, locals, fetch, cookies }) => {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
-		const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
-		if (!business.canOperate) return fail(403, { message: 'No tenés permisos para desvincular usuarios.' });
+		const { supabase, business } = await getOdontoContext({ locals, fetch, cookies });
+		if (!business.capabilities.canManageUsers) return fail(403, { message: 'No tenés permisos para desvincular usuarios.' });
 
 		const form = await request.formData();
 		const linkId = String(form.get('link_id') ?? '').trim();
 		const professionalId = String(form.get('professional_id') ?? '').trim();
 		if (!linkId) return fail(400, { message: 'Vínculo inválido.' });
 
-		const { error } = await supabase
-			.from('professional_users')
-			.delete()
-			.eq('business_id', business.business.id)
-			.eq('id', linkId);
+		const { error } = await supabase.rpc('unlink_professional_user_safely', {
+			p_business_id: business.business.id,
+			p_link_id: linkId
+		});
 
 		if (error) {
 			console.error('Error desvinculando usuario profesional', error);
 			return fail(500, { message: 'No se pudo desvincular el usuario.' });
 		}
-
-		await writeAuditLog(supabase, {
-			businessId: business.business.id,
-			userId,
-			action: 'professional.user_unlinked',
-			entityType: 'professional',
-			entityId: professionalId || null
-		});
+		void professionalId;
 
 		return { success: true, message: 'Usuario desvinculado.' };
 	}

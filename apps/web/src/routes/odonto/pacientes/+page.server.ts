@@ -175,7 +175,7 @@ export const load: PageServerLoad = async ({ locals, url, fetch, cookies }) => {
 		query: '',
 		showArchived,
 		demo: false,
-		canCreatePatient: context.access.allowedCapabilities.canCreatePatient,
+		canCreatePatient: context.capabilities.canCreateBasicPatient,
 		totalCount,
 		activeCount,
 		archivedCount,
@@ -332,7 +332,7 @@ const handleCreatePatient = async ({
 		if (!context) {
 			return fail(500, { message: 'No se pudo resolver el negocio activo.', full_name, dni, phone });
 		}
-		if (!context.access.allowedCapabilities.canCreatePatient) {
+		if (!context.capabilities.canCreateBasicPatient) {
 			return fail(403, {
 				message: 'La cuenta está suspendida. Regularizá la suscripción para volver a operar.',
 				full_name,

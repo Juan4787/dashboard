@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { createSupabaseAdminClient } from './supabase';
 
 export const writeAuditLog = async (
 	supabase: SupabaseClient,
@@ -11,7 +12,9 @@ export const writeAuditLog = async (
 		metadata?: Record<string, unknown> | null;
 	}
 ) => {
-	const { error } = await supabase.from('audit_logs').insert({
+	const admin = await createSupabaseAdminClient('odonto');
+	void supabase;
+	const { error } = await admin.from('audit_logs').insert({
 		business_id: input.businessId,
 		user_id: input.userId ?? null,
 		action: input.action,
