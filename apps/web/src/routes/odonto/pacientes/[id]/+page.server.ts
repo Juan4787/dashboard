@@ -97,19 +97,29 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 
 	const [
 		{ data: patient, error: patientError },
+		{ data: clinicalProfile, error: clinicalProfileError },
 		{ data: entries, error: entriesError },
 		{ data: radiographs, error: radiographsError },
 		{ data: appointments, error: appointmentsError },
-		{ data: driveConnection, error: driveError }
+		{ data: driveConnection, error: driveError },
+		{ data: driveFolderId, error: driveFolderError }
 	] = await Promise.all([
 		supabase
 			.from('patients')
 			.select(
-				'id, full_name, dni, phone, email, birth_date, address, allergies, medication, background, insurance, insurance_plan, custom_fields, archived_at, created_at, updated_at, drive_folder_id'
+				'id, full_name, dni, phone, email, birth_date, address, insurance, insurance_plan, archived_at, created_at, updated_at'
 			)
 			.eq('id', params.id)
 			.eq('business_id', context.business.id)
 			.maybeSingle(),
+		context.access.allowedCapabilities.canViewExistingClinicalNotes
+			? supabase
+					.from('patient_clinical_profiles')
+					.select('allergies, medication, background, custom_fields')
+					.eq('patient_id', params.id)
+					.eq('business_id', context.business.id)
+					.maybeSingle()
+			: Promise.resolve({ data: null, error: null }),
 		supabase
 			.from('clinical_entries')
 			.select('id, created_at, entry_type, description, teeth, amount, internal_note')
@@ -143,13 +153,26 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 					.select('connected_email, root_folder_id, updated_at')
 					.eq('owner_id', ownerId)
 					.maybeSingle()
+			: Promise.resolve({ data: null, error: null }),
+		context.access.allowedCapabilities.canLinkExternalFiles
+			? supabase.rpc('get_patient_drive_folder_safely', {
+					p_business_id: context.business.id,
+					p_patient_id: params.id
+				})
 			: Promise.resolve({ data: null, error: null })
 	]);
 
-	if (patientError || !patient) {
+	if (patientError) {
+		console.error('Error cargando paciente', patientError);
+		throw kitError(500, 'No se pudo cargar el paciente');
+	}
+	if (!patient) {
 		throw kitError(404, 'Paciente no encontrado');
 	}
 
+	if (clinicalProfileError) {
+		console.error('Error cargando perfil clinico', clinicalProfileError);
+	}
 	if (entriesError) {
 		console.error('Error cargando entradas', entriesError);
 	}
@@ -162,6 +185,9 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 	if (driveError) {
 		console.error('Error cargando conexion Drive', driveError);
 	}
+	if (driveFolderError) {
+		console.error('Error cargando carpeta Drive del paciente', driveFolderError);
+	}
 
 	const safeEntries = entries ?? [];
 	const safeRadiographs = radiographs ?? [];
@@ -169,7 +195,14 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 	const hasMoreRadiographs = safeRadiographs.length > RADIOGRAPHS_PAGE_SIZE;
 
 	return {
-		patient,
+		patient: {
+			...patient,
+			allergies: clinicalProfile?.allergies ?? null,
+			medication: clinicalProfile?.medication ?? null,
+			background: clinicalProfile?.background ?? null,
+			custom_fields: clinicalProfile?.custom_fields ?? null,
+			drive_folder_id: typeof driveFolderId === 'string' ? driveFolderId : null
+		},
 		entries: hasMoreEntries ? safeEntries.slice(0, ENTRIES_PAGE_SIZE) : safeEntries,
 		appointments: appointments ?? [],
 		radiographs: hasMoreRadiographs
@@ -239,10 +272,9 @@ export const actions: Actions = {
 		}
 		const { supabase, ownerId, context } = session;
 		const { error } = await supabase.from('drive_connections').delete().eq('owner_id', ownerId);
-		const { error: resetError } = await supabase
-			.from('patients')
-			.update({ drive_folder_id: null })
-			.eq('business_id', context.business.id);
+		const { error: resetError } = await supabase.rpc('clear_patient_drive_folders_safely', {
+			p_business_id: context.business.id
+		});
 
 		if (error) {
 			console.error('Error desconectando Drive', error);
@@ -273,11 +305,11 @@ export const actions: Actions = {
 			return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
 		}
 		const { supabase, context } = session;
-		const { error } = await supabase
-			.from('patients')
-			.update({ drive_folder_id })
-			.eq('id', params.id)
-			.eq('business_id', context.business.id);
+		const { error } = await supabase.rpc('set_patient_drive_folder_safely', {
+			p_business_id: context.business.id,
+			p_patient_id: params.id,
+			p_drive_folder_id: drive_folder_id
+		});
 
 		if (error) {
 			console.error('Error guardando carpeta Drive', error);
@@ -748,14 +780,16 @@ export const actions: Actions = {
 			birth_date = birthDateRaw;
 		}
 
+		const clinicalUpdates = {
+			allergies: String(form.get('allergies') ?? '') || null,
+			medication: String(form.get('medication') ?? '') || null,
+			background: String(form.get('background') ?? '') || null
+		};
 		const updates = {
 			email: String(form.get('email') ?? '') || null,
 			dni: dni || null,
 			birth_date,
 			address: String(form.get('address') ?? '') || null,
-			allergies: String(form.get('allergies') ?? '') || null,
-			medication: String(form.get('medication') ?? '') || null,
-			background: String(form.get('background') ?? '') || null,
 			insurance: String(form.get('insurance') ?? '') || null,
 			insurance_plan: String(form.get('insurance_plan') ?? '') || null,
 			phone: phone || null,
@@ -769,7 +803,7 @@ export const actions: Actions = {
 			updateDemoDb((db) => {
 				const patient = db.patients.find((p) => p.id === params.id);
 				if (!patient) return;
-				Object.assign(patient, updates);
+				Object.assign(patient, updates, clinicalUpdates);
 				updated = true;
 			});
 
@@ -798,6 +832,24 @@ export const actions: Actions = {
 		if (error) {
 			console.error('Error actualizando paciente', error);
 			return fail(500, { message: 'No se pudo actualizar la ficha' });
+		}
+
+		if (context.role === 'owner' || context.role === 'admin') {
+			const { error: profileError } = await supabase.rpc('upsert_patient_clinical_profile_safely', {
+				p_business_id: context.business.id,
+				p_patient_id: params.id,
+				p_allergies: clinicalUpdates.allergies,
+				p_medication: clinicalUpdates.medication,
+				p_background: clinicalUpdates.background,
+				p_clinical_alert_note: null,
+				p_notes: null,
+				p_custom_fields: null
+			});
+
+			if (profileError) {
+				console.error('Error actualizando perfil clinico del paciente', profileError);
+				return fail(500, { message: 'No se pudo actualizar la información clínica' });
+			}
 		}
 
 		throw redirect(303, `/odonto/pacientes/${params.id}`);
