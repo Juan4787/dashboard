@@ -193,7 +193,11 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 			: Promise.resolve({ data: null, error: null })
 	]);
 
-	if (patientError || !patient) {
+	if (patientError) {
+		console.error('Error cargando paciente', patientError);
+		throw kitError(500, 'No se pudo cargar el paciente');
+	}
+	if (!patient) {
 		throw kitError(404, 'Paciente no encontrado');
 	}
 
