@@ -116,10 +116,9 @@ export const actions: Actions = {
 			});
 		}
 		const { error } = await supabase.from('drive_connections').delete().eq('owner_id', ownerId);
-		const { error: resetError } = await supabase
-			.from('patients')
-			.update({ drive_folder_id: null })
-			.eq('business_id', context.business.id);
+		const { error: resetError } = await supabase.rpc('clear_patient_drive_folders_safely', {
+			p_business_id: context.business.id
+		});
 
 		if (error) {
 			console.error('Error desconectando Drive', error);

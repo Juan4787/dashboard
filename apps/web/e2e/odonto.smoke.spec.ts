@@ -34,7 +34,7 @@ test.describe('Reserva pública - modo demo', () => {
 		await expect(page.getByText('Tu turno está reservado.')).toBeVisible();
 		await expect(page.getByRole('button', { name: 'Confirmo que voy' })).toBeEnabled();
 		await expect(page.getByText('Necesito reprogramar')).toBeVisible();
-		await expect(page.getByText('Cancelar turno')).toBeVisible();
+		await expect(page.locator('summary').filter({ hasText: 'Cancelar turno' })).toBeVisible();
 
 		await page.goto('/confirmar/demo-token');
 		await expect(page).toHaveURL(/\/turno\/demo-token\?accion=confirmar$/);

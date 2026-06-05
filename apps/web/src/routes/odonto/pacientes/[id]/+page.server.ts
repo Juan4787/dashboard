@@ -99,6 +99,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 		{ data: patient, error: patientError },
 		{ data: clinicalProfile, error: clinicalProfileError },
 		{ data: entries, error: entriesError },
+		{ data: costs, error: costsError },
 		{ data: radiographs, error: radiographsError },
 		{ data: appointments, error: appointmentsError },
 		{ data: driveConnection, error: driveError },
@@ -122,13 +123,19 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 			: Promise.resolve({ data: null, error: null }),
 		supabase
 			.from('clinical_entries')
-			.select('id, created_at, entry_type, description, teeth, amount, internal_note')
+			.select('id, created_at, entry_type, description, teeth, internal_note')
 			.eq('patient_id', params.id)
 			.eq('business_id', context.business.id)
 			.is('archived_at', null)
 			.order('created_at', { ascending: false })
 			.order('id', { ascending: false })
 			.limit(ENTRIES_PAGE_SIZE + 1),
+		context.access.allowedCapabilities.canViewExistingCosts
+			? supabase
+					.from('clinical_entry_costs')
+					.select('clinical_entry_id, amount')
+					.eq('business_id', context.business.id)
+			: Promise.resolve({ data: [], error: null }),
 		supabase
 			.from('patient_radiographs')
 			.select(
@@ -176,6 +183,9 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 	if (entriesError) {
 		console.error('Error cargando entradas', entriesError);
 	}
+	if (costsError) {
+		console.error('Error cargando costos clinicos', costsError);
+	}
 	if (radiographsError) {
 		console.error('Error cargando radiografias', radiographsError);
 	}
@@ -190,8 +200,15 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 	}
 
 	const safeEntries = entries ?? [];
+	const costByEntryId = new Map((costs ?? []).map((item: any) => [String(item.clinical_entry_id), item.amount]));
+	const entriesWithCosts = safeEntries.map((entry: any) => ({
+		...entry,
+		amount: context.access.allowedCapabilities.canViewExistingCosts
+			? (costByEntryId.get(String(entry.id)) ?? null)
+			: null
+	}));
 	const safeRadiographs = radiographs ?? [];
-	const hasMoreEntries = safeEntries.length > ENTRIES_PAGE_SIZE;
+	const hasMoreEntries = entriesWithCosts.length > ENTRIES_PAGE_SIZE;
 	const hasMoreRadiographs = safeRadiographs.length > RADIOGRAPHS_PAGE_SIZE;
 
 	return {
@@ -203,7 +220,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 			custom_fields: clinicalProfile?.custom_fields ?? null,
 			drive_folder_id: typeof driveFolderId === 'string' ? driveFolderId : null
 		},
-		entries: hasMoreEntries ? safeEntries.slice(0, ENTRIES_PAGE_SIZE) : safeEntries,
+		entries: hasMoreEntries ? entriesWithCosts.slice(0, ENTRIES_PAGE_SIZE) : entriesWithCosts,
 		appointments: appointments ?? [],
 		radiographs: hasMoreRadiographs
 			? safeRadiographs.slice(0, RADIOGRAPHS_PAGE_SIZE)
@@ -621,9 +638,12 @@ export const actions: Actions = {
 		if (!hasCapability(session, 'canCreateClinicalEntry')) {
 			return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
 		}
+		if (amount != null && !hasCapability(session, 'canViewExistingCosts')) {
+			return fail(403, { message: 'Tu rol no permite registrar importes.' });
+		}
 		const { supabase, ownerId, context } = session;
 
-		const { error } = await supabase.from('clinical_entries').insert({
+		const entryPayload = {
 			owner_id: ownerId,
 			business_id: context.business.id,
 			patient_id: params.id,
@@ -631,13 +651,54 @@ export const actions: Actions = {
 			description,
 			created_at,
 			teeth: teeth || null,
-			amount,
 			internal_note: internal_note || null
-		});
+		};
+		let { data: entry, error } = await supabase
+			.from('clinical_entries')
+			.insert(entryPayload)
+			.select('id')
+			.single();
 
-		if (error) {
+		if (error?.code === '42501') {
+			const fallbackPayload = {
+				owner_id: ownerId,
+				business_id: context.business.id,
+				patient_id: params.id,
+				entry_type,
+				description,
+				teeth: teeth || null,
+				internal_note: internal_note || null
+			};
+			const fallback = await supabase
+				.from('clinical_entries')
+				.insert(fallbackPayload)
+				.select('id')
+				.single();
+			entry = fallback.data;
+			error = fallback.error;
+		}
+
+		if (error || !entry) {
 			console.error('Error guardando entrada', error);
 			return fail(500, { message: 'No se pudo guardar la entrada' });
+		}
+
+		if (amount != null) {
+			const { error: costError } = await supabase.from('clinical_entry_costs').upsert(
+				{
+					business_id: context.business.id,
+					clinical_entry_id: entry.id,
+					amount,
+					created_by: ownerId,
+					updated_by: ownerId
+				},
+				{ onConflict: 'business_id,clinical_entry_id' }
+			);
+
+			if (costError) {
+				console.error('Error guardando importe de entrada', costError);
+				return fail(500, { message: 'La entrada se guardó, pero no se pudo guardar el importe.' });
+			}
 		}
 
 		throw redirect(303, `/odonto/pacientes/${params.id}`);
@@ -722,25 +783,49 @@ export const actions: Actions = {
 		if (!hasCapability(session, 'canEditClinicalEntry')) {
 			return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
 		}
-		const { supabase, context } = session;
+		if (amount != null && !hasCapability(session, 'canViewExistingCosts')) {
+			return fail(403, { message: 'Tu rol no permite registrar importes.' });
+		}
+		const { supabase, ownerId, context } = session;
 
-		const { error } = await supabase
+		const { data: updatedEntry, error } = await supabase
 			.from('clinical_entries')
 			.update({
 				entry_type,
 				description,
-				created_at,
 				teeth: teeth || null,
-				amount,
-				internal_note: internal_note || null
+				internal_note: internal_note || null,
+				updated_at: new Date().toISOString()
 			})
 			.eq('id', entry_id)
 			.eq('patient_id', params.id)
-			.eq('business_id', context.business.id);
+			.eq('business_id', context.business.id)
+			.select('id')
+			.maybeSingle();
 
 		if (error) {
 			console.error('Error actualizando entrada', error);
 			return fail(500, { message: 'No se pudo actualizar la entrada' });
+		}
+		if (!updatedEntry) {
+			return fail(404, { message: 'Entrada no encontrada o sin permiso de edición.' });
+		}
+
+		if (hasCapability(session, 'canViewExistingCosts')) {
+			const { error: costError } = await supabase.from('clinical_entry_costs').upsert(
+				{
+					business_id: context.business.id,
+					clinical_entry_id: entry_id,
+					amount,
+					updated_by: ownerId
+				},
+				{ onConflict: 'business_id,clinical_entry_id' }
+			);
+
+			if (costError) {
+				console.error('Error actualizando importe de entrada', costError);
+				return fail(500, { message: 'La entrada se actualizó, pero no se pudo guardar el importe.' });
+			}
 		}
 
 		throw redirect(303, `/odonto/pacientes/${params.id}`);
@@ -882,11 +967,11 @@ export const actions: Actions = {
 		}
 		const { supabase, context } = session;
 
-		const { error } = await supabase
-			.from('patients')
-			.update({ archived_at: new Date().toISOString() })
-			.eq('id', params.id)
-			.eq('business_id', context.business.id);
+		const { error } = await supabase.rpc('set_patient_archive_state_safely', {
+			p_business_id: context.business.id,
+			p_patient_id: params.id,
+			p_archived: true
+		});
 
 		if (error) {
 			console.error('Error archivando paciente', error);
@@ -922,11 +1007,11 @@ export const actions: Actions = {
 		}
 		const { supabase, context } = session;
 
-		const { error } = await supabase
-			.from('patients')
-			.update({ archived_at: null })
-			.eq('id', params.id)
-			.eq('business_id', context.business.id);
+		const { error } = await supabase.rpc('set_patient_archive_state_safely', {
+			p_business_id: context.business.id,
+			p_patient_id: params.id,
+			p_archived: false
+		});
 
 		if (error) {
 			console.error('Error desarchivando paciente', error);
@@ -960,29 +1045,8 @@ export const actions: Actions = {
 		if (!hasCapability(session, 'canEditPatient')) {
 			return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
 		}
-		const { supabase, context } = session;
-
-		// Primero borrar entradas clínicas para evitar errores de FK.
-		const { error: entriesError } = await supabase
-			.from('clinical_entries')
-			.delete()
-			.eq('patient_id', params.id)
-			.eq('business_id', context.business.id);
-		if (entriesError) {
-			console.error('Error eliminando entradas', entriesError);
-			return fail(500, { message: 'No se pudieron eliminar las entradas del paciente' });
-		}
-
-		const { error: patientError } = await supabase
-			.from('patients')
-			.delete()
-			.eq('id', params.id)
-			.eq('business_id', context.business.id);
-		if (patientError) {
-			console.error('Error eliminando paciente', patientError);
-			return fail(500, { message: 'No se pudo eliminar el paciente' });
-		}
-
-		throw redirect(303, '/odonto/pacientes');
+		return fail(403, {
+			message: 'Por seguridad, los pacientes no se eliminan directamente. Archivá el paciente para ocultarlo.'
+		});
 	}
 };

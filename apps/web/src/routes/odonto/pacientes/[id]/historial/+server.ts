@@ -50,7 +50,7 @@ export const GET: RequestHandler = async ({ params, url, locals, fetch, cookies 
 	}
 	let query = supabase
 		.from('clinical_entries')
-		.select('id, created_at, entry_type, description, teeth, amount, internal_note')
+		.select('id, created_at, entry_type, description, teeth, internal_note')
 		.eq('patient_id', params.id)
 		.eq('business_id', context.business.id)
 		.is('archived_at', null)
@@ -76,9 +76,33 @@ export const GET: RequestHandler = async ({ params, url, locals, fetch, cookies 
 	const hasMore = rows.length > PAGE_SIZE;
 	const items = hasMore ? rows.slice(0, PAGE_SIZE) : rows;
 	const last = items.at(-1);
+	let itemsWithCosts = items.map((item) => ({ ...item, amount: null as number | null }));
+
+	if (context.access.allowedCapabilities.canViewExistingCosts && items.length > 0) {
+		const { data: costs, error: costsError } = await supabase
+			.from('clinical_entry_costs')
+			.select('clinical_entry_id, amount')
+			.eq('business_id', context.business.id)
+			.in(
+				'clinical_entry_id',
+				items.map((item) => item.id)
+			);
+
+		if (costsError) {
+			console.error('Error cargando costos del historial', costsError);
+		} else {
+			const costByEntryId = new Map(
+				(costs ?? []).map((item) => [String(item.clinical_entry_id), item.amount])
+			);
+			itemsWithCosts = items.map((item) => ({
+				...item,
+				amount: costByEntryId.get(String(item.id)) ?? null
+			}));
+		}
+	}
 
 	return json({
-		items,
+		items: itemsWithCosts,
 		has_more: hasMore,
 		next_cursor_created_at: hasMore ? last?.created_at ?? null : null,
 		next_cursor_id: hasMore ? last?.id ?? null : null
