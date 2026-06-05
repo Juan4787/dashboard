@@ -106,7 +106,7 @@ export const getHumanAppointmentErrorMessage = (error: unknown) => {
 	if (raw.includes('APPOINTMENT_CANNOT_RESCHEDULE')) return 'Ese turno no se puede reprogramar.';
 	if (raw.includes('APPOINTMENT_ACCESS_DENIED')) return 'No tenés permiso para modificar este turno.';
 	if (raw.includes('BUSINESS_ACCESS_RESTRICTED')) {
-		return 'La cuenta está suspendida. Regularizá la suscripción para volver a operar.';
+		return 'Suscripción pendiente de regularización. Para volver a operar el consultorio, regularizá la suscripción.';
 	}
 	if (raw.includes('INVALID_PROFESSIONAL_STATUS')) return 'El profesional solo puede marcar asistencia o ausencia.';
 

@@ -69,7 +69,7 @@ export const actions: Actions = {
 		});
 		if (!context?.access.allowedCapabilities.canLinkExternalFiles) {
 			return fail(403, {
-				message: 'La cuenta está suspendida. Regularizá la suscripción para volver a operar.'
+				message: 'Suscripción pendiente de regularización. Para volver a operar el consultorio, regularizá la suscripción.'
 			});
 		}
 		const { error } = await supabase
@@ -112,7 +112,7 @@ export const actions: Actions = {
 		}
 		if (!context.access.allowedCapabilities.canLinkExternalFiles) {
 			return fail(403, {
-				message: 'La cuenta está suspendida. Regularizá la suscripción para volver a operar.'
+				message: 'Suscripción pendiente de regularización. Para volver a operar el consultorio, regularizá la suscripción.'
 			});
 		}
 		const { error } = await supabase.from('drive_connections').delete().eq('owner_id', ownerId);

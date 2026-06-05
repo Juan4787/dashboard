@@ -334,7 +334,7 @@ const handleCreatePatient = async ({
 		}
 		if (!context.access.allowedCapabilities.canCreatePatient) {
 			return fail(403, {
-				message: 'La cuenta está suspendida. Regularizá la suscripción para volver a operar.',
+				message: 'Suscripción pendiente de regularización. Para volver a operar el consultorio, regularizá la suscripción.',
 				full_name,
 				dni,
 				phone

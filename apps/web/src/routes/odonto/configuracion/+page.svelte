@@ -69,7 +69,7 @@
 			return;
 		}
 		if (!canLinkExternalFiles) {
-			errorMessage = 'La cuenta está suspendida. Regularizá la suscripción para volver a operar.';
+			errorMessage = 'Suscripción pendiente de regularización. Para volver a operar el consultorio, regularizá la suscripción.';
 			return;
 		}
 		busy = true;
@@ -115,7 +115,7 @@
 		successMessage = '';
 		infoMessage = '';
 		if (!canLinkExternalFiles) {
-			errorMessage = 'La cuenta está suspendida. Regularizá la suscripción para volver a operar.';
+			errorMessage = 'Suscripción pendiente de regularización. Para volver a operar el consultorio, regularizá la suscripción.';
 			return;
 		}
 		busy = true;
@@ -151,8 +151,8 @@
 		</a>
 		<a href="/odonto/configuracion/usuarios" class="ux-choice p-6">
 			<span class="ux-badge">Permisos</span>
-			<h2 class="mt-4 text-2xl font-bold text-white">Usuarios</h2>
-			<p class="mt-2 text-sm text-white/55">Quién puede entrar y qué puede hacer.</p>
+			<h2 class="mt-4 text-2xl font-bold text-white">Roles</h2>
+			<p class="mt-2 text-sm text-white/55">Accesos y permisos.</p>
 		</a>
 		<a href="/odonto/configuracion/suscripcion" class="ux-choice p-6">
 			<span class="ux-badge">Acceso</span>
@@ -197,7 +197,7 @@
 			<p class="ux-alert mt-4">Falta configurar Google Drive.</p>
 		{/if}
 		{#if !canLinkExternalFiles}
-			<p class="ux-alert mt-4">La cuenta está suspendida. Regularizá la suscripción para volver a operar.</p>
+			<p class="ux-alert mt-4">Suscripción pendiente de regularización. Para volver a operar el consultorio, regularizá la suscripción.</p>
 		{/if}
 		{#if errorMessage}
 			<p class="ux-alert mt-4">{errorMessage}</p>

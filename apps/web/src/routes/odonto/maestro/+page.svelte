@@ -48,6 +48,7 @@
 	const durationOptions = [
 		{ value: 'hour_1', label: '1 hora' },
 		{ value: 'day_1', label: '1 día' },
+		{ value: 'day_7', label: '7 días' },
 		...Array.from({ length: 12 }, (_, index) => ({
 			value: `month_${index + 1}`,
 			label: `${index + 1} mes${index === 0 ? '' : 'es'}`
@@ -140,7 +141,7 @@
 				: 'Activo';
 		}
 		if (business.access.commercialStatus === 'grace') return 'Vencido';
-		if (business.access.commercialStatus === 'restricted') return 'Suspendido';
+		if (business.access.commercialStatus === 'restricted') return 'Pendiente';
 		return 'Archivado';
 	};
 
@@ -150,6 +151,7 @@
 		if (business.access.visualStatus === 'expiring') return 'ux-badge ux-badge-warning';
 		if (business.access.commercialStatus === 'active') return 'ux-badge ux-badge-success';
 		if (business.access.commercialStatus === 'grace') return 'ux-badge ux-badge-warning';
+		if (business.access.commercialStatus === 'restricted') return 'ux-badge ux-badge-warning';
 		return 'ux-badge ux-badge-danger';
 	};
 
@@ -295,7 +297,7 @@
 					['active', 'Activo'],
 					['expiring', 'Vence pronto'],
 					['grace', 'Vencido'],
-					['restricted', 'Suspendido'],
+					['restricted', 'Pendiente'],
 					['archived', 'Archivado'],
 					['permanent', 'Permanente'],
 					['disabled', 'Deshabilitado']

@@ -205,6 +205,28 @@ const loadMemberships = async (
 	);
 };
 
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isDefaultBusinessCreationDisabled = (error: unknown) => {
+	const message =
+		typeof error === 'object' && error !== null && 'message' in error
+			? String((error as { message?: unknown }).message ?? '')
+			: String(error ?? '');
+	return message.includes('DEFAULT_BUSINESS_CREATION_DISABLED');
+};
+
+const reloadMembershipsAfterBootstrap = async (
+	supabase: SupabaseClient,
+	userId: string
+): Promise<BusinessContext[]> => {
+	for (const delay of [0, 150, 350]) {
+		if (delay > 0) await wait(delay);
+		const memberships = await loadMemberships(supabase, userId);
+		if (memberships.length > 0) return memberships;
+	}
+	return [];
+};
+
 export const resolveActiveBusiness = async ({
 	supabase,
 	accessToken,
@@ -224,9 +246,13 @@ export const resolveActiveBusiness = async ({
 			p_industry: 'odontology'
 		});
 		if (error) {
-			throw error;
+			memberships = await reloadMembershipsAfterBootstrap(supabase, userId);
+			if (memberships.length === 0 || !isDefaultBusinessCreationDisabled(error)) {
+				throw error;
+			}
+		} else {
+			memberships = await reloadMembershipsAfterBootstrap(supabase, userId);
 		}
-		memberships = await loadMemberships(supabase, userId);
 	}
 
 	const activeBusinessId = cookies?.get(ACTIVE_BUSINESS_COOKIE);

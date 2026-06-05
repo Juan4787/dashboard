@@ -83,18 +83,8 @@ describe('patient detail migrated actions', () => {
 		});
 	});
 
-	it('stores clinical entry amounts in clinical_entry_costs instead of clinical_entries', async () => {
-		const clinicalInsert = vi.fn((_payload: Record<string, unknown>) => ({
-			select: vi.fn(() => ({
-				single: vi.fn(async () => ({ data: { id: 'entry-1' }, error: null }))
-			}))
-		}));
-		const costUpsert = vi.fn(async () => ({ error: null }));
-		mocks.supabase.from.mockImplementation((table: string) => {
-			if (table === 'clinical_entries') return { insert: clinicalInsert };
-			if (table === 'clinical_entry_costs') return { upsert: costUpsert };
-			throw new Error(`Unexpected table ${table}`);
-		});
+	it('creates clinical entries through the safe RPC instead of direct table writes', async () => {
+		mocks.supabase.rpc.mockResolvedValue({ data: 'entry-1', error: null });
 
 		const form = new FormData();
 		form.set('entry_type', 'Consulta');
@@ -106,29 +96,48 @@ describe('patient detail migrated actions', () => {
 
 		await expectRedirectToPatient(actions.add_entry!(makeEvent(form)));
 
-		expect(clinicalInsert).toHaveBeenCalledTimes(1);
-		expect(clinicalInsert.mock.calls[0][0]).toEqual(
-			expect.objectContaining({
-				owner_id: ownerId,
-				business_id: businessId,
-				patient_id: patientId,
-				entry_type: 'Consulta',
-				description: 'Control clinico',
-				teeth: '11',
-				internal_note: 'nota interna'
-			})
-		);
-		expect(clinicalInsert.mock.calls[0][0]).not.toHaveProperty('amount');
-		expect(costUpsert).toHaveBeenCalledWith(
-			expect.objectContaining({
-				business_id: businessId,
-				clinical_entry_id: 'entry-1',
-				amount: 12000,
-				created_by: ownerId,
-				updated_by: ownerId
-			}),
-			{ onConflict: 'business_id,clinical_entry_id' }
-		);
+		expect(mocks.supabase.rpc).toHaveBeenCalledWith('create_clinical_entry_safely', {
+			p_business_id: businessId,
+			p_patient_id: patientId,
+			p_entry_type: 'Consulta',
+			p_description: 'Control clinico',
+			p_created_at: expect.any(String),
+			p_teeth: '11',
+			p_internal_note: 'nota interna',
+			p_amount: 12000
+		});
+		expect(mocks.supabase.from).not.toHaveBeenCalled();
+	});
+
+	it('returns a specific patient error when the clinical entry RPC rejects the patient scope', async () => {
+		mocks.supabase.rpc.mockResolvedValue({ data: null, error: { message: 'PATIENT_NOT_FOUND' } });
+
+		const form = new FormData();
+		form.set('entry_type', 'Consulta');
+		form.set('description', 'Control clinico');
+		form.set('created_at', '2026-06-05T09:30');
+
+		const result = (await actions.add_entry!(makeEvent(form))) as any;
+
+		expect(result.status).toBe(404);
+		expect(result.data.message).toBe('Paciente no encontrado en este consultorio.');
+		expect(mocks.supabase.rpc).toHaveBeenCalledWith('create_clinical_entry_safely', expect.any(Object));
+		expect(mocks.supabase.from).not.toHaveBeenCalled();
+	});
+
+	it('returns a specific permission error when the clinical entry RPC denies write access', async () => {
+		mocks.supabase.rpc.mockResolvedValue({ data: null, error: { message: 'CLINICAL_ENTRY_DENIED' } });
+
+		const form = new FormData();
+		form.set('entry_type', 'Consulta');
+		form.set('description', 'Control clinico');
+		form.set('created_at', '2026-06-05T09:30');
+
+		const result = (await actions.add_entry!(makeEvent(form))) as any;
+
+		expect(result.status).toBe(403);
+		expect(result.data.message).toBe('Tu rol no permite modificar la historia clinica de este paciente.');
+		expect(mocks.supabase.from).not.toHaveBeenCalled();
 	});
 
 	it('archives patients through the safe RPC instead of direct table updates', async () => {
@@ -152,18 +161,8 @@ describe('patient detail migrated actions', () => {
 		expect(mocks.supabase.from).not.toHaveBeenCalled();
 	});
 
-	it('updates clinical entry text separately from its amount', async () => {
-		const maybeSingle = vi.fn(async () => ({ data: { id: 'entry-1' }, error: null }));
-		const select = vi.fn(() => ({ maybeSingle }));
-		const updateEqChain = { eq: vi.fn(() => undefined as any), select };
-		updateEqChain.eq.mockReturnValue(updateEqChain);
-		const clinicalUpdate = vi.fn((_payload: Record<string, unknown>) => updateEqChain);
-		const costUpsert = vi.fn(async () => ({ error: null }));
-		mocks.supabase.from.mockImplementation((table: string) => {
-			if (table === 'clinical_entries') return { update: clinicalUpdate };
-			if (table === 'clinical_entry_costs') return { upsert: costUpsert };
-			throw new Error(`Unexpected table ${table}`);
-		});
+	it('updates clinical entries through the safe RPC instead of direct table writes', async () => {
+		mocks.supabase.rpc.mockResolvedValue({ data: null, error: null });
 
 		const form = new FormData();
 		form.set('entry_id', 'entry-1');
@@ -176,25 +175,17 @@ describe('patient detail migrated actions', () => {
 
 		await expectRedirectToPatient(actions.update_entry!(makeEvent(form)));
 
-		expect(clinicalUpdate).toHaveBeenCalledWith(
-			expect.objectContaining({
-				entry_type: 'Tratamiento',
-				description: 'Evolucion controlada',
-				teeth: '21',
-				internal_note: 'seguimiento'
-			})
-		);
-		expect(clinicalUpdate.mock.calls[0][0]).not.toHaveProperty('amount');
-		expect(clinicalUpdate.mock.calls[0][0]).not.toHaveProperty('created_at');
-		expect(costUpsert).toHaveBeenCalledWith(
-			expect.objectContaining({
-				business_id: businessId,
-				clinical_entry_id: 'entry-1',
-				amount: 18500,
-				updated_by: ownerId
-			}),
-			{ onConflict: 'business_id,clinical_entry_id' }
-		);
+		expect(mocks.supabase.rpc).toHaveBeenCalledWith('update_clinical_entry_safely', {
+			p_business_id: businessId,
+			p_patient_id: patientId,
+			p_entry_id: 'entry-1',
+			p_entry_type: 'Tratamiento',
+			p_description: 'Evolucion controlada',
+			p_teeth: '21',
+			p_internal_note: 'seguimiento',
+			p_amount: 18500
+		});
+		expect(mocks.supabase.from).not.toHaveBeenCalled();
 	});
 
 	it('unarchives patients through the safe RPC', async () => {

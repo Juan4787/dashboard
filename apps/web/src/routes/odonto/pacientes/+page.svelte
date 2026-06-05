@@ -467,7 +467,7 @@ const canCreatePatient = $derived(data.canCreatePatient !== false);
 <form method="post" action="?/create_patient" use:enhance class="space-y-4" onkeydown={preventEnterSubmit}>
 		{#if !canCreatePatient}
 			<div class="rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
-				La cuenta está suspendida. Regularizá la suscripción para volver a operar.
+				Suscripción pendiente de regularización. Para volver a operar el consultorio, regularizá la suscripción.
 			</div>
 		{/if}
 		<div class="space-y-2">

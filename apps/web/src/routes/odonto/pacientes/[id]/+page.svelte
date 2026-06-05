@@ -20,6 +20,18 @@
 			hasMoreEntries?: boolean;
 			hasMoreRadiographs?: boolean;
 			driveConnection: { connected_email?: string | null; root_folder_id?: string | null } | null;
+			permissions: {
+				canReadClinicalProfile: boolean;
+				canEditClinicalProfile: boolean;
+				canViewCosts: boolean;
+				canEditPatient: boolean;
+				canArchivePatient: boolean;
+				canCreateClinicalEntry: boolean;
+				canEditClinicalEntry: boolean;
+				canCreateAppointment: boolean;
+				canManageDriveFolders: boolean;
+				canManageRadiographs: boolean;
+			};
 			demo?: boolean;
 		};
 		form: { message?: string };
@@ -85,6 +97,20 @@
 	const requestedDelete = $derived.by(() => $page.url.searchParams.has('eliminar'));
 	const returnTo = $derived.by(() => encodeURIComponent(`${$page.url.pathname}?tab=radiografias`));
 	const connectConfigHref = $derived.by(() => `/odonto/configuracion?return=${returnTo}`);
+	const permissions = $derived(
+		data.permissions ?? {
+			canReadClinicalProfile: true,
+			canEditClinicalProfile: true,
+			canViewCosts: true,
+			canEditPatient: true,
+			canArchivePatient: true,
+			canCreateClinicalEntry: true,
+			canEditClinicalEntry: true,
+			canCreateAppointment: true,
+			canManageDriveFolders: true,
+			canManageRadiographs: true
+		}
+	);
 	const getDriveClient = async () => {
 		if (!driveClientPromise) {
 			driveClientPromise = import('$lib/client/drive');
@@ -103,6 +129,11 @@
 	$effect(() => {
 		if (requestedDelete) {
 			showDeleteConfirm = true;
+		}
+	});
+	$effect(() => {
+		if (!permissions.canArchivePatient) {
+			showDeleteConfirm = false;
 		}
 	});
 	$effect(() => {
@@ -531,6 +562,10 @@
 
 	const deleteRadiograph = async (radiographId: string) => {
 		if (!radiographId) return;
+		if (!permissions.canManageRadiographs) {
+			uploadError = 'Tu rol no permite administrar radiografías de este paciente.';
+			return;
+		}
 		uploadError = '';
 		uploadInfo = '';
 		try {
@@ -544,12 +579,20 @@
 	};
 
 	const openRadiographDeleteConfirm = (radiographId: string) => {
+		if (!permissions.canManageRadiographs) {
+			uploadError = 'Tu rol no permite administrar radiografías de este paciente.';
+			return;
+		}
 		deleteRadiographTargetId = radiographId;
 		deleteRadiographConfirmText = '';
 		showRadiographDeleteConfirm = true;
 	};
 
 	const openRetryUpload = (radiographId: string) => {
+		if (!permissions.canManageRadiographs) {
+			uploadError = 'Tu rol no permite administrar radiografías de este paciente.';
+			return;
+		}
 		const existing = radiographs.find((item) => item.id === radiographId);
 		if (existing) {
 			radiographNote = existing.note ?? '';
@@ -563,6 +606,10 @@
 	};
 
 	const openNewRadiographUpload = () => {
+		if (!permissions.canManageRadiographs) {
+			uploadError = 'Tu rol no permite administrar radiografías de este paciente.';
+			return;
+		}
 		retryTargetId = null;
 		radiographNote = '';
 		radiographTakenAt = '';
@@ -573,6 +620,10 @@
 	};
 
 	const openCameraUpload = () => {
+		if (!permissions.canManageRadiographs) {
+			uploadError = 'Tu rol no permite administrar radiografías de este paciente.';
+			return;
+		}
 		retryTargetId = null;
 		radiographNote = '';
 		radiographTakenAt = '';
@@ -595,6 +646,10 @@
 
 	const submitRadiographUpload = async () => {
 		if (!pendingRadiographFile) return;
+		if (!permissions.canManageRadiographs) {
+			uploadError = 'Tu rol no permite administrar radiografías de este paciente.';
+			return;
+		}
 		if (radiographTakenAt && !/^\d{4}-\d{2}-\d{2}$/.test(radiographTakenAt)) {
 			uploadError = 'La fecha debe tener formato AAAA-MM-DD.';
 			return;
@@ -606,6 +661,11 @@
 	};
 
 	const uploadRadiograph = async (file: File, existingId?: string) => {
+		if (!permissions.canManageRadiographs) {
+			uploadError = 'Tu rol no permite administrar radiografías de este paciente.';
+			retryTargetId = null;
+			return;
+		}
 		if (data.demo) {
 			uploadError = 'No disponible en modo demo.';
 			retryTargetId = null;
@@ -726,9 +786,9 @@ let amountDisplay = $state('');
 let amountRaw = $state('');
 let editAmountDisplay = $state('');
 let editAmountRaw = $state('');
-let archiveForm: HTMLFormElement | null = null;
-let unarchiveForm: HTMLFormElement | null = null;
-let deleteForm: HTMLFormElement | null = null;
+let archiveForm: HTMLFormElement | null = $state(null);
+let unarchiveForm: HTMLFormElement | null = $state(null);
+let deleteForm: HTMLFormElement | null = $state(null);
 	const isArchived = $derived(Boolean(data.patient.archived_at));
 	const hasPatientData = $derived(
 		Boolean(
@@ -844,40 +904,39 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				</button>
 			</div>
 			<div class="hidden md:grid md:grid-cols-2 md:gap-2 md:justify-items-start lg:flex lg:flex-wrap lg:items-center lg:gap-3">
-				<form method="post" action="?/archive_patient" class="contents" bind:this={archiveForm}>
-					<button
-						type="submit"
-						class="rounded-full bg-neutral-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-neutral-800 hover:shadow-card dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white md:inline-flex md:justify-self-start"
-						onclick={(event: MouseEvent) => {
-							event.preventDefault();
-							showArchiveConfirm = true;
-						}}
-					>
-						{isArchived ? 'Desarchivar paciente' : 'Archivar paciente'}
-					</button>
-				</form>
+				{#if permissions.canArchivePatient}
+					<form method="post" action="?/archive_patient" class="contents" bind:this={archiveForm}>
+						<button
+							type="submit"
+							class="rounded-full bg-neutral-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-neutral-800 hover:shadow-card dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white md:inline-flex md:justify-self-start"
+							onclick={(event: MouseEvent) => {
+								event.preventDefault();
+								showArchiveConfirm = true;
+							}}
+						>
+							{isArchived ? 'Desarchivar paciente' : 'Archivar paciente'}
+						</button>
+					</form>
+				{/if}
 				<form method="post" action="?/unarchive_patient" class="hidden" bind:this={unarchiveForm}></form>
 				<form method="post" action="?/delete_patient" class="hidden" bind:this={deleteForm}></form>
-				<button
-					class="rounded-full bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-red-700 hover:shadow-card dark:bg-red-700 dark:hover:bg-red-800 md:inline-flex md:justify-self-start"
-					type="button"
-					onclick={() => (showDeleteConfirm = true)}
-				>
-					Eliminar paciente
-				</button>
-				<button
-					class="rounded-full bg-[#7c3aed] px-5 py-2 text-sm font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed] md:col-span-2 md:inline-flex md:justify-self-start lg:col-span-1"
-					type="button"
-					onclick={openNewEntryModal}
-				>
-					+ Registrar consulta
-				</button>
-				<a
-					href={`/odonto/agenda?patient_id=${data.patient.id}`}
-					class="rounded-full border border-[#7c3aed]/40 px-5 py-2 text-sm font-semibold text-[#7c3aed] transition hover:-translate-y-0.5 hover:bg-[#7c3aed]/10 dark:text-[#c4b5fd] md:col-span-2 md:inline-flex md:justify-self-start lg:col-span-1"
-				>
-					+ Nuevo turno
-				</a>
+				{#if permissions.canCreateClinicalEntry}
+					<button
+						class="rounded-full bg-[#7c3aed] px-5 py-2 text-sm font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed] md:col-span-2 md:inline-flex md:justify-self-start lg:col-span-1"
+						type="button"
+						onclick={openNewEntryModal}
+					>
+						+ Registrar consulta
+					</button>
+				{/if}
+				{#if permissions.canCreateAppointment}
+					<a
+						href={`/odonto/agenda?patient_id=${data.patient.id}`}
+						class="rounded-full border border-[#7c3aed]/40 px-5 py-2 text-sm font-semibold text-[#7c3aed] transition hover:-translate-y-0.5 hover:bg-[#7c3aed]/10 dark:text-[#c4b5fd] md:col-span-2 md:inline-flex md:justify-self-start lg:col-span-1"
+					>
+						+ Nuevo turno
+					</a>
+				{/if}
 			</div>
 		</div>
 		<div class="mt-4 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4 sm:text-sm md:flex md:items-center md:gap-3">
@@ -1033,20 +1092,22 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 															{formatCurrency(entry.amount)}
 														</span>
 													{/if}
-													<button
-														type="button"
-														class="inline-flex items-center gap-1 rounded-full border border-neutral-200 px-3 py-1 text-xs font-semibold text-neutral-600 transition hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-100 dark:hover:bg-[#122641]"
-														onclick={(event) => {
-															event.stopPropagation();
-															openEditEntry(entry);
-														}}
-													>
-														<svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-															<path stroke-linecap="round" stroke-linejoin="round" d="M12 20h9" />
-															<path stroke-linecap="round" stroke-linejoin="round" d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
-														</svg>
-														Editar
-													</button>
+													{#if permissions.canEditClinicalEntry}
+														<button
+															type="button"
+															class="inline-flex items-center gap-1 rounded-full border border-neutral-200 px-3 py-1 text-xs font-semibold text-neutral-600 transition hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-100 dark:hover:bg-[#122641]"
+															onclick={(event) => {
+																event.stopPropagation();
+																openEditEntry(entry);
+															}}
+														>
+															<svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+																<path stroke-linecap="round" stroke-linejoin="round" d="M12 20h9" />
+																<path stroke-linecap="round" stroke-linejoin="round" d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+															</svg>
+															Editar
+														</button>
+													{/if}
 												</div>
 											</div>
 											{#if entry.description && !isDuplicateDescription(entry)}
@@ -1104,25 +1165,29 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 		<div class="rounded-2xl border border-neutral-100 bg-white p-4 shadow-sm dark:border-[#1f3554] dark:bg-[#122641] sm:p-5">
 			<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 				<h2 class="text-lg font-semibold text-neutral-900 dark:text-white">Datos del paciente</h2>
-				<button
-					type="button"
-					class="w-full rounded-full border border-neutral-200 bg-white px-4 py-2 text-sm font-semibold text-neutral-900 shadow-sm transition hover:-translate-y-0.5 hover:shadow-card sm:w-auto"
-					onclick={() => (showEditModal = true)}
-				>
-					{hasPatientData ? 'Editar datos del paciente' : 'Agregar datos del paciente'}
-				</button>
+				{#if permissions.canEditPatient}
+					<button
+						type="button"
+						class="w-full rounded-full border border-neutral-200 bg-white px-4 py-2 text-sm font-semibold text-neutral-900 shadow-sm transition hover:-translate-y-0.5 hover:shadow-card dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white sm:w-auto"
+						onclick={() => (showEditModal = true)}
+					>
+						{hasPatientData ? 'Editar datos del paciente' : 'Agregar datos del paciente'}
+					</button>
+				{/if}
 			</div>
 			<div class="mt-4 space-y-4">
 				<div class="rounded-xl border border-neutral-100 bg-white/60 p-4 dark:border-[#1f3554] dark:bg-[#0f1f36]">
 					<div class="mb-3 flex items-center justify-between">
 						<p class="text-[13px] font-bold uppercase tracking-wide text-neutral-600 dark:text-neutral-300">Alertas médicas</p>
-							<button
-								type="button"
-								class="rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-50 dark:hover:bg-[#122641]"
-								onclick={() => (showEditModal = true)}
-							>
-								Editar
-							</button>
+							{#if permissions.canEditPatient}
+								<button
+									type="button"
+									class="rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-50 dark:hover:bg-[#122641]"
+									onclick={() => (showEditModal = true)}
+								>
+									Editar
+								</button>
+							{/if}
 					</div>
 					<div class="space-y-3">
 						<div class="flex min-w-0 items-start justify-between gap-3 rounded-lg bg-amber-100/30 px-3 py-2 dark:bg-amber-500/10">
@@ -1177,13 +1242,15 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				<div class="rounded-xl border border-neutral-100 bg-white/60 p-4 dark:border-[#1f3554] dark:bg-[#0f1f36]">
 					<div class="mb-3 flex items-center justify-between">
 						<p class="text-[13px] font-bold uppercase tracking-wide text-neutral-600 dark:text-neutral-300">Contacto</p>
-							<button
-								type="button"
-								class="rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-50 dark:hover:bg-[#122641]"
-								onclick={() => (showEditModal = true)}
-							>
-								Editar
-							</button>
+							{#if permissions.canEditPatient}
+								<button
+									type="button"
+									class="rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-50 dark:hover:bg-[#122641]"
+									onclick={() => (showEditModal = true)}
+								>
+									Editar
+								</button>
+							{/if}
 					</div>
 					<div class="grid gap-3 md:grid-cols-2">
 						<div class="space-y-1">
@@ -1246,13 +1313,15 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				<div class="rounded-xl border border-neutral-100 bg-white/60 p-4 dark:border-[#1f3554] dark:bg-[#0f1f36]">
 					<div class="mb-3 flex items-center justify-between">
 						<p class="text-[13px] font-bold uppercase tracking-wide text-neutral-600 dark:text-neutral-300">Administrativo</p>
-							<button
-								type="button"
-								class="rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-50 dark:hover:bg-[#122641]"
-								onclick={() => (showEditModal = true)}
-							>
-								Editar
-							</button>
+							{#if permissions.canEditPatient}
+								<button
+									type="button"
+									class="rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-50 dark:hover:bg-[#122641]"
+									onclick={() => (showEditModal = true)}
+								>
+									Editar
+								</button>
+							{/if}
 					</div>
 					<div class="grid gap-3 md:grid-cols-2">
 						<div class="space-y-1">
@@ -1289,7 +1358,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				<div>
 					<h2 class="text-lg font-semibold text-neutral-900 dark:text-white">Radiografías</h2>
 				</div>
-				{#if isDriveConnected}
+				{#if isDriveConnected && permissions.canManageRadiographs}
 					<div class="flex flex-col gap-2 sm:flex-row sm:items-center">
 						<input
 							class="hidden"
@@ -1499,7 +1568,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 										Ver
 									</button>
 								{/if}
-								{#if !isRadiographReady(radiograph)}
+								{#if !isRadiographReady(radiograph) && permissions.canManageRadiographs}
 									<button
 										type="button"
 										class="rounded-full border border-neutral-200 px-4 py-2 text-center text-sm font-semibold text-neutral-700 transition hover:-translate-y-0.5 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-200 dark:hover:bg-[#122641]"
@@ -1509,18 +1578,20 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 										Reintentar
 									</button>
 								{/if}
-								<button
-									type="button"
-									class="inline-flex items-center justify-center gap-1 rounded-full border border-neutral-200 px-4 py-2 text-center text-sm font-semibold text-neutral-500 transition hover:border-red-200 hover:text-red-600 dark:border-[#1f3554] dark:text-neutral-300 dark:hover:border-red-400/40 dark:hover:text-red-300"
-									onclick={() => openRadiographDeleteConfirm(radiograph.id)}
-								>
-									<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-										<path stroke-linecap="round" stroke-linejoin="round" d="M3 6h18" />
-										<path stroke-linecap="round" stroke-linejoin="round" d="M8 6V4h8v2" />
-										<path stroke-linecap="round" stroke-linejoin="round" d="M7 6l1 14h8l1-14" />
-									</svg>
-									Quitar
-								</button>
+								{#if permissions.canManageRadiographs}
+									<button
+										type="button"
+										class="inline-flex items-center justify-center gap-1 rounded-full border border-neutral-200 px-4 py-2 text-center text-sm font-semibold text-neutral-500 transition hover:border-red-200 hover:text-red-600 dark:border-[#1f3554] dark:text-neutral-300 dark:hover:border-red-400/40 dark:hover:text-red-300"
+										onclick={() => openRadiographDeleteConfirm(radiograph.id)}
+									>
+										<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+											<path stroke-linecap="round" stroke-linejoin="round" d="M3 6h18" />
+											<path stroke-linecap="round" stroke-linejoin="round" d="M8 6V4h8v2" />
+											<path stroke-linecap="round" stroke-linejoin="round" d="M7 6l1 14h8l1-14" />
+										</svg>
+										Quitar
+									</button>
+								{/if}
 							</div>
 						</div>
 					{/each}
@@ -1560,7 +1631,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 </div>
 
 <!-- FAB móvil para nueva entrada -->
-{#if tab === 'historial'}
+{#if tab === 'historial' && permissions.canCreateClinicalEntry}
 	<button
 		class="fixed bottom-20 right-4 z-20 flex h-14 w-14 items-center justify-center rounded-full bg-[#7c3aed] text-2xl font-bold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed] md:hidden"
 		onclick={openNewEntryModal}
@@ -1572,26 +1643,39 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 
 <Modal open={showMobileActions} title="Acciones del paciente" on:close={() => (showMobileActions = false)}>
 	<div class="space-y-3">
-		<button
-			type="button"
-			class="w-full rounded-xl border border-neutral-200 px-4 py-3 text-sm font-semibold text-neutral-800 transition hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-100 dark:hover:bg-[#122641]"
-			onclick={() => {
-				showMobileActions = false;
-				showArchiveConfirm = true;
-			}}
-		>
-			{isArchived ? 'Desarchivar paciente' : 'Archivar paciente'}
-		</button>
-		<button
-			type="button"
-			class="w-full rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700"
-			onclick={() => {
-				showMobileActions = false;
-				showDeleteConfirm = true;
-			}}
-		>
-			Eliminar paciente
-		</button>
+		{#if permissions.canArchivePatient}
+			<button
+				type="button"
+				class="w-full rounded-xl border border-neutral-200 px-4 py-3 text-sm font-semibold text-neutral-800 transition hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-100 dark:hover:bg-[#122641]"
+				onclick={() => {
+					showMobileActions = false;
+					showArchiveConfirm = true;
+				}}
+			>
+				{isArchived ? 'Desarchivar paciente' : 'Archivar paciente'}
+			</button>
+		{/if}
+		{#if permissions.canCreateClinicalEntry}
+			<button
+				type="button"
+				class="w-full rounded-xl bg-[#7c3aed] px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-[#6d28d9]"
+				onclick={() => {
+					showMobileActions = false;
+					openNewEntryModal();
+				}}
+			>
+				Registrar consulta
+			</button>
+		{/if}
+		{#if permissions.canCreateAppointment}
+			<a
+				href={`/odonto/agenda?patient_id=${data.patient.id}`}
+				class="block w-full rounded-xl border border-[#7c3aed]/40 px-4 py-3 text-center text-sm font-semibold text-[#7c3aed] transition hover:bg-[#7c3aed]/10 dark:text-[#c4b5fd]"
+				onclick={() => (showMobileActions = false)}
+			>
+				Nuevo turno
+			</a>
+		{/if}
 		<button
 			type="button"
 			class="w-full rounded-xl px-4 py-3 text-sm font-semibold text-neutral-600 transition hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-[#122641]"
@@ -1716,20 +1800,22 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 					placeholder="Ej: 11-12"
 				/>
 			</div>
-			<div class="space-y-2">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="amount">Importe (opcional)</label>
-				<input type="hidden" name="amount" value={amountRaw} />
-				<input
-					id="amount"
-					name="amount_display"
-					type="text"
-					inputmode="numeric"
-					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
-					placeholder="Ej: 18.000"
-					value={amountDisplay}
-					oninput={(event) => handleAmountChange(event, 'new')}
-				/>
-			</div>
+			{#if permissions.canViewCosts}
+				<div class="space-y-2">
+					<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="amount">Importe (opcional)</label>
+					<input type="hidden" name="amount" value={amountRaw} />
+					<input
+						id="amount"
+						name="amount_display"
+						type="text"
+						inputmode="numeric"
+						class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+						placeholder="Ej: 18.000"
+						value={amountDisplay}
+						oninput={(event) => handleAmountChange(event, 'new')}
+					/>
+				</div>
+			{/if}
 			<div class="space-y-2">
 				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="internal_note">Nota interna (opcional)</label>
 				<input
@@ -1948,20 +2034,22 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 					placeholder="Ej: 11-12"
 				/>
 			</div>
-			<div class="space-y-2">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="edit_amount">Importe (opcional)</label>
-				<input type="hidden" name="amount" value={editAmountRaw} />
-				<input
-					id="edit_amount"
-					name="amount_display"
-					type="text"
-					inputmode="numeric"
-					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
-					value={editAmountDisplay}
-					oninput={(event) => handleAmountChange(event, 'edit')}
-					placeholder="Ej: 18.000"
-				/>
-			</div>
+			{#if permissions.canViewCosts}
+				<div class="space-y-2">
+					<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="edit_amount">Importe (opcional)</label>
+					<input type="hidden" name="amount" value={editAmountRaw} />
+					<input
+						id="edit_amount"
+						name="amount_display"
+						type="text"
+						inputmode="numeric"
+						class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+						value={editAmountDisplay}
+						oninput={(event) => handleAmountChange(event, 'edit')}
+						placeholder="Ej: 18.000"
+					/>
+				</div>
+			{/if}
 			<div class="space-y-2">
 				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="edit_internal_note">Nota interna (opcional)</label>
 				<input
@@ -2072,36 +2160,40 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 					/>
 				</div>
 			</div>
-			<div class="space-y-1">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="allergies">Alergias (opcional)</label>
-				<input
-					id="allergies"
-					name="allergies"
-					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
-					value={data.patient.allergies ?? ''}
-				/>
-			</div>
+			{#if permissions.canEditClinicalProfile}
+				<div class="space-y-1">
+					<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="allergies">Alergias (opcional)</label>
+					<input
+						id="allergies"
+						name="allergies"
+						class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+						value={data.patient.allergies ?? ''}
+					/>
+				</div>
+			{/if}
 		</div>
-		<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-			<div class="space-y-1">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="medication">Medicación (opcional)</label>
-				<textarea
-					id="medication"
-					name="medication"
-					rows="2"
-					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
-				>{data.patient.medication ?? ''}</textarea>
+		{#if permissions.canEditClinicalProfile}
+			<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+				<div class="space-y-1">
+					<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="medication">Medicación (opcional)</label>
+					<textarea
+						id="medication"
+						name="medication"
+						rows="2"
+						class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+					>{data.patient.medication ?? ''}</textarea>
+				</div>
+				<div class="space-y-1">
+					<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="background">Antecedentes (opcional)</label>
+					<textarea
+						id="background"
+						name="background"
+						rows="2"
+						class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+					>{data.patient.background ?? ''}</textarea>
+				</div>
 			</div>
-			<div class="space-y-1">
-				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="background">Antecedentes (opcional)</label>
-				<textarea
-					id="background"
-					name="background"
-					rows="2"
-					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
-				>{data.patient.background ?? ''}</textarea>
-			</div>
-		</div>
+		{/if}
 		{#if form?.message}
 			<p class="rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{form.message}</p>
 		{/if}

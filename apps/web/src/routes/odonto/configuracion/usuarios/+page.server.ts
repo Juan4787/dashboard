@@ -11,22 +11,36 @@ import { error as kitError, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-type BusinessMember = {
+type RoleAccessStatus = 'active' | 'pending';
+
+type BusinessRoleAccess = {
 	id: string;
 	business_id: string;
-	user_id: string;
-	email: string | null;
+	user_id: string | null;
+	email: string;
 	role: BusinessRole;
+	status: RoleAccessStatus;
+	professional_id: string | null;
 	created_at: string;
 };
 
-const DEMO_MEMBERS: BusinessMember[] = [
+type ProfessionalOption = {
+	id: string;
+	name: string;
+	email: string | null;
+	is_active: boolean;
+	is_public: boolean;
+};
+
+const DEMO_MEMBERS: BusinessRoleAccess[] = [
 	{
 		id: 'demo-owner',
 		business_id: 'demo-business',
 		user_id: 'demo-user',
 		email: 'dueno@consultorio.demo',
 		role: 'owner',
+		status: 'active',
+		professional_id: null,
 		created_at: new Date('2026-01-01T12:00:00Z').toISOString()
 	},
 	{
@@ -35,41 +49,66 @@ const DEMO_MEMBERS: BusinessMember[] = [
 		user_id: 'demo-reception-user',
 		email: 'recepcion@consultorio.demo',
 		role: 'reception',
+		status: 'active',
+		professional_id: null,
 		created_at: new Date('2026-01-02T12:00:00Z').toISOString()
 	}
 ];
+
+const EMAIL_FORMAT_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const normalizeEmail = (value: FormDataEntryValue | null) =>
 	String(value ?? '')
 		.trim()
 		.toLowerCase();
 
-const normalizeMember = (row: any): BusinessMember | null => {
+const normalizeAccess = (row: any): BusinessRoleAccess | null => {
 	const role = String(row?.role ?? '');
-	if (!row?.id || !row?.business_id || !row?.user_id || !isBusinessRole(role)) return null;
+	const status = String(row?.status ?? '');
+	if (!row?.id || !row?.business_id || !row?.email || !isBusinessRole(role)) return null;
+	if (status !== 'active' && status !== 'pending') return null;
 	return {
 		id: String(row.id),
 		business_id: String(row.business_id),
-		user_id: String(row.user_id),
-		email: row.email ? String(row.email) : null,
+		user_id: row.user_id ? String(row.user_id) : null,
+		email: String(row.email),
 		role,
+		status,
+		professional_id: row.professional_id ? String(row.professional_id) : null,
 		created_at: String(row.created_at ?? '')
 	};
 };
 
-const listMembers = async (
+const listRoleAccess = async (
 	supabase: SupabaseClient,
 	businessId: string
-): Promise<BusinessMember[]> => {
-	const { data, error } = await supabase.rpc('list_business_users', {
+): Promise<BusinessRoleAccess[]> => {
+	const { data, error } = await supabase.rpc('list_business_role_access', {
 		target_business_id: businessId
 	});
-	if (error) {
-		throw error;
-	}
+	if (error) throw error;
 	return ((data ?? []) as unknown[])
-		.map(normalizeMember)
-		.filter((item): item is BusinessMember => Boolean(item));
+		.map(normalizeAccess)
+		.filter((item): item is BusinessRoleAccess => Boolean(item));
+};
+
+const listProfessionals = async (
+	supabase: SupabaseClient,
+	businessId: string
+): Promise<ProfessionalOption[]> => {
+	const { data, error } = await supabase
+		.from('professionals')
+		.select('id, name, email, is_active, is_public')
+		.eq('business_id', businessId)
+		.order('name');
+	if (error) throw error;
+	return ((data ?? []) as ProfessionalOption[]).map((item) => ({
+		id: String(item.id),
+		name: String(item.name ?? ''),
+		email: item.email ? String(item.email) : null,
+		is_active: Boolean(item.is_active),
+		is_public: Boolean(item.is_public)
+	}));
 };
 
 const getUsersPageContext = async ({
@@ -100,8 +139,18 @@ const getUsersPageContext = async ({
 	return { supabase, context, currentUserId };
 };
 
-const countOwners = (members: BusinessMember[]) =>
-	members.filter((member) => member.role === 'owner').length;
+const countOwners = (members: BusinessRoleAccess[]) =>
+	members.filter((member) => member.status === 'active' && member.role === 'owner').length;
+
+const roleAccessErrorMessage = (error: { message?: string } | null | undefined) => {
+	const raw = error?.message ?? '';
+	if (raw.includes('BUSINESS_MANAGE_DENIED')) return 'No tenés permisos para administrar roles.';
+	if (raw.includes('INVALID_EMAIL')) return 'Ingresá un email válido.';
+	if (raw.includes('INVALID_ROLE')) return 'El rol seleccionado no es válido.';
+	if (raw.includes('PROFESSIONAL_REQUIRED')) return 'Seleccioná o creá el profesional asociado.';
+	if (raw.includes('PROFESSIONAL_NOT_FOUND')) return 'No se encontró el profesional seleccionado.';
+	return 'No se pudo guardar el acceso.';
+};
 
 export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 	if (!locals.auth) throw redirect(303, '/login');
@@ -110,6 +159,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 		return {
 			context: demoBusinessContext(),
 			members: DEMO_MEMBERS,
+			professionals: [],
 			roles: BUSINESS_ROLES,
 			currentUserId: 'demo-user',
 			demo: true
@@ -118,11 +168,15 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 
 	const { supabase, context, currentUserId } = await getUsersPageContext({ locals, fetch, cookies });
 	if (context.role === 'professional') throw redirect(303, '/odonto/mis-turnos');
-	const members = await listMembers(supabase, context.business.id);
+	const [members, professionals] = await Promise.all([
+		listRoleAccess(supabase, context.business.id),
+		listProfessionals(supabase, context.business.id)
+	]);
 
 	return {
 		context,
 		members,
+		professionals,
 		roles: BUSINESS_ROLES,
 		currentUserId,
 		demo: false
@@ -137,36 +191,97 @@ export const actions: Actions = {
 		}
 
 		const form = await request.formData();
+		const values = Object.fromEntries(form);
 		const email = normalizeEmail(form.get('email'));
 		const role = String(form.get('role') ?? '').trim();
+		const professionalMode = String(form.get('professional_mode') ?? 'existing');
+		const selectedProfessionalId = String(form.get('professional_id') ?? '').trim();
+		const newProfessionalName = String(form.get('professional_name') ?? '').trim();
 
-		if (!email || !email.includes('@')) {
-			return fail(400, { message: 'Ingresá un correo electrónico válido.', values: Object.fromEntries(form) });
+		if (!EMAIL_FORMAT_REGEX.test(email)) {
+			return fail(400, { message: 'Ingresá un email válido.', values });
 		}
 		if (!isBusinessRole(role)) {
-			return fail(400, { message: 'El permiso seleccionado no es válido.', values: Object.fromEntries(form) });
+			return fail(400, { message: 'El rol seleccionado no es válido.', values });
 		}
 
 		const { supabase, context } = await getUsersPageContext({ locals, fetch, cookies });
 		if (!context.canManage) {
-			return fail(403, { message: 'No tenés permisos para administrar usuarios.' });
+			return fail(403, { message: 'No tenés permisos para administrar roles.', values });
 		}
 
-		const { error } = await supabase.rpc('add_business_user_by_email', {
+		const currentAccess = await listRoleAccess(supabase, context.business.id);
+		const existing = currentAccess.find((item) => item.email.toLowerCase() === email);
+		if (existing?.role === role) {
+			return fail(400, {
+				message: `Ese correo ya está asignado al rol ${role}.`,
+				values
+			});
+		}
+
+		let professionalId: string | null = null;
+		let createdProfessionalId: string | null = null;
+		if (role === 'professional') {
+			if (professionalMode === 'new') {
+				if (!newProfessionalName) {
+					return fail(400, { message: 'Ingresá el nombre del profesional.', values });
+				}
+				const { data: created, error: createError } = await supabase
+					.from('professionals')
+					.insert({
+						business_id: context.business.id,
+						name: newProfessionalName,
+						email,
+						is_active: true,
+						is_public: false
+					})
+					.select('id')
+					.single();
+				if (createError || !created?.id) {
+					console.error('Error creando profesional pendiente', createError);
+					return fail(500, { message: 'No se pudo crear el profesional.', values });
+				}
+				professionalId = String(created.id);
+				createdProfessionalId = professionalId;
+			} else {
+				professionalId = selectedProfessionalId;
+				if (!professionalId) {
+					return fail(400, { message: 'Seleccioná un profesional.', values });
+				}
+			}
+		}
+
+		const { data, error } = await supabase.rpc('upsert_business_role_access', {
 			target_business_id: context.business.id,
 			target_email: email,
-			target_role: role
+			target_role: role,
+			target_professional_id: professionalId
 		});
 
 		if (error) {
-			console.error('Error agregando usuario al negocio', error);
-			const message = error.message?.includes('USER_NOT_FOUND')
-				? 'Ese correo electrónico todavía no tiene una cuenta creada.'
-				: 'No se pudo agregar el usuario.';
-			return fail(500, { message, values: Object.fromEntries(form) });
+			if (createdProfessionalId) {
+				await supabase
+					.from('professionals')
+					.delete()
+					.eq('business_id', context.business.id)
+					.eq('id', createdProfessionalId);
+			}
+			console.error('Error guardando acceso al negocio', error);
+			return fail(500, { message: roleAccessErrorMessage(error), values });
 		}
 
-		return { success: true, message: 'Usuario agregado al consultorio.' };
+		const status = String(data?.[0]?.status ?? '');
+		if (status === 'already_active' || status === 'already_pending') {
+			return { success: true, message: 'Ese correo ya tenía ese rol asignado.' };
+		}
+		if (status === 'pending') {
+			return {
+				success: true,
+				message: 'Email habilitado. Cuando la persona cree su cuenta, el rol se asignará automáticamente.'
+			};
+		}
+
+		return { success: true, message: 'Rol asignado al consultorio.' };
 	},
 	update_role: async ({ request, locals, fetch, cookies }) => {
 		if (!locals.auth) throw redirect(303, '/login');
@@ -179,24 +294,27 @@ export const actions: Actions = {
 		const role = String(form.get('role') ?? '').trim();
 
 		if (!membershipId) {
-			return fail(400, { message: 'Usuario inválido.' });
+			return fail(400, { message: 'Acceso inválido.' });
 		}
 		if (!isBusinessRole(role)) {
-			return fail(400, { message: 'El permiso seleccionado no es válido.' });
+			return fail(400, { message: 'El rol seleccionado no es válido.' });
 		}
 
 		const { supabase, context } = await getUsersPageContext({ locals, fetch, cookies });
 		if (!context.canManage) {
-			return fail(403, { message: 'No tenés permisos para administrar usuarios.' });
+			return fail(403, { message: 'No tenés permisos para administrar roles.' });
 		}
 
-		const members = await listMembers(supabase, context.business.id);
-		const target = members.find((member) => member.id === membershipId);
+		const members = await listRoleAccess(supabase, context.business.id);
+		const target = members.find((member) => member.id === membershipId && member.status === 'active');
 		if (!target) {
-			return fail(404, { message: 'Usuario no encontrado en este consultorio.' });
+			return fail(404, { message: 'Acceso no encontrado en este consultorio.' });
 		}
 		if (target.role === 'owner' && role !== 'owner' && countOwners(members) <= 1) {
 			return fail(400, { message: 'El consultorio debe conservar al menos un dueño.' });
+		}
+		if (role === 'professional' && !target.professional_id) {
+			return fail(400, { message: 'Para asignar rol profesional, usá Nuevo acceso y vinculá un profesional.' });
 		}
 
 		const { error } = await supabase
@@ -207,10 +325,10 @@ export const actions: Actions = {
 
 		if (error) {
 			console.error('Error actualizando rol', error);
-			return fail(500, { message: 'No se pudo actualizar el permiso.' });
+			return fail(500, { message: 'No se pudo actualizar el rol.' });
 		}
 
-		return { success: true, message: 'Permiso actualizado.' };
+		return { success: true, message: 'Rol actualizado.' };
 	},
 	remove_user: async ({ request, locals, fetch, cookies }) => {
 		if (!locals.auth) throw redirect(303, '/login');
@@ -219,20 +337,32 @@ export const actions: Actions = {
 		}
 
 		const form = await request.formData();
-		const membershipId = String(form.get('membership_id') ?? '').trim();
-		if (!membershipId) {
-			return fail(400, { message: 'Usuario inválido.' });
+		const accessId = String(form.get('access_id') ?? form.get('membership_id') ?? '').trim();
+		const status = String(form.get('status') ?? 'active').trim();
+		if (!accessId) {
+			return fail(400, { message: 'Acceso inválido.' });
 		}
 
 		const { supabase, context, currentUserId } = await getUsersPageContext({ locals, fetch, cookies });
 		if (!context.canManage) {
-			return fail(403, { message: 'No tenés permisos para administrar usuarios.' });
+			return fail(403, { message: 'No tenés permisos para administrar roles.' });
 		}
 
-		const members = await listMembers(supabase, context.business.id);
-		const target = members.find((member) => member.id === membershipId);
+		if (status === 'pending') {
+			const { error } = await supabase.rpc('cancel_business_role_invite', {
+				target_invite_id: accessId
+			});
+			if (error) {
+				console.error('Error cancelando invitación', error);
+				return fail(500, { message: 'No se pudo quitar el acceso pendiente.' });
+			}
+			return { success: true, message: 'Acceso pendiente quitado.' };
+		}
+
+		const members = await listRoleAccess(supabase, context.business.id);
+		const target = members.find((member) => member.id === accessId && member.status === 'active');
 		if (!target) {
-			return fail(404, { message: 'Usuario no encontrado en este consultorio.' });
+			return fail(404, { message: 'Acceso no encontrado en este consultorio.' });
 		}
 		if (target.user_id === currentUserId) {
 			return fail(400, { message: 'No podés quitar tu propio acceso desde esta pantalla.' });
@@ -241,17 +371,29 @@ export const actions: Actions = {
 			return fail(400, { message: 'El consultorio debe conservar al menos un dueño.' });
 		}
 
+		if (target.user_id) {
+			const { error: linkError } = await supabase
+				.from('professional_users')
+				.delete()
+				.eq('business_id', context.business.id)
+				.eq('user_id', target.user_id);
+			if (linkError) {
+				console.error('Error quitando vínculos profesionales', linkError);
+				return fail(500, { message: 'No se pudo quitar el vínculo profesional.' });
+			}
+		}
+
 		const { error } = await supabase
 			.from('business_users')
 			.delete()
-			.eq('id', membershipId)
+			.eq('id', accessId)
 			.eq('business_id', context.business.id);
 
 		if (error) {
-			console.error('Error quitando usuario', error);
-			return fail(500, { message: 'No se pudo quitar el usuario.' });
+			console.error('Error quitando acceso', error);
+			return fail(500, { message: 'No se pudo quitar el acceso.' });
 		}
 
-		return { success: true, message: 'Usuario quitado del consultorio.' };
+		return { success: true, message: 'Acceso quitado del consultorio.' };
 	}
 };

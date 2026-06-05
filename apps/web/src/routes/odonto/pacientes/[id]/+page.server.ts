@@ -1,6 +1,5 @@
 import { env } from '$env/dynamic/private';
 import { resolveActiveBusiness } from '$lib/server/business';
-import type { BusinessAccessCapabilities } from '$lib/server/commercial-access';
 import { newId, readDemoDb, updateDemoDb } from '$lib/server/demo-store';
 import { normalizePhoneE164, normalizePhoneRaw } from '$lib/server/phone';
 import { createSupabaseServerClient, getAuthUserId } from '$lib/server/supabase';
@@ -26,7 +25,7 @@ const normalizeFilename = (value?: string | null) => {
 const ENTRIES_PAGE_SIZE = 30;
 const RADIOGRAPHS_PAGE_SIZE = 24;
 const COMMERCIAL_RESTRICTED_MESSAGE =
-	'La cuenta está suspendida. Regularizá la suscripción para volver a operar.';
+	'Suscripción pendiente de regularización. Para volver a operar el consultorio, regularizá la suscripción.';
 
 const resolveBusinessActionContext = async ({
 	locals,
@@ -54,10 +53,65 @@ const resolveBusinessActionContext = async ({
 
 type BusinessActionSession = NonNullable<Awaited<ReturnType<typeof resolveBusinessActionContext>>>;
 
-const hasCapability = (
-	session: BusinessActionSession,
-	capability: keyof BusinessAccessCapabilities
-) => Boolean(session.context.access.allowedCapabilities[capability]);
+const resolvePatientPermissions = (context: BusinessActionSession['context']) => {
+	const role = context.role;
+	const capabilities = context.access.allowedCapabilities;
+	const isOwnerOrAdmin = role === 'owner' || role === 'admin';
+	const canOperatePatients = role === 'owner' || role === 'admin' || role === 'reception';
+	const canWriteClinical = role === 'owner' || role === 'admin' || role === 'professional';
+	const canManageRadiographs = role === 'owner' || role === 'admin' || role === 'professional';
+
+	return {
+		canReadClinicalProfile:
+			(role === 'owner' || role === 'admin' || role === 'professional') &&
+			capabilities.canViewExistingClinicalNotes,
+		canEditClinicalProfile: isOwnerOrAdmin && capabilities.canEditPatient,
+		canViewCosts: isOwnerOrAdmin && capabilities.canViewExistingCosts,
+		canEditPatient: canOperatePatients && capabilities.canEditPatient,
+		canArchivePatient: isOwnerOrAdmin && capabilities.canEditPatient,
+		canCreateClinicalEntry: canWriteClinical && capabilities.canCreateClinicalEntry,
+		canEditClinicalEntry: canWriteClinical && capabilities.canEditClinicalEntry,
+		canCreateAppointment: canOperatePatients && capabilities.canCreateAppointment,
+		canManageDriveFolders: isOwnerOrAdmin && capabilities.canLinkExternalFiles,
+		canManageRadiographs: canManageRadiographs && capabilities.canLinkExternalFiles
+	};
+};
+
+const clinicalEntryRpcError = (error: { message?: string; code?: string } | null | undefined) => {
+	const message = `${error?.message ?? ''} ${error?.code ?? ''}`;
+
+	if (message.includes('BUSINESS_ACCESS_RESTRICTED')) {
+		return { status: 403, message: COMMERCIAL_RESTRICTED_MESSAGE };
+	}
+	if (message.includes('PATIENT_NOT_FOUND')) {
+		return { status: 404, message: 'Paciente no encontrado en este consultorio.' };
+	}
+	if (message.includes('ENTRY_TYPE_REQUIRED') || message.includes('DESCRIPTION_REQUIRED')) {
+		return { status: 400, message: 'Tipo y descripcion son obligatorios.' };
+	}
+	if (message.includes('INVALID_CLINICAL_ENTRY_DATE')) {
+		return { status: 400, message: 'La fecha de la consulta no puede estar en el futuro.' };
+	}
+	if (message.includes('CLINICAL_COST_DENIED')) {
+		return { status: 403, message: 'Tu rol no permite registrar importes.' };
+	}
+	if (
+		message.includes('CLINICAL_ENTRY_DENIED') ||
+		message.includes('CLINICAL_ENTRY_EDIT_DENIED') ||
+		message.includes('PATIENT_ACCESS_DENIED') ||
+		message.includes('PROFESSIONAL_LINK_REQUIRED')
+	) {
+		return { status: 403, message: 'Tu rol no permite modificar la historia clinica de este paciente.' };
+	}
+	if (message.includes('CLINICAL_ENTRY_LOCKED')) {
+		return { status: 403, message: 'Esta entrada ya no se puede editar.' };
+	}
+	if (message.includes('CLINICAL_ENTRY_NOT_FOUND')) {
+		return { status: 404, message: 'Entrada no encontrada o sin permiso de edicion.' };
+	}
+
+	return { status: 500, message: 'No se pudo guardar la entrada.' };
+};
 
 export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) => {
 	if (!locals.auth) {
@@ -82,6 +136,18 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 			hasMoreEntries: false,
 			hasMoreRadiographs: false,
 			driveConnection: null,
+			permissions: {
+				canReadClinicalProfile: true,
+				canEditClinicalProfile: true,
+				canViewCosts: true,
+				canEditPatient: true,
+				canArchivePatient: true,
+				canCreateClinicalEntry: true,
+				canEditClinicalEntry: true,
+				canCreateAppointment: true,
+				canManageDriveFolders: true,
+				canManageRadiographs: true
+			},
 			demo: true
 		};
 	}
@@ -94,6 +160,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 		cookies
 	});
 	if (!context) throw kitError(500, 'No se pudo resolver el negocio activo');
+	const permissions = resolvePatientPermissions(context);
 
 	const [
 		{ data: patient, error: patientError },
@@ -113,7 +180,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 			.eq('id', params.id)
 			.eq('business_id', context.business.id)
 			.maybeSingle(),
-		context.access.allowedCapabilities.canViewExistingClinicalNotes
+		permissions.canReadClinicalProfile
 			? supabase
 					.from('patient_clinical_profiles')
 					.select('allergies, medication, background, custom_fields')
@@ -130,7 +197,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 			.order('created_at', { ascending: false })
 			.order('id', { ascending: false })
 			.limit(ENTRIES_PAGE_SIZE + 1),
-		context.access.allowedCapabilities.canViewExistingCosts
+		permissions.canViewCosts
 			? supabase
 					.from('clinical_entry_costs')
 					.select('clinical_entry_id, amount')
@@ -161,7 +228,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 					.eq('owner_id', ownerId)
 					.maybeSingle()
 			: Promise.resolve({ data: null, error: null }),
-		context.access.allowedCapabilities.canLinkExternalFiles
+		permissions.canManageDriveFolders
 			? supabase.rpc('get_patient_drive_folder_safely', {
 					p_business_id: context.business.id,
 					p_patient_id: params.id
@@ -203,7 +270,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 	const costByEntryId = new Map((costs ?? []).map((item: any) => [String(item.clinical_entry_id), item.amount]));
 	const entriesWithCosts = safeEntries.map((entry: any) => ({
 		...entry,
-		amount: context.access.allowedCapabilities.canViewExistingCosts
+		amount: permissions.canViewCosts
 			? (costByEntryId.get(String(entry.id)) ?? null)
 			: null
 	}));
@@ -228,6 +295,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 		hasMoreEntries,
 		hasMoreRadiographs,
 		driveConnection: driveConnection ?? null,
+		permissions,
 		demo: false
 	};
 };
@@ -251,8 +319,8 @@ export const actions: Actions = {
 		if (!session) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
 		}
-		if (!hasCapability(session, 'canLinkExternalFiles')) {
-			return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
+		if (!resolvePatientPermissions(session.context).canManageDriveFolders) {
+			return fail(403, { message: 'Tu rol no permite administrar Google Drive de pacientes.' });
 		}
 		const { supabase, ownerId } = session;
 		const { error } = await supabase
@@ -284,8 +352,8 @@ export const actions: Actions = {
 		if (!session) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
 		}
-		if (!hasCapability(session, 'canLinkExternalFiles')) {
-			return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
+		if (!resolvePatientPermissions(session.context).canManageDriveFolders) {
+			return fail(403, { message: 'Tu rol no permite administrar Google Drive de pacientes.' });
 		}
 		const { supabase, ownerId, context } = session;
 		const { error } = await supabase.from('drive_connections').delete().eq('owner_id', ownerId);
@@ -318,8 +386,8 @@ export const actions: Actions = {
 		if (!session) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
 		}
-		if (!hasCapability(session, 'canLinkExternalFiles')) {
-			return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
+		if (!resolvePatientPermissions(session.context).canManageDriveFolders) {
+			return fail(403, { message: 'Tu rol no permite administrar Google Drive de pacientes.' });
 		}
 		const { supabase, context } = session;
 		const { error } = await supabase.rpc('set_patient_drive_folder_safely', {
@@ -352,8 +420,8 @@ export const actions: Actions = {
 		if (!session) {
 			return fail(401, { message: 'Sesion invalida. Volve a iniciar sesion.' });
 		}
-		if (!hasCapability(session, 'canLinkExternalFiles')) {
-			return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
+		if (!resolvePatientPermissions(session.context).canManageRadiographs) {
+			return fail(403, { message: 'Tu rol no permite administrar radiografías de este paciente.' });
 		}
 		const { supabase, ownerId, context } = session;
 		const { data, error } = await supabase
@@ -402,8 +470,8 @@ export const actions: Actions = {
 		if (!session) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
 		}
-		if (!hasCapability(session, 'canLinkExternalFiles')) {
-			return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
+		if (!resolvePatientPermissions(session.context).canManageRadiographs) {
+			return fail(403, { message: 'Tu rol no permite administrar radiografías de este paciente.' });
 		}
 		const { supabase, context } = session;
 		const { data, error } = await supabase
@@ -458,8 +526,8 @@ export const actions: Actions = {
 		if (!session) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
 		}
-		if (!hasCapability(session, 'canLinkExternalFiles')) {
-			return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
+		if (!resolvePatientPermissions(session.context).canManageRadiographs) {
+			return fail(403, { message: 'Tu rol no permite administrar radiografías de este paciente.' });
 		}
 		const { supabase, context } = session;
 		const { data, error } = await supabase
@@ -501,8 +569,8 @@ export const actions: Actions = {
 		if (!session) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
 		}
-		if (!hasCapability(session, 'canLinkExternalFiles')) {
-			return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
+		if (!resolvePatientPermissions(session.context).canManageRadiographs) {
+			return fail(403, { message: 'Tu rol no permite administrar radiografías de este paciente.' });
 		}
 		const { supabase, context } = session;
 		const { data, error } = await supabase
@@ -539,8 +607,8 @@ export const actions: Actions = {
 		if (!session) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
 		}
-		if (!hasCapability(session, 'canLinkExternalFiles')) {
-			return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
+		if (!resolvePatientPermissions(session.context).canManageRadiographs) {
+			return fail(403, { message: 'Tu rol no permite administrar radiografías de este paciente.' });
 		}
 		const { supabase, context } = session;
 		const { error } = await supabase
@@ -635,70 +703,34 @@ export const actions: Actions = {
 		if (!session) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
 		}
-		if (!hasCapability(session, 'canCreateClinicalEntry')) {
-			return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
+		const permissions = resolvePatientPermissions(session.context);
+		if (!permissions.canCreateClinicalEntry) {
+			return fail(403, {
+				message: session.context.access.allowedCapabilities.canCreateClinicalEntry
+					? 'Tu rol no permite registrar consultas clínicas.'
+					: COMMERCIAL_RESTRICTED_MESSAGE
+			});
 		}
-		if (amount != null && !hasCapability(session, 'canViewExistingCosts')) {
+		if (amount != null && !permissions.canViewCosts) {
 			return fail(403, { message: 'Tu rol no permite registrar importes.' });
 		}
-		const { supabase, ownerId, context } = session;
+		const { supabase, context } = session;
 
-		const entryPayload = {
-			owner_id: ownerId,
-			business_id: context.business.id,
-			patient_id: params.id,
-			entry_type,
-			description,
-			created_at,
-			teeth: teeth || null,
-			internal_note: internal_note || null
-		};
-		let { data: entry, error } = await supabase
-			.from('clinical_entries')
-			.insert(entryPayload)
-			.select('id')
-			.single();
+		const { error } = await supabase.rpc('create_clinical_entry_safely', {
+			p_business_id: context.business.id,
+			p_patient_id: params.id,
+			p_entry_type: entry_type,
+			p_description: description,
+			p_created_at: created_at,
+			p_teeth: teeth || null,
+			p_internal_note: internal_note || null,
+			p_amount: amount
+		});
 
-		if (error?.code === '42501') {
-			const fallbackPayload = {
-				owner_id: ownerId,
-				business_id: context.business.id,
-				patient_id: params.id,
-				entry_type,
-				description,
-				teeth: teeth || null,
-				internal_note: internal_note || null
-			};
-			const fallback = await supabase
-				.from('clinical_entries')
-				.insert(fallbackPayload)
-				.select('id')
-				.single();
-			entry = fallback.data;
-			error = fallback.error;
-		}
-
-		if (error || !entry) {
+		if (error) {
 			console.error('Error guardando entrada', error);
-			return fail(500, { message: 'No se pudo guardar la entrada' });
-		}
-
-		if (amount != null) {
-			const { error: costError } = await supabase.from('clinical_entry_costs').upsert(
-				{
-					business_id: context.business.id,
-					clinical_entry_id: entry.id,
-					amount,
-					created_by: ownerId,
-					updated_by: ownerId
-				},
-				{ onConflict: 'business_id,clinical_entry_id' }
-			);
-
-			if (costError) {
-				console.error('Error guardando importe de entrada', costError);
-				return fail(500, { message: 'La entrada se guardó, pero no se pudo guardar el importe.' });
-			}
+			const mapped = clinicalEntryRpcError(error);
+			return fail(mapped.status, { message: mapped.message });
 		}
 
 		throw redirect(303, `/odonto/pacientes/${params.id}`);
@@ -780,52 +812,34 @@ export const actions: Actions = {
 		if (!session) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
 		}
-		if (!hasCapability(session, 'canEditClinicalEntry')) {
-			return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
+		const permissions = resolvePatientPermissions(session.context);
+		if (!permissions.canEditClinicalEntry) {
+			return fail(403, {
+				message: session.context.access.allowedCapabilities.canEditClinicalEntry
+					? 'Tu rol no permite editar consultas clínicas.'
+					: COMMERCIAL_RESTRICTED_MESSAGE
+			});
 		}
-		if (amount != null && !hasCapability(session, 'canViewExistingCosts')) {
+		if (amount != null && !permissions.canViewCosts) {
 			return fail(403, { message: 'Tu rol no permite registrar importes.' });
 		}
-		const { supabase, ownerId, context } = session;
+		const { supabase, context } = session;
 
-		const { data: updatedEntry, error } = await supabase
-			.from('clinical_entries')
-			.update({
-				entry_type,
-				description,
-				teeth: teeth || null,
-				internal_note: internal_note || null,
-				updated_at: new Date().toISOString()
-			})
-			.eq('id', entry_id)
-			.eq('patient_id', params.id)
-			.eq('business_id', context.business.id)
-			.select('id')
-			.maybeSingle();
+		const { error } = await supabase.rpc('update_clinical_entry_safely', {
+			p_business_id: context.business.id,
+			p_patient_id: params.id,
+			p_entry_id: entry_id,
+			p_entry_type: entry_type,
+			p_description: description,
+			p_teeth: teeth || null,
+			p_internal_note: internal_note || null,
+			p_amount: amount
+		});
 
 		if (error) {
 			console.error('Error actualizando entrada', error);
-			return fail(500, { message: 'No se pudo actualizar la entrada' });
-		}
-		if (!updatedEntry) {
-			return fail(404, { message: 'Entrada no encontrada o sin permiso de edición.' });
-		}
-
-		if (hasCapability(session, 'canViewExistingCosts')) {
-			const { error: costError } = await supabase.from('clinical_entry_costs').upsert(
-				{
-					business_id: context.business.id,
-					clinical_entry_id: entry_id,
-					amount,
-					updated_by: ownerId
-				},
-				{ onConflict: 'business_id,clinical_entry_id' }
-			);
-
-			if (costError) {
-				console.error('Error actualizando importe de entrada', costError);
-				return fail(500, { message: 'La entrada se actualizó, pero no se pudo guardar el importe.' });
-			}
+			const mapped = clinicalEntryRpcError(error);
+			return fail(mapped.status, { message: mapped.message });
 		}
 
 		throw redirect(303, `/odonto/pacientes/${params.id}`);
@@ -903,8 +917,13 @@ export const actions: Actions = {
 		if (!session) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
 		}
-		if (!hasCapability(session, 'canEditPatient')) {
-			return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
+		const permissions = resolvePatientPermissions(session.context);
+		if (!permissions.canEditPatient) {
+			return fail(403, {
+				message: session.context.access.allowedCapabilities.canEditPatient
+					? 'Tu rol no permite editar datos de pacientes.'
+					: COMMERCIAL_RESTRICTED_MESSAGE
+			});
 		}
 		const { supabase, context } = session;
 
@@ -962,8 +981,13 @@ export const actions: Actions = {
 		if (!session) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
 		}
-		if (!hasCapability(session, 'canEditPatient')) {
-			return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
+		const permissions = resolvePatientPermissions(session.context);
+		if (!permissions.canArchivePatient) {
+			return fail(403, {
+				message: session.context.access.allowedCapabilities.canEditPatient
+					? 'Solo dueño o administrador puede archivar pacientes.'
+					: COMMERCIAL_RESTRICTED_MESSAGE
+			});
 		}
 		const { supabase, context } = session;
 
@@ -1002,8 +1026,13 @@ export const actions: Actions = {
 		if (!session) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
 		}
-		if (!hasCapability(session, 'canEditPatient')) {
-			return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
+		const permissions = resolvePatientPermissions(session.context);
+		if (!permissions.canArchivePatient) {
+			return fail(403, {
+				message: session.context.access.allowedCapabilities.canEditPatient
+					? 'Solo dueño o administrador puede desarchivar pacientes.'
+					: COMMERCIAL_RESTRICTED_MESSAGE
+			});
 		}
 		const { supabase, context } = session;
 
@@ -1042,8 +1071,13 @@ export const actions: Actions = {
 		if (!session) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
 		}
-		if (!hasCapability(session, 'canEditPatient')) {
-			return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
+		const permissions = resolvePatientPermissions(session.context);
+		if (!permissions.canArchivePatient) {
+			return fail(403, {
+				message: session.context.access.allowedCapabilities.canEditPatient
+					? 'Los pacientes no se eliminan directamente. Archivá el paciente para ocultarlo.'
+					: COMMERCIAL_RESTRICTED_MESSAGE
+			});
 		}
 		return fail(403, {
 			message: 'Por seguridad, los pacientes no se eliminan directamente. Archivá el paciente para ocultarlo.'

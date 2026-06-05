@@ -96,7 +96,7 @@ export const actions: Actions = {
 		}
 		if (!business.access.allowedCapabilities.canEditAppointment) {
 			return fail(403, {
-				message: 'La cuenta está suspendida. Regularizá la suscripción para volver a operar.'
+				message: 'Suscripción pendiente de regularización. Para volver a operar el consultorio, regularizá la suscripción.'
 			});
 		}
 

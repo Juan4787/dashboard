@@ -23,13 +23,16 @@
 		if (access.visualStatus === 'expiring') return 'Vence mañana';
 		if (access.commercialStatus === 'active') return 'Activo';
 		if (access.commercialStatus === 'grace') return 'Vencido';
-		if (access.commercialStatus === 'restricted') return 'Suspendido';
+		if (access.commercialStatus === 'restricted') return 'Pendiente';
 		return 'Archivado';
 	});
 
 	const statusClass = $derived.by(() => {
-		if (!access.commercialAccessEnabled || access.commercialStatus === 'restricted' || access.commercialStatus === 'archived') {
+		if (access.commercialStatus === 'archived') {
 			return 'ux-badge ux-badge-danger';
+		}
+		if (!access.commercialAccessEnabled || access.commercialStatus === 'restricted') {
+			return 'ux-badge ux-badge-warning';
 		}
 		if (access.commercialStatus === 'grace' || access.visualStatus === 'expiring') {
 			return 'ux-badge ux-badge-warning';

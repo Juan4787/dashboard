@@ -78,7 +78,11 @@ export const GET: RequestHandler = async ({ params, url, locals, fetch, cookies 
 	const last = items.at(-1);
 	let itemsWithCosts = items.map((item) => ({ ...item, amount: null as number | null }));
 
-	if (context.access.allowedCapabilities.canViewExistingCosts && items.length > 0) {
+	const canViewCosts =
+		(context.role === 'owner' || context.role === 'admin') &&
+		context.access.allowedCapabilities.canViewExistingCosts;
+
+	if (canViewCosts && items.length > 0) {
 		const { data: costs, error: costsError } = await supabase
 			.from('clinical_entry_costs')
 			.select('clinical_entry_id, amount')

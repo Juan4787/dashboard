@@ -247,7 +247,7 @@ export const commercialAccessMessage = (state: BusinessAccessState) => {
 		return 'La cuenta está archivada. Contactá soporte para reactivación o exportación.';
 	}
 	if (state.commercialStatus === 'restricted') {
-		return 'La cuenta está suspendida. Regularizá la suscripción para volver a operar.';
+		return 'Suscripción pendiente de regularización. Para volver a operar el consultorio, regularizá la suscripción.';
 	}
 	return null;
 };

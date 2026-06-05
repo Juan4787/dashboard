@@ -62,13 +62,20 @@
 
 	const configNav: NavItem[] = [
 		{ label: 'Negocio', href: '/odonto/configuracion/negocio' },
-		{ label: 'Usuarios', href: '/odonto/configuracion/usuarios' },
+		{ label: 'Roles', href: '/odonto/configuracion/usuarios' },
 		{ label: 'Suscripción', href: '/odonto/configuracion/suscripcion' },
 		{ label: 'Comunicación', href: '/odonto/configuracion/comunicacion' }
 	];
 
 	const activeBusiness = $derived(data?.activeBusiness);
+	const commercialLockActive = $derived.by(() => {
+		const access = activeBusiness?.access;
+		if (!access) return false;
+		if ($page.url.pathname.startsWith('/odonto/maestro')) return false;
+		return !access.commercialAccessEnabled || access.commercialStatus === 'restricted';
+	});
 	const visibleNav = $derived.by(() => {
+		if (commercialLockActive) return [];
 		if (activeBusiness?.role === 'professional') {
 			return professionalNav;
 		}
@@ -79,7 +86,7 @@
 	});
 
 	const canShowConfigMenu = $derived(
-		activeBusiness?.role !== 'professional' && activeBusiness?.role !== 'readonly'
+		!commercialLockActive && activeBusiness?.role !== 'professional' && activeBusiness?.role !== 'readonly'
 	);
 	const primaryMobileNav = $derived.by(() =>
 		visibleNav.filter((item) => item.label !== 'Configuración')
@@ -102,16 +109,17 @@
 		if (access.visualStatus === 'permanent') return 'Permanente';
 		if (access.visualStatus === 'expiring') return 'Vence mañana';
 		if (access.commercialStatus === 'grace') return 'Vencido';
-		if (access.commercialStatus === 'restricted') return 'Suspendido';
+		if (access.commercialStatus === 'restricted') return 'Regularizar';
 		if (access.commercialStatus === 'archived') return 'Archivado';
 		return null;
 	});
 
 	const accessTone = $derived.by(() => {
 		const access = activeBusiness?.access;
-		if (!access?.commercialAccessEnabled || access?.commercialStatus === 'restricted' || access?.commercialStatus === 'archived') {
+		if (access?.commercialStatus === 'archived') {
 			return 'danger';
 		}
+		if (!access?.commercialAccessEnabled || access?.commercialStatus === 'restricted') return 'warning';
 		if (access?.commercialStatus === 'grace' || access?.visualStatus === 'expiring') return 'warning';
 		return 'neutral';
 	});
@@ -132,7 +140,7 @@
 			return 'La cuenta está archivada. Contactá soporte para solicitar reactivación o exportación.';
 		}
 		if (access.commercialStatus === 'restricted') {
-			return 'La cuenta está suspendida. Podés consultar información existente, pero las funciones operativas están pausadas.';
+			return 'Suscripción pendiente de regularización. Para volver a operar el consultorio, regularizá la suscripción.';
 		}
 		if (access.commercialStatus === 'grace') {
 			return access.graceUntil
@@ -683,7 +691,7 @@
 				{data.businessError}
 			</div>
 		{/if}
-		{#if commercialNotice}
+		{#if commercialNotice && !commercialLockActive}
 			<div
 				class={`mb-4 rounded-2xl border px-4 py-3 text-sm font-bold ${
 					accessTone === 'danger'
@@ -694,7 +702,22 @@
 				{commercialNotice}
 			</div>
 		{/if}
-		{#if showSkeleton}
+		{#if commercialLockActive}
+			<section class="mx-auto mt-8 max-w-2xl rounded-3xl border border-amber-300/40 bg-amber-400/12 p-8 text-center shadow-2xl shadow-amber-950/10 dark:border-amber-400/25 dark:bg-amber-400/10">
+				<p class="mx-auto inline-flex rounded-full bg-amber-400/15 px-3 py-1 text-xs font-black uppercase tracking-wide text-amber-900 dark:text-amber-100">
+					Regularización
+				</p>
+				<h1 class="mt-5 text-3xl font-black text-neutral-950 dark:text-white">
+					Suscripción pendiente de regularización
+				</h1>
+				<p class="mx-auto mt-3 max-w-lg text-base font-semibold text-neutral-700 dark:text-amber-50/80">
+					Para volver a operar el consultorio, regularizá la suscripción.
+				</p>
+				<p class="mt-6 rounded-2xl border border-amber-300/35 bg-white/70 px-4 py-3 text-sm font-bold text-amber-950 dark:bg-[#13243d]/70 dark:text-amber-100">
+					Contactá soporte del sistema.
+				</p>
+			</section>
+		{:else if showSkeleton}
 			<OdontoRouteSkeleton kind={skeletonKind} />
 		{:else}
 			{@render children()}
