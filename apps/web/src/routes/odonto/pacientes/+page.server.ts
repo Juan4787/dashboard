@@ -2,7 +2,12 @@ import { env } from '$env/dynamic/private';
 import { resolveActiveBusiness } from '$lib/server/business';
 import { newId, readDemoDb, updateDemoDb } from '$lib/server/demo-store';
 import { normalizePhoneE164, normalizePhoneRaw } from '$lib/server/phone';
-import { createSupabaseServerClient, getAuthUserId, isJwtExpired } from '$lib/server/supabase';
+import {
+	createSupabaseAdminClient,
+	createSupabaseServerClient,
+	getAuthUserId,
+	isJwtExpired
+} from '$lib/server/supabase';
 import { normalizePhone } from '$lib/utils/format';
 import { fail, redirect, error as kitError } from '@sveltejs/kit';
 import { dev } from '$app/environment';
@@ -43,6 +48,87 @@ const isJwtExpiredError = (error: { code?: string | null; message?: string | nul
 };
 
 type CountsSource = 'rpc' | 'fallback_planned';
+
+const ensureProfessionalPatientLink = async ({
+	fetch,
+	businessId,
+	userId,
+	patientId
+}: {
+	fetch: typeof globalThis.fetch;
+	businessId: string;
+	userId: string;
+	patientId: string;
+}) => {
+	const admin = await createSupabaseAdminClient('odonto', fetch);
+	const { data: professionalUser, error: professionalUserError } = await admin
+		.from('professional_users')
+		.select('professional_id')
+		.eq('business_id', businessId)
+		.eq('user_id', userId)
+		.order('created_at', { ascending: true })
+		.limit(1)
+		.maybeSingle();
+
+	if (professionalUserError) throw professionalUserError;
+	const professionalId = professionalUser?.professional_id ? String(professionalUser.professional_id) : null;
+	if (!professionalId) throw new Error('PROFESSIONAL_LINK_REQUIRED');
+
+	const { data: existingLink, error: existingLinkError } = await admin
+		.from('professional_patient_links')
+		.select('id, is_active')
+		.eq('business_id', businessId)
+		.eq('professional_id', professionalId)
+		.eq('patient_id', patientId)
+		.order('is_active', { ascending: false })
+		.order('created_at', { ascending: true })
+		.limit(1)
+		.maybeSingle();
+
+	if (existingLinkError) throw existingLinkError;
+
+	if (existingLink?.id) {
+		const { error } = await admin
+			.from('professional_patient_links')
+			.update({
+				is_active: true,
+				source: 'manual',
+				disabled_by: null,
+				disabled_at: null,
+				disabled_reason: null,
+				updated_at: new Date().toISOString()
+			})
+			.eq('id', existingLink.id);
+		if (error) throw error;
+		return;
+	}
+
+	const { error: insertError } = await admin.from('professional_patient_links').insert({
+		business_id: businessId,
+		professional_id: professionalId,
+		patient_id: patientId,
+		source: 'manual',
+		created_by: userId
+	});
+
+	if (!insertError) return;
+	if (insertError.code !== '23505') throw insertError;
+
+	const { error: activateError } = await admin
+		.from('professional_patient_links')
+		.update({
+			is_active: true,
+			source: 'manual',
+			disabled_by: null,
+			disabled_at: null,
+			disabled_reason: null,
+			updated_at: new Date().toISOString()
+		})
+		.eq('business_id', businessId)
+		.eq('professional_id', professionalId)
+		.eq('patient_id', patientId);
+	if (activateError) throw activateError;
+};
 
 export const load: PageServerLoad = async ({ locals, url, fetch, cookies }) => {
 	if (!locals.auth) {
@@ -424,6 +510,35 @@ const handleCreatePatient = async ({
 				dni,
 				phone
 			});
+		}
+
+		if (context.role === 'professional') {
+			try {
+				await ensureProfessionalPatientLink({
+					fetch,
+					businessId: context.business.id,
+					userId: ownerId,
+					patientId: data.id
+				});
+			} catch (linkError) {
+				console.error('Error vinculando paciente al profesional', linkError);
+				try {
+					const admin = await createSupabaseAdminClient('odonto', fetch);
+					await admin
+						.from('patients')
+						.delete()
+						.eq('business_id', context.business.id)
+						.eq('id', data.id);
+				} catch (cleanupError) {
+					console.error('Error limpiando paciente sin vinculo profesional', cleanupError);
+				}
+				return fail(500, {
+					message: 'No se pudo vincular el paciente al profesional. Intentá de nuevo.',
+					full_name,
+					dni,
+					phone
+				});
+			}
 		}
 
 		throw redirect(303, `/odonto/pacientes/${data.id}`);
