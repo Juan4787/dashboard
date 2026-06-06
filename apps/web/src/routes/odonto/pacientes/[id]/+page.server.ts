@@ -2,7 +2,11 @@ import { env } from '$env/dynamic/private';
 import { resolveActiveBusiness } from '$lib/server/business';
 import { newId, readDemoDb, updateDemoDb } from '$lib/server/demo-store';
 import { normalizePhoneE164, normalizePhoneRaw } from '$lib/server/phone';
-import { createSupabaseServerClient, getAuthUserId } from '$lib/server/supabase';
+import {
+	createSupabaseAdminClient,
+	createSupabaseServerClient,
+	getAuthUserId
+} from '$lib/server/supabase';
 import { normalizePhone } from '$lib/utils/format';
 import { parseMoneyInteger } from '$lib/utils/money-input';
 import { fail, redirect, error as kitError } from '@sveltejs/kit';
@@ -26,6 +30,46 @@ const ENTRIES_PAGE_SIZE = 30;
 const RADIOGRAPHS_PAGE_SIZE = 24;
 const COMMERCIAL_RESTRICTED_MESSAGE =
 	'Suscripción pendiente de regularización. Para volver a operar el consultorio, regularizá la suscripción.';
+const PROFESSIONAL_DELETE_PATIENT_MESSAGE =
+	'Para eliminar un paciente, consultá al dueño del consultorio.';
+
+type DuplicatePatientField = 'dni' | 'name';
+
+const normalizePatientName = (value: string) => value.trim().replace(/\s+/g, ' ').toLowerCase();
+
+const cleanText = (value: unknown) => {
+	const text = String(value ?? '').trim();
+	return text ? text : null;
+};
+
+const duplicatePatientMessage = (field: DuplicatePatientField) =>
+	field === 'dni'
+		? 'Ya hay otro paciente creado con ese DNI. Abrí su ficha o corregí el dato.'
+		: 'Ya hay otro paciente creado con ese nombre. Abrí su ficha o corregí el dato.';
+
+const sentenceJoin = (items: string[]) => {
+	if (items.length <= 1) return items[0] ?? '';
+	return `${items.slice(0, -1).join(', ')} y ${items.at(-1)}`;
+};
+
+const patientFieldLabels: Record<string, string> = {
+	full_name: 'nombre',
+	dni: 'DNI',
+	phone: 'teléfono',
+	email: 'correo electrónico',
+	birth_date: 'fecha de nacimiento',
+	address: 'dirección',
+	insurance: 'obra social',
+	insurance_plan: 'plan de la obra social',
+	allergies: 'alergias',
+	medication: 'medicación',
+	background: 'antecedentes'
+};
+
+const currentValue = (value: unknown) => {
+	const text = String(value ?? '').trim();
+	return text ? text : null;
+};
 
 const resolveBusinessActionContext = async ({
 	locals,
@@ -53,26 +97,203 @@ const resolveBusinessActionContext = async ({
 
 type BusinessActionSession = NonNullable<Awaited<ReturnType<typeof resolveBusinessActionContext>>>;
 
+const getCurrentProfessional = async ({
+	admin,
+	businessId,
+	userId
+}: {
+	admin: Awaited<ReturnType<typeof createSupabaseAdminClient>>;
+	businessId: string;
+	userId: string;
+}) => {
+	const { data, error } = await admin
+		.from('professional_users')
+		.select('professional_id, professionals(name)')
+		.eq('business_id', businessId)
+		.eq('user_id', userId)
+		.order('created_at', { ascending: true })
+		.limit(1)
+		.maybeSingle();
+
+	if (error) throw error;
+	const professional = (data as any)?.professionals;
+	const professionalId = (data as any)?.professional_id ? String((data as any).professional_id) : null;
+	if (!professionalId) return null;
+
+	return {
+		id: professionalId,
+		name: cleanText(professional?.name) ?? 'Profesional'
+	};
+};
+
+const ensureProfessionalCanAccessPatient = async ({
+	admin,
+	businessId,
+	patientId,
+	professionalId
+}: {
+	admin: Awaited<ReturnType<typeof createSupabaseAdminClient>>;
+	businessId: string;
+	patientId: string;
+	professionalId: string;
+}) => {
+	const { data, error } = await admin
+		.from('professional_patient_links')
+		.select('id, archived_at')
+		.eq('business_id', businessId)
+		.eq('patient_id', patientId)
+		.eq('professional_id', professionalId)
+		.eq('is_active', true)
+		.limit(1)
+		.maybeSingle();
+
+	if (error) throw error;
+	return data ? { id: String((data as any).id), archived_at: (data as any).archived_at ?? null } : null;
+};
+
+const findPatientDuplicateForUpdate = async ({
+	admin,
+	businessId,
+	patientId,
+	fullName,
+	dni
+}: {
+	admin: Awaited<ReturnType<typeof createSupabaseAdminClient>>;
+	businessId: string;
+	patientId: string;
+	fullName: string;
+	dni: string;
+}): Promise<{ id: string; field: DuplicatePatientField } | null> => {
+	const normalizedName = normalizePatientName(fullName);
+
+	if (dni) {
+		const { data, error } = await admin
+			.from('patients')
+			.select('id')
+			.eq('business_id', businessId)
+			.eq('dni', dni)
+			.neq('id', patientId)
+			.limit(1)
+			.maybeSingle();
+		if (error) throw error;
+		if ((data as any)?.id) return { id: String((data as any).id), field: 'dni' };
+	}
+
+	const { data, error } = await admin
+		.from('patients')
+		.select('id, full_name')
+		.eq('business_id', businessId)
+		.neq('id', patientId)
+		.range(0, 9999);
+	if (error) throw error;
+
+	const existingByName = (data ?? []).find(
+		(patient: any) => normalizePatientName(String(patient.full_name ?? '')) === normalizedName
+	);
+	if (existingByName?.id) return { id: String(existingByName.id), field: 'name' };
+
+	return null;
+};
+
+const duplicatePatientActionResult = (existing: { id: string; field: DuplicatePatientField }) =>
+	fail(400, {
+		message: duplicatePatientMessage(existing.field),
+		duplicate: true,
+		duplicateField: existing.field,
+		existingId: existing.id
+	});
+
+const mapDuplicatePatientError = async ({
+	error,
+	admin,
+	businessId,
+	patientId,
+	fullName,
+	dni
+}: {
+	error: { message?: string | null } | null | undefined;
+	admin: Awaited<ReturnType<typeof createSupabaseAdminClient>>;
+	businessId: string;
+	patientId: string;
+	fullName: string;
+	dni: string;
+}) => {
+	const message = String(error?.message ?? '');
+	if (!message.includes('PATIENT_DNI_ALREADY_EXISTS') && !message.includes('PATIENT_NAME_ALREADY_EXISTS')) {
+		return null;
+	}
+	const duplicate = await findPatientDuplicateForUpdate({
+		admin,
+		businessId,
+		patientId,
+		fullName,
+		dni
+	});
+	if (duplicate) return duplicatePatientActionResult(duplicate);
+	return fail(400, {
+		message: message.includes('PATIENT_DNI_ALREADY_EXISTS')
+			? duplicatePatientMessage('dni')
+			: duplicatePatientMessage('name')
+	});
+};
+
+const getActorName = (role: BusinessActionSession['context']['role'], professionalName?: string | null) => {
+	if (professionalName) return professionalName;
+	if (role === 'owner') return 'Dueño';
+	if (role === 'admin') return 'Administrador';
+	if (role === 'reception') return 'Recepción';
+	return 'Usuario del consultorio';
+};
+
+const changedFieldsForPatientUpdate = ({
+	currentPatient,
+	currentProfile,
+	updates,
+	clinicalUpdates
+}: {
+	currentPatient: Record<string, unknown> | null | undefined;
+	currentProfile: Record<string, unknown> | null | undefined;
+	updates: Record<string, unknown>;
+	clinicalUpdates: Record<string, unknown>;
+}) => {
+	const changed: string[] = [];
+	for (const key of ['full_name', 'dni', 'phone', 'email', 'birth_date', 'address', 'insurance', 'insurance_plan']) {
+		if (currentValue(currentPatient?.[key]) !== currentValue(updates[key])) {
+			changed.push(patientFieldLabels[key]);
+		}
+	}
+	for (const key of ['allergies', 'medication', 'background']) {
+		if (currentValue(currentProfile?.[key]) !== currentValue(clinicalUpdates[key])) {
+			changed.push(patientFieldLabels[key]);
+		}
+	}
+	return changed;
+};
+
 const resolvePatientPermissions = (context: BusinessActionSession['context']) => {
 	const role = context.role;
 	const capabilities = context.access.allowedCapabilities;
 	const isOwnerOrAdmin = role === 'owner' || role === 'admin';
-	const canOperatePatients = role === 'owner' || role === 'admin' || role === 'reception';
+	const canEditPatientData = role === 'owner' || role === 'admin' || role === 'reception' || role === 'professional';
 	const canWriteClinical = role === 'owner' || role === 'admin' || role === 'professional';
 	const canManageRadiographs = role === 'owner' || role === 'admin' || role === 'professional';
+	const canArchivePatient = role === 'owner' || role === 'admin' || role === 'professional';
 
 	return {
 		canReadClinicalProfile:
 			(role === 'owner' || role === 'admin' || role === 'professional') &&
 			capabilities.canViewExistingClinicalNotes,
-		canEditClinicalProfile: isOwnerOrAdmin && capabilities.canEditPatient,
+		canEditClinicalProfile:
+			(role === 'owner' || role === 'admin' || role === 'professional') && capabilities.canEditPatient,
 		canViewCosts: isOwnerOrAdmin && capabilities.canViewExistingCosts,
-		canEditPatient: canOperatePatients && capabilities.canEditPatient,
-		canArchivePatient: isOwnerOrAdmin && capabilities.canEditPatient,
+		canEditPatient: canEditPatientData && capabilities.canEditPatient,
+		canArchivePatient: canArchivePatient && capabilities.canEditPatient,
 		canCreateClinicalEntry: canWriteClinical && capabilities.canCreateClinicalEntry,
 		canEditClinicalEntry: canWriteClinical && capabilities.canEditClinicalEntry,
-		canCreateAppointment: canOperatePatients && capabilities.canCreateAppointment,
-		canManageDriveFolders: isOwnerOrAdmin && capabilities.canLinkExternalFiles,
+		canCreateAppointment:
+			(role === 'owner' || role === 'admin' || role === 'reception') &&
+			capabilities.canCreateAppointment,
+		canManageDriveFolders: canManageRadiographs && capabilities.canLinkExternalFiles,
 		canManageRadiographs: canManageRadiographs && capabilities.canLinkExternalFiles
 	};
 };
@@ -161,6 +382,18 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 	});
 	if (!context) throw kitError(500, 'No se pudo resolver el negocio activo');
 	const permissions = resolvePatientPermissions(context);
+	const admin = await createSupabaseAdminClient('odonto', fetch);
+	const currentProfessional =
+		context.role === 'professional'
+			? await getCurrentProfessional({
+					admin,
+					businessId: context.business.id,
+					userId: ownerId ?? ''
+				}).catch((err) => {
+					console.error('Error resolviendo profesional actual', err);
+					return null;
+				})
+			: null;
 
 	const [
 		{ data: patient, error: patientError },
@@ -170,12 +403,14 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 		{ data: radiographs, error: radiographsError },
 		{ data: appointments, error: appointmentsError },
 		{ data: driveConnection, error: driveError },
-		{ data: driveFolderId, error: driveFolderError }
+		{ data: driveFolderRecord, error: driveFolderError },
+		{ data: professionalLink, error: professionalLinkError },
+		{ data: changeEvents, error: changeEventsError }
 	] = await Promise.all([
 		supabase
 			.from('patients')
 			.select(
-				'id, full_name, dni, phone, email, birth_date, address, insurance, insurance_plan, archived_at, created_at, updated_at'
+				'id, full_name, dni, phone, email, birth_date, address, insurance, insurance_plan, archived_at, drive_folder_id, created_at, updated_at'
 			)
 			.eq('id', params.id)
 			.eq('business_id', context.business.id)
@@ -190,7 +425,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 			: Promise.resolve({ data: null, error: null }),
 		supabase
 			.from('clinical_entries')
-			.select('id, created_at, entry_type, description, teeth, internal_note')
+			.select('id, created_at, entry_type, description, teeth, internal_note, created_by_user_id, locked_after')
 			.eq('patient_id', params.id)
 			.eq('business_id', context.business.id)
 			.is('archived_at', null)
@@ -229,11 +464,37 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 					.maybeSingle()
 			: Promise.resolve({ data: null, error: null }),
 		permissions.canManageDriveFolders
-			? supabase.rpc('get_patient_drive_folder_safely', {
-					p_business_id: context.business.id,
-					p_patient_id: params.id
-				})
-			: Promise.resolve({ data: null, error: null })
+			? admin
+					.from('patients')
+					.select('drive_folder_id')
+					.eq('id', params.id)
+					.eq('business_id', context.business.id)
+					.maybeSingle()
+			: Promise.resolve({ data: null, error: null }),
+		context.role === 'professional' && currentProfessional
+			? admin
+					.from('professional_patient_links')
+					.select('id, archived_at')
+					.eq('business_id', context.business.id)
+					.eq('patient_id', params.id)
+					.eq('professional_id', currentProfessional.id)
+					.eq('is_active', true)
+					.limit(1)
+					.maybeSingle()
+			: Promise.resolve({ data: null, error: null }),
+		(async () => {
+			try {
+				return await admin
+					.from('patient_profile_change_events')
+					.select('id, summary, changed_by_name, changed_fields, created_at')
+					.eq('business_id', context.business.id)
+					.eq('patient_id', params.id)
+					.order('created_at', { ascending: false })
+					.limit(5);
+			} catch (error) {
+				return { data: [], error };
+			}
+		})()
 	]);
 
 	if (patientError) {
@@ -265,6 +526,12 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 	if (driveFolderError) {
 		console.error('Error cargando carpeta Drive del paciente', driveFolderError);
 	}
+	if (professionalLinkError) {
+		console.error('Error cargando archivo personal del profesional', professionalLinkError);
+	}
+	if (changeEventsError) {
+		console.error('Error cargando cambios del paciente', changeEventsError);
+	}
 
 	const safeEntries = entries ?? [];
 	const costByEntryId = new Map((costs ?? []).map((item: any) => [String(item.clinical_entry_id), item.amount]));
@@ -285,7 +552,12 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 			medication: clinicalProfile?.medication ?? null,
 			background: clinicalProfile?.background ?? null,
 			custom_fields: clinicalProfile?.custom_fields ?? null,
-			drive_folder_id: typeof driveFolderId === 'string' ? driveFolderId : null
+			drive_folder_id:
+				typeof (driveFolderRecord as any)?.drive_folder_id === 'string'
+					? (driveFolderRecord as any).drive_folder_id
+					: null,
+			professional_archived_at:
+				context.role === 'professional' ? ((professionalLink as any)?.archived_at ?? null) : null
 		},
 		entries: hasMoreEntries ? entriesWithCosts.slice(0, ENTRIES_PAGE_SIZE) : entriesWithCosts,
 		appointments: appointments ?? [],
@@ -295,6 +567,9 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 		hasMoreEntries,
 		hasMoreRadiographs,
 		driveConnection: driveConnection ?? null,
+		changeEvents: changeEvents ?? [],
+		role: context.role,
+		currentUserId: ownerId,
 		permissions,
 		demo: false
 	};
@@ -357,9 +632,13 @@ export const actions: Actions = {
 		}
 		const { supabase, ownerId, context } = session;
 		const { error } = await supabase.from('drive_connections').delete().eq('owner_id', ownerId);
-		const { error: resetError } = await supabase.rpc('clear_patient_drive_folders_safely', {
-			p_business_id: context.business.id
-		});
+		const resetResult =
+			context.role === 'owner' || context.role === 'admin'
+				? await supabase.rpc('clear_patient_drive_folders_safely', {
+						p_business_id: context.business.id
+					})
+				: { error: null };
+		const resetError = resetResult.error;
 
 		if (error) {
 			console.error('Error desconectando Drive', error);
@@ -389,12 +668,16 @@ export const actions: Actions = {
 		if (!resolvePatientPermissions(session.context).canManageDriveFolders) {
 			return fail(403, { message: 'Tu rol no permite administrar Google Drive de pacientes.' });
 		}
-		const { supabase, context } = session;
-		const { error } = await supabase.rpc('set_patient_drive_folder_safely', {
-			p_business_id: context.business.id,
-			p_patient_id: params.id,
-			p_drive_folder_id: drive_folder_id
-		});
+		const { context } = session;
+		const admin = await createSupabaseAdminClient('odonto', fetch);
+		const { error } = await admin
+			.from('patients')
+			.update({
+				drive_folder_id,
+				updated_at: new Date().toISOString()
+			})
+			.eq('business_id', context.business.id)
+			.eq('id', params.id);
 
 		if (error) {
 			console.error('Error guardando carpeta Drive', error);
@@ -423,8 +706,9 @@ export const actions: Actions = {
 		if (!resolvePatientPermissions(session.context).canManageRadiographs) {
 			return fail(403, { message: 'Tu rol no permite administrar radiografías de este paciente.' });
 		}
-		const { supabase, ownerId, context } = session;
-		const { data, error } = await supabase
+		const { ownerId, context } = session;
+		const admin = await createSupabaseAdminClient('odonto', fetch);
+		const { data, error } = await admin
 			.from('patient_radiographs')
 			.insert({
 				owner_id: ownerId,
@@ -473,8 +757,9 @@ export const actions: Actions = {
 		if (!resolvePatientPermissions(session.context).canManageRadiographs) {
 			return fail(403, { message: 'Tu rol no permite administrar radiografías de este paciente.' });
 		}
-		const { supabase, context } = session;
-		const { data, error } = await supabase
+		const { context } = session;
+		const admin = await createSupabaseAdminClient('odonto', fetch);
+		const { data, error } = await admin
 			.from('patient_radiographs')
 			.update({
 				status: 'uploading',
@@ -529,8 +814,9 @@ export const actions: Actions = {
 		if (!resolvePatientPermissions(session.context).canManageRadiographs) {
 			return fail(403, { message: 'Tu rol no permite administrar radiografías de este paciente.' });
 		}
-		const { supabase, context } = session;
-		const { data, error } = await supabase
+		const { context } = session;
+		const admin = await createSupabaseAdminClient('odonto', fetch);
+		const { data, error } = await admin
 			.from('patient_radiographs')
 			.update({
 				drive_file_id,
@@ -572,8 +858,9 @@ export const actions: Actions = {
 		if (!resolvePatientPermissions(session.context).canManageRadiographs) {
 			return fail(403, { message: 'Tu rol no permite administrar radiografías de este paciente.' });
 		}
-		const { supabase, context } = session;
-		const { data, error } = await supabase
+		const { context } = session;
+		const admin = await createSupabaseAdminClient('odonto', fetch);
+		const { data, error } = await admin
 			.from('patient_radiographs')
 			.update({ status: 'failed' })
 			.eq('id', radiograph_id)
@@ -610,8 +897,9 @@ export const actions: Actions = {
 		if (!resolvePatientPermissions(session.context).canManageRadiographs) {
 			return fail(403, { message: 'Tu rol no permite administrar radiografías de este paciente.' });
 		}
-		const { supabase, context } = session;
-		const { error } = await supabase
+		const { context } = session;
+		const admin = await createSupabaseAdminClient('odonto', fetch);
+		const { error } = await admin
 			.from('patient_radiographs')
 			.delete()
 			.eq('id', radiograph_id)
@@ -848,10 +1136,15 @@ export const actions: Actions = {
 		if (!locals.auth) throw redirect(303, '/login');
 
 		const form = await request.formData();
+		const full_name = String(form.get('full_name') ?? '').trim().replace(/\s+/g, ' ');
 		const dni = String(form.get('dni') ?? '').trim();
 		const phoneInput = String(form.get('phone') ?? '');
 		const phone = normalizePhone(phoneInput);
 		const birthDateRaw = String(form.get('birth_date') ?? '').trim();
+
+		if (!full_name) {
+			return fail(400, { message: 'Ingresá el nombre del paciente.' });
+		}
 
 		let birth_date: string | null = null;
 		if (birthDateRaw) {
@@ -880,17 +1173,18 @@ export const actions: Actions = {
 		}
 
 		const clinicalUpdates = {
-			allergies: String(form.get('allergies') ?? '') || null,
-			medication: String(form.get('medication') ?? '') || null,
-			background: String(form.get('background') ?? '') || null
+			allergies: cleanText(form.get('allergies')),
+			medication: cleanText(form.get('medication')),
+			background: cleanText(form.get('background'))
 		};
 		const updates = {
-			email: String(form.get('email') ?? '') || null,
+			full_name,
+			email: cleanText(form.get('email')),
 			dni: dni || null,
 			birth_date,
-			address: String(form.get('address') ?? '') || null,
-			insurance: String(form.get('insurance') ?? '') || null,
-			insurance_plan: String(form.get('insurance_plan') ?? '') || null,
+			address: cleanText(form.get('address')),
+			insurance: cleanText(form.get('insurance')),
+			insurance_plan: cleanText(form.get('insurance_plan')),
 			phone: phone || null,
 			phone_raw: normalizePhoneRaw(phoneInput),
 			phone_e164: normalizePhoneE164(phoneInput),
@@ -925,9 +1219,78 @@ export const actions: Actions = {
 					: COMMERCIAL_RESTRICTED_MESSAGE
 			});
 		}
-		const { supabase, context } = session;
+		const { context, ownerId } = session;
+		const admin = await createSupabaseAdminClient('odonto', fetch);
+		const currentProfessional =
+			context.role === 'professional'
+				? await getCurrentProfessional({
+						admin,
+						businessId: context.business.id,
+						userId: ownerId
+					})
+				: null;
 
-		const { error } = await supabase
+		if (context.role === 'professional') {
+			if (!currentProfessional) {
+				return fail(403, { message: 'Tu usuario no está vinculado a un profesional del consultorio.' });
+			}
+			const link = await ensureProfessionalCanAccessPatient({
+				admin,
+				businessId: context.business.id,
+				patientId: params.id,
+				professionalId: currentProfessional.id
+			});
+			if (!link) {
+				return fail(403, { message: 'Este paciente no está asignado a tu perfil profesional.' });
+			}
+		}
+
+		try {
+			const duplicate = await findPatientDuplicateForUpdate({
+				admin,
+				businessId: context.business.id,
+				patientId: params.id,
+				fullName: full_name,
+				dni
+			});
+			if (duplicate) return duplicatePatientActionResult(duplicate);
+		} catch (duplicateError) {
+			console.error('Error verificando duplicados al editar paciente', duplicateError);
+			return fail(500, {
+				message: 'No se pudo verificar si ya existe otro paciente con esos datos. Intentá de nuevo.'
+			});
+		}
+
+		const [{ data: currentPatient, error: currentPatientError }, { data: currentProfile, error: currentProfileError }] =
+			await Promise.all([
+				admin
+					.from('patients')
+					.select(
+						'full_name, dni, phone, email, birth_date, address, insurance, insurance_plan'
+					)
+					.eq('id', params.id)
+					.eq('business_id', context.business.id)
+					.maybeSingle(),
+				admin
+					.from('patient_clinical_profiles')
+					.select('allergies, medication, background')
+					.eq('patient_id', params.id)
+					.eq('business_id', context.business.id)
+					.maybeSingle()
+			]);
+
+		if (currentPatientError) {
+			console.error('Error cargando paciente antes de editar', currentPatientError);
+			return fail(500, { message: 'No se pudo cargar la ficha antes de guardar.' });
+		}
+		if (!currentPatient) {
+			return fail(404, { message: 'Paciente no encontrado.' });
+		}
+		if (currentProfileError) {
+			console.error('Error cargando perfil clínico antes de editar', currentProfileError);
+		}
+
+		const { error } = await admin
 			.from('patients')
 			.update(updates)
 			.eq('id', params.id)
@@ -935,24 +1298,62 @@ export const actions: Actions = {
 
 		if (error) {
 			console.error('Error actualizando paciente', error);
-			return fail(500, { message: 'No se pudo actualizar la ficha' });
+			const duplicateResult = await mapDuplicatePatientError({
+				error,
+				admin,
+				businessId: context.business.id,
+				patientId: params.id,
+				fullName: full_name,
+				dni
+			});
+			if (duplicateResult) return duplicateResult;
+			return fail(500, { message: 'No se pudo actualizar la ficha.' });
 		}
 
-		if (context.role === 'owner' || context.role === 'admin') {
-			const { error: profileError } = await supabase.rpc('upsert_patient_clinical_profile_safely', {
-				p_business_id: context.business.id,
-				p_patient_id: params.id,
-				p_allergies: clinicalUpdates.allergies,
-				p_medication: clinicalUpdates.medication,
-				p_background: clinicalUpdates.background,
-				p_clinical_alert_note: null,
-				p_notes: null,
-				p_custom_fields: null
-			});
+		if (permissions.canEditClinicalProfile) {
+			const { error: profileError } = await admin
+				.from('patient_clinical_profiles')
+				.upsert(
+					{
+						business_id: context.business.id,
+						patient_id: params.id,
+						allergies: clinicalUpdates.allergies,
+						medication: clinicalUpdates.medication,
+						background: clinicalUpdates.background,
+						updated_by: ownerId,
+						updated_at: new Date().toISOString()
+					},
+					{ onConflict: 'business_id,patient_id' }
+				);
 
 			if (profileError) {
 				console.error('Error actualizando perfil clinico del paciente', profileError);
-				return fail(500, { message: 'No se pudo actualizar la información clínica' });
+				return fail(500, { message: 'No se pudo actualizar la información clínica.' });
+			}
+		}
+
+		const changedFields = changedFieldsForPatientUpdate({
+			currentPatient: currentPatient as Record<string, unknown>,
+			currentProfile: permissions.canEditClinicalProfile
+				? (currentProfile as Record<string, unknown> | null)
+				: null,
+			updates,
+			clinicalUpdates: permissions.canEditClinicalProfile ? clinicalUpdates : {}
+		});
+
+		if (changedFields.length > 0) {
+			const summary = `Se modificó: ${sentenceJoin(changedFields)}.`;
+			const { error: changeLogError } = await admin.from('patient_profile_change_events').insert({
+				business_id: context.business.id,
+				patient_id: params.id,
+				changed_by_user_id: ownerId,
+				changed_by_professional_id: currentProfessional?.id ?? null,
+				changed_by_name: getActorName(context.role, currentProfessional?.name),
+				changed_fields: changedFields,
+				summary
+			});
+			if (changeLogError) {
+				console.error('Error registrando cambios visibles del paciente', changeLogError);
 			}
 		}
 
@@ -985,11 +1386,47 @@ export const actions: Actions = {
 		if (!permissions.canArchivePatient) {
 			return fail(403, {
 				message: session.context.access.allowedCapabilities.canEditPatient
-					? 'Solo dueño o administrador puede archivar pacientes.'
+					? 'Tu rol no permite archivar este paciente.'
 					: COMMERCIAL_RESTRICTED_MESSAGE
 			});
 		}
-		const { supabase, context } = session;
+		const { supabase, context, ownerId } = session;
+
+		if (context.role === 'professional') {
+			const admin = await createSupabaseAdminClient('odonto', fetch);
+			const professional = await getCurrentProfessional({
+				admin,
+				businessId: context.business.id,
+				userId: ownerId
+			});
+			if (!professional) {
+				return fail(403, { message: 'Tu usuario no está vinculado a un profesional del consultorio.' });
+			}
+			const link = await ensureProfessionalCanAccessPatient({
+				admin,
+				businessId: context.business.id,
+				patientId: params.id,
+				professionalId: professional.id
+			});
+			if (!link) {
+				return fail(403, { message: 'Este paciente no está asignado a tu perfil profesional.' });
+			}
+			const { error } = await admin
+				.from('professional_patient_links')
+				.update({
+					archived_at: new Date().toISOString(),
+					archived_by: ownerId,
+					updated_at: new Date().toISOString()
+				})
+				.eq('id', link.id);
+
+			if (error) {
+				console.error('Error archivando paciente para profesional', error);
+				return fail(500, { message: 'No se pudo archivar el paciente.' });
+			}
+
+			throw redirect(303, '/odonto/pacientes?estado=archivados');
+		}
 
 		const { error } = await supabase.rpc('set_patient_archive_state_safely', {
 			p_business_id: context.business.id,
@@ -1030,11 +1467,47 @@ export const actions: Actions = {
 		if (!permissions.canArchivePatient) {
 			return fail(403, {
 				message: session.context.access.allowedCapabilities.canEditPatient
-					? 'Solo dueño o administrador puede desarchivar pacientes.'
+					? 'Tu rol no permite desarchivar este paciente.'
 					: COMMERCIAL_RESTRICTED_MESSAGE
 			});
 		}
-		const { supabase, context } = session;
+		const { supabase, context, ownerId } = session;
+
+		if (context.role === 'professional') {
+			const admin = await createSupabaseAdminClient('odonto', fetch);
+			const professional = await getCurrentProfessional({
+				admin,
+				businessId: context.business.id,
+				userId: ownerId
+			});
+			if (!professional) {
+				return fail(403, { message: 'Tu usuario no está vinculado a un profesional del consultorio.' });
+			}
+			const link = await ensureProfessionalCanAccessPatient({
+				admin,
+				businessId: context.business.id,
+				patientId: params.id,
+				professionalId: professional.id
+			});
+			if (!link) {
+				return fail(403, { message: 'Este paciente no está asignado a tu perfil profesional.' });
+			}
+			const { error } = await admin
+				.from('professional_patient_links')
+				.update({
+					archived_at: null,
+					archived_by: null,
+					updated_at: new Date().toISOString()
+				})
+				.eq('id', link.id);
+
+			if (error) {
+				console.error('Error desarchivando paciente para profesional', error);
+				return fail(500, { message: 'No se pudo desarchivar el paciente.' });
+			}
+
+			throw redirect(303, '/odonto/pacientes');
+		}
 
 		const { error } = await supabase.rpc('set_patient_archive_state_safely', {
 			p_business_id: context.business.id,
@@ -1072,6 +1545,9 @@ export const actions: Actions = {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
 		}
 		const permissions = resolvePatientPermissions(session.context);
+		if (session.context.role === 'professional') {
+			return fail(403, { message: PROFESSIONAL_DELETE_PATIENT_MESSAGE });
+		}
 		if (!permissions.canArchivePatient) {
 			return fail(403, {
 				message: session.context.access.allowedCapabilities.canEditPatient

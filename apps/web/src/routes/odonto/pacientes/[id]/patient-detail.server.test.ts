@@ -1,16 +1,21 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
+	createSupabaseAdminClient: vi.fn(),
 	createSupabaseServerClient: vi.fn(),
 	getAuthUserId: vi.fn(),
 	resolveActiveBusiness: vi.fn(),
 	supabase: {
 		from: vi.fn(),
 		rpc: vi.fn()
+	},
+	admin: {
+		from: vi.fn()
 	}
 }));
 
 vi.mock('$lib/server/supabase', () => ({
+	createSupabaseAdminClient: mocks.createSupabaseAdminClient,
 	createSupabaseServerClient: mocks.createSupabaseServerClient,
 	getAuthUserId: mocks.getAuthUserId
 }));
@@ -71,10 +76,56 @@ const expectRedirectToPatient = async (promise: unknown) => {
 	}
 };
 
+const makeQueryBuilder = ({
+	result = { data: null, error: null },
+	maybeSingleResult,
+	rangeResult
+}: {
+	result?: any;
+	maybeSingleResult?: any;
+	rangeResult?: any;
+} = {}) => {
+	const builder: any = {
+		select: vi.fn(() => builder),
+		eq: vi.fn(() => builder),
+		neq: vi.fn(() => builder),
+		order: vi.fn(() => builder),
+		limit: vi.fn(() => builder),
+		range: vi.fn(() => Promise.resolve(rangeResult ?? result)),
+		maybeSingle: vi.fn(() => Promise.resolve(maybeSingleResult ?? result)),
+		update: vi.fn(() => builder),
+		insert: vi.fn(() => Promise.resolve(result)),
+		upsert: vi.fn(() => Promise.resolve(result)),
+		then: (resolve: (value: any) => unknown, reject?: (reason: unknown) => unknown) =>
+			Promise.resolve(result).then(resolve, reject)
+	};
+	return builder;
+};
+
+const mockAdminBuilders = (builders: any[]) => {
+	const calls: { table: string; builder: any }[] = [];
+	mocks.admin.from.mockImplementation((table: string) => {
+		const builder = builders.shift();
+		if (!builder) throw new Error(`No mock builder for ${table}`);
+		calls.push({ table, builder });
+		return builder;
+	});
+	return calls;
+};
+
+const makeProfessionalContext = () => {
+	mocks.resolveActiveBusiness.mockResolvedValue({
+		business: { id: businessId },
+		role: 'professional',
+		access: { allowedCapabilities: { ...allCapabilities } }
+	});
+};
+
 describe('patient detail migrated actions', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		mocks.createSupabaseServerClient.mockResolvedValue(mocks.supabase);
+		mocks.createSupabaseAdminClient.mockResolvedValue(mocks.admin);
 		mocks.getAuthUserId.mockResolvedValue(ownerId);
 		mocks.resolveActiveBusiness.mockResolvedValue({
 			business: { id: businessId },
@@ -216,5 +267,128 @@ describe('patient detail migrated actions', () => {
 		expect(result.data.message).toContain('no se eliminan directamente');
 		expect(mocks.supabase.from).not.toHaveBeenCalled();
 		expect(mocks.supabase.rpc).not.toHaveBeenCalled();
+	});
+
+	it('archives a professional patient only on the professional link', async () => {
+		makeProfessionalContext();
+		const updateBuilder = makeQueryBuilder({ result: { error: null } });
+		mockAdminBuilders([
+			makeQueryBuilder({
+				maybeSingleResult: {
+					data: { professional_id: 'prof-1', professionals: { name: 'Dra. Test' } },
+					error: null
+				}
+			}),
+			makeQueryBuilder({
+				maybeSingleResult: { data: { id: 'link-1', archived_at: null }, error: null }
+			}),
+			updateBuilder
+		]);
+
+		try {
+			await actions.archive_patient!(makeEvent());
+			throw new Error('Expected redirect');
+		} catch (err) {
+			expect(err).toMatchObject({
+				status: 303,
+				location: '/odonto/pacientes?estado=archivados'
+			});
+		}
+
+		expect(mocks.supabase.rpc).not.toHaveBeenCalledWith('set_patient_archive_state_safely', expect.any(Object));
+		expect(updateBuilder.update).toHaveBeenCalledWith(
+			expect.objectContaining({
+				archived_by: ownerId,
+				archived_at: expect.any(String)
+			})
+		);
+		expect(updateBuilder.eq).toHaveBeenCalledWith('id', 'link-1');
+	});
+
+	it('shows a human deletion message for professionals instead of attempting deletion', async () => {
+		makeProfessionalContext();
+
+		const result = (await actions.delete_patient!(makeEvent())) as any;
+
+		expect(result.status).toBe(403);
+		expect(result.data.message).toBe('Para eliminar un paciente, consultá al dueño del consultorio.');
+		expect(mocks.supabase.from).not.toHaveBeenCalled();
+		expect(mocks.supabase.rpc).not.toHaveBeenCalled();
+		expect(mocks.admin.from).not.toHaveBeenCalled();
+	});
+
+	it('lets a linked professional edit patient data and records a visible change event', async () => {
+		makeProfessionalContext();
+		const patientUpdateBuilder = makeQueryBuilder({ result: { error: null } });
+		const profileUpsertBuilder = makeQueryBuilder({ result: { error: null } });
+		const eventInsertBuilder = makeQueryBuilder({ result: { error: null } });
+		mockAdminBuilders([
+			makeQueryBuilder({
+				maybeSingleResult: {
+					data: { professional_id: 'prof-1', professionals: { name: 'Dra. Test' } },
+					error: null
+				}
+			}),
+			makeQueryBuilder({
+				maybeSingleResult: { data: { id: 'link-1', archived_at: null }, error: null }
+			}),
+			makeQueryBuilder({ rangeResult: { data: [], error: null } }),
+			makeQueryBuilder({
+				maybeSingleResult: {
+					data: {
+						full_name: 'Paciente Original',
+						dni: null,
+						phone: null,
+						email: null,
+						birth_date: null,
+						address: null,
+						insurance: null,
+						insurance_plan: null
+					},
+					error: null
+				}
+			}),
+			makeQueryBuilder({
+				maybeSingleResult: {
+					data: { allergies: null, medication: null, background: null },
+					error: null
+				}
+			}),
+			patientUpdateBuilder,
+			profileUpsertBuilder,
+			eventInsertBuilder
+		]);
+
+		const form = new FormData();
+		form.set('full_name', 'Paciente Nuevo');
+		form.set('phone', '112233');
+
+		await expectRedirectToPatient(actions.update_patient!(makeEvent(form)));
+
+		expect(patientUpdateBuilder.update).toHaveBeenCalledWith(
+			expect.objectContaining({
+				full_name: 'Paciente Nuevo',
+				phone: '112233'
+			})
+		);
+		expect(profileUpsertBuilder.upsert).toHaveBeenCalledWith(
+			expect.objectContaining({
+				business_id: businessId,
+				patient_id: patientId,
+				updated_by: ownerId
+			}),
+			{ onConflict: 'business_id,patient_id' }
+		);
+		expect(eventInsertBuilder.insert).toHaveBeenCalledWith(
+			expect.objectContaining({
+				business_id: businessId,
+				patient_id: patientId,
+				changed_by_user_id: ownerId,
+				changed_by_professional_id: 'prof-1',
+				changed_by_name: 'Dra. Test',
+				changed_fields: ['nombre', 'teléfono'],
+				summary: 'Se modificó: nombre y teléfono.'
+			})
+		);
 	});
 });

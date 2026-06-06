@@ -50,7 +50,7 @@ export const GET: RequestHandler = async ({ params, url, locals, fetch, cookies 
 	}
 	let query = supabase
 		.from('clinical_entries')
-		.select('id, created_at, entry_type, description, teeth, internal_note')
+		.select('id, created_at, entry_type, description, teeth, internal_note, created_by_user_id, locked_after')
 		.eq('patient_id', params.id)
 		.eq('business_id', context.business.id)
 		.is('archived_at', null)

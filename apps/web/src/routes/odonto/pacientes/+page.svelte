@@ -7,6 +7,8 @@ import { enhance } from '$app/forms';
 import type { KeyboardEventHandler } from 'svelte/elements';
 
 type FormResult = {
+	duplicate?: boolean;
+	duplicateField?: 'dni' | 'name';
 	message?: string;
 	existingId?: string;
 	full_name?: string;
@@ -507,16 +509,22 @@ const canCreatePatient = $derived(data.canCreatePatient !== false);
 		</div>
 
 		{#if formState?.message}
-			<div class="rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
-				{formState.message}
-				{#if formState.existingId}
-						<a
-							class="ml-2 underline"
-							href={`/odonto/pacientes/${formState.existingId}`}
-							data-sveltekit-preload-data="tap"
-						>
-							Ver ficha existente
-						</a>
+			<div
+				class={`rounded-xl px-4 py-3 text-sm font-semibold ${
+					formState.duplicate
+						? 'border border-amber-300 bg-amber-50 text-amber-950 dark:border-amber-400/60 dark:bg-amber-500/15 dark:text-amber-100'
+						: 'border border-red-300 bg-red-50 text-red-800 dark:border-red-400/60 dark:bg-red-500/15 dark:text-red-100'
+				}`}
+			>
+				<p>{formState.message}</p>
+				{#if formState.duplicate && formState.existingId}
+					<a
+						class="mt-3 inline-flex rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-slate-950 transition hover:bg-amber-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-300"
+						href={`/odonto/pacientes/${formState.existingId}`}
+						data-sveltekit-preload-data="tap"
+					>
+						Abrir paciente existente
+					</a>
 				{/if}
 			</div>
 		{/if}

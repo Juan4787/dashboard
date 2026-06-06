@@ -17,6 +17,9 @@
 			entries: any[];
 			appointments: any[];
 			radiographs: any[];
+			changeEvents?: any[];
+			role?: string;
+			currentUserId?: string | null;
 			hasMoreEntries?: boolean;
 			hasMoreRadiographs?: boolean;
 			driveConnection: { connected_email?: string | null; root_folder_id?: string | null } | null;
@@ -34,7 +37,7 @@
 			};
 			demo?: boolean;
 		};
-		form: { message?: string };
+		form: { message?: string; duplicate?: boolean; existingId?: string };
 	}>();
 
 	let showEntryModal = $state(false);
@@ -44,7 +47,6 @@
 	let showRadiographDeleteConfirm = $state(false);
 	let showRadiographModal = $state(false);
 	let showMobileActions = $state(false);
-	let deleteConfirmText = $state('');
 	let deleteRadiographConfirmText = $state('');
 	let deleteRadiographTargetId = $state<string | null>(null);
 	let tab = $state<'historial' | 'datos' | 'radiografias'>('historial');
@@ -111,6 +113,7 @@
 			canManageRadiographs: true
 		}
 	);
+	const isProfessional = $derived(data.role === 'professional');
 	const getDriveClient = async () => {
 		if (!driveClientPromise) {
 			driveClientPromise = import('$lib/client/drive');
@@ -211,6 +214,15 @@
 		return true;
 	};
 
+	const canEditEntry = (entry: any) => {
+		if (!permissions.canEditClinicalEntry) return false;
+		if (!isProfessional) return true;
+		const ownsEntry = entry.created_by_user_id && entry.created_by_user_id === data.currentUserId;
+		const lockedAt = entry.locked_after ? new Date(entry.locked_after).getTime() : null;
+		const isUnlocked = lockedAt === null || Date.now() <= lockedAt;
+		return Boolean(ownsEntry && isUnlocked);
+	};
+
 	const loadMoreEntries = async () => {
 		if (loadingMoreEntries || !hasMoreEntries) return;
 		const last = entries.at(-1);
@@ -288,10 +300,13 @@
 		const response = await fetch(action, { method: 'POST', body: formData });
 		const result = deserialize(await response.text());
 		if (result.type === 'failure') {
-			throw new Error((result.data as { message?: string })?.message ?? 'Error inesperado.');
+			throw new Error(
+				(result.data as { message?: string })?.message ??
+					'No se pudo completar la acción. Intentá de nuevo.'
+			);
 		}
 		if (result.type === 'error') {
-			throw new Error('Error inesperado.');
+			throw new Error('No se pudo completar la acción. Intentá de nuevo.');
 		}
 		if (result.type === 'redirect') {
 			window.location.assign(result.location);
@@ -498,7 +513,7 @@
 		uploadError = '';
 		uploadInfo = '';
 		if (!googleClientId) {
-			uploadError = 'Falta configurar PUBLIC_GOOGLE_CLIENT_ID.';
+			uploadError = 'La conexión con Google Drive no está configurada. Contactá al administrador.';
 			return;
 		}
 		if (data.demo) {
@@ -672,7 +687,7 @@
 			return;
 		}
 		if (!googleClientId) {
-			uploadError = 'Falta configurar PUBLIC_GOOGLE_CLIENT_ID.';
+			uploadError = 'La conexión con Google Drive no está configurada. Contactá al administrador.';
 			retryTargetId = null;
 			return;
 		}
@@ -711,7 +726,7 @@
 			});
 			const uploaded = await driveClient.uploadResumable({ accessToken: token, uploadUrl, file });
 			if (!uploaded?.id) {
-				throw new Error('Drive no devolvio el id del archivo.');
+				throw new Error('No se pudo confirmar la subida en Google Drive.');
 			}
 			await finalizeRadiographRecord(pending.id, uploaded.id, noteToSend, takenAtToSend);
 			uploadInfo = 'Radiografia guardada.';
@@ -726,9 +741,9 @@
 				raw.includes('insufficientPermissions') ||
 				raw.includes('authError')
 			) {
-				uploadError = 'Tu sesion con Google vencio. Reconecta Drive en Configuracion.';
+				uploadError = 'Tu sesión con Google venció. Reconectá Drive desde Configuración.';
 			} else {
-				uploadError = raw;
+				uploadError = 'No se pudo subir la radiografía. Revisá la conexión con Google Drive e intentá de nuevo.';
 			}
 			if (pendingId) {
 				await markRadiographFailed(pendingId);
@@ -788,8 +803,9 @@ let editAmountDisplay = $state('');
 let editAmountRaw = $state('');
 let archiveForm: HTMLFormElement | null = $state(null);
 let unarchiveForm: HTMLFormElement | null = $state(null);
-let deleteForm: HTMLFormElement | null = $state(null);
-	const isArchived = $derived(Boolean(data.patient.archived_at));
+	const isArchived = $derived(
+		Boolean(isProfessional ? data.patient.professional_archived_at : data.patient.archived_at)
+	);
 	const hasPatientData = $derived(
 		Boolean(
 			data.patient.dni ||
@@ -919,7 +935,15 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 					</form>
 				{/if}
 				<form method="post" action="?/unarchive_patient" class="hidden" bind:this={unarchiveForm}></form>
-				<form method="post" action="?/delete_patient" class="hidden" bind:this={deleteForm}></form>
+				{#if isProfessional}
+					<button
+						type="button"
+						class="rounded-full border border-red-300/70 px-5 py-2 text-sm font-semibold text-red-700 transition hover:-translate-y-0.5 hover:bg-red-50 dark:border-red-400/40 dark:text-red-200 dark:hover:bg-red-500/10 md:col-span-2 md:inline-flex md:justify-self-start lg:col-span-1"
+						onclick={() => (showDeleteConfirm = true)}
+					>
+						Eliminar paciente
+					</button>
+				{/if}
 				{#if permissions.canCreateClinicalEntry}
 					<button
 						class="rounded-full bg-[#7c3aed] px-5 py-2 text-sm font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed] md:col-span-2 md:inline-flex md:justify-self-start lg:col-span-1"
@@ -1012,7 +1036,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				{#each data.appointments as appointment}
 					<a href={`/odonto/turnos/${appointment.id}`} class="rounded-xl border border-neutral-100 bg-white px-3 py-2 text-sm transition hover:bg-neutral-50 dark:border-[#1f3554] dark:bg-[#152642] dark:hover:bg-[#122641]">
 						<span class="block font-semibold text-neutral-900 dark:text-white">{formatDateTime(appointment.starts_at)} · {appointment.service_name_snapshot}</span>
-						<span class="text-xs text-neutral-500 dark:text-neutral-300">{appointment.professional_name_snapshot} · {appointmentStatusLabels[appointment.status] ?? appointment.status}</span>
+						<span class="text-xs text-neutral-500 dark:text-neutral-300">{appointment.professional_name_snapshot} · {appointmentStatusLabels[appointment.status] ?? 'Estado pendiente'}</span>
 					</a>
 				{/each}
 				{#if data.appointments.length === 0}
@@ -1092,7 +1116,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 															{formatCurrency(entry.amount)}
 														</span>
 													{/if}
-													{#if permissions.canEditClinicalEntry}
+													{#if canEditEntry(entry)}
 														<button
 															type="button"
 															class="inline-flex items-center gap-1 rounded-full border border-neutral-200 px-3 py-1 text-xs font-semibold text-neutral-600 transition hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-100 dark:hover:bg-[#122641]"
@@ -1176,6 +1200,26 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				{/if}
 			</div>
 			<div class="mt-4 space-y-4">
+				<div class="rounded-xl border border-neutral-100 bg-white/60 p-4 dark:border-[#1f3554] dark:bg-[#0f1f36]">
+					<div class="mb-3 flex items-center justify-between">
+						<p class="text-[13px] font-bold uppercase tracking-wide text-neutral-600 dark:text-neutral-300">Identidad</p>
+						{#if permissions.canEditPatient}
+							<button
+								type="button"
+								class="rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-50 dark:hover:bg-[#122641]"
+								onclick={() => (showEditModal = true)}
+							>
+								Editar
+							</button>
+						{/if}
+					</div>
+					<div class="space-y-1">
+						<p class="text-xs font-semibold text-neutral-500 dark:text-neutral-300">Nombre</p>
+						<p class="break-words text-[17px] font-semibold text-neutral-900 dark:text-white">
+							{data.patient.full_name}
+						</p>
+					</div>
+				</div>
 				<div class="rounded-xl border border-neutral-100 bg-white/60 p-4 dark:border-[#1f3554] dark:bg-[#0f1f36]">
 					<div class="mb-3 flex items-center justify-between">
 						<p class="text-[13px] font-bold uppercase tracking-wide text-neutral-600 dark:text-neutral-300">Alertas médicas</p>
@@ -1345,6 +1389,21 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 					</div>
 				</div>
 			</div>
+			{#if (data.changeEvents ?? []).length > 0}
+				<div class="mt-5 rounded-xl border border-neutral-100 bg-white/60 p-4 dark:border-[#1f3554] dark:bg-[#0f1f36]">
+					<p class="text-[13px] font-bold uppercase tracking-wide text-neutral-600 dark:text-neutral-300">Últimos cambios</p>
+					<div class="mt-3 space-y-3">
+						{#each (data.changeEvents ?? []).slice(0, 5) as event}
+							<div class="rounded-lg border border-neutral-100 bg-white/70 px-3 py-2 dark:border-[#1f3554] dark:bg-[#122641]">
+								<p class="text-sm font-semibold text-neutral-900 dark:text-white">{event.summary}</p>
+								<p class="mt-1 text-xs text-neutral-500 dark:text-neutral-300">
+									{formatDateTime(event.created_at)} · {event.changed_by_name}
+								</p>
+							</div>
+						{/each}
+					</div>
+				</div>
+			{/if}
 			<details class="mt-4 text-[11px] text-[#65738d] dark:text-[#7b8aa5]">
 				<summary class="cursor-pointer text-neutral-600 dark:text-neutral-200">Ver detalles</summary>
 				<p class="mt-1">
@@ -1476,7 +1535,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 			{/if}
 			{#if !googleClientId}
 				<p class="mt-5 rounded-xl border border-dashed border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-					Falta configurar la conexión con Google Drive para habilitar las subidas.
+					La conexión con Google Drive no está configurada. Contactá al administrador.
 				</p>
 			{/if}
 
@@ -1676,6 +1735,18 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				Nuevo turno
 			</a>
 		{/if}
+		{#if isProfessional}
+			<button
+				type="button"
+				class="w-full rounded-xl border border-red-300/70 px-4 py-3 text-sm font-semibold text-red-700 transition hover:bg-red-50 dark:border-red-400/40 dark:text-red-200 dark:hover:bg-red-500/10"
+				onclick={() => {
+					showMobileActions = false;
+					showDeleteConfirm = true;
+				}}
+			>
+				Eliminar paciente
+			</button>
+		{/if}
 		<button
 			type="button"
 			class="w-full rounded-xl px-4 py-3 text-sm font-semibold text-neutral-600 transition hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-[#122641]"
@@ -1850,9 +1921,9 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 <Modal open={showArchiveConfirm} title={isArchived ? 'Desarchivar paciente' : 'Archivar paciente'} on:close={() => (showArchiveConfirm = false)} dismissible>
 	<div class="space-y-4 text-sm text-neutral-800 dark:text-neutral-100">
 		{#if isArchived}
-			<p>El paciente volverá a la lista de activos.</p>
+			<p>{isProfessional ? 'El paciente volverá a tu lista de activos.' : 'El paciente volverá a la lista de activos.'}</p>
 		{:else}
-			<p>El paciente se moverá a “Archivados”. Podrás recuperarlo más adelante.</p>
+			<p>{isProfessional ? 'El paciente se ocultará de tu lista activa. Podrás recuperarlo desde Archivados.' : 'El paciente se moverá a “Archivados”. Podrás recuperarlo más adelante.'}</p>
 		{/if}
 		<div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
 			<button
@@ -1882,47 +1953,37 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 
 <Modal open={showDeleteConfirm} title="Eliminar paciente" on:close={() => (showDeleteConfirm = false)} dismissible>
 	<div class="space-y-4 text-sm text-neutral-800 dark:text-neutral-100">
-		<p class="text-base font-semibold text-red-600 dark:text-red-400">Esta acción eliminará al paciente y su historial. No se puede deshacer.</p>
-		<div class="space-y-2">
-			<label class="text-sm font-semibold text-neutral-600 dark:text-neutral-300" for="delete-confirm-input">
-					Escribí <span class="font-bold">eliminar</span> para confirmar
-				</label>
-			<input
-				id="delete-confirm-input"
-				class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-red-500 focus:ring-2 focus:ring-red-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
-				placeholder="eliminar"
-				bind:value={deleteConfirmText}
-				autocomplete="off"
-			/>
-		</div>
+		{#if isProfessional}
+			<p class="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-950 dark:border-amber-400/60 dark:bg-amber-500/15 dark:text-amber-100">
+				Para eliminar un paciente, consultá al dueño del consultorio.
+			</p>
+		{:else}
+			<p class="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-950 dark:border-amber-400/60 dark:bg-amber-500/15 dark:text-amber-100">
+				La app no elimina pacientes desde esta pantalla. Para ocultarlo de la lista, archivá el paciente.
+			</p>
+		{/if}
 		<div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
 			<button
 				type="button"
 				class="w-full rounded-xl px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:text-white dark:hover:bg-[#1b2d4b] sm:w-auto"
 				onclick={() => {
-					deleteConfirmText = '';
 					showDeleteConfirm = false;
 				}}
 			>
-				Cancelar
+				Entendido
 			</button>
-			<button
-				type="button"
-				disabled={deleteConfirmText.trim().toLowerCase() !== 'eliminar'}
-				class={`w-full rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500 sm:w-auto ${
-					deleteConfirmText.trim().toLowerCase() === 'eliminar'
-						? 'bg-red-600 hover:bg-red-700'
-						: 'bg-red-400 cursor-not-allowed opacity-80'
-				}`}
-				onclick={() => {
-					if (deleteConfirmText.trim().toLowerCase() !== 'eliminar') return;
-					showDeleteConfirm = false;
-					deleteConfirmText = '';
-					deleteForm?.submit();
-				}}
-			>
-				Eliminar definitivamente
-			</button>
+			{#if !isProfessional && permissions.canArchivePatient && !isArchived}
+				<button
+					type="button"
+					class="w-full rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 sm:w-auto"
+					onclick={() => {
+						showDeleteConfirm = false;
+						showArchiveConfirm = true;
+					}}
+				>
+					Archivar paciente
+				</button>
+			{/if}
 		</div>
 	</div>
 </Modal>
@@ -2085,7 +2146,17 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 <Modal open={showEditModal} title="Editar datos" on:close={() => (showEditModal = false)}>
 	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 	<form method="post" action="?/update_patient" class="space-y-3" onkeydown={preventEnterSubmit} onsubmit={handleEditSubmit}>
-		<div class="grid grid-cols-1 gap-3 md:grid-cols-3">
+		<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+			<div class="space-y-1">
+				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="full_name">Nombre del paciente *</label>
+				<input
+					id="full_name"
+					name="full_name"
+					required
+					class="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm shadow-sm outline-none transition text-neutral-900 placeholder:text-neutral-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white dark:placeholder:text-neutral-500"
+					value={data.patient.full_name ?? ''}
+				/>
+			</div>
 			<div class="space-y-1">
 				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="email">Correo electrónico (opcional)</label>
 				<input
@@ -2096,6 +2167,8 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 					value={data.patient.email ?? ''}
 				/>
 			</div>
+		</div>
+		<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
 			<div class="space-y-1">
 				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="phone">Teléfono (opcional)</label>
 				<input
@@ -2195,7 +2268,18 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 			</div>
 		{/if}
 		{#if form?.message}
-			<p class="rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{form.message}</p>
+			<div class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 dark:border-red-400/50 dark:bg-red-500/15 dark:text-red-100">
+				<p>{form.message}</p>
+				{#if form.duplicate && form.existingId}
+					<a
+						class="mt-3 inline-flex rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-slate-950 transition hover:bg-amber-400"
+						href={`/odonto/pacientes/${form.existingId}`}
+						data-sveltekit-preload-data="tap"
+					>
+						Abrir paciente existente
+					</a>
+				{/if}
+			</div>
 		{/if}
 		<p class="text-xs text-neutral-500 dark:text-neutral-300">Todos los datos son opcionales.</p>
 		<div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">

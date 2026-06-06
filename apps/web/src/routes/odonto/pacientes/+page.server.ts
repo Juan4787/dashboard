@@ -49,6 +49,77 @@ const isJwtExpiredError = (error: { code?: string | null; message?: string | nul
 
 type CountsSource = 'rpc' | 'fallback_planned';
 
+type DuplicatePatientField = 'dni' | 'name';
+
+const normalizePatientName = (value: string) => value.trim().replace(/\s+/g, ' ').toLowerCase();
+
+const duplicatePatientMessage = (field: DuplicatePatientField) =>
+	field === 'dni'
+		? 'Ya hay un paciente creado con ese DNI. Abrí su ficha para continuar.'
+		: 'Ya hay un paciente creado con ese nombre. Abrí su ficha para continuar.';
+
+const duplicatePatientResult = ({
+	field,
+	existingId,
+	full_name,
+	dni,
+	phone
+}: {
+	field: DuplicatePatientField;
+	existingId: string;
+	full_name: string;
+	dni: string;
+	phone: string;
+}) => ({
+	duplicate: true,
+	duplicateField: field,
+	message: duplicatePatientMessage(field),
+	existingId,
+	full_name,
+	dni,
+	phone
+});
+
+const findExistingPatientIdentity = async ({
+	admin,
+	businessId,
+	fullName,
+	dni
+}: {
+	admin: Awaited<ReturnType<typeof createSupabaseAdminClient>>;
+	businessId: string;
+	fullName: string;
+	dni: string;
+}): Promise<{ id: string; field: DuplicatePatientField } | null> => {
+	const normalizedName = normalizePatientName(fullName);
+
+	if (dni) {
+		const { data, error } = await admin
+			.from('patients')
+			.select('id')
+			.eq('business_id', businessId)
+			.eq('dni', dni)
+			.limit(1)
+			.maybeSingle();
+		if (error) throw error;
+		if (data?.id) return { id: String(data.id), field: 'dni' };
+	}
+
+	const { data, error } = await admin
+		.from('patients')
+		.select('id, full_name')
+		.eq('business_id', businessId)
+		.range(0, 9999);
+	if (error) throw error;
+
+	const existingByName = (data ?? []).find(
+		(patient: any) => normalizePatientName(String(patient.full_name ?? '')) === normalizedName
+	);
+	if (existingByName?.id) return { id: String(existingByName.id), field: 'name' };
+
+	return null;
+};
+
 const ensureProfessionalPatientLink = async ({
 	fetch,
 	businessId,
@@ -183,6 +254,112 @@ export const load: PageServerLoad = async ({ locals, url, fetch, cookies }) => {
 		throw kitError(500, 'No se pudo resolver el negocio activo');
 	}
 
+	if (context.role === 'professional') {
+		const admin = await createSupabaseAdminClient('odonto', fetch);
+		const { data: professionalUser, error: professionalUserError } = await admin
+			.from('professional_users')
+			.select('professional_id')
+			.eq('business_id', context.business.id)
+			.eq('user_id', ownerId)
+			.order('created_at', { ascending: true })
+			.limit(1)
+			.maybeSingle();
+
+		if (professionalUserError) {
+			console.error('Error resolviendo profesional para listar pacientes', professionalUserError);
+			throw kitError(500, 'No se pudieron cargar los pacientes');
+		}
+
+		const professionalId = (professionalUser as any)?.professional_id
+			? String((professionalUser as any).professional_id)
+			: null;
+		if (!professionalId) {
+			return {
+				patients: [],
+				query: '',
+				showArchived,
+				demo: false,
+				canCreatePatient: context.access.allowedCapabilities.canCreatePatient,
+				totalCount: 0,
+				activeCount: 0,
+				archivedCount: 0,
+				countsSource: 'fallback_planned' as const
+			};
+		}
+
+		const { data: links, error: linksError } = await admin
+			.from('professional_patient_links')
+			.select('patient_id, archived_at')
+			.eq('business_id', context.business.id)
+			.eq('professional_id', professionalId)
+			.eq('is_active', true);
+
+		if (linksError) {
+			console.error('Error cargando vínculos profesional-paciente', linksError);
+			throw kitError(500, 'No se pudieron cargar los pacientes');
+		}
+
+		const linkRows = links ?? [];
+		const linkArchivedByPatientId = new Map(
+			linkRows.map((link: any) => [String(link.patient_id), link.archived_at ?? null])
+		);
+		const patientIds = [...linkArchivedByPatientId.keys()];
+
+		if (patientIds.length === 0) {
+			return {
+				patients: [],
+				query: '',
+				showArchived,
+				demo: false,
+				canCreatePatient: context.access.allowedCapabilities.canCreatePatient,
+				totalCount: 0,
+				activeCount: 0,
+				archivedCount: 0,
+				countsSource: 'fallback_planned' as const
+			};
+		}
+
+		const { data: linkedPatients, error: linkedPatientsError } = await admin
+			.from('patients')
+			.select('id, full_name, dni, phone, archived_at, last_entry_at, updated_at, created_at')
+			.eq('business_id', context.business.id)
+			.in('id', patientIds)
+			.is('archived_at', null)
+			.order('updated_at', { ascending: false })
+			.limit(200);
+
+		if (linkedPatientsError) {
+			console.error('Error cargando pacientes vinculados al profesional', linkedPatientsError);
+			throw kitError(500, 'No se pudieron cargar los pacientes');
+		}
+
+		const decoratedPatients = (linkedPatients ?? []).map((patient: any) => {
+			const professionalArchivedAt = linkArchivedByPatientId.get(String(patient.id)) ?? null;
+			return {
+				...patient,
+				archived_at: professionalArchivedAt,
+				professional_archived_at: professionalArchivedAt
+			};
+		});
+		const activeCount = decoratedPatients.filter((patient: any) => !patient.professional_archived_at).length;
+		const archivedCount = decoratedPatients.filter((patient: any) => patient.professional_archived_at).length;
+		const patients = decoratedPatients.filter((patient: any) =>
+			showArchived ? patient.professional_archived_at : !patient.professional_archived_at
+		);
+
+		return {
+			patients,
+			query: '',
+			showArchived,
+			demo: false,
+			canCreatePatient: context.access.allowedCapabilities.canCreatePatient,
+			totalCount: decoratedPatients.length,
+			activeCount,
+			archivedCount,
+			countsSource: 'fallback_planned' as const
+		};
+	}
+
 	let patientsBuilder = supabase
 		.from('patients')
 		.select('id, full_name, dni, phone, archived_at, last_entry_at, updated_at, created_at')
@@ -298,18 +475,34 @@ const handleCreatePatient = async ({
 		}
 
 		if (env.DEMO_MODE === 'true') {
+			const demoPatients = readDemoDb().patients;
+			const existingByDni = dni ? demoPatients.find((patient) => patient.dni === dni) : null;
+			if (existingByDni) {
+				return duplicatePatientResult({
+					field: 'dni',
+					existingId: existingByDni.id,
+					full_name,
+					dni,
+					phone
+				});
+			}
+
+			const existingByName = demoPatients.find(
+				(patient) => normalizePatientName(patient.full_name) === normalizePatientName(full_name)
+			);
+			if (existingByName) {
+				return duplicatePatientResult({
+					field: 'name',
+					existingId: existingByName.id,
+					full_name,
+					dni,
+					phone
+				});
+			}
+
 			let createdId: string | null = null;
-			let existingId: string | null = null;
 
 			updateDemoDb((db) => {
-				if (dni) {
-					const existing = db.patients.find((p) => p.dni === dni);
-					if (existing) {
-						existingId = existing.id;
-						return;
-					}
-				}
-
 				const now = new Date().toISOString();
 				const id = newId('p');
 				db.patients.unshift({
@@ -332,16 +525,6 @@ const handleCreatePatient = async ({
 				});
 				createdId = id;
 			});
-
-			if (existingId) {
-				return fail(409, {
-					message: 'Ya existe un paciente con este DNI',
-					existingId,
-					full_name,
-					dni,
-					phone
-				});
-			}
 
 			if (!createdId) {
 				return fail(500, {
@@ -427,44 +610,56 @@ const handleCreatePatient = async ({
 			});
 		}
 
-		if (dni) {
-			const { data: existing, error: existingError } = await supabase
-				.from('patients')
-				.select('id')
-				.eq('dni', dni)
-				.eq('business_id', context.business.id)
-				.maybeSingle();
-
-			if (existingError && isJwtExpiredError(existingError)) {
-				const refreshed = await refreshSessionIfNeeded();
-				if (refreshed) {
-					const { data: retryExisting, error: retryError } = await supabase
-						.from('patients')
-						.select('id')
-						.eq('dni', dni)
-						.eq('business_id', context.business.id)
-						.maybeSingle();
-					if (!retryError && retryExisting?.id) {
-						return fail(409, {
-							message: 'Ya existe un paciente con este DNI',
-							existingId: retryExisting.id,
-							full_name,
-							dni,
-							phone
-						});
-					}
+		let admin;
+		const returnDuplicatePatient = async (existingPatient: { id: string; field: DuplicatePatientField }) => {
+			if (context.role === 'professional') {
+				try {
+					await ensureProfessionalPatientLink({
+						fetch,
+						businessId: context.business.id,
+						userId: ownerId,
+						patientId: existingPatient.id
+					});
+				} catch (linkError) {
+					console.error('Error vinculando paciente duplicado al profesional', linkError);
+					return fail(500, {
+						message: 'Ya hay un paciente creado con esos datos, pero no se pudo vincular al profesional. Intentá de nuevo.',
+						existingId: existingPatient.id,
+						full_name,
+						dni,
+						phone
+					});
 				}
 			}
 
-			if (!existingError && existing?.id) {
-				return fail(409, {
-					message: 'Ya existe un paciente con este DNI',
-					existingId: existing.id,
-					full_name,
-					dni,
-					phone
-				});
+			return duplicatePatientResult({
+				field: existingPatient.field,
+				existingId: existingPatient.id,
+				full_name,
+				dni,
+				phone
+			});
+		};
+
+		try {
+			admin = await createSupabaseAdminClient('odonto', fetch);
+			const existingPatient = await findExistingPatientIdentity({
+				admin,
+				businessId: context.business.id,
+				fullName: full_name,
+				dni
+			});
+			if (existingPatient) {
+				return returnDuplicatePatient(existingPatient);
 			}
+		} catch (duplicateLookupError) {
+			console.error('Error verificando duplicados de paciente', duplicateLookupError);
+			return fail(500, {
+				message: 'No se pudo verificar si el paciente ya existe. Intentá de nuevo.',
+				full_name,
+				dni,
+				phone
+			});
 		}
 
 		let { data, error } = await supabase
@@ -503,6 +698,18 @@ const handleCreatePatient = async ({
 		}
 
 		if (error || !data) {
+			const message = String(error?.message ?? '');
+			if (message.includes('PATIENT_DNI_ALREADY_EXISTS') || message.includes('PATIENT_NAME_ALREADY_EXISTS')) {
+				const existingPatient = await findExistingPatientIdentity({
+					admin,
+					businessId: context.business.id,
+					fullName: full_name,
+					dni
+				});
+				if (existingPatient) {
+					return returnDuplicatePatient(existingPatient);
+				}
+			}
 			console.error('Error creando paciente:', error);
 			return fail(getCreatePatientStatus(error ?? {}), {
 				message: getCreatePatientErrorMessage(error ?? {}),
@@ -523,7 +730,6 @@ const handleCreatePatient = async ({
 			} catch (linkError) {
 				console.error('Error vinculando paciente al profesional', linkError);
 				try {
-					const admin = await createSupabaseAdminClient('odonto', fetch);
 					await admin
 						.from('patients')
 						.delete()

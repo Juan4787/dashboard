@@ -471,5 +471,111 @@ export const actions: Actions = {
 		});
 
 		redirectToProfessional(params.professionalId, 'horarios');
+	},
+
+	archive_professional: async ({ params, locals, fetch, cookies }) => {
+		if (!locals.auth) throw redirect(303, '/login');
+		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
+		const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
+		if (!business.canManage) {
+			return fail(403, { message: 'Solo el dueño o un administrador puede archivar profesionales.' });
+		}
+
+		const { error } = await supabase
+			.from('professionals')
+			.update({ is_active: false, is_public: false, updated_at: new Date().toISOString() })
+			.eq('business_id', business.business.id)
+			.eq('id', params.professionalId);
+		if (error) {
+			console.error('Error archivando profesional', error);
+			return fail(500, { message: 'No se pudo archivar el profesional.' });
+		}
+
+		await writeAuditLog(supabase, {
+			businessId: business.business.id,
+			userId,
+			action: 'professional.archived',
+			entityType: 'professional',
+			entityId: params.professionalId
+		});
+
+		redirectToProfessional(params.professionalId, 'perfil');
+	},
+
+	restore_professional: async ({ params, locals, fetch, cookies }) => {
+		if (!locals.auth) throw redirect(303, '/login');
+		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
+		const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
+		if (!business.canManage) {
+			return fail(403, { message: 'Solo el dueño o un administrador puede restaurar profesionales.' });
+		}
+
+		const { error } = await supabase
+			.from('professionals')
+			.update({ is_active: true, is_public: true, updated_at: new Date().toISOString() })
+			.eq('business_id', business.business.id)
+			.eq('id', params.professionalId);
+		if (error) {
+			console.error('Error restaurando profesional', error);
+			return fail(500, { message: 'No se pudo restaurar el profesional.' });
+		}
+
+		await writeAuditLog(supabase, {
+			businessId: business.business.id,
+			userId,
+			action: 'professional.restored',
+			entityType: 'professional',
+			entityId: params.professionalId
+		});
+
+		redirectToProfessional(params.professionalId, 'perfil');
+	},
+
+	delete_professional: async ({ params, locals, fetch, cookies }) => {
+		if (!locals.auth) throw redirect(303, '/login');
+		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
+		const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
+		if (!business.canManage) {
+			return fail(403, { message: 'Solo el dueño o un administrador puede eliminar profesionales.' });
+		}
+
+		// Un profesional con turnos no se puede borrar (la FK es RESTRICT y, además,
+		// perderíamos historial). En ese caso pedimos archivar.
+		const { count, error: countError } = await supabase
+			.from('appointments')
+			.select('id', { count: 'exact', head: true })
+			.eq('business_id', business.business.id)
+			.eq('professional_id', params.professionalId);
+		if (countError) {
+			console.error('Error verificando turnos del profesional', countError);
+			return fail(500, { message: 'No se pudo verificar los turnos del profesional.' });
+		}
+		if ((count ?? 0) > 0) {
+			return fail(400, {
+				message: 'Este profesional tiene turnos cargados. Archivalo en lugar de eliminarlo para conservar el historial.'
+			});
+		}
+
+		const { error } = await supabase
+			.from('professionals')
+			.delete()
+			.eq('business_id', business.business.id)
+			.eq('id', params.professionalId);
+		if (error) {
+			console.error('Error eliminando profesional', error);
+			return fail(400, {
+				message: 'No se pudo eliminar: el profesional tiene datos asociados. Archivalo en su lugar.'
+			});
+		}
+
+		await writeAuditLog(supabase, {
+			businessId: business.business.id,
+			userId,
+			action: 'professional.deleted',
+			entityType: 'professional',
+			entityId: params.professionalId
+		});
+
+		throw redirect(303, '/odonto/profesionales');
 	}
 };

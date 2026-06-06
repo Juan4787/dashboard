@@ -1,4 +1,8 @@
 <script lang="ts">
+	import { enhance } from '$app/forms';
+	import type { SubmitFunction } from '@sveltejs/kit';
+	import { persistDraft, clearDraft } from '$lib/actions/persist-draft';
+
 	type Professional = {
 		id: string;
 		name: string;
@@ -25,6 +29,14 @@
 	$effect(() => {
 		if (data.professionals.length === 0 || form?.values) showCreate = true;
 	});
+
+	const createDraftKey = 'prof-create';
+	const createEnhance: SubmitFunction = () => {
+		return async ({ result, update }) => {
+			if (result.type === 'redirect' || result.type === 'success') clearDraft(createDraftKey);
+			await update();
+		};
+	};
 </script>
 
 <section class="ux-page">
@@ -45,7 +57,7 @@
 	{/if}
 
 	{#if showCreate}
-		<form method="POST" action="?/create_professional" class="ux-card">
+		<form method="POST" action="?/create_professional" class="ux-card" use:enhance={createEnhance} use:persistDraft={createDraftKey}>
 			<div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
 				<div>
 					<h2 class="ux-section-title">Nuevo profesional</h2>

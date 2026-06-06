@@ -78,7 +78,7 @@ const makeEvent = (formData = new FormData()) =>
 
 const chain = <T extends Record<string, unknown>>(extra: T) => {
 	const builder: Record<string, any> = { ...extra };
-	for (const method of ['select', 'eq', 'order', 'limit']) {
+	for (const method of ['select', 'eq', 'order', 'limit', 'range']) {
 		builder[method] = vi.fn(() => builder);
 	}
 	return builder;
@@ -118,7 +118,11 @@ describe('patients create action', () => {
 			maybeSingle: vi.fn(async () => ({ data: null, error: null })),
 			insert: vi.fn(async () => ({ error: null }))
 		});
+		const patientLookupBuilder = chain({
+			range: vi.fn(async () => ({ data: [], error: null }))
+		});
 		mocks.admin.from.mockImplementation((table: string) => {
+			if (table === 'patients') return patientLookupBuilder;
 			if (table === 'professional_users') return professionalUserBuilder;
 			if (table === 'professional_patient_links') return professionalPatientLinkBuilder;
 			throw new Error(`Unexpected admin table ${table}`);
@@ -138,6 +142,54 @@ describe('patients create action', () => {
 			});
 		}
 
+		expect(professionalPatientLinkBuilder.insert).toHaveBeenCalledWith({
+			business_id: businessId,
+			professional_id: professionalId,
+			patient_id: patientId,
+			source: 'manual',
+			created_by: professionalUserId
+		});
+	});
+
+	it('does not create a second patient with the same name and returns the existing patient to open', async () => {
+		mocks.supabase.from.mockImplementation(() => {
+			throw new Error('Patient insert should not run for duplicates.');
+		});
+
+		const patientLookupBuilder = {
+			select: vi.fn(() => patientLookupBuilder),
+			eq: vi.fn(() => patientLookupBuilder),
+			range: vi.fn(async () => ({
+				data: [{ id: patientId, full_name: 'Paciente Profesional' }],
+				error: null
+			}))
+		};
+		const professionalUserBuilder = chain({
+			maybeSingle: vi.fn(async () => ({ data: { professional_id: professionalId }, error: null }))
+		});
+		const professionalPatientLinkBuilder = chain({
+			maybeSingle: vi.fn(async () => ({ data: null, error: null })),
+			insert: vi.fn(async () => ({ error: null }))
+		});
+		mocks.admin.from.mockImplementation((table: string) => {
+			if (table === 'patients') return patientLookupBuilder;
+			if (table === 'professional_users') return professionalUserBuilder;
+			if (table === 'professional_patient_links') return professionalPatientLinkBuilder;
+			throw new Error(`Unexpected admin table ${table}`);
+		});
+
+		const form = new FormData();
+		form.set('full_name', '  Paciente   Profesional ');
+		form.set('phone', '+54 9 11 5555-5555');
+
+		const result = (await actions.create_patient!(makeEvent(form))) as any;
+
+		expect(result).toMatchObject({
+			duplicate: true,
+			duplicateField: 'name',
+			message: 'Ya hay un paciente creado con ese nombre. Abrí su ficha para continuar.',
+			existingId: patientId
+		});
 		expect(professionalPatientLinkBuilder.insert).toHaveBeenCalledWith({
 			business_id: businessId,
 			professional_id: professionalId,

@@ -3,6 +3,9 @@
 	import { formatDateTime } from '$lib/utils/format';
 	import { formatPriceLabel } from '$lib/utils/money-input';
 	import { normalizeTimeRangesInput, parseTimeRanges } from '$lib/utils/time-ranges';
+	import { enhance } from '$app/forms';
+	import type { SubmitFunction } from '@sveltejs/kit';
+	import { persistDraft, clearDraft } from '$lib/actions/persist-draft';
 
 	const weekdays = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 	const tabs = [
@@ -39,7 +42,7 @@
 
 	let { data, form } = $props<{
 		data: {
-			context: { canOperate: boolean };
+			context: { canOperate: boolean; canManage: boolean };
 			professional: {
 				id: string;
 				name: string;
@@ -60,7 +63,17 @@
 	}>();
 
 	const canOperate = $derived(data.context.canOperate && !data.demo);
+	const canManage = $derived(data.context.canManage && !data.demo);
 	const professional = $derived(data.professional);
+
+	// Borrador del Perfil: se conserva al cambiar de pestaña o navegar, y se limpia al guardar bien.
+	const profileDraftKey = $derived(`prof-perfil:${data.professional?.id ?? ''}`);
+	const profileEnhance: SubmitFunction = () => {
+		return async ({ result, update }) => {
+			if (result.type === 'redirect' || result.type === 'success') clearDraft(profileDraftKey);
+			await update();
+		};
+	};
 	let activeTab = $state<TabId>('perfil');
 	let selectedServiceIds = $state<string[]>([]);
 	let selectedWeekdays = $state<number[]>([1, 2, 3, 4, 5]);
@@ -184,7 +197,7 @@
 	</div>
 
 	{#if activeTab === 'perfil'}
-		<form method="POST" action="?/update_profile" class="ux-card">
+		<form method="POST" action="?/update_profile" class="ux-card" use:enhance={profileEnhance} use:persistDraft={profileDraftKey}>
 			<div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
 				<div>
 					<h2 class="ux-section-title">Perfil</h2>
@@ -222,6 +235,50 @@
 				Disponible para turnos
 			</label>
 		</form>
+
+		{#if canManage}
+			<div class="ux-card border-red-400/20">
+				<h2 class="ux-section-title">Administración</h2>
+				<p class="mt-1 text-sm text-white/55">Acciones reservadas al dueño del consultorio.</p>
+
+				<div class="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+					<div>
+						<p class="font-black text-white">{professional?.is_active ? 'Archivar profesional' : 'Restaurar profesional'}</p>
+						<p class="mt-1 text-sm text-white/55">
+							{professional?.is_active
+								? 'Lo oculta de la agenda y de las reservas. Podés restaurarlo cuando quieras.'
+								: 'Vuelve a aparecer como disponible para asignar turnos.'}
+						</p>
+					</div>
+					{#if professional?.is_active}
+						<form method="POST" action="?/archive_professional" use:enhance class="shrink-0">
+							<button type="submit" class="ux-btn-secondary">Archivar</button>
+						</form>
+					{:else}
+						<form method="POST" action="?/restore_professional" use:enhance class="shrink-0">
+							<button type="submit" class="ux-btn-primary">Restaurar</button>
+						</form>
+					{/if}
+				</div>
+
+				<div class="mt-4 flex flex-col gap-3 border-t border-white/10 pt-4 sm:flex-row sm:items-center sm:justify-between">
+					<div>
+						<p class="font-black text-red-100">Eliminar definitivamente</p>
+						<p class="mt-1 text-sm text-white/55">Solo si no tiene turnos cargados. Si los tiene, archivalo para conservar el historial.</p>
+					</div>
+					<form
+						method="POST"
+						action="?/delete_professional"
+						class="shrink-0"
+						onsubmit={(event) => {
+							if (!confirm('¿Eliminar este profesional de forma permanente? Esta acción no se puede deshacer.')) event.preventDefault();
+						}}
+					>
+						<button type="submit" class="ux-btn-danger">Eliminar</button>
+					</form>
+				</div>
+			</div>
+		{/if}
 	{/if}
 
 	{#if activeTab === 'servicios'}

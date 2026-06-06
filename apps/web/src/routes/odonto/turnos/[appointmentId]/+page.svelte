@@ -1,6 +1,8 @@
 <script lang="ts">
 	import BackLink from '$lib/components/BackLink.svelte';
 	import { formatDateTime } from '$lib/utils/format';
+	import { enhance } from '$app/forms';
+	import type { SubmitFunction } from '@sveltejs/kit';
 
 	type Slot = { date: string; time: string; starts_at: string; professional_name: string };
 	type AuditLog = {
@@ -118,15 +120,124 @@
 		{ status: 'attended', label: 'Marcar asistió', tone: 'text-sky-100', mark: '✓' },
 		{ status: 'no_show', label: 'Marcar no asistió', tone: 'text-red-100', mark: '!' }
 	];
+
+	// --- Reprogramar: calendario inline + chips de horario ---
+	const parseIso = (iso: string) => {
+		const [y, m, d] = iso.split('-').map(Number);
+		return { y, m, d };
+	};
+
+	const todayIso = data.minReprogramDate;
+	const initParts = parseIso(data.reprogramDate);
+
+	let selectedDate = $state(data.reprogramDate);
+	let viewYear = $state(initParts.y);
+	let viewMonth = $state(initParts.m - 1);
+	let slotsCache = $state<Record<string, Slot[]>>({ [data.reprogramDate]: data.reprogramSlots ?? [] });
+	let loadingSlots = $state(false);
+	let slotsError = $state<string | null>(null);
+	let selectedSlot = $state('');
+	let submitting = $state(false);
+
+	const weekdayLabels = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
+
+	const currentSlots = $derived(slotsCache[selectedDate] ?? []);
+	const selectedSlotTime = $derived(currentSlots.find((s) => s.starts_at === selectedSlot)?.time ?? '');
+
+	const monthLabel = $derived(
+		new Intl.DateTimeFormat('es-AR', { month: 'long', year: 'numeric' }).format(new Date(viewYear, viewMonth, 1))
+	);
+
+	const canGoPrev = $derived(`${viewYear}-${String(viewMonth + 1).padStart(2, '0')}` > todayIso.slice(0, 7));
+
+	const monthDays = $derived.by(() => {
+		const startOffset = (new Date(viewYear, viewMonth, 1).getDay() + 6) % 7;
+		const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+		const cells: ({ day: number; iso: string } | null)[] = [];
+		for (let i = 0; i < startOffset; i++) cells.push(null);
+		for (let d = 1; d <= daysInMonth; d++) {
+			const iso = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+			cells.push({ day: d, iso });
+		}
+		return cells;
+	});
+
+	const selectedDayLabel = $derived.by(() => {
+		const { y, m, d } = parseIso(selectedDate);
+		return new Intl.DateTimeFormat('es-AR', { weekday: 'short', day: 'numeric', month: 'short' }).format(
+			new Date(y, m - 1, d)
+		);
+	});
+
+	const isPast = (iso: string) => iso < todayIso;
+	const isToday = (iso: string) => iso === todayIso;
+	const isSelected = (iso: string) => iso === selectedDate;
+
+	const loadSlots = async (date: string) => {
+		if (slotsCache[date]) return;
+		loadingSlots = true;
+		slotsError = null;
+		try {
+			const res = await fetch(`/odonto/turnos/${data.appointment.id}/slots?date=${date}`);
+			const body = await res.json().catch(() => ({}));
+			if (!res.ok) {
+				slotsError = body?.message ?? 'No se pudieron cargar los horarios.';
+				slotsCache = { ...slotsCache, [date]: [] };
+			} else {
+				slotsCache = { ...slotsCache, [date]: (body.slots ?? []) as Slot[] };
+			}
+		} catch {
+			slotsError = 'No se pudieron cargar los horarios. Revisá tu conexión.';
+			slotsCache = { ...slotsCache, [date]: [] };
+		} finally {
+			loadingSlots = false;
+		}
+	};
+
+	const selectDay = (iso: string) => {
+		if (isPast(iso) || selectedDate === iso) return;
+		selectedDate = iso;
+		selectedSlot = '';
+		slotsError = null;
+		loadSlots(iso);
+	};
+
+	const prevMonth = () => {
+		if (!canGoPrev) return;
+		if (viewMonth === 0) {
+			viewMonth = 11;
+			viewYear -= 1;
+		} else {
+			viewMonth -= 1;
+		}
+	};
+
+	const nextMonth = () => {
+		if (viewMonth === 11) {
+			viewMonth = 0;
+			viewYear += 1;
+		} else {
+			viewMonth += 1;
+		}
+	};
+
+	const onReschedule: SubmitFunction = ({ cancel }) => {
+		if (!selectedSlot || submitting) {
+			cancel();
+			return;
+		}
+		submitting = true;
+		return async ({ update }) => {
+			await update();
+			submitting = false;
+		};
+	};
 </script>
 
 <section class="flex flex-col gap-5">
 	<div class="flex flex-col items-start gap-4">
 		<BackLink href={`/odonto/agenda?date=${data.fromDate}`} label="Volver" />
 		<div class="flex items-center gap-3 text-sm font-semibold text-neutral-500 dark:text-white/55">
-			<div class="grid h-11 w-11 place-items-center rounded-2xl border border-[#8b5cf6]/35 bg-[#7c3aed]/15 text-sm font-bold text-[#c4b5fd]">
-				<span aria-hidden="true">•</span>
-			</div>
 			<span>Agenda</span>
 			<span class="text-white/25">/</span>
 			<span>Turno</span>
@@ -145,15 +256,15 @@
 		<article class="rounded-3xl border border-[#244062] bg-[#071626] p-5 shadow-2xl shadow-black/20 sm:p-7 lg:p-9">
 			<div class="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
 				<div class="flex items-start gap-5">
-					<div class="grid h-20 w-20 shrink-0 place-items-center rounded-full bg-[#7c3aed]/35 text-2xl font-bold text-white ring-1 ring-[#8b5cf6]/40">
-						<span aria-hidden="true">•</span>
+					<div class="grid h-20 w-20 shrink-0 place-items-center rounded-full bg-[#7c3aed]/35 text-2xl font-bold uppercase text-white ring-1 ring-[#8b5cf6]/40">
+						{(data.appointment.patients?.full_name || data.appointment.service_name_snapshot || '·').trim().charAt(0)}
 					</div>
 					<div>
 						<h1 class="text-3xl font-semibold tracking-tight text-white md:text-4xl">
 							{data.appointment.service_name_snapshot}
 						</h1>
 						<p class="mt-2 text-lg font-semibold text-white/55">
-							{data.appointment.professional_name_snapshot}
+							<span class="text-white/40">Profesional:</span> {data.appointment.professional_name_snapshot}
 						</p>
 					</div>
 				</div>
@@ -181,6 +292,18 @@
 					<p class="text-sm font-semibold text-white/55">Duración</p>
 					<p class="mt-2 text-lg font-semibold text-white">{durationText(data.appointment)}</p>
 				</div>
+				{#if data.appointment.internal_note}
+					<div class="rounded-2xl border border-white/10 bg-white/[0.045] p-5">
+						<p class="text-sm font-semibold text-white/55">Nota interna</p>
+						<p class="mt-2 text-base font-semibold text-white">{data.appointment.internal_note}</p>
+					</div>
+				{/if}
+				{#if data.appointment.cancelled_reason}
+					<div class="rounded-2xl border border-red-400/20 bg-red-500/10 p-5">
+						<p class="text-sm font-semibold text-red-100/70">Motivo de cancelación</p>
+						<p class="mt-2 text-base font-semibold text-white">{data.appointment.cancelled_reason}</p>
+					</div>
+				{/if}
 			</div>
 
 			<div class="mt-7 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -232,68 +355,112 @@
 
 		<details id="reprogramar" class="group rounded-3xl border border-[#244062] bg-[#071626] shadow-xl shadow-black/10">
 			<summary class="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-5 text-lg font-semibold text-white sm:px-7">
-				<span>Más detalles</span>
+				<span>Reprogramar</span>
 				<span class="text-[#a78bfa] transition group-open:rotate-180">v</span>
 			</summary>
 			<div class="border-t border-white/10 px-5 py-6 sm:px-7">
-				<div class="grid gap-5 lg:grid-cols-2">
+				<div>
 					<div class="rounded-2xl border border-white/10 bg-white/[0.035] p-5">
 						<h2 class="text-lg font-semibold text-white">Reprogramar</h2>
-						<form method="GET" class="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]">
-							<input type="hidden" name="from_date" value={data.fromDate} />
-							<label class="space-y-1">
-								<span class="text-sm font-semibold text-white/65">Día</span>
-								<input type="date" name="reprogram_date" value={data.reprogramDate} min={data.minReprogramDate} disabled={!canOperate || isClosed} class="w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white disabled:opacity-50" />
-							</label>
-							<button disabled={!canOperate || isClosed} class="self-end rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/10 disabled:opacity-50">
-								Buscar horarios
-							</button>
-						</form>
-
-						<form method="POST" action="?/reschedule" class="mt-4">
-							<input type="hidden" name="reprogram_date" value={data.reprogramDate} />
-							<label class="space-y-1">
-								<span class="text-sm font-semibold text-white/65">Horario</span>
-								<select name="slot_starts_at" disabled={!canOperate || isClosed || data.reprogramSlots.length === 0} class="w-full rounded-2xl border border-white/10 bg-[#0b1d32] px-4 py-3 text-sm text-white disabled:opacity-50">
-									<option value="">Seleccionar horario</option>
-									{#each data.reprogramSlots as slot}
-										<option value={slot.starts_at}>{slot.time}</option>
+						{#if !canOperate || isClosed}
+							<p class="mt-3 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/55">
+								{isClosed
+									? 'Este turno está cerrado, no se puede reprogramar.'
+									: 'No tenés permiso para reprogramar este turno.'}
+							</p>
+						{:else}
+							<div class="mt-4 rounded-2xl border border-white/10 bg-[#0a1b2e] p-4">
+								<div class="flex items-center justify-between">
+									<button type="button" onclick={prevMonth} disabled={!canGoPrev} aria-label="Mes anterior" class="grid h-9 w-9 place-items-center rounded-xl border border-white/10 text-lg text-white/80 transition hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent">‹</button>
+									<span class="text-sm font-semibold capitalize text-white">{monthLabel}</span>
+									<button type="button" onclick={nextMonth} aria-label="Mes siguiente" class="grid h-9 w-9 place-items-center rounded-xl border border-white/10 text-lg text-white/80 transition hover:bg-white/10">›</button>
+								</div>
+								<div class="mt-3 grid grid-cols-7 gap-1 text-center text-xs font-semibold text-white/35">
+									{#each weekdayLabels as wd}
+										<span class="py-1">{wd}</span>
 									{/each}
-								</select>
-							</label>
-							{#if data.reprogramSlots.length === 0}
-								<p class="mt-3 text-sm text-white/55">No hay horarios disponibles para esa fecha y profesional.</p>
-							{/if}
-							<button type="submit" disabled={!canOperate || isClosed || data.reprogramSlots.length === 0} class="mt-4 w-full rounded-2xl bg-[#7c3aed] px-5 py-4 text-sm font-semibold text-white transition hover:bg-[#6d28d9] disabled:opacity-45">
-								Reprogramar
-							</button>
-						</form>
-					</div>
+								</div>
+								<div class="mt-1 grid grid-cols-7 gap-1">
+									{#each monthDays as cell}
+										{#if cell === null}
+											<span></span>
+										{:else}
+											<button
+												type="button"
+												onclick={() => selectDay(cell.iso)}
+												disabled={isPast(cell.iso)}
+												class={`grid h-10 place-items-center rounded-xl text-sm font-semibold transition ${
+													isSelected(cell.iso)
+														? 'bg-[#7c3aed] text-white shadow-lg shadow-[#7c3aed]/30'
+														: isPast(cell.iso)
+															? 'cursor-not-allowed text-white/20'
+															: 'text-white/80 hover:bg-white/10'
+												} ${isToday(cell.iso) && !isSelected(cell.iso) ? 'ring-1 ring-[#8b5cf6]/60' : ''}`}
+											>
+												{cell.day}
+											</button>
+										{/if}
+									{/each}
+								</div>
+							</div>
 
-					<div class="rounded-2xl border border-white/10 bg-white/[0.035] p-5">
-						<h2 class="text-lg font-semibold text-white">Información</h2>
-						<div class="mt-4 grid gap-4 text-sm">
-							<div>
-								<p class="font-semibold text-white/45">Horario del turno</p>
-								<p class="mt-1 font-semibold text-white">{formatDateTime(data.appointment.starts_at)} - {timeOnly(data.appointment.ends_at)}</p>
-							</div>
-							<div>
-								<p class="font-semibold text-white/45">Tiempo separado en agenda</p>
-								<p class="mt-1 font-semibold text-white">{formatDateTime(data.appointment.blocking_starts_at)} - {timeOnly(data.appointment.blocking_ends_at)}</p>
-							</div>
-							{#if data.appointment.cancelled_reason}
-								<div>
-									<p class="font-semibold text-white/45">Motivo de cancelación</p>
-									<p class="mt-1 font-semibold text-white">{data.appointment.cancelled_reason}</p>
+							<div class="mt-4">
+								<div class="flex items-center justify-between gap-2">
+									<span class="text-sm font-semibold text-white/65">
+										Horarios · <span class="capitalize text-white">{selectedDayLabel}</span>
+									</span>
+									{#if loadingSlots}
+										<span class="text-xs font-semibold text-[#a78bfa]">Buscando…</span>
+									{/if}
 								</div>
-							{/if}
-							{#if data.appointment.internal_note}
-								<div>
-									<p class="font-semibold text-white/45">Nota interna</p>
-									<p class="mt-1 font-semibold text-white">{data.appointment.internal_note}</p>
-								</div>
-							{/if}
-						</div>
+
+								{#if slotsError}
+									<p class="mt-3 rounded-xl bg-red-500/15 px-3 py-2 text-sm text-red-100">{slotsError}</p>
+								{:else if loadingSlots && currentSlots.length === 0}
+									<div class="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4">
+										{#each Array(8) as _}
+											<div class="h-10 animate-pulse rounded-xl bg-white/5"></div>
+										{/each}
+									</div>
+								{:else if currentSlots.length === 0}
+									<p class="mt-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-white/55">
+										No hay horarios disponibles ese día. Probá con otra fecha.
+									</p>
+								{:else}
+									<div class="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4">
+										{#each currentSlots as slot}
+											<button
+												type="button"
+												onclick={() => (selectedSlot = slot.starts_at)}
+												class={`rounded-xl border px-2 py-2.5 text-sm font-semibold tabular-nums transition ${
+													selectedSlot === slot.starts_at
+														? 'border-[#7c3aed] bg-[#7c3aed] text-white shadow-lg shadow-[#7c3aed]/30'
+														: 'border-white/10 bg-white/[0.04] text-white/85 hover:border-[#8b5cf6]/60 hover:bg-white/10'
+												}`}
+											>
+												{slot.time}
+											</button>
+										{/each}
+									</div>
+								{/if}
+							</div>
+
+							<form method="POST" action="?/reschedule" class="mt-5" use:enhance={onReschedule}>
+								<input type="hidden" name="slot_starts_at" value={selectedSlot} />
+								<input type="hidden" name="reprogram_date" value={selectedDate} />
+								<button
+									type="submit"
+									disabled={!selectedSlot || submitting}
+									class="w-full rounded-2xl bg-[#7c3aed] px-5 py-4 text-sm font-semibold text-white transition hover:bg-[#6d28d9] disabled:cursor-not-allowed disabled:opacity-40"
+								>
+									{submitting
+										? 'Reprogramando…'
+										: selectedSlot
+											? `Reprogramar a las ${selectedSlotTime}`
+											: 'Elegí un horario'}
+								</button>
+							</form>
+						{/if}
 					</div>
 				</div>
 
