@@ -4,6 +4,11 @@ import { writeAuditLog } from '$lib/server/audit';
 import { zonedDateTimeToUtc } from '$lib/server/availability';
 import { getOdontoContext } from '$lib/server/odonto-context';
 import { idsFromForm, setProfessionalServices } from '$lib/server/professional-services';
+import {
+	findProfessionalByEmail,
+	humanProfessionalEmailConflict,
+	normalizeProfessionalEmail
+} from '$lib/server/professionals';
 import { formatPriceLabel } from '$lib/utils/money-input';
 import { parseTimeRanges } from '$lib/utils/time-ranges';
 import { error as kitError, fail, redirect } from '@sveltejs/kit';
@@ -132,6 +137,16 @@ export const actions: Actions = {
 		const name = String(form.get('name') ?? '').trim();
 		if (!name) return fail(400, { message: 'El nombre es obligatorio.' });
 		const isAvailable = boolFromForm(form, 'is_available');
+		const email = normalizeProfessionalEmail(form.get('email'));
+		const existingProfessional = await findProfessionalByEmail(
+			supabase,
+			business.business.id,
+			email,
+			params.professionalId
+		);
+		if (existingProfessional) {
+			return fail(400, { message: humanProfessionalEmailConflict(existingProfessional) });
+		}
 
 		const { error } = await supabase
 			.from('professionals')
@@ -139,7 +154,7 @@ export const actions: Actions = {
 				name,
 				specialty: String(form.get('specialty') ?? '').trim() || null,
 				phone: String(form.get('phone') ?? '').trim() || null,
-				email: String(form.get('email') ?? '').trim() || null,
+				email,
 				is_public: isAvailable,
 				is_active: isAvailable,
 				updated_at: new Date().toISOString()
@@ -149,7 +164,11 @@ export const actions: Actions = {
 
 		if (error) {
 			console.error('Error actualizando profesional', error);
-			return fail(500, { message: 'No se pudo actualizar el profesional.' });
+			return fail(500, {
+				message: error.message?.includes('PROFESSIONAL_EMAIL_ALREADY_EXISTS')
+					? 'Ese correo ya está cargado en otro profesional.'
+					: 'No se pudo actualizar el profesional.'
+			});
 		}
 
 		await writeAuditLog(supabase, {

@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { writeAuditLog } from './audit';
 import { normalizePhoneE164, normalizePhoneRaw } from './phone';
@@ -173,9 +174,11 @@ export const createOrFindPatientForAppointment = async (
 	}
 	if (!ownerId) throw new Error('PATIENT_OWNER_REQUIRED');
 
-	const { data, error } = await supabase
+	const newPatientId = crypto.randomUUID();
+	const { error } = await supabase
 		.from('patients')
 		.insert({
+			id: newPatientId,
 			business_id: input.businessId,
 			owner_id: ownerId,
 			full_name: fullName,
@@ -183,13 +186,10 @@ export const createOrFindPatientForAppointment = async (
 			phone_raw: phoneRaw,
 			phone_e164: phoneE164,
 			email: email || null
-		})
-		.select('id')
-		.single();
+		});
 
 	if (error) throw error;
-	if (!data?.id) throw new Error('PATIENT_CREATE_FAILED');
-	return data.id as string;
+	return newPatientId;
 };
 
 export const createManualAppointment = async (

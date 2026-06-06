@@ -64,11 +64,11 @@
 				</label>
 				<label>
 					<span class="ux-label">Teléfono (opcional)</span>
-					<input name="phone" disabled={!canOperate} class="ux-input" />
+					<input name="phone" disabled={!canOperate} value={String(form?.values?.phone ?? '')} class="ux-input" />
 				</label>
 				<label>
 					<span class="ux-label">Correo electrónico (opcional)</span>
-					<input name="email" type="email" disabled={!canOperate} class="ux-input" />
+					<input name="email" type="email" disabled={!canOperate} value={String(form?.values?.email ?? '')} class="ux-input" />
 				</label>
 			</div>
 			<label class="mt-5 inline-flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-bold text-white">

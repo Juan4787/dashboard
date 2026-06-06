@@ -19,6 +19,7 @@
 			messageDispatches: any[];
 			userLabels: Record<string, string>;
 			reprogramDate: string;
+			minReprogramDate: string;
 			reprogramSlots: Slot[];
 			fromDate: string;
 			demo: boolean;
@@ -78,6 +79,12 @@
 	const auditLabel = (log: AuditLog) => {
 		const user = log.user_id ? (data.userLabels[log.user_id] ?? log.user_id.slice(0, 8)) : 'Sistema';
 		if (log.action === 'appointment.created') return `${user} creó el turno`;
+		if (log.action === 'appointment.public_created') return 'El paciente reservó el turno online';
+		if (log.action === 'appointment.public_confirmed') return 'El paciente confirmó el turno desde el enlace';
+		if (log.action === 'appointment.public_cancelled') return 'El paciente canceló el turno desde el enlace';
+		if (log.action === 'appointment.public_reschedule_requested') {
+			return 'El paciente pidió reprogramar desde el enlace';
+		}
 		if (log.action === 'appointment.rescheduled') return `${user} reprogramó el turno`;
 		if (log.action === 'appointment.cancelled') return `${user} canceló el turno`;
 		if (log.action === 'appointment.confirmed') return `${user} confirmó el turno`;
@@ -108,12 +115,14 @@
 	};
 
 	const mainActions = [
-		{ status: 'confirmed', label: 'Confirmar', tone: 'text-emerald-200', mark: 'OK' }
+		{ status: 'attended', label: 'Marcar asistió', tone: 'text-sky-100', mark: '✓' },
+		{ status: 'no_show', label: 'Marcar no asistió', tone: 'text-red-100', mark: '!' }
 	];
 </script>
 
 <section class="flex flex-col gap-5">
-	<div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+	<div class="flex flex-col items-start gap-4">
+		<BackLink href={`/odonto/agenda?date=${data.fromDate}`} label="Volver" />
 		<div class="flex items-center gap-3 text-sm font-semibold text-neutral-500 dark:text-white/55">
 			<div class="grid h-11 w-11 place-items-center rounded-2xl border border-[#8b5cf6]/35 bg-[#7c3aed]/15 text-sm font-bold text-[#c4b5fd]">
 				<span aria-hidden="true">•</span>
@@ -124,7 +133,6 @@
 			<span class="text-white/25">/</span>
 			<span class="text-[#a78bfa]">Detalle</span>
 		</div>
-		<BackLink href={`/odonto/agenda?date=${data.fromDate}`} label="Volver" />
 	</div>
 
 	{#if form?.message}
@@ -235,10 +243,10 @@
 							<input type="hidden" name="from_date" value={data.fromDate} />
 							<label class="space-y-1">
 								<span class="text-sm font-semibold text-white/65">Día</span>
-								<input type="date" name="reprogram_date" value={data.reprogramDate} disabled={!canOperate || isClosed} class="w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white disabled:opacity-50" />
+								<input type="date" name="reprogram_date" value={data.reprogramDate} min={data.minReprogramDate} disabled={!canOperate || isClosed} class="w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white disabled:opacity-50" />
 							</label>
 							<button disabled={!canOperate || isClosed} class="self-end rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/10 disabled:opacity-50">
-								Ver horarios
+								Buscar horarios
 							</button>
 						</form>
 
@@ -254,7 +262,7 @@
 								</select>
 							</label>
 							{#if data.reprogramSlots.length === 0}
-								<p class="mt-3 text-sm text-white/45">No hay horarios para ese día.</p>
+								<p class="mt-3 text-sm text-white/55">No hay horarios disponibles para esa fecha y profesional.</p>
 							{/if}
 							<button type="submit" disabled={!canOperate || isClosed || data.reprogramSlots.length === 0} class="mt-4 w-full rounded-2xl bg-[#7c3aed] px-5 py-4 text-sm font-semibold text-white transition hover:bg-[#6d28d9] disabled:opacity-45">
 								Reprogramar

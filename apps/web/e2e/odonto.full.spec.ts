@@ -31,8 +31,17 @@ const readEnvFile = () => {
 	return {};
 };
 
+const runtimeEnv = () => {
+	const fileEnv = readEnvFile();
+	const shellEnv: Record<string, string> = {};
+	for (const [key, value] of Object.entries(process.env)) {
+		if (typeof value === 'string') shellEnv[key] = value;
+	}
+	return { ...fileEnv, ...shellEnv };
+};
+
 const cleanupRecentHeadlessBookingAttempts = async () => {
-	const env = readEnvFile();
+	const env = runtimeEnv();
 	const url = env.ODONTO_SUPABASE_URL;
 	const key = env.ODONTO_SUPABASE_SERVICE_ROLE_KEY;
 	if (!url || !key) return;
@@ -54,7 +63,7 @@ const cleanupRecentHeadlessBookingAttempts = async () => {
 };
 
 const restEnv = () => {
-	const env = readEnvFile();
+	const env = runtimeEnv();
 	const url = env.ODONTO_SUPABASE_URL;
 	const key = env.ODONTO_SUPABASE_SERVICE_ROLE_KEY;
 	if (!url || !key) throw new Error('Faltan ODONTO_SUPABASE_URL u ODONTO_SUPABASE_SERVICE_ROLE_KEY para E2E.');

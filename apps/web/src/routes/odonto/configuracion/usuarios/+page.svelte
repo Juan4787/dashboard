@@ -96,6 +96,13 @@
 	};
 
 	const selectedProfessional = $derived(professionals.find((item) => item.id === professionalId) ?? null);
+	const professionalAccessById = $derived(
+		new Map(
+			members
+				.filter((member): member is RoleAccess & { professional_id: string } => Boolean(member.professional_id))
+				.map((member) => [member.professional_id, member])
+		)
+	);
 </script>
 
 <section class="ux-page">
@@ -103,8 +110,7 @@
 		<BackLink href="/odonto/configuracion" label="Volver" class="mb-5" />
 		<div class="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
 			<div>
-				<p class="ux-badge">Roles</p>
-				<h1 class="ux-title mt-4">Accesos</h1>
+				<h1 class="ux-title">Roles</h1>
 			</div>
 			<div class="ux-soft-card min-w-32 p-5 text-center">
 				<p class="text-sm font-bold text-white/55">Activos</p>
@@ -124,7 +130,7 @@
 
 	<form method="POST" action="?/add_user" class="ux-card">
 		<div class="flex items-center justify-between gap-4">
-			<h2 class="ux-section-title">Nuevo acceso</h2>
+			<h2 class="ux-section-title">Asignar rol</h2>
 			<div class="flex gap-2">
 				{#each [1, 2, 3, 4] as item}
 					<span class={`grid h-8 w-8 place-items-center rounded-full text-sm font-black ${step === item ? 'bg-[#7c3aed] text-white' : 'bg-white/10 text-white/45'}`}>
@@ -189,6 +195,7 @@
 					onclick={() => (professionalMode = 'existing')}
 				>
 					<span class="block text-lg font-black">Profesional existente</span>
+					<span class="mt-1 block text-sm text-white/55">Usá un perfil ya cargado en Profesionales.</span>
 				</button>
 				<button
 					type="button"
@@ -200,6 +207,7 @@
 					onclick={() => (professionalMode = 'new')}
 				>
 					<span class="block text-lg font-black">Profesional nuevo</span>
+					<span class="mt-1 block text-sm text-white/55">Crea el perfil y habilita el email.</span>
 				</button>
 			</div>
 
@@ -249,7 +257,7 @@
 			</div>
 			<div class="mt-4 flex gap-3">
 				<button type="button" class="ux-btn-secondary" onclick={previousStep}>Atrás</button>
-				<button type="submit" disabled={!canManage} class="ux-btn-primary flex-1">Crear acceso</button>
+				<button type="submit" disabled={!canManage} class="ux-btn-primary flex-1">Guardar rol</button>
 			</div>
 		{/if}
 	</form>
@@ -296,5 +304,40 @@
 				</div>
 			</article>
 		{/each}
+	</div>
+
+	<div class="ux-card">
+		<div>
+			<h2 class="ux-section-title">Profesionales</h2>
+			<p class="mt-1 text-sm text-white/55">Perfiles que pueden vincularse al rol Profesional.</p>
+		</div>
+		<div class="mt-5 grid gap-3">
+			{#each professionals as professional}
+				{@const access = professionalAccessById.get(professional.id)}
+				<div class="ux-soft-card p-4">
+					<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+						<div class="min-w-0">
+							<div class="flex flex-wrap items-center gap-2">
+								<h3 class="truncate text-lg font-black text-white">{professional.name}</h3>
+								<span class={professional.is_active && professional.is_public ? 'ux-badge ux-badge-success' : 'ux-badge'}>
+									{professional.is_active && professional.is_public ? 'Disponible' : 'No disponible'}
+								</span>
+							</div>
+							<p class="mt-1 text-sm text-white/55">{professional.email ?? 'Sin email cargado'}</p>
+						</div>
+						{#if access}
+							<span class={access.status === 'pending' ? 'ux-badge ux-badge-warning' : 'ux-badge ux-badge-success'}>
+								{access.status === 'pending' ? 'Rol pendiente' : 'Rol activo'}
+							</span>
+						{:else}
+							<span class="ux-badge">Sin rol</span>
+						{/if}
+					</div>
+				</div>
+			{/each}
+			{#if professionals.length === 0}
+				<div class="ux-empty">Todavía no hay perfiles profesionales cargados.</div>
+			{/if}
+		</div>
 	</div>
 </section>

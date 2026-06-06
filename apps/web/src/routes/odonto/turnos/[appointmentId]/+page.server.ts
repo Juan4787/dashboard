@@ -23,6 +23,17 @@ const localDateFor = (isoDate: string, timeZone: string) => {
 	return `${parts.year}-${parts.month}-${parts.day}`;
 };
 
+const todayForTimezone = (timeZone: string) => {
+	const formatter = new Intl.DateTimeFormat('en-CA', {
+		timeZone,
+		year: 'numeric',
+		month: '2-digit',
+		day: '2-digit'
+	});
+	const parts = Object.fromEntries(formatter.formatToParts(new Date()).map((part) => [part.type, part.value]));
+	return `${parts.year}-${parts.month}-${parts.day}`;
+};
+
 const canUseProfessionalStatusAction = (
 	role: string,
 	status: string
@@ -39,6 +50,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 			messageDispatches: [],
 			userLabels: {},
 			reprogramDate: new Date().toISOString().slice(0, 10),
+			minReprogramDate: new Date().toISOString().slice(0, 10),
 			reprogramSlots: [],
 			fromDate: '',
 			demo: true
@@ -61,8 +73,11 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 	}
 	if (!data) throw kitError(404, 'Turno no encontrado o sin permiso');
 
+	const appointmentLocalDate = localDateFor(data.starts_at, business.business.timezone);
+	const minReprogramDate = todayForTimezone(business.business.timezone);
+	const requestedReprogramDate = url.searchParams.get('reprogram_date');
 	const reprogramDate =
-		url.searchParams.get('reprogram_date') ?? localDateFor(data.starts_at, business.business.timezone);
+		requestedReprogramDate ?? (appointmentLocalDate >= minReprogramDate ? appointmentLocalDate : minReprogramDate);
 	const fromDate = url.searchParams.get('from_date') ?? localDateFor(data.starts_at, business.business.timezone);
 
 	const [auditResult, usersResult, messageResult, reprogramSlots] = await Promise.all([
@@ -108,6 +123,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 		messageDispatches: messageResult.data ?? [],
 		userLabels,
 		reprogramDate,
+		minReprogramDate,
 		reprogramSlots,
 		fromDate,
 		demo: false
@@ -123,6 +139,9 @@ export const actions: Actions = {
 		const form = await request.formData();
 		const status = String(form.get('status') ?? '').trim();
 		if (!isAppointmentStatus(status)) return fail(400, { message: 'Estado inválido.' });
+		if (status === 'confirmed') {
+			return fail(400, { message: 'La confirmación queda reservada al paciente desde su enlace.' });
+		}
 
 		try {
 			if (business.canOperate) {
@@ -159,6 +178,9 @@ export const actions: Actions = {
 		const slotStartsAt = String(form.get('slot_starts_at') ?? '').trim();
 		const reprogramDate = String(form.get('reprogram_date') ?? '').trim();
 		if (!slotStartsAt || !reprogramDate) return fail(400, { message: 'Elegí un horario disponible.' });
+		if (reprogramDate < todayForTimezone(business.business.timezone)) {
+			return fail(400, { message: 'Elegí una fecha futura para reprogramar.' });
+		}
 
 		const { data: appointment, error: loadError } = await supabase
 			.from('appointments')

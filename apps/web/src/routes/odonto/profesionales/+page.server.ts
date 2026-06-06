@@ -2,10 +2,21 @@ import { env } from '$env/dynamic/private';
 import { demoBusinessContext } from '$lib/server/business';
 import { writeAuditLog } from '$lib/server/audit';
 import { getOdontoContext } from '$lib/server/odonto-context';
+import {
+	findProfessionalByEmail,
+	humanProfessionalEmailConflict,
+	normalizeProfessionalEmail
+} from '$lib/server/professionals';
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
 const boolFromForm = (form: FormData, key: string) => form.get(key) === 'true';
+
+const professionalErrorMessage = (error: { message?: string } | null | undefined) => {
+	const raw = error?.message ?? '';
+	if (raw.includes('PROFESSIONAL_EMAIL_ALREADY_EXISTS')) return 'Ese correo ya está cargado en otro profesional.';
+	return 'No se pudo guardar el profesional.';
+};
 
 export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 	if (!locals.auth) throw redirect(303, '/login');
@@ -51,6 +62,14 @@ export const actions: Actions = {
 		const name = String(form.get('name') ?? '').trim();
 		if (!name) return fail(400, { message: 'El nombre es obligatorio.', values: Object.fromEntries(form) });
 		const isAvailable = boolFromForm(form, 'is_available');
+		const email = normalizeProfessionalEmail(form.get('email'));
+		const existingProfessional = await findProfessionalByEmail(supabase, business.business.id, email);
+		if (existingProfessional) {
+			return fail(400, {
+				message: humanProfessionalEmailConflict(existingProfessional),
+				values: Object.fromEntries(form)
+			});
+		}
 
 		const { data, error } = await supabase
 			.from('professionals')
@@ -59,7 +78,7 @@ export const actions: Actions = {
 				name,
 				specialty: String(form.get('specialty') ?? '').trim() || null,
 				phone: String(form.get('phone') ?? '').trim() || null,
-				email: String(form.get('email') ?? '').trim() || null,
+				email,
 				is_public: isAvailable,
 				is_active: isAvailable
 			})
@@ -68,7 +87,7 @@ export const actions: Actions = {
 
 		if (error) {
 			console.error('Error creando profesional', error);
-			return fail(500, { message: 'No se pudo crear el profesional.', values: Object.fromEntries(form) });
+			return fail(500, { message: professionalErrorMessage(error), values: Object.fromEntries(form) });
 		}
 
 		await writeAuditLog(supabase, {
@@ -94,6 +113,13 @@ export const actions: Actions = {
 		if (!professionalId) return fail(400, { message: 'Profesional inválido.' });
 		if (!name) return fail(400, { message: 'El nombre es obligatorio.' });
 		const isAvailable = boolFromForm(form, 'is_available');
+		const email = normalizeProfessionalEmail(form.get('email'));
+		const existingProfessional = await findProfessionalByEmail(supabase, business.business.id, email, professionalId);
+		if (existingProfessional) {
+			return fail(400, {
+				message: humanProfessionalEmailConflict(existingProfessional)
+			});
+		}
 
 		const { error } = await supabase
 			.from('professionals')
@@ -101,7 +127,7 @@ export const actions: Actions = {
 				name,
 				specialty: String(form.get('specialty') ?? '').trim() || null,
 				phone: String(form.get('phone') ?? '').trim() || null,
-				email: String(form.get('email') ?? '').trim() || null,
+				email,
 				is_public: isAvailable,
 				is_active: isAvailable,
 				updated_at: new Date().toISOString()
@@ -111,7 +137,7 @@ export const actions: Actions = {
 
 		if (error) {
 			console.error('Error actualizando profesional', error);
-			return fail(500, { message: 'No se pudo actualizar el profesional.' });
+			return fail(500, { message: professionalErrorMessage(error) });
 		}
 
 		await writeAuditLog(supabase, {

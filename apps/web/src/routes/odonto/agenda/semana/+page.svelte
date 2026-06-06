@@ -19,7 +19,7 @@
 	}>();
 
 	const statusLabels: Record<string, string> = {
-		reserved: 'Pendientes',
+		reserved: 'Reservados',
 		confirmed: 'Confirmados',
 		cancelled: 'Cancelados',
 		reschedule_requested: 'Reprogramar',
@@ -67,7 +67,7 @@
 					{/each}
 				</select>
 			</label>
-			<button class="ux-btn-primary self-end">Ver semana</button>
+			<button class="ux-btn-primary self-end">Buscar</button>
 		</form>
 	</div>
 

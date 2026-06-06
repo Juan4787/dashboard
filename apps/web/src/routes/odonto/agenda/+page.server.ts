@@ -257,6 +257,9 @@ export const actions: Actions = {
 		const selectedStatus = String(form.get('selected_status') ?? '').trim();
 		const serviceId = String(form.get('service_id') ?? '').trim();
 		if (!appointmentId || !isAppointmentStatus(status)) return fail(400, { message: 'Estado inválido.' });
+		if (status === 'confirmed') {
+			return fail(400, { message: 'La confirmación queda reservada al paciente desde su enlace.' });
+		}
 
 		try {
 			await updateAppointmentStatus(supabase, {

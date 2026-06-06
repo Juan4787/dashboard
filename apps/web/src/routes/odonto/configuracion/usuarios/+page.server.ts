@@ -5,7 +5,16 @@ import {
 	resolveActiveBusiness,
 	type BusinessRole
 } from '$lib/server/business';
-import { createSupabaseServerClient, getAuthUserId } from '$lib/server/supabase';
+import {
+	findProfessionalByEmail,
+	humanProfessionalEmailConflict,
+	normalizeProfessionalEmail
+} from '$lib/server/professionals';
+import {
+	createSupabaseAdminClient,
+	createSupabaseServerClient,
+	getAuthUserId
+} from '$lib/server/supabase';
 import { env } from '$env/dynamic/private';
 import { error as kitError, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
@@ -100,6 +109,7 @@ const listProfessionals = async (
 		.from('professionals')
 		.select('id, name, email, is_active, is_public')
 		.eq('business_id', businessId)
+		.order('sort_order')
 		.order('name');
 	if (error) throw error;
 	return ((data ?? []) as ProfessionalOption[]).map((item) => ({
@@ -142,14 +152,249 @@ const getUsersPageContext = async ({
 const countOwners = (members: BusinessRoleAccess[]) =>
 	members.filter((member) => member.status === 'active' && member.role === 'owner').length;
 
-const roleAccessErrorMessage = (error: { message?: string } | null | undefined) => {
+const roleAccessErrorMessage = (error: { code?: string; message?: string } | null | undefined) => {
 	const raw = error?.message ?? '';
 	if (raw.includes('BUSINESS_MANAGE_DENIED')) return 'No tenés permisos para administrar roles.';
 	if (raw.includes('INVALID_EMAIL')) return 'Ingresá un email válido.';
 	if (raw.includes('INVALID_ROLE')) return 'El rol seleccionado no es válido.';
 	if (raw.includes('PROFESSIONAL_REQUIRED')) return 'Seleccioná o creá el profesional asociado.';
 	if (raw.includes('PROFESSIONAL_NOT_FOUND')) return 'No se encontró el profesional seleccionado.';
-	return 'No se pudo guardar el acceso.';
+	if (raw.includes('PROFESSIONAL_ALREADY_LINKED_TO_USER')) {
+		return 'Ese profesional ya está vinculado a otro usuario.';
+	}
+	if (raw.includes('PROFESSIONAL_EMAIL_ALREADY_EXISTS')) {
+		return 'Ese correo ya está cargado en otro profesional.';
+	}
+	if (error?.code === '42P10' || raw.includes('no unique or exclusion constraint matching the on conflict')) {
+		return 'Falta aplicar la migración de roles en la base de datos.';
+	}
+	if (raw.includes('ADMIN_OWNER_ACTION_DENIED')) return 'Un administrador no puede modificar dueños ni otros administradores.';
+	if (raw.includes('LAST_OWNER_BLOCKED')) return 'El consultorio debe conservar al menos un dueño.';
+	if (raw.includes('SELF_REMOVE_DENIED')) return 'No podés quitar tu propio rol desde esta pantalla.';
+	return 'No se pudo guardar el rol.';
+};
+
+const roleLabel = (role: BusinessRole) => {
+	const labels: Record<BusinessRole, string> = {
+		owner: 'Dueño',
+		admin: 'Administrador',
+		reception: 'Recepción',
+		professional: 'Profesional',
+		readonly: 'Solo lectura'
+	};
+	return labels[role];
+};
+
+const findAuthUserIdByEmail = async (admin: SupabaseClient, email: string) => {
+	for (let page = 1; page <= 20; page += 1) {
+		const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
+		if (error) throw error;
+		const user = data.users.find((item) => item.email?.trim().toLowerCase() === email);
+		if (user?.id) return user.id;
+		if (data.users.length < 1000) return null;
+	}
+	return null;
+};
+
+const enableAllowedEmail = async (admin: SupabaseClient, email: string, actorId: string | null) => {
+	const { data: existingRows, error: readError } = await admin
+		.from('allowed_emails')
+		.select('id, email')
+		.ilike('email', email)
+		.limit(20);
+	if (readError) throw readError;
+
+	const ids = (existingRows ?? []).map((row: any) => String(row.id)).filter(Boolean);
+	if (ids.length > 0) {
+		const { error } = await admin
+			.from('allowed_emails')
+			.update({
+				email,
+				enabled: true,
+				disabled_at: null,
+				disabled_reason: null,
+				updated_by: actorId,
+				updated_at: new Date().toISOString()
+			})
+			.in('id', ids);
+		if (error) throw error;
+		return;
+	}
+
+	const { error } = await admin.from('allowed_emails').insert({
+		email,
+		enabled: true,
+		created_by: actorId,
+		updated_by: actorId
+	});
+	if (error) throw error;
+};
+
+const saveRoleAccessDirect = async ({
+	admin,
+	businessId,
+	email,
+	role,
+	professionalId,
+	actorId,
+	actorRole,
+	currentAccess
+}: {
+	admin: SupabaseClient;
+	businessId: string;
+	email: string;
+	role: BusinessRole;
+	professionalId: string | null;
+	actorId: string | null;
+	actorRole: BusinessRole;
+	currentAccess: BusinessRoleAccess[];
+}) => {
+	if (!actorId) throw new Error('AUTH_REQUIRED');
+	if (actorRole === 'admin' && (role === 'owner' || role === 'admin')) {
+		throw new Error('ADMIN_OWNER_ACTION_DENIED');
+	}
+	if (role === 'professional' && !professionalId) {
+		throw new Error('PROFESSIONAL_REQUIRED');
+	}
+
+	const targetUserId = await findAuthUserIdByEmail(admin, email);
+
+	if (role === 'professional' && professionalId) {
+		const { data: linkedRows, error: linkedError } = await admin
+			.from('professional_users')
+			.select('id, user_id')
+			.eq('business_id', businessId)
+			.eq('professional_id', professionalId)
+			.limit(10);
+		if (linkedError) throw linkedError;
+		if ((linkedRows ?? []).some((row: any) => !targetUserId || String(row.user_id) !== targetUserId)) {
+			throw new Error('PROFESSIONAL_ALREADY_LINKED_TO_USER');
+		}
+	}
+
+	await enableAllowedEmail(admin, email, actorId);
+
+	if (targetUserId) {
+		const existing = currentAccess.find(
+			(item) => item.status === 'active' && item.user_id === targetUserId
+		);
+		if (actorRole === 'admin' && existing?.role && (existing.role === 'owner' || existing.role === 'admin')) {
+			throw new Error('ADMIN_OWNER_ACTION_DENIED');
+		}
+		if (existing?.role === 'owner' && role !== 'owner' && countOwners(currentAccess) <= 1) {
+			throw new Error('LAST_OWNER_BLOCKED');
+		}
+
+		if (existing) {
+			const { error } = await admin
+				.from('business_users')
+				.update({
+					role,
+					status: 'active',
+					disabled_at: null,
+					disabled_reason: null,
+					updated_by: actorId,
+					updated_at: new Date().toISOString()
+				})
+				.eq('id', existing.id)
+				.eq('business_id', businessId);
+			if (error) throw error;
+		} else {
+			const { error } = await admin.from('business_users').insert({
+				business_id: businessId,
+				user_id: targetUserId,
+				role,
+				status: 'active',
+				accepted_at: new Date().toISOString(),
+				created_by: actorId,
+				updated_by: actorId
+			});
+			if (error) throw error;
+		}
+
+		if (role === 'professional' && professionalId) {
+			const deleteByUser = await admin
+				.from('professional_users')
+				.delete()
+				.eq('business_id', businessId)
+				.eq('user_id', targetUserId);
+			if (deleteByUser.error) throw deleteByUser.error;
+			const deleteByProfessional = await admin
+				.from('professional_users')
+				.delete()
+				.eq('business_id', businessId)
+				.eq('professional_id', professionalId);
+			if (deleteByProfessional.error) throw deleteByProfessional.error;
+			const { error } = await admin.from('professional_users').insert({
+				business_id: businessId,
+				professional_id: professionalId,
+				user_id: targetUserId
+			});
+			if (error) throw error;
+		} else {
+			const { error } = await admin
+				.from('professional_users')
+				.delete()
+				.eq('business_id', businessId)
+				.eq('user_id', targetUserId);
+			if (error) throw error;
+		}
+
+		const { error: inviteError } = await admin
+			.from('business_user_invites')
+			.update({
+				status: 'accepted',
+				accepted_user_id: targetUserId,
+				accepted_at: new Date().toISOString(),
+				updated_at: new Date().toISOString()
+			})
+			.eq('business_id', businessId)
+			.ilike('email', email)
+			.eq('status', 'pending');
+		if (inviteError) throw inviteError;
+
+		return {
+			status:
+				existing?.role === role &&
+				(role !== 'professional' || existing.professional_id === professionalId)
+					? 'already_active'
+					: 'active'
+		};
+	}
+
+	const existingPending = currentAccess.find(
+		(item) => item.status === 'pending' && item.email.toLowerCase() === email
+	);
+	if (existingPending) {
+		const { error } = await admin
+			.from('business_user_invites')
+			.update({
+				role,
+				professional_id: professionalId,
+				invited_by: actorId,
+				updated_at: new Date().toISOString()
+			})
+			.eq('id', existingPending.id)
+			.eq('business_id', businessId);
+		if (error) throw error;
+		return {
+			status:
+				existingPending.role === role &&
+				(role !== 'professional' || existingPending.professional_id === professionalId)
+					? 'already_pending'
+					: 'pending'
+		};
+	}
+
+	const { error } = await admin.from('business_user_invites').insert({
+		business_id: businessId,
+		email,
+		role,
+		professional_id: professionalId,
+		invited_by: actorId
+	});
+	if (error) throw error;
+	return { status: 'pending' };
 };
 
 export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
@@ -205,7 +450,7 @@ export const actions: Actions = {
 			return fail(400, { message: 'El rol seleccionado no es válido.', values });
 		}
 
-		const { supabase, context } = await getUsersPageContext({ locals, fetch, cookies });
+		const { supabase, context, currentUserId } = await getUsersPageContext({ locals, fetch, cookies });
 		if (!context.canManage) {
 			return fail(403, { message: 'No tenés permisos para administrar roles.', values });
 		}
@@ -214,7 +459,7 @@ export const actions: Actions = {
 		const existing = currentAccess.find((item) => item.email.toLowerCase() === email);
 		if (existing?.role === role) {
 			return fail(400, {
-				message: `Ese correo ya está asignado al rol ${role}.`,
+				message: `Ese correo ya está asignado al rol ${roleLabel(role)}.`,
 				values
 			});
 		}
@@ -225,6 +470,17 @@ export const actions: Actions = {
 			if (professionalMode === 'new') {
 				if (!newProfessionalName) {
 					return fail(400, { message: 'Ingresá el nombre del profesional.', values });
+				}
+				const existingProfessional = await findProfessionalByEmail(
+					supabase,
+					context.business.id,
+					normalizeProfessionalEmail(email)
+				);
+				if (existingProfessional) {
+					return fail(400, {
+						message: humanProfessionalEmailConflict(existingProfessional),
+						values
+					});
 				}
 				const { data: created, error: createError } = await supabase
 					.from('professionals')
@@ -248,29 +504,70 @@ export const actions: Actions = {
 				if (!professionalId) {
 					return fail(400, { message: 'Seleccioná un profesional.', values });
 				}
+				const professionals = await listProfessionals(supabase, context.business.id);
+				const selectedProfessional = professionals.find((professional) => professional.id === professionalId);
+				if (!selectedProfessional) {
+					return fail(400, { message: 'No se encontró el profesional seleccionado.', values });
+				}
+				const selectedEmail = normalizeProfessionalEmail(selectedProfessional.email);
+				if (selectedEmail && selectedEmail !== email) {
+					return fail(400, {
+						message: `Ese profesional ya tiene cargado ${selectedEmail}. Corregí el email del profesional o seleccioná otro perfil.`,
+						values
+					});
+				}
+				const existingProfessional = await findProfessionalByEmail(
+					supabase,
+					context.business.id,
+					normalizeProfessionalEmail(email),
+					professionalId
+				);
+				if (existingProfessional) {
+					return fail(400, {
+						message: humanProfessionalEmailConflict(existingProfessional),
+						values
+					});
+				}
+				if (!selectedEmail) {
+					const { error: updateProfessionalEmailError } = await supabase
+						.from('professionals')
+						.update({ email, updated_at: new Date().toISOString() })
+						.eq('business_id', context.business.id)
+						.eq('id', professionalId);
+					if (updateProfessionalEmailError) {
+						console.error('Error actualizando email del profesional', updateProfessionalEmailError);
+						return fail(500, { message: roleAccessErrorMessage(updateProfessionalEmailError), values });
+					}
+				}
 			}
 		}
 
-		const { data, error } = await supabase.rpc('upsert_business_role_access', {
-			target_business_id: context.business.id,
-			target_email: email,
-			target_role: role,
-			target_professional_id: professionalId
-		});
-
-		if (error) {
+		const admin = await createSupabaseAdminClient('odonto', fetch);
+		let result: { status: string };
+		try {
+			result = await saveRoleAccessDirect({
+				admin,
+				businessId: context.business.id,
+				email,
+				role,
+				professionalId,
+				actorId: currentUserId,
+				actorRole: context.role,
+				currentAccess
+			});
+		} catch (error) {
 			if (createdProfessionalId) {
-				await supabase
+				await admin
 					.from('professionals')
 					.delete()
 					.eq('business_id', context.business.id)
 					.eq('id', createdProfessionalId);
 			}
 			console.error('Error guardando acceso al negocio', error);
-			return fail(500, { message: roleAccessErrorMessage(error), values });
+			return fail(500, { message: roleAccessErrorMessage(error as { code?: string; message?: string }), values });
 		}
 
-		const status = String(data?.[0]?.status ?? '');
+		const status = String(result.status ?? '');
 		if (status === 'already_active' || status === 'already_pending') {
 			return { success: true, message: 'Ese correo ya tenía ese rol asignado.' };
 		}
@@ -294,7 +591,7 @@ export const actions: Actions = {
 		const role = String(form.get('role') ?? '').trim();
 
 		if (!membershipId) {
-			return fail(400, { message: 'Acceso inválido.' });
+			return fail(400, { message: 'Rol inválido.' });
 		}
 		if (!isBusinessRole(role)) {
 			return fail(400, { message: 'El rol seleccionado no es válido.' });
@@ -308,24 +605,23 @@ export const actions: Actions = {
 		const members = await listRoleAccess(supabase, context.business.id);
 		const target = members.find((member) => member.id === membershipId && member.status === 'active');
 		if (!target) {
-			return fail(404, { message: 'Acceso no encontrado en este consultorio.' });
+			return fail(404, { message: 'Rol no encontrado en este consultorio.' });
 		}
 		if (target.role === 'owner' && role !== 'owner' && countOwners(members) <= 1) {
 			return fail(400, { message: 'El consultorio debe conservar al menos un dueño.' });
 		}
 		if (role === 'professional' && !target.professional_id) {
-			return fail(400, { message: 'Para asignar rol profesional, usá Nuevo acceso y vinculá un profesional.' });
+			return fail(400, { message: 'Para asignar rol profesional, usá Asignar rol y vinculá un profesional.' });
 		}
 
-		const { error } = await supabase
-			.from('business_users')
-			.update({ role })
-			.eq('id', membershipId)
-			.eq('business_id', context.business.id);
+		const { error } = await supabase.rpc('update_business_role_access', {
+			target_access_id: membershipId,
+			target_role: role
+		});
 
 		if (error) {
 			console.error('Error actualizando rol', error);
-			return fail(500, { message: 'No se pudo actualizar el rol.' });
+			return fail(500, { message: roleAccessErrorMessage(error) });
 		}
 
 		return { success: true, message: 'Rol actualizado.' };
@@ -340,7 +636,7 @@ export const actions: Actions = {
 		const accessId = String(form.get('access_id') ?? form.get('membership_id') ?? '').trim();
 		const status = String(form.get('status') ?? 'active').trim();
 		if (!accessId) {
-			return fail(400, { message: 'Acceso inválido.' });
+			return fail(400, { message: 'Rol inválido.' });
 		}
 
 		const { supabase, context, currentUserId } = await getUsersPageContext({ locals, fetch, cookies });
@@ -354,15 +650,15 @@ export const actions: Actions = {
 			});
 			if (error) {
 				console.error('Error cancelando invitación', error);
-				return fail(500, { message: 'No se pudo quitar el acceso pendiente.' });
+				return fail(500, { message: 'No se pudo quitar el rol pendiente.' });
 			}
-			return { success: true, message: 'Acceso pendiente quitado.' };
+			return { success: true, message: 'Rol pendiente quitado.' };
 		}
 
 		const members = await listRoleAccess(supabase, context.business.id);
 		const target = members.find((member) => member.id === accessId && member.status === 'active');
 		if (!target) {
-			return fail(404, { message: 'Acceso no encontrado en este consultorio.' });
+			return fail(404, { message: 'Rol no encontrado en este consultorio.' });
 		}
 		if (target.user_id === currentUserId) {
 			return fail(400, { message: 'No podés quitar tu propio acceso desde esta pantalla.' });
@@ -371,29 +667,15 @@ export const actions: Actions = {
 			return fail(400, { message: 'El consultorio debe conservar al menos un dueño.' });
 		}
 
-		if (target.user_id) {
-			const { error: linkError } = await supabase
-				.from('professional_users')
-				.delete()
-				.eq('business_id', context.business.id)
-				.eq('user_id', target.user_id);
-			if (linkError) {
-				console.error('Error quitando vínculos profesionales', linkError);
-				return fail(500, { message: 'No se pudo quitar el vínculo profesional.' });
-			}
-		}
-
-		const { error } = await supabase
-			.from('business_users')
-			.delete()
-			.eq('id', accessId)
-			.eq('business_id', context.business.id);
+		const { error } = await supabase.rpc('remove_business_role_access', {
+			target_access_id: accessId
+		});
 
 		if (error) {
 			console.error('Error quitando acceso', error);
-			return fail(500, { message: 'No se pudo quitar el acceso.' });
+			return fail(500, { message: roleAccessErrorMessage(error) });
 		}
 
-		return { success: true, message: 'Acceso quitado del consultorio.' };
+		return { success: true, message: 'Rol quitado del consultorio.' };
 	}
 };

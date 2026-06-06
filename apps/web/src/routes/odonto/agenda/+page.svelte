@@ -159,7 +159,7 @@
 					{showDayAppointments ? 'Ocultar turnos' : 'Ver turnos del día'}
 				</button>
 				<a href={`/odonto/agenda/semana?date=${data.date}${data.selectedProfessionalId ? `&professional_id=${data.selectedProfessionalId}` : ''}`} class="ux-btn-secondary text-center">
-					Ver semana
+					Semana
 				</a>
 			</div>
 		</div>

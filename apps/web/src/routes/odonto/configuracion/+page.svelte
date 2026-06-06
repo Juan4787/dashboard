@@ -152,7 +152,7 @@
 		<a href="/odonto/configuracion/usuarios" class="ux-choice p-6">
 			<span class="ux-badge">Permisos</span>
 			<h2 class="mt-4 text-2xl font-bold text-white">Roles</h2>
-			<p class="mt-2 text-sm text-white/55">Accesos y permisos.</p>
+			<p class="mt-2 text-sm text-white/55">Usuarios y permisos del consultorio.</p>
 		</a>
 		<a href="/odonto/configuracion/suscripcion" class="ux-choice p-6">
 			<span class="ux-badge">Acceso</span>
