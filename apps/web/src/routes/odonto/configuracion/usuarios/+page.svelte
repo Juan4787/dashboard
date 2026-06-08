@@ -103,6 +103,20 @@
 				.map((member) => [member.professional_id, member])
 		)
 	);
+
+	const professionalsWithoutAccess = $derived(professionals.filter((item) => !professionalAccessById.has(item.id)));
+
+	const giveAccess = (professional: Professional) => {
+		email = professional.email ?? '';
+		role = 'professional';
+		professionalMode = 'existing';
+		professionalId = professional.id;
+		professionalName = professional.name;
+		step = professional.email ? 4 : 1;
+		if (typeof document !== 'undefined') {
+			document.getElementById('asignar-rol')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+		}
+	};
 </script>
 
 <section class="ux-page">
@@ -128,7 +142,7 @@
 		<p class="ux-empty">Tu permiso actual permite ver roles, pero no administrarlos.</p>
 	{/if}
 
-	<form method="POST" action="?/add_user" class="ux-card">
+	<form method="POST" action="?/add_user" id="asignar-rol" class="ux-card scroll-mt-5">
 		<div class="flex items-center justify-between gap-4">
 			<h2 class="ux-section-title">Asignar rol</h2>
 			<div class="flex gap-2">
@@ -308,35 +322,28 @@
 
 	<div class="ux-card">
 		<div>
-			<h2 class="ux-section-title">Profesionales</h2>
-			<p class="mt-1 text-sm text-white/55">Perfiles que pueden vincularse al rol Profesional.</p>
+			<h2 class="ux-section-title">Profesionales sin acceso</h2>
+			<p class="mt-1 text-sm text-white/55">Dales acceso para que entren a ver su agenda y sus pacientes.</p>
 		</div>
 		<div class="mt-5 grid gap-3">
-			{#each professionals as professional}
-				{@const access = professionalAccessById.get(professional.id)}
-				<div class="ux-soft-card p-4">
-					<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-						<div class="min-w-0">
-							<div class="flex flex-wrap items-center gap-2">
-								<h3 class="truncate text-lg font-black text-white">{professional.name}</h3>
-								<span class={professional.is_active && professional.is_public ? 'ux-badge ux-badge-success' : 'ux-badge'}>
-									{professional.is_active && professional.is_public ? 'Disponible' : 'No disponible'}
-								</span>
-							</div>
-							<p class="mt-1 text-sm text-white/55">{professional.email ?? 'Sin email cargado'}</p>
-						</div>
-						{#if access}
-							<span class={access.status === 'pending' ? 'ux-badge ux-badge-warning' : 'ux-badge ux-badge-success'}>
-								{access.status === 'pending' ? 'Rol pendiente' : 'Rol activo'}
+			{#each professionalsWithoutAccess as professional}
+				<div class="ux-soft-card flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+					<div class="min-w-0">
+						<div class="flex flex-wrap items-center gap-2">
+							<h3 class="truncate text-lg font-bold text-white">{professional.name}</h3>
+							<span class={professional.is_active && professional.is_public ? 'ux-badge ux-badge-success' : 'ux-badge'}>
+								{professional.is_active && professional.is_public ? 'Disponible' : 'No disponible'}
 							</span>
-						{:else}
-							<span class="ux-badge">Sin rol</span>
-						{/if}
+						</div>
+						<p class="mt-1 truncate text-sm text-white/55">{professional.email ?? 'Sin email cargado'}</p>
 					</div>
+					<button type="button" disabled={!canManage} class="ux-btn-primary shrink-0" onclick={() => giveAccess(professional)}>
+						Dar acceso
+					</button>
 				</div>
 			{/each}
-			{#if professionals.length === 0}
-				<div class="ux-empty">Todavía no hay perfiles profesionales cargados.</div>
+			{#if professionalsWithoutAccess.length === 0}
+				<div class="ux-empty">Todos los profesionales ya tienen acceso asignado.</div>
 			{/if}
 		</div>
 	</div>

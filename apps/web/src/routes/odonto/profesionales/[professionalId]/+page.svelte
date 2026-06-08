@@ -6,6 +6,7 @@
 	import { enhance } from '$app/forms';
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { persistDraft, clearDraft } from '$lib/actions/persist-draft';
+	import Modal from '$lib/components/Modal.svelte';
 
 	const weekdays = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 	const tabs = [
@@ -56,6 +57,8 @@
 			assignedServiceIds: string[];
 			rules: Rule[];
 			exceptions: Exception[];
+			appointmentCount: number;
+			clinicalEntryCount: number;
 			tab: string;
 			demo: boolean;
 		};
@@ -65,6 +68,10 @@
 	const canOperate = $derived(data.context.canOperate && !data.demo);
 	const canManage = $derived(data.context.canManage && !data.demo);
 	const professional = $derived(data.professional);
+	const appointmentCount = $derived(data.appointmentCount ?? 0);
+	const clinicalEntryCount = $derived(data.clinicalEntryCount ?? 0);
+	const canDelete = $derived(appointmentCount === 0 && clinicalEntryCount === 0);
+	let showDeleteConfirm = $state(false);
 
 	// Borrador del Perfil: se conserva al cambiar de pestaña o navegar, y se limpia al guardar bien.
 	const profileDraftKey = $derived(`prof-perfil:${data.professional?.id ?? ''}`);
@@ -237,47 +244,61 @@
 		</form>
 
 		{#if canManage}
-			<div class="ux-card border-red-400/20">
-				<h2 class="ux-section-title">Administración</h2>
-				<p class="mt-1 text-sm text-white/55">Acciones reservadas al dueño del consultorio.</p>
-
-				<div class="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-					<div>
-						<p class="font-black text-white">{professional?.is_active ? 'Archivar profesional' : 'Restaurar profesional'}</p>
-						<p class="mt-1 text-sm text-white/55">
-							{professional?.is_active
-								? 'Lo oculta de la agenda y de las reservas. Podés restaurarlo cuando quieras.'
-								: 'Vuelve a aparecer como disponible para asignar turnos.'}
-						</p>
-					</div>
+			<div class="ux-card flex flex-col gap-4 border-red-400/15 sm:flex-row sm:items-center sm:justify-between">
+				<div class="min-w-0">
+					<p class="font-bold text-white">{professional?.is_active ? 'Archivar profesional' : 'Restaurar profesional'}</p>
+					<p class="mt-1 text-sm text-white/55">
+						{professional?.is_active
+							? 'Se oculta de la agenda y de las reservas. Reversible.'
+							: 'Vuelve a estar disponible para asignar turnos.'}
+					</p>
+				</div>
+				<div class="flex shrink-0 flex-wrap items-center gap-2">
 					{#if professional?.is_active}
-						<form method="POST" action="?/archive_professional" use:enhance class="shrink-0">
+						<form method="POST" action="?/archive_professional" use:enhance>
 							<button type="submit" class="ux-btn-secondary">Archivar</button>
 						</form>
 					{:else}
-						<form method="POST" action="?/restore_professional" use:enhance class="shrink-0">
+						<form method="POST" action="?/restore_professional" use:enhance>
 							<button type="submit" class="ux-btn-primary">Restaurar</button>
 						</form>
 					{/if}
-				</div>
-
-				<div class="mt-4 flex flex-col gap-3 border-t border-white/10 pt-4 sm:flex-row sm:items-center sm:justify-between">
-					<div>
-						<p class="font-black text-red-100">Eliminar definitivamente</p>
-						<p class="mt-1 text-sm text-white/55">Solo si no tiene turnos cargados. Si los tiene, archivalo para conservar el historial.</p>
-					</div>
-					<form
-						method="POST"
-						action="?/delete_professional"
-						class="shrink-0"
-						onsubmit={(event) => {
-							if (!confirm('¿Eliminar este profesional de forma permanente? Esta acción no se puede deshacer.')) event.preventDefault();
-						}}
-					>
-						<button type="submit" class="ux-btn-danger">Eliminar</button>
-					</form>
+					<button type="button" class="ux-btn-danger" onclick={() => (showDeleteConfirm = true)}>Eliminar</button>
 				</div>
 			</div>
+
+			<Modal open={showDeleteConfirm} title={canDelete ? 'Eliminar profesional' : 'No se puede eliminar'} on:close={() => (showDeleteConfirm = false)}>
+				{#if canDelete}
+					<p class="text-sm text-white/70">
+						¿Eliminar a <span class="font-bold text-white">{professional?.name}</span> de forma permanente? Esta acción no se puede deshacer.
+					</p>
+					<div class="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+						<button type="button" class="ux-btn-secondary" onclick={() => (showDeleteConfirm = false)}>Cancelar</button>
+						<form
+							method="POST"
+							action="?/delete_professional"
+							use:enhance={() => {
+								return async ({ update }) => {
+									showDeleteConfirm = false;
+									await update();
+								};
+							}}
+						>
+							<button type="submit" class="ux-btn-danger">Eliminar profesional</button>
+						</form>
+					</div>
+				{:else}
+					<p class="text-sm text-white/70">
+						No se puede eliminar a <span class="font-bold text-white">{professional?.name}</span> porque tiene historial cargado{#if clinicalEntryCount > 0} ({clinicalEntryCount} consulta{clinicalEntryCount === 1 ? '' : 's'}){/if}{#if appointmentCount > 0}{clinicalEntryCount > 0 ? ' y' : ''} {appointmentCount} turno{appointmentCount === 1 ? '' : 's'}{/if}. Esos registros pertenecen a los pacientes y se conservan.
+					</p>
+					<div class="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+						<button type="button" class="ux-btn-secondary" onclick={() => (showDeleteConfirm = false)}>Cerrar</button>
+						{#if clinicalEntryCount > 0}
+							<a href={`/odonto/profesionales/${professional?.id}/historial`} class="ux-btn-primary">Ver historial</a>
+						{/if}
+					</div>
+				{/if}
+			</Modal>
 		{/if}
 	{/if}
 
@@ -484,9 +505,7 @@
 								<div class="flex flex-1 flex-wrap gap-2">
 									{#if day.rules.length > 0}
 										{#each day.rules as rule}
-											<form method="POST" action="?/delete_rule" class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-2" onsubmit={(event) => {
-												if (!confirm('¿Quitar este horario?')) event.preventDefault();
-											}}>
+											<form method="POST" action="?/delete_rule" class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-2">
 												<input type="hidden" name="rule_id" value={rule.id} />
 												<span class="text-sm font-bold text-white">{rule.start_time.slice(0, 5)} - {rule.end_time.slice(0, 5)}</span>
 												<button type="submit" disabled={!canOperate} class="text-xs font-black text-red-200 disabled:opacity-50">Quitar</button>
@@ -506,9 +525,7 @@
 				<h2 class="ux-section-title">Cambios puntuales</h2>
 				<div class="mt-5 grid gap-3">
 					{#each data.exceptions as item}
-						<form method="POST" action="?/delete_exception" class="ux-soft-card p-4" onsubmit={(event) => {
-							if (!confirm('¿Eliminar este cambio puntual?')) event.preventDefault();
-						}}>
+						<form method="POST" action="?/delete_exception" class="ux-soft-card p-4">
 							<input type="hidden" name="exception_id" value={item.id} />
 							<div class="flex items-start justify-between gap-3">
 								<div class="text-sm">

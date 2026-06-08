@@ -93,14 +93,14 @@ const canCreatePatient = $derived(data.canCreatePatient !== false);
 	};
 </script>
 
-<section class="flex flex-col gap-4 pb-24 md:pb-0">
+<section class="flex flex-col gap-4">
 	<div class="flex flex-col items-start gap-3 md:flex-row md:items-center md:justify-between">
 		<div class="space-y-1">
 			<h1 class="text-3xl font-semibold text-neutral-900 dark:text-white">Pacientes</h1>
 		</div>
 		<button
 			disabled={!canCreatePatient}
-			class="hidden md:inline-flex rounded-full bg-[#7c3aed] px-4 py-3 text-sm font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed] disabled:cursor-not-allowed disabled:opacity-45"
+			class="inline-flex w-full justify-center rounded-full bg-[#7c3aed] px-4 py-3 text-sm font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed] disabled:cursor-not-allowed disabled:opacity-45 sm:w-auto"
 			onclick={openCreateModal}
 		>
 			+ Nuevo paciente
@@ -173,8 +173,7 @@ const canCreatePatient = $derived(data.canCreatePatient !== false);
 				{:else if data.showArchived}
 					No hay pacientes archivados.
 				{:else}
-					<span class="md:hidden">Aun no hay pacientes registrados. Creá el primero tocando el botón + de abajo.</span>
-					<span class="hidden md:inline">Aun no hay pacientes registrados.</span>
+					Aun no hay pacientes registrados.
 				{/if}
 			</div>
 		{:else}
@@ -454,14 +453,6 @@ const canCreatePatient = $derived(data.canCreatePatient !== false);
 		</div>
 	</div>
 
-	<!-- FAB móvil para nuevo paciente -->
-	<button
-		disabled={!canCreatePatient}
-		class="fixed bottom-4 left-4 right-4 z-20 rounded-full bg-[#7c3aed] px-4 py-3 text-sm font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed] disabled:cursor-not-allowed disabled:opacity-45 md:hidden"
-		onclick={openCreateModal}
-	>
-		+ Nuevo paciente
-	</button>
 </section>
 
 <Modal open={showCreate} title="Alta rápida de paciente" on:close={closeModal}>

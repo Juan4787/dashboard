@@ -105,24 +105,22 @@
 			<h2 class="ux-section-title">Hoy</h2>
 			<div class="mt-5 grid gap-3">
 				{#each data.todayAppointments as appointment}
-					<article class="ux-soft-card p-4">
-						<div class="grid gap-4 lg:grid-cols-[110px_1fr_auto] lg:items-center">
-							<div>
-								<p class="text-2xl font-bold text-white">{timeOnly(appointment.starts_at)}</p>
-								<p class="text-sm text-white/45">{timeOnly(appointment.ends_at)}</p>
-							</div>
-							<div>
-								<p class="text-lg font-bold text-white">{appointment.service_name_snapshot}</p>
-								<p class="mt-1 text-sm text-white/58">
-									{appointment.patients?.full_name ?? 'Paciente'}{appointment.patients?.phone_e164 ? ` · ${appointment.patients.phone_e164}` : ''}
-								</p>
-								<span class={`mt-3 ${statusTone[appointment.status] ?? 'ux-badge'}`}>{statusLabels[appointment.status] ?? appointment.status}</span>
-							</div>
-							<div class="flex flex-wrap gap-2 lg:justify-end">
-								<a href={`/odonto/turnos/${appointment.id}`} class="ux-btn-primary">Abrir</a>
+					<a href={`/odonto/turnos/${appointment.id}`} class="ux-choice flex items-center gap-3 p-3 sm:gap-4 sm:p-4">
+						<div class="w-14 shrink-0 text-center sm:w-20">
+							<p class="text-xl font-bold text-white sm:text-2xl">{timeOnly(appointment.starts_at)}</p>
+							<p class="mt-0.5 text-xs text-white/40">{timeOnly(appointment.ends_at)}</p>
+						</div>
+						<div class="min-w-0 flex-1">
+							<p class="truncate text-base font-bold text-white sm:text-lg">{appointment.service_name_snapshot}</p>
+							<p class="mt-0.5 truncate text-sm text-white/55">
+								{appointment.patients?.full_name ?? 'Paciente'}{appointment.patients?.phone_e164 ? ` · ${appointment.patients.phone_e164}` : ''}
+							</p>
+							<div class="mt-2">
+								<span class={statusTone[appointment.status] ?? 'ux-badge'}>{statusLabels[appointment.status] ?? appointment.status}</span>
 							</div>
 						</div>
-					</article>
+						<svg class="h-5 w-5 shrink-0 text-white/30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6" /></svg>
+					</a>
 				{/each}
 				{#if data.todayAppointments.length === 0}
 					<p class="ux-empty">No tenés turnos asignados para hoy.</p>
@@ -134,10 +132,15 @@
 			<h2 class="ux-section-title">Próximos</h2>
 			<div class="mt-5 grid gap-3">
 				{#each data.upcomingAppointments as appointment}
-					<a href={`/odonto/turnos/${appointment.id}`} class="ux-choice p-4">
-						<span class="block text-base font-bold text-white">{formatDateTime(appointment.starts_at)}</span>
-						<span class="mt-1 block text-sm text-white/58">{appointment.service_name_snapshot}</span>
-						<span class="mt-3 inline-flex {statusTone[appointment.status] ?? 'ux-badge'}">{statusLabels[appointment.status] ?? appointment.status}</span>
+					<a href={`/odonto/turnos/${appointment.id}`} class="ux-choice flex items-center gap-3 p-3 sm:gap-4 sm:p-4">
+						<div class="min-w-0 flex-1">
+							<p class="truncate text-base font-bold text-white">{formatDateTime(appointment.starts_at)}</p>
+							<p class="mt-0.5 truncate text-sm text-white/55">{appointment.service_name_snapshot}</p>
+							<div class="mt-2">
+								<span class={statusTone[appointment.status] ?? 'ux-badge'}>{statusLabels[appointment.status] ?? appointment.status}</span>
+							</div>
+						</div>
+						<svg class="h-5 w-5 shrink-0 text-white/30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6" /></svg>
 					</a>
 				{/each}
 				{#if data.upcomingAppointments.length === 0}

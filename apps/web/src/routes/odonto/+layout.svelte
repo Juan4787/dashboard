@@ -2,7 +2,6 @@
 	import { page } from '$app/stores';
 	import { navigating } from '$app/stores';
 	import { onDestroy, onMount } from 'svelte';
-	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import OdontoRouteSkeleton from '$lib/components/skeleton/OdontoRouteSkeleton.svelte';
 
 	let { data, children } = $props();
@@ -300,7 +299,7 @@
 
 <div class="min-h-screen bg-neutral-50 text-neutral-900 dark:bg-[#0b1626] dark:text-[#eaf1ff]">
 	<header class="sticky top-0 z-20 border-b border-neutral-100 bg-white/80 backdrop-blur dark:border-[#1f2b45] dark:bg-[#0f1f36]/90">
-		<div class="flex h-14 items-center justify-between px-4 md:hidden">
+		<div class="flex h-14 items-center gap-3 px-4 md:hidden">
 			{#if showBack}
 				<a
 					href={mobileBackHref}
@@ -326,21 +325,9 @@
 			<h1 class="max-w-[60vw] truncate text-base font-semibold text-neutral-900 dark:text-white">
 				{mobileTitle}
 			</h1>
-			<button
-				type="button"
-				class="flex h-11 w-11 items-center justify-center rounded-full text-neutral-700 transition hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-[#13243d]"
-				aria-label="Menú de acciones"
-				onclick={() => (mobileMenuOpen = true)}
-			>
-				<svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
-					<circle cx="6" cy="12" r="1.6" />
-					<circle cx="12" cy="12" r="1.6" />
-					<circle cx="18" cy="12" r="1.6" />
-				</svg>
-			</button>
 		</div>
 		{#if mobileMenuOpen}
-			<div class="fixed inset-0 z-40 flex items-start justify-center bg-black/60 px-4 py-6 md:hidden relative">
+			<div class="fixed inset-0 z-40 flex items-start justify-center bg-black/60 px-4 py-6 md:hidden">
 				<div
 					class="relative z-10 w-full max-w-sm rounded-2xl border border-neutral-100 bg-white p-4 text-neutral-900 shadow-2xl dark:border-white/10 dark:bg-[#0f1f36] dark:text-white"
 					role="dialog"
@@ -448,12 +435,6 @@
 							</a>
 						{/if}
 					</nav>
-					<div class="mt-4 rounded-xl border border-neutral-200 p-3 dark:border-white/10">
-						<p class="text-xs font-semibold text-neutral-500 uppercase tracking-wide dark:text-neutral-300">Tema</p>
-						<div class="mt-2">
-							<ThemeToggle />
-						</div>
-					</div>
 					<button
 						type="button"
 						class="mt-4 w-full rounded-xl border border-neutral-200 px-4 py-3 text-sm font-semibold text-neutral-700 transition hover:bg-neutral-100 dark:border-white/10 dark:text-neutral-200 dark:hover:bg-white/10"
@@ -665,12 +646,6 @@
 							</a>
 						{/if}
 						<div class="my-2 border-t border-neutral-200 dark:border-white/10"></div>
-						<div class="rounded-xl px-4 py-3">
-							<p class="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
-								Tema
-							</p>
-							<ThemeToggle />
-						</div>
 						<a
 							href="/logout"
 							class="block rounded-xl px-4 py-3 text-sm font-semibold text-red-700 transition hover:bg-red-50 dark:text-red-200 dark:hover:bg-red-500/10"
@@ -685,7 +660,7 @@
 		</div>
 	</header>
 
-	<main class="mx-auto max-w-6xl px-4 py-6" aria-busy={showSkeleton}>
+	<main class="mx-auto max-w-6xl px-4 pt-6 pb-28 md:pb-6" aria-busy={showSkeleton}>
 		{#if data?.businessError}
 			<div class="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900 dark:border-amber-400/30 dark:bg-amber-500/15 dark:text-amber-100">
 				{data.businessError}
@@ -723,4 +698,67 @@
 			{@render children()}
 		{/if}
 	</main>
+
+	{#snippet navIcon(label: string)}
+		<svg class="h-[22px] w-[22px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+			{#if label === 'Agenda'}
+				<rect x="3.5" y="5" width="17" height="15.5" rx="2.5" />
+				<path d="M3.5 9.5h17M8 3.5v3M16 3.5v3" />
+			{:else if label === 'Pacientes'}
+				<circle cx="9" cy="8" r="3.1" />
+				<path d="M3.8 19v-1.3A3.7 3.7 0 0 1 7.5 14h3a3.7 3.7 0 0 1 3.7 3.7V19" />
+				<path d="M16 5.3a3 3 0 0 1 0 5.8M20.2 19v-1.3a3.5 3.5 0 0 0-2.6-3.3" />
+			{:else if label === 'Profesionales'}
+				<rect x="4.5" y="3.5" width="15" height="17" rx="2.5" />
+				<circle cx="12" cy="9.8" r="2.4" />
+				<path d="M8.2 16.6a3.8 3.8 0 0 1 7.6 0" />
+			{:else if label === 'Mis turnos'}
+				<rect x="3.5" y="5" width="17" height="15.5" rx="2.5" />
+				<path d="M3.5 9.5h17M8 3.5v3M16 3.5v3M9 14.7l2 2 4-4" />
+			{:else}
+				<circle cx="5.5" cy="12" r="1.4" fill="currentColor" stroke="none" />
+				<circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" />
+				<circle cx="18.5" cy="12" r="1.4" fill="currentColor" stroke="none" />
+			{/if}
+		</svg>
+	{/snippet}
+
+	{#if !commercialLockActive && primaryMobileNav.length > 0}
+		<nav
+			class="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-[#0b1d32]/95 backdrop-blur md:hidden"
+			style="padding-bottom: env(safe-area-inset-bottom);"
+			aria-label="Navegación principal"
+		>
+			<div class="mx-auto flex max-w-md items-stretch">
+				{#each primaryMobileNav as item}
+					<a
+						href={item.href}
+						aria-current={isNavItemActive(item) ? 'page' : undefined}
+						class={`flex flex-1 flex-col items-center gap-1 py-2 text-[11px] font-bold transition ${
+							isNavItemActive(item) ? 'text-white' : 'text-white/50'
+						}`}
+					>
+						<span
+							class={`flex h-8 w-14 items-center justify-center rounded-full transition ${
+								isNavItemActive(item) ? 'bg-[#7c3aed] text-white shadow-lg shadow-[#7c3aed]/30' : ''
+							}`}
+						>
+							{@render navIcon(item.label)}
+						</span>
+						{item.label}
+					</a>
+				{/each}
+				<button
+					type="button"
+					onclick={() => (mobileMenuOpen = true)}
+					class="flex flex-1 flex-col items-center gap-1 py-2 text-[11px] font-bold text-white/50 transition"
+				>
+					<span class="flex h-8 w-14 items-center justify-center rounded-full">
+						{@render navIcon('mas')}
+					</span>
+					Más
+				</button>
+			</div>
+		</nav>
+	{/if}
 </div>

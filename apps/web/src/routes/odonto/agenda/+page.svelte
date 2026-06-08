@@ -1,5 +1,6 @@
 <script lang="ts">
 	import ManualAppointmentWizard from '$lib/components/agenda/ManualAppointmentWizard.svelte';
+	import EmptyState from '$lib/components/EmptyState.svelte';
 	import { tick } from 'svelte';
 	import { slide } from 'svelte/transition';
 
@@ -47,11 +48,9 @@
 	const canOperate = $derived(data.context.canOperate && !data.demo);
 	let showCreate = $state(false);
 	let showSearch = $state(false);
-	let showDayAppointments = $state(false);
 	let initialized = $state(false);
 	let createSection = $state<HTMLElement | null>(null);
 	let searchSection = $state<HTMLElement | null>(null);
-	let dayAppointmentsSection = $state<HTMLElement | null>(null);
 
 	const statusLabels: Record<string, string> = {
 		reserved: 'Reservado',
@@ -60,13 +59,6 @@
 		reschedule_requested: 'Reprogramar',
 		attended: 'Asistió',
 		no_show: 'No asistió'
-	};
-
-	const sourceLabels: Record<string, string> = {
-		public_booking: 'Reserva online',
-		manual: 'Manual',
-		whatsapp_bot: 'WhatsApp',
-		admin: 'Administración interna'
 	};
 
 	const statusTone: Record<string, string> = {
@@ -81,10 +73,12 @@
 	const timeOnly = (value: string) =>
 		new Intl.DateTimeFormat('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value));
 
-	const dayLabel = (value: string) =>
-		new Intl.DateTimeFormat('es-AR', { weekday: 'long', day: '2-digit', month: 'long' }).format(
+	const dayLabel = (value: string) => {
+		const label = new Intl.DateTimeFormat('es-AR', { weekday: 'long', day: 'numeric', month: 'long' }).format(
 			new Date(`${value}T12:00:00`)
 		);
+		return label.charAt(0).toUpperCase() + label.slice(1);
+	};
 
 	const statCount = (status: string) => data.stats.find((stat: Stat) => stat.status === status)?.count ?? 0;
 	const statusFilterEntries = $derived(Object.entries(statusLabels));
@@ -92,9 +86,7 @@
 		Boolean(data.selectedProfessionalId || data.selectedStatus || data.selectedServiceId || data.selectedQuery)
 	);
 	const resultLabel = $derived(
-		hasActiveSearch
-			? `${data.appointments.length} ${data.appointments.length === 1 ? 'turno encontrado' : 'turnos encontrados'}`
-			: `${data.appointments.length} ${data.appointments.length === 1 ? 'turno del día' : 'turnos del día'}`
+		`${data.appointments.length} ${data.appointments.length === 1 ? 'turno' : 'turnos'}`
 	);
 	const searchSummary = $derived.by(() => {
 		const parts: string[] = [];
@@ -107,12 +99,36 @@
 		return parts.join(' · ');
 	});
 
+	// Navegación por día (preserva los filtros activos).
+	const shiftDate = (value: string, days: number) => {
+		const d = new Date(`${value}T12:00:00`);
+		d.setDate(d.getDate() + days);
+		return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+	};
+	const today = new Date();
+	const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+	const prevDate = $derived(shiftDate(data.date, -1));
+	const nextDate = $derived(shiftDate(data.date, 1));
+	const isToday = $derived(data.date === todayStr);
+	const buildAgendaHref = (date: string) => {
+		const params = new URLSearchParams();
+		params.set('date', date);
+		if (data.selectedProfessionalId) params.set('professional_id', data.selectedProfessionalId);
+		if (data.selectedServiceId) params.set('service_id', data.selectedServiceId);
+		if (data.selectedStatus) params.set('status', data.selectedStatus);
+		if (data.selectedQuery) params.set('q', data.selectedQuery);
+		return `/odonto/agenda?${params.toString()}`;
+	};
+	const weekHref = $derived(
+		`/odonto/agenda/semana?date=${data.date}${data.selectedProfessionalId ? `&professional_id=${data.selectedProfessionalId}` : ''}`
+	);
+
+	const needsSetup = $derived(data.professionals.length === 0 || data.services.length === 0);
+
 	const scrollToElement = async (element: HTMLElement | null) => {
 		await tick();
 		if (!element) return;
-		requestAnimationFrame(() => {
-			element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-		});
+		requestAnimationFrame(() => element.scrollIntoView({ behavior: 'smooth', block: 'start' }));
 	};
 
 	const toggleCreate = async () => {
@@ -125,43 +141,49 @@
 		if (showSearch) await scrollToElement(searchSection);
 	};
 
-	const toggleDayAppointments = async () => {
-		showDayAppointments = !showDayAppointments;
-		if (showDayAppointments) await scrollToElement(dayAppointmentsSection);
-	};
-
 	$effect(() => {
 		if (initialized) return;
 		showCreate = Boolean(form?.message || data.selectedPatientId);
 		showSearch = Boolean(hasActiveSearch || form?.message);
-		showDayAppointments = Boolean(data.searchApplied || form?.message);
 		initialized = true;
 	});
 </script>
 
 <section class="ux-page">
 	<div class="ux-hero">
-		<div class="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-			<div>
-				<h1 class="ux-title capitalize">{dayLabel(data.date)}</h1>
-				<p class="ux-subtitle">
-					{data.totalAppointments} {data.totalAppointments === 1 ? 'turno hoy' : 'turnos hoy'}
-				</p>
+		<div class="flex items-center gap-2">
+			<a
+				href={buildAgendaHref(prevDate)}
+				class="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-white/10 bg-white/[0.04] text-white/80 transition hover:bg-white/10"
+				aria-label="Día anterior"
+			>
+				<svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m14 6-6 6 6 6" /></svg>
+			</a>
+			<div class="min-w-0 flex-1 text-center">
+				<h1 class="text-lg font-bold leading-tight tracking-tight text-white sm:text-2xl lg:text-4xl">{dayLabel(data.date)}</h1>
 			</div>
-			<div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-				<button type="button" class="ux-btn-primary" onclick={toggleCreate}>
-					{showCreate ? 'Cerrar' : 'Nuevo turno'}
+			<a
+				href={buildAgendaHref(nextDate)}
+				class="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-white/10 bg-white/[0.04] text-white/80 transition hover:bg-white/10"
+				aria-label="Día siguiente"
+			>
+				<svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m10 6 6 6-6 6" /></svg>
+			</a>
+		</div>
+
+		<div class="mt-5 flex flex-wrap items-center justify-center gap-2 sm:justify-start">
+			{#if canOperate}
+				<button type="button" class="ux-btn-primary w-full sm:w-auto" onclick={toggleCreate}>
+					{showCreate ? 'Cerrar' : '+ Nuevo turno'}
 				</button>
-				<button type="button" class="ux-btn-secondary" onclick={toggleSearch}>
-					{showSearch ? 'Ocultar búsqueda' : 'Buscar turno'}
-				</button>
-				<button type="button" class="ux-btn-secondary" onclick={toggleDayAppointments}>
-					{showDayAppointments ? 'Ocultar turnos' : 'Ver turnos del día'}
-				</button>
-				<a href={`/odonto/agenda/semana?date=${data.date}${data.selectedProfessionalId ? `&professional_id=${data.selectedProfessionalId}` : ''}`} class="ux-btn-secondary text-center">
-					Semana
-				</a>
-			</div>
+			{/if}
+			{#if !isToday}
+				<a href={buildAgendaHref(todayStr)} class="ux-btn-secondary">Hoy</a>
+			{/if}
+			<button type="button" class="ux-btn-secondary" onclick={toggleSearch}>
+				{showSearch ? 'Ocultar búsqueda' : 'Buscar'}
+			</button>
+			<a href={weekHref} class="ux-btn-secondary">Semana</a>
 		</div>
 	</div>
 
@@ -175,17 +197,27 @@
 		</div>
 	{/if}
 
+	{#if needsSetup}
+		<div class="ux-card">
+			<h2 class="ux-section-title">Antes de tomar turnos</h2>
+			<p class="mt-1 text-sm text-white/55">Completá lo básico para poder agendar.</p>
+			<div class="mt-4 flex flex-wrap gap-2">
+				{#if data.professionals.length === 0}
+					<a href="/odonto/profesionales" class="ux-btn-primary">Cargar profesional</a>
+				{/if}
+				{#if data.services.length === 0}
+					<a href="/odonto/profesionales" class="ux-btn-secondary">Cargar servicio</a>
+				{/if}
+			</div>
+		</div>
+	{/if}
+
 	{#if showSearch}
 		<div transition:slide={{ duration: 180 }} class="ux-card scroll-mt-5" bind:this={searchSection}>
-			<form method="GET" class="grid gap-4 lg:grid-cols-[1.25fr_1fr_1fr_1fr_auto]">
+			<form method="GET" class="grid gap-4 lg:grid-cols-[1.25fr_1fr_1fr_1fr_1fr_auto]">
 				<label>
 					<span class="ux-label">Paciente, teléfono o servicio</span>
-					<input
-						name="q"
-						value={data.selectedQuery}
-						placeholder="Buscar turno"
-						class="ux-input"
-					/>
+					<input name="q" value={data.selectedQuery} placeholder="Buscar turno" class="ux-input" />
 				</label>
 				<label>
 					<span class="ux-label">Día</span>
@@ -220,16 +252,10 @@
 				</label>
 				<button class="ux-btn-primary self-end">Buscar</button>
 			</form>
-		</div>
-	{/if}
-
-	{#if data.professionals.length === 0 || data.services.length === 0}
-		<div class="ux-empty">
-			{#if data.professionals.length === 0}
-				<p>Primero cargá al menos un profesional.</p>
-			{/if}
-			{#if data.services.length === 0}
-				<p>Primero cargá al menos un servicio.</p>
+			{#if hasActiveSearch}
+				<a href={`/odonto/agenda?date=${data.date}`} class="mt-3 inline-block text-sm font-semibold text-[#c4b5fd] hover:underline">
+					Limpiar filtros
+				</a>
 			{/if}
 		</div>
 	{/if}
@@ -249,77 +275,63 @@
 		</div>
 	{/if}
 
-	{#if showDayAppointments}
-		<div transition:slide={{ duration: 180 }} class="ux-card scroll-mt-5" bind:this={dayAppointmentsSection}>
-			<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-				<div>
-					<h2 class="ux-section-title">{hasActiveSearch ? 'Resultado de búsqueda' : 'Turnos del día'}</h2>
-					{#if searchSummary}
-						<p class="mt-1 text-sm font-semibold text-white/50">{searchSummary}</p>
-					{/if}
-				</div>
-				<span class="ux-badge">{resultLabel}</span>
-			</div>
-
-			<div class="mt-5 grid gap-3">
-				{#each data.appointments as appointment}
-					<details class="group ux-soft-card overflow-hidden">
-						<summary class="grid cursor-pointer list-none gap-4 p-4 lg:grid-cols-[110px_1fr_auto] lg:items-center">
-							<div>
-								<p class="text-2xl font-bold text-white">{timeOnly(appointment.starts_at)}</p>
-								<p class="mt-1 text-sm text-white/45">{timeOnly(appointment.ends_at)}</p>
-							</div>
-							<div class="min-w-0">
-								<p class="truncate text-lg font-bold text-white">{appointment.patients?.full_name ?? 'Paciente'}</p>
-								<p class="mt-1 text-sm text-white/58">
-									{appointment.service_name_snapshot} · {appointment.professional_name_snapshot}
-								</p>
-								<div class="mt-3 flex flex-wrap gap-2">
-									<span class={statusTone[appointment.status] ?? 'ux-badge'}>{statusLabels[appointment.status] ?? appointment.status}</span>
-									<span class="ux-badge">{sourceLabels[appointment.source] ?? appointment.source}</span>
-								</div>
-							</div>
-							<div class="flex flex-wrap items-center gap-2 lg:justify-end">
-								<span class="text-sm font-bold text-[#c4b5fd] group-open:hidden">Ver detalle</span>
-								<span class="hidden text-sm font-bold text-white/55 group-open:inline">Ocultar</span>
-							</div>
-						</summary>
-						<div class="border-t border-white/10 p-4">
-							<div class="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
-								<div>
-									<p class="font-bold text-white/45">Teléfono</p>
-									<p class="mt-1 font-bold text-white">{appointment.patients?.phone_e164 ?? 'Sin teléfono'}</p>
-								</div>
-								<div>
-									<p class="font-bold text-white/45">Correo</p>
-									<p class="mt-1 font-bold text-white">{appointment.patients?.email ?? 'Sin correo electrónico'}</p>
-								</div>
-								<div>
-									<p class="font-bold text-white/45">Inicio</p>
-									<p class="mt-1 font-bold text-white">{timeOnly(appointment.starts_at)}</p>
-								</div>
-								<div>
-									<p class="font-bold text-white/45">Fin</p>
-									<p class="mt-1 font-bold text-white">{timeOnly(appointment.ends_at)}</p>
-								</div>
-							</div>
-							{#if appointment.internal_note}
-								<p class="mt-4 rounded-2xl border border-white/10 bg-white/[0.04] p-3 text-sm font-semibold text-white/70">
-									{appointment.internal_note}
-								</p>
-							{/if}
-							<a href={`/odonto/turnos/${appointment.id}?from_date=${data.date}`} class="ux-btn-primary mt-4 w-full sm:w-fit">
-								Abrir turno
-							</a>
-						</div>
-					</details>
-				{/each}
-				{#if data.appointments.length === 0}
-					<div class="ux-empty">
-						{hasActiveSearch ? 'No encontramos turnos con esa búsqueda.' : 'No hay turnos para este día.'}
-					</div>
+	<div class="ux-card">
+		<div class="flex items-center justify-between gap-3">
+			<div class="min-w-0">
+				<h2 class="ux-section-title">{hasActiveSearch ? 'Resultado de búsqueda' : 'Turnos del día'}</h2>
+				{#if searchSummary}
+					<p class="mt-1 truncate text-sm font-semibold text-white/50">{searchSummary}</p>
 				{/if}
 			</div>
+			<span class="ux-badge shrink-0">{resultLabel}</span>
 		</div>
-	{/if}
+
+		{#if data.appointments.length === 0}
+			<div class="mt-5">
+				{#if hasActiveSearch}
+					<EmptyState
+						title="Sin resultados"
+						description="No encontramos turnos con esa búsqueda. Probá con otros filtros."
+					/>
+				{:else}
+					<EmptyState
+						title="No hay turnos para este día"
+						description={canOperate ? 'Agendá el primero o revisá otro día.' : 'Revisá otro día.'}
+					>
+						{#snippet actions()}
+							{#if canOperate && !needsSetup}
+								<button type="button" class="ux-btn-primary" onclick={toggleCreate}>+ Nuevo turno</button>
+							{/if}
+							<a href={buildAgendaHref(nextDate)} class="ux-btn-secondary">Día siguiente</a>
+						{/snippet}
+					</EmptyState>
+				{/if}
+			</div>
+		{:else}
+			<div class="mt-5 grid gap-3">
+				{#each data.appointments as appointment}
+					<a
+						href={`/odonto/turnos/${appointment.id}?from_date=${data.date}`}
+						class="ux-choice flex items-center gap-3 p-3 sm:gap-4 sm:p-4"
+					>
+						<div class="w-14 shrink-0 text-center sm:w-20">
+							<p class="text-xl font-bold text-white sm:text-2xl">{timeOnly(appointment.starts_at)}</p>
+							<p class="mt-0.5 text-xs text-white/40">{timeOnly(appointment.ends_at)}</p>
+						</div>
+						<div class="min-w-0 flex-1">
+							<p class="truncate text-base font-bold text-white sm:text-lg">{appointment.patients?.full_name ?? 'Paciente'}</p>
+							<p class="mt-0.5 truncate text-sm text-white/55">
+								{appointment.service_name_snapshot} · {appointment.professional_name_snapshot}
+							</p>
+							<div class="mt-2 flex flex-wrap gap-2">
+								<span class={statusTone[appointment.status] ?? 'ux-badge'}>{statusLabels[appointment.status] ?? appointment.status}</span>
+								{#if appointment.source === 'public_booking'}<span class="ux-badge">Online</span>{/if}
+							</div>
+						</div>
+						<svg class="h-5 w-5 shrink-0 text-white/30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6" /></svg>
+					</a>
+				{/each}
+			</div>
+		{/if}
+	</div>
 </section>

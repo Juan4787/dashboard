@@ -3,6 +3,7 @@ import { demoBusinessContext } from '$lib/server/business';
 import { writeAuditLog } from '$lib/server/audit';
 import { zonedDateTimeToUtc } from '$lib/server/availability';
 import { getOdontoContext } from '$lib/server/odonto-context';
+import { createSupabaseAdminClient } from '$lib/server/supabase';
 import { idsFromForm, setProfessionalServices } from '$lib/server/professional-services';
 import {
 	findProfessionalByEmail,
@@ -77,7 +78,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 	if (!business.canOperate) throw redirect(303, business.role === 'professional' ? '/odonto/mis-turnos' : '/odonto/agenda');
 	const businessId = business.business.id;
 
-	const [{ data: professional, error: professionalError }, { data: services }, { data: assignments }, { data: rules }, { data: exceptions }] =
+	const [{ data: professional, error: professionalError }, { data: services }, { data: assignments }, { data: rules }, { data: exceptions }, { count: appointmentCount }, { count: clinicalEntryCount }] =
 		await Promise.all([
 			supabase
 				.from('professionals')
@@ -109,7 +110,17 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 				.eq('business_id', businessId)
 				.or(`professional_id.eq.${params.professionalId},professional_id.is.null`)
 				.order('starts_at', { ascending: false })
-				.limit(80)
+				.limit(80),
+			supabase
+				.from('appointments')
+				.select('id', { count: 'exact', head: true })
+				.eq('business_id', businessId)
+				.eq('professional_id', params.professionalId),
+			supabase
+				.from('clinical_entries')
+				.select('id', { count: 'exact', head: true })
+				.eq('business_id', businessId)
+				.eq('professional_id', params.professionalId)
 		]);
 
 	if (professionalError || !professional) throw kitError(404, 'Profesional no encontrado');
@@ -121,6 +132,8 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 		assignedServiceIds: (assignments ?? []).map((item: any) => String(item.service_id)),
 		rules: rules ?? [],
 		exceptions: exceptions ?? [],
+		appointmentCount: appointmentCount ?? 0,
+		clinicalEntryCount: clinicalEntryCount ?? 0,
 		tab: url.searchParams.get('tab') ?? 'perfil',
 		demo: false
 	};
@@ -539,32 +552,60 @@ export const actions: Actions = {
 			return fail(403, { message: 'Solo el dueño o un administrador puede eliminar profesionales.' });
 		}
 
-		// Un profesional con turnos no se puede borrar (la FK es RESTRICT y, además,
-		// perderíamos historial). En ese caso pedimos archivar.
-		const { count, error: countError } = await supabase
-			.from('appointments')
-			.select('id', { count: 'exact', head: true })
-			.eq('business_id', business.business.id)
-			.eq('professional_id', params.professionalId);
-		if (countError) {
-			console.error('Error verificando turnos del profesional', countError);
-			return fail(500, { message: 'No se pudo verificar los turnos del profesional.' });
-		}
-		if ((count ?? 0) > 0) {
+		const admin = await createSupabaseAdminClient('odonto', fetch);
+		const businessId = business.business.id;
+		const profId = params.professionalId;
+
+		// No se puede eliminar un profesional con HISTORIAL (turnos o consultas clínicas):
+		// son registros de la agenda y de los pacientes que hay que conservar. Se archiva.
+		const [apptResult, entryResult] = await Promise.all([
+			supabase.from('appointments').select('id', { count: 'exact', head: true }).eq('business_id', businessId).eq('professional_id', profId),
+			supabase.from('clinical_entries').select('id', { count: 'exact', head: true }).eq('business_id', businessId).eq('professional_id', profId)
+		]);
+		const apptCount = apptResult.count ?? 0;
+		const entryCount = entryResult.count ?? 0;
+		if (apptCount > 0 || entryCount > 0) {
+			const parts: string[] = [];
+			if (apptCount > 0) parts.push(`${apptCount} turno${apptCount === 1 ? '' : 's'}`);
+			if (entryCount > 0) parts.push(`${entryCount} consulta${entryCount === 1 ? '' : 's'} clínica${entryCount === 1 ? '' : 's'}`);
 			return fail(400, {
-				message: 'Este profesional tiene turnos cargados. Archivalo en lugar de eliminarlo para conservar el historial.'
+				message: `No se puede eliminar a este profesional: tiene ${parts.join(' y ')} en su historial. Archivalo para conservar esos registros.`
 			});
 		}
 
-		const { error } = await supabase
+		// Limpiar los dependientes que NO son historial (se pueden borrar): invitaciones,
+		// vínculo de usuario, servicios, vínculos con pacientes, reglas y excepciones.
+		// Chequeamos cada paso: si algo falla, mostramos el motivo real, no un genérico.
+		const steps = [
+			await admin
+				.from('patient_profile_change_events')
+				.update({ changed_by_professional_id: null })
+				.eq('business_id', businessId)
+				.eq('changed_by_professional_id', profId),
+			await admin.from('business_user_invites').delete().eq('business_id', businessId).eq('professional_id', profId),
+			await admin.from('professional_users').delete().eq('business_id', businessId).eq('professional_id', profId),
+			await admin.from('professional_services').delete().eq('business_id', businessId).eq('professional_id', profId),
+			await admin.from('professional_patient_links').delete().eq('business_id', businessId).eq('professional_id', profId),
+			await admin.from('availability_rules').delete().eq('business_id', businessId).eq('professional_id', profId),
+			await admin.from('availability_exceptions').delete().eq('business_id', businessId).eq('professional_id', profId)
+		];
+		const prepError = steps.find((step) => step.error)?.error;
+		if (prepError) {
+			console.error('Error preparando el borrado del profesional', prepError);
+			return fail(400, {
+				message: `No se pudo preparar el borrado [${prepError.code ?? '?'}]: ${prepError.message ?? 'error desconocido'}`
+			});
+		}
+
+		const { error } = await admin
 			.from('professionals')
 			.delete()
-			.eq('business_id', business.business.id)
-			.eq('id', params.professionalId);
+			.eq('business_id', businessId)
+			.eq('id', profId);
 		if (error) {
 			console.error('Error eliminando profesional', error);
 			return fail(400, {
-				message: 'No se pudo eliminar: el profesional tiene datos asociados. Archivalo en su lugar.'
+				message: `No se pudo eliminar [${error.code ?? '?'}]: ${error.message ?? ''}${error.details ? ` — ${error.details}` : ''}`
 			});
 		}
 

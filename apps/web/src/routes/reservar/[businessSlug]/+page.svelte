@@ -61,6 +61,7 @@
 		return bookingPath ? `${bookingPath}${value ? `?${value}` : ''}` : value ? `?${value}` : '';
 	};
 	const step = $derived(!selectedService ? 1 : !selectedProfessional ? 2 : !data.selected.date ? 3 : !selectedSlot ? 4 : 5);
+	const stepNames = ['Servicio', 'Profesional', 'Día', 'Horario', 'Tus datos'];
 	const createBookingAction = '?/create_booking';
 	const issueMessages: Record<string, string> = {
 		business_not_found: 'El enlace de reserva no está disponible.',
@@ -175,6 +176,7 @@
 						{/if}
 					{/each}
 				</div>
+				<p class="mt-4 text-center text-sm font-semibold text-white/55">Paso {step} de 5 · {stepNames[step - 1]}</p>
 			</section>
 
 			<section class="ux-card scroll-mt-5" bind:this={servicesSection}>

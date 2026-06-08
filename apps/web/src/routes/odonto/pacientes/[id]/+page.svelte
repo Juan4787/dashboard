@@ -898,7 +898,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 </script>
 
 <div class="flex flex-col gap-5">
-	<div class="rounded-2xl border border-neutral-100 bg-white/90 p-4 shadow-card dark:border-[#1f3554] dark:bg-[#152642] sm:p-6">
+	<div class="ux-card">
 		<div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
 			<div class="flex items-start justify-between gap-3">
 				<div class="min-w-0 space-y-1">
@@ -924,7 +924,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 					<form method="post" action="?/archive_patient" class="contents" bind:this={archiveForm}>
 						<button
 							type="submit"
-							class="rounded-full bg-neutral-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-neutral-800 hover:shadow-card dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white md:inline-flex md:justify-self-start"
+							class="ux-btn-secondary md:justify-self-start"
 							onclick={(event: MouseEvent) => {
 								event.preventDefault();
 								showArchiveConfirm = true;
@@ -938,7 +938,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				{#if isProfessional}
 					<button
 						type="button"
-						class="rounded-full border border-red-300/70 px-5 py-2 text-sm font-semibold text-red-700 transition hover:-translate-y-0.5 hover:bg-red-50 dark:border-red-400/40 dark:text-red-200 dark:hover:bg-red-500/10 md:col-span-2 md:inline-flex md:justify-self-start lg:col-span-1"
+						class="ux-btn-danger md:col-span-2 md:justify-self-start lg:col-span-1"
 						onclick={() => (showDeleteConfirm = true)}
 					>
 						Eliminar paciente
@@ -946,7 +946,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				{/if}
 				{#if permissions.canCreateClinicalEntry}
 					<button
-						class="rounded-full bg-[#7c3aed] px-5 py-2 text-sm font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed] md:col-span-2 md:inline-flex md:justify-self-start lg:col-span-1"
+						class="ux-btn-primary md:col-span-2 md:justify-self-start lg:col-span-1"
 						type="button"
 						onclick={openNewEntryModal}
 					>
@@ -956,7 +956,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				{#if permissions.canCreateAppointment}
 					<a
 						href={`/odonto/agenda?patient_id=${data.patient.id}`}
-						class="rounded-full border border-[#7c3aed]/40 px-5 py-2 text-sm font-semibold text-[#7c3aed] transition hover:-translate-y-0.5 hover:bg-[#7c3aed]/10 dark:text-[#c4b5fd] md:col-span-2 md:inline-flex md:justify-self-start lg:col-span-1"
+						class="ux-btn-secondary md:col-span-2 md:justify-self-start lg:col-span-1"
 					>
 						+ Nuevo turno
 					</a>
@@ -1047,7 +1047,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 	</div>
 
 	{#if tab === 'historial'}
-		<div class="rounded-2xl border border-neutral-100 bg-white/90 p-4 shadow-card dark:border-[#1f3554] dark:bg-[#152642] sm:p-6">
+		<div class="ux-card">
 			<div class="flex flex-col gap-3 text-sm sm:flex-row sm:items-center">
 				<div class="relative w-full sm:max-w-xs">
 					<span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400">
@@ -1412,7 +1412,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 			</details>
 		</div>
 	{:else if tab === 'radiografias'}
-		<div class="rounded-2xl border border-neutral-100 bg-white/90 p-4 shadow-card dark:border-[#1f3554] dark:bg-[#152642] sm:p-6">
+		<div class="ux-card">
 			<div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
 				<div>
 					<h2 class="text-lg font-semibold text-neutral-900 dark:text-white">Radiografías</h2>

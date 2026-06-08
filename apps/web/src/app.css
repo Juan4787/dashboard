@@ -2,28 +2,76 @@
 @import 'tailwindcss/components';
 @import 'tailwindcss/utilities';
 
+/* ===========================================================================
+   Dental Suite — sistema de diseño (tema oscuro único)
+   Tokens centralizados para imponer consistencia en toda la app.
+   =========================================================================== */
 :root {
-	color: #0f172a;
-	background-color: #f5f7fb;
-	font-family: 'Inter Variable', Inter, system-ui, sans-serif;
+	color-scheme: dark;
+
+	/* Superficies */
+	--bg: #0b1626;
+	--surface: #0b1d32;
+	--surface-2: #0f2238;
+	--surface-raised: #102842;
+	--border: rgba(255, 255, 255, 0.1);
+	--border-strong: #244062;
+
+	/* Texto (jerarquía) */
+	--text: #eaf1ff;
+	--text-muted: rgba(234, 241, 255, 0.64);
+	--text-subtle: rgba(234, 241, 255, 0.42);
+
+	/* Acento de marca */
+	--accent: #8b5cf6;
+	--accent-strong: #7c3aed;
+	--accent-press: #6d28d9;
+	--accent-soft: rgba(124, 58, 237, 0.18);
+	--accent-text: #c4b5fd;
+	--ring: rgba(139, 92, 246, 0.65);
+
+	/* Semánticos */
+	--success: #34d399;
+	--success-soft: rgba(52, 211, 153, 0.14);
+	--success-text: #a7f3d0;
+	--warning: #fbbf24;
+	--warning-soft: rgba(251, 191, 36, 0.14);
+	--warning-text: #fde68a;
+	--danger: #f87171;
+	--danger-strong: #dc2626;
+	--danger-press: #b91c1c;
+	--danger-soft: rgba(248, 113, 113, 0.13);
+	--danger-text: #fecaca;
+
+	/* Radios / sombras */
+	--radius-sm: 0.85rem;
+	--radius: 1rem;
+	--radius-lg: 1.4rem;
+	--radius-xl: 1.75rem;
+	--shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.22);
+	--shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+	--shadow-accent: 0 14px 30px rgba(124, 58, 237, 0.26);
+
+	/* Toque mínimo accesible */
+	--tap: 2.75rem;
+
+	font-family: 'Inter', system-ui, -apple-system, sans-serif;
 	font-size: 17px;
+	color: var(--text);
+	background-color: var(--bg);
 }
 
-.dark {
-	color: #eaf1ff;
-	background-color: #0b1626;
+html {
+	background-color: var(--bg);
 }
 
 body {
 	margin: 0;
 	min-height: 100vh;
-	background-color: inherit;
-	color: inherit;
-}
-
-.dark body {
-	background-color: #0b1626;
-	color: #eaf1ff;
+	background-color: var(--bg);
+	color: var(--text);
+	-webkit-font-smoothing: antialiased;
+	text-rendering: optimizeLegibility;
 }
 
 a {
@@ -31,17 +79,21 @@ a {
 	text-decoration: none;
 }
 
+/* Foco visible y consistente en TODO lo interactivo (accesibilidad, regla 15). */
+:where(a, button, input, select, textarea, summary, [role='button'], [tabindex]):focus-visible {
+	outline: 2px solid var(--ring);
+	outline-offset: 2px;
+	border-radius: 0.5rem;
+}
+
 .app-shell {
 	display: contents;
 }
 
+/* ============================= Skeletons ============================== */
 .skeleton-base {
 	position: relative;
 	overflow: hidden;
-	background-color: #e3e9f3;
-}
-
-.dark .skeleton-base {
 	background-color: #1f3554;
 }
 
@@ -53,19 +105,10 @@ a {
 	background: linear-gradient(
 		90deg,
 		rgba(255, 255, 255, 0) 0%,
-		rgba(255, 255, 255, 0.55) 45%,
-		rgba(255, 255, 255, 0) 100%
-	);
-	animation: skeleton-shimmer 1.25s linear infinite;
-}
-
-.dark .skeleton-shimmer::after {
-	background: linear-gradient(
-		90deg,
-		rgba(255, 255, 255, 0) 0%,
 		rgba(255, 255, 255, 0.16) 45%,
 		rgba(255, 255, 255, 0) 100%
 	);
+	animation: skeleton-shimmer 1.25s linear infinite;
 }
 
 @keyframes skeleton-shimmer {
@@ -75,8 +118,14 @@ a {
 }
 
 @media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.001ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.001ms !important;
+	}
 	.skeleton-shimmer::after {
-		animation: none;
 		display: none;
 	}
 }
@@ -91,28 +140,28 @@ a {
 	.ux-hero,
 	.ux-card,
 	.ux-panel {
-		border: 1px solid #244062;
+		border: 1px solid var(--border-strong);
 		background:
-			radial-gradient(circle at top left, rgba(124, 58, 237, 0.16), transparent 34rem),
-			linear-gradient(145deg, rgba(11, 29, 50, 0.96), rgba(7, 22, 38, 0.98));
-		color: #fff;
-		box-shadow: 0 20px 60px rgba(0, 0, 0, 0.18);
+			radial-gradient(circle at top left, rgba(124, 58, 237, 0.14), transparent 32rem),
+			linear-gradient(150deg, var(--surface) 0%, #071626 100%);
+		color: var(--text);
+		box-shadow: var(--shadow);
 	}
 
 	.ux-hero {
-		border-radius: 1.75rem;
+		border-radius: var(--radius-xl);
 		padding: 1.5rem;
 	}
 
 	.ux-card,
 	.ux-panel {
-		border-radius: 1.5rem;
+		border-radius: var(--radius-lg);
 		padding: 1.25rem;
 	}
 
 	@media (min-width: 640px) {
 		.ux-hero {
-			padding: 1.75rem;
+			padding: 1.85rem;
 		}
 
 		.ux-card,
@@ -121,45 +170,47 @@ a {
 		}
 	}
 
+	/* ----------------------------- Tipografía ----------------------------- */
 	.ux-title {
-		color: #fff;
-		font-size: clamp(1.65rem, 2.4vw, 2.5rem);
+		color: var(--text);
+		font-size: clamp(1.7rem, 2.4vw, 2.5rem);
 		font-weight: 700;
-		letter-spacing: 0;
-		line-height: 1.12;
+		line-height: 1.1;
+		letter-spacing: -0.01em;
 	}
 
 	.ux-subtitle {
 		margin-top: 0.5rem;
 		max-width: 48rem;
-		color: rgba(255, 255, 255, 0.62);
+		color: var(--text-muted);
 		font-size: 0.95rem;
 		line-height: 1.55;
 	}
 
 	.ux-section-title {
-		color: #fff;
+		color: var(--text);
 		font-size: 1.15rem;
 		font-weight: 700;
-		letter-spacing: 0;
+		letter-spacing: -0.01em;
 	}
 
 	.ux-muted {
-		color: rgba(255, 255, 255, 0.58);
+		color: var(--text-muted);
 	}
 
 	.ux-soft-card {
-		border: 1px solid rgba(255, 255, 255, 0.1);
+		border: 1px solid var(--border);
 		background: rgba(255, 255, 255, 0.045);
-		border-radius: 1.25rem;
-		color: #fff;
+		border-radius: var(--radius);
+		color: var(--text);
 	}
 
+	/* --------------------------- Tarjetas elegibles ----------------------- */
 	.ux-choice {
-		border: 1px solid rgba(255, 255, 255, 0.11);
+		border: 1px solid var(--border);
 		background: rgba(255, 255, 255, 0.045);
-		border-radius: 1.35rem;
-		color: #fff;
+		border-radius: var(--radius-lg);
+		color: var(--text);
 		transition:
 			border-color 160ms ease,
 			background-color 160ms ease,
@@ -174,20 +225,23 @@ a {
 	}
 
 	.ux-choice-active {
-		border-color: #8b5cf6;
-		background: rgba(124, 58, 237, 0.2);
+		border-color: var(--accent);
+		background: var(--accent-soft);
 		box-shadow: 0 18px 42px rgba(124, 58, 237, 0.16);
 	}
 
+	/* ------------------------------ Formularios --------------------------- */
 	.ux-input,
 	.ux-select,
 	.ux-textarea {
 		width: 100%;
-		border-radius: 1rem;
+		min-height: var(--tap);
+		border-radius: var(--radius);
 		border: 1px solid rgba(255, 255, 255, 0.12);
 		background: rgba(255, 255, 255, 0.045);
-		padding: 0.9rem 1rem;
-		color: #fff;
+		padding: 0.75rem 1rem;
+		color: var(--text);
+		font-size: 1rem; /* ≥16px: evita el auto-zoom en iOS */
 		color-scheme: dark;
 		outline: none;
 		transition:
@@ -207,20 +261,20 @@ a {
 	}
 
 	select option:checked {
-		background-color: #7c3aed;
+		background-color: var(--accent-strong);
 		color: #ffffff;
 	}
 
 	.ux-input::placeholder,
 	.ux-textarea::placeholder {
-		color: rgba(255, 255, 255, 0.35);
+		color: var(--text-subtle);
 	}
 
 	.ux-input:focus,
 	.ux-select:focus,
 	.ux-textarea:focus {
-		border-color: #8b5cf6;
-		box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.18);
+		border-color: var(--accent);
+		box-shadow: 0 0 0 3px var(--accent-soft);
 	}
 
 	.ux-input:disabled,
@@ -233,58 +287,70 @@ a {
 	.ux-label {
 		display: block;
 		margin-bottom: 0.45rem;
-		color: rgba(255, 255, 255, 0.72);
+		color: var(--text-muted);
 		font-size: 0.9rem;
 		font-weight: 700;
 	}
 
+	/* ------------------------------- Botones ------------------------------ */
 	.ux-btn-primary,
 	.ux-btn-secondary,
 	.ux-btn-danger {
 		display: inline-flex;
+		min-height: var(--tap);
 		align-items: center;
 		justify-content: center;
-		border-radius: 1rem;
-		padding: 0.85rem 1.15rem;
-		font-size: 0.9rem;
-		font-weight: 800;
+		gap: 0.5rem;
+		border-radius: var(--radius);
+		padding: 0.7rem 1.25rem;
+		font-size: 0.95rem;
+		font-weight: 700;
+		line-height: 1;
+		cursor: pointer;
 		transition:
-			transform 160ms ease,
+			transform 140ms ease,
 			box-shadow 160ms ease,
 			background-color 160ms ease,
-			border-color 160ms ease;
+			border-color 160ms ease,
+			opacity 160ms ease;
+	}
+
+	.ux-btn-primary:active,
+	.ux-btn-secondary:active,
+	.ux-btn-danger:active {
+		transform: translateY(0) scale(0.99);
 	}
 
 	.ux-btn-primary {
-		background: #7c3aed;
+		background: var(--accent-strong);
 		color: #fff;
-		box-shadow: 0 14px 30px rgba(124, 58, 237, 0.25);
+		box-shadow: var(--shadow-accent);
 	}
 
 	.ux-btn-primary:hover {
-		background: #6d28d9;
+		background: var(--accent-press);
 		transform: translateY(-1px);
 	}
 
 	.ux-btn-secondary {
-		border: 1px solid rgba(255, 255, 255, 0.11);
-		background: rgba(255, 255, 255, 0.045);
-		color: #fff;
+		border: 1px solid var(--border);
+		background: rgba(255, 255, 255, 0.05);
+		color: var(--text);
 	}
 
 	.ux-btn-secondary:hover {
 		border-color: rgba(139, 92, 246, 0.55);
-		background: rgba(255, 255, 255, 0.08);
+		background: rgba(255, 255, 255, 0.09);
 		transform: translateY(-1px);
 	}
 
 	.ux-btn-danger {
-		background: #dc2626;
+		background: var(--danger-strong);
 		color: #fff;
 	}
 
 	.ux-btn-danger:hover {
-		background: #b91c1c;
+		background: var(--danger-press);
 		transform: translateY(-1px);
 	}
 
@@ -297,67 +363,75 @@ a {
 		box-shadow: none;
 	}
 
+	/* ------------------------------- Badges ------------------------------- */
 	.ux-badge {
 		display: inline-flex;
 		width: fit-content;
 		align-items: center;
+		gap: 0.35rem;
 		border-radius: 999px;
-		background: rgba(124, 58, 237, 0.22);
-		padding: 0.45rem 0.8rem;
-		color: #c4b5fd;
+		background: var(--accent-soft);
+		padding: 0.4rem 0.8rem;
+		color: var(--accent-text);
 		font-size: 0.78rem;
-		font-weight: 800;
+		font-weight: 700;
 	}
 
 	.ux-badge-success {
-		background: rgba(52, 211, 153, 0.16);
-		color: #bbf7d0;
+		background: var(--success-soft);
+		color: var(--success-text);
 	}
 
 	.ux-badge-warning {
-		background: rgba(251, 191, 36, 0.16);
-		color: #fde68a;
+		background: var(--warning-soft);
+		color: var(--warning-text);
 	}
 
 	.ux-badge-danger {
-		background: rgba(248, 113, 113, 0.16);
-		color: #fecaca;
+		background: var(--danger-soft);
+		color: var(--danger-text);
 	}
 
+	/* ---------------------- Estados vacíos / alertas ---------------------- */
 	.ux-empty {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.5rem;
 		border: 1px dashed rgba(255, 255, 255, 0.16);
-		background: rgba(255, 255, 255, 0.035);
-		border-radius: 1.25rem;
-		padding: 1rem;
-		color: rgba(255, 255, 255, 0.62);
+		background: rgba(255, 255, 255, 0.025);
+		border-radius: var(--radius-lg);
+		padding: 2rem 1.25rem;
+		text-align: center;
+		color: var(--text-muted);
 	}
 
 	.ux-alert {
-		border-radius: 1.1rem;
+		border-radius: var(--radius);
 		border: 1px solid rgba(248, 113, 113, 0.28);
-		background: rgba(248, 113, 113, 0.12);
+		background: var(--danger-soft);
 		padding: 0.85rem 1rem;
-		color: #fecaca;
+		color: var(--danger-text);
 		font-size: 0.9rem;
 		font-weight: 700;
 	}
 
 	.ux-alert-success {
 		border-color: rgba(52, 211, 153, 0.3);
-		background: rgba(52, 211, 153, 0.12);
-		color: #bbf7d0;
+		background: var(--success-soft);
+		color: var(--success-text);
 	}
 
 	.ux-alert-warning {
 		border-color: rgba(251, 191, 36, 0.3);
-		background: rgba(251, 191, 36, 0.12);
-		color: #fde68a;
+		background: var(--warning-soft);
+		color: var(--warning-text);
 	}
 
 	.ux-pill-nav {
 		display: inline-flex;
 		border-radius: 999px;
-		border: 1px solid rgba(255, 255, 255, 0.11);
+		border: 1px solid var(--border);
 		background: rgba(255, 255, 255, 0.045);
 		padding: 0.35rem;
 	}
