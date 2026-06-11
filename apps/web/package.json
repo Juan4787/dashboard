@@ -25,6 +25,7 @@
 		"@testing-library/jest-dom": "^6.9.1",
 		"@testing-library/svelte": "^5.2.10",
 		"@testing-library/user-event": "^14.6.1",
+		"@types/web-push": "^3.6.4",
 		"autoprefixer": "^10.4.20",
 		"jsdom": "^27.3.0",
 		"postcss": "^8.4.47",
@@ -38,6 +39,7 @@
 	"dependencies": {
 		"@supabase/supabase-js": "^2.87.1",
 		"@turnos-saas/shared": "workspace:*",
+		"web-push": "^3.6.7",
 		"ws": "^8.20.1"
 	}
 }

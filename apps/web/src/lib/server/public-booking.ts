@@ -33,6 +33,8 @@ export type PublicBookingBusiness = Pick<
 	| 'slug'
 	| 'phone'
 	| 'address'
+	| 'address_instructions'
+	| 'maps_url'
 	| 'logo_url'
 	| 'timezone'
 	| 'public_booking_enabled'
@@ -73,7 +75,7 @@ type BookingAttemptInput = {
 };
 
 export const PUBLIC_BUSINESS_SELECT =
-	'id, name, slug, phone, address, logo_url, timezone, public_booking_enabled, is_active, created_at, min_booking_notice_minutes, max_booking_days_ahead, cancellation_policy';
+	'id, name, slug, phone, address, address_instructions, maps_url, logo_url, timezone, public_booking_enabled, is_active, created_at, min_booking_notice_minutes, max_booking_days_ahead, cancellation_policy';
 
 const pad = (value: number) => String(value).padStart(2, '0');
 
@@ -265,14 +267,16 @@ export const summarizeSlotsByDate = (
 		day: 'numeric',
 		month: 'long'
 	});
-	return [...counts.entries()].map(([date, count]) => ({
-		date,
-		count,
-		label: formatter
-			.format(new Date(`${date}T12:00:00.000Z`))
-			.replace(',', '')
-			.replace(/^./, (letter) => letter.toUpperCase())
-	}));
+	return [...counts.entries()]
+		.sort(([a], [b]) => a.localeCompare(b))
+		.map(([date, count]) => ({
+			date,
+			count,
+			label: formatter
+				.format(new Date(`${date}T12:00:00.000Z`))
+				.replace(',', '')
+				.replace(/^./, (letter) => letter.toUpperCase())
+		}));
 };
 
 const PUBLIC_DAY_BATCH_DAYS = 14;
@@ -293,6 +297,58 @@ const uniqueSlots = (slots: AvailabilitySlot[]) => {
 	return result;
 };
 
+// ---------------------------------------------------------------------------
+// Caché en memoria de los escaneos de disponibilidad pública.
+//
+// El flujo de reserva navega 4-5 veces la misma URL (servicio → profesional →
+// día → horario) y cada navegación recomputaba TODOS los escaneos (varios
+// round-trips a Supabase por lote de 14 días). El caché por instancia con TTL
+// corto convierte esos pasos en una sola computación.
+//
+// Staleness acotada y tolerada por diseño: la creación de la reserva SIEMPRE
+// revalida el slot contra disponibilidad viva (PUBLIC_SLOT_UNAVAILABLE si otro
+// lo tomó), igual que ya pasa entre que el paciente ve el horario y confirma.
+// ---------------------------------------------------------------------------
+
+const SLOT_SCAN_CACHE_TTL_MS = 25_000;
+const STRUCTURE_SCAN_CACHE_TTL_MS = 60_000;
+const SCAN_CACHE_MAX_ENTRIES = 500;
+
+type ScanCacheEntry = { value: unknown; expiresAt: number };
+const scanCache = new Map<string, ScanCacheEntry>();
+
+export const clearPublicBookingScanCache = () => scanCache.clear();
+
+// Tras crear una reserva, los escaneos cacheados del negocio quedan viejos
+// (el slot tomado seguiría visible hasta vencer el TTL en esta instancia).
+export const invalidatePublicBookingScans = (businessId: string) => {
+	for (const key of scanCache.keys()) {
+		if (key.includes(`:${businessId}:`)) scanCache.delete(key);
+	}
+};
+
+const cachedScan = async <T>(key: string, ttlMs: number, compute: () => Promise<T>): Promise<T> => {
+	const now = Date.now();
+	const hit = scanCache.get(key);
+	if (hit && hit.expiresAt > now) return hit.value as T;
+	const value = await compute();
+	if (scanCache.size >= SCAN_CACHE_MAX_ENTRIES) {
+		for (const [entryKey, entry] of scanCache) {
+			if (entry.expiresAt <= now) scanCache.delete(entryKey);
+		}
+		if (scanCache.size >= SCAN_CACHE_MAX_ENTRIES) scanCache.clear();
+	}
+	scanCache.set(key, { value, expiresAt: now + ttlMs });
+	return value;
+};
+
+type DaySlotScan = {
+	slots: AvailabilitySlot[];
+	// Última fecha local efectivamente escaneada: si la fecha pedida cae dentro,
+	// sus slots ya están en `slots` y no hace falta otra query.
+	scannedThrough: string;
+};
+
 const collectPublicDaySlots = async (
 	supabase: SupabaseClient,
 	input: {
@@ -304,9 +360,10 @@ const collectPublicDaySlots = async (
 		targetDays?: number;
 		targetProfessionalIds?: string[];
 	}
-) => {
+): Promise<DaySlotScan> => {
 	let cursor = input.fromDate;
 	let collected: AvailabilitySlot[] = [];
+	let scannedThrough = input.fromDate;
 	const requiredProfessionals = new Set(input.targetProfessionalIds ?? []);
 	while (dateLTE(cursor, input.maxDate)) {
 		const windowEnd = minDateString(addDaysToDateString(cursor, PUBLIC_DAY_BATCH_DAYS - 1), input.maxDate);
@@ -319,6 +376,7 @@ const collectPublicDaySlots = async (
 			publicOnly: true
 		});
 		collected = uniqueSlots([...collected, ...batch]);
+		scannedThrough = windowEnd;
 		const collectedDates = new Set(collected.map((slot) => slot.date)).size;
 		const collectedProfessionals = new Set(collected.map((slot) => slot.professional_id));
 		const hasAllRequiredProfessionals =
@@ -327,7 +385,7 @@ const collectPublicDaySlots = async (
 		if (collectedDates >= (input.targetDays ?? PUBLIC_DAY_TARGET) && hasAllRequiredProfessionals) break;
 		cursor = addDaysToDateString(windowEnd, 1);
 	}
-	return collected;
+	return { slots: collected, scannedThrough };
 };
 
 const getProfessionalsWithPublicAvailability = async (
@@ -341,15 +399,24 @@ const getProfessionalsWithPublicAvailability = async (
 	}
 ) => {
 	if (input.professionals.length === 0) return [];
-	const slots = await collectPublicDaySlots(supabase, {
-		business: input.business as Business,
-		serviceId: input.serviceId,
-		professionalId: null,
-		fromDate: input.fromDate,
-		maxDate: input.maxDate,
-		targetDays: 1,
-		targetProfessionalIds: input.professionals.map((professional) => professional.id)
-	});
+	const professionalIds = input.professionals
+		.map((professional) => professional.id)
+		.sort()
+		.join(',');
+	const { slots } = await cachedScan(
+		`prof-scan:${input.business.id}:${input.serviceId}:${input.fromDate}:${input.maxDate}:${professionalIds}`,
+		STRUCTURE_SCAN_CACHE_TTL_MS,
+		() =>
+			collectPublicDaySlots(supabase, {
+				business: input.business as Business,
+				serviceId: input.serviceId,
+				professionalId: null,
+				fromDate: input.fromDate,
+				maxDate: input.maxDate,
+				targetDays: 1,
+				targetProfessionalIds: input.professionals.map((professional) => professional.id)
+			})
+	);
 
 	const firstAvailableByProfessional = new Map<string, string>();
 	for (const slot of slots) {
@@ -374,14 +441,19 @@ const serviceHasPublicAvailability = async (
 		maxDate: string;
 	}
 ) => {
-	const slots = await collectPublicDaySlots(supabase, {
-		business: input.business as Business,
-		serviceId: input.serviceId,
-		professionalId: null,
-		fromDate: input.fromDate,
-		maxDate: input.maxDate,
-		targetDays: 1
-	});
+	const { slots } = await cachedScan(
+		`service-scan:${input.business.id}:${input.serviceId}:${input.fromDate}:${input.maxDate}`,
+		STRUCTURE_SCAN_CACHE_TTL_MS,
+		() =>
+			collectPublicDaySlots(supabase, {
+				business: input.business as Business,
+				serviceId: input.serviceId,
+				professionalId: null,
+				fromDate: input.fromDate,
+				maxDate: input.maxDate,
+				targetDays: 1
+			})
+	);
 	return slots.length > 0;
 };
 
@@ -401,11 +473,20 @@ export const loadPublicBookingState = async (
 	if (!business.is_active || !business.public_booking_enabled) {
 		return { business, services: [], professionals: [], slots: [], days: [], issue: 'booking_disabled' };
 	}
-	if (!(await canUsePublicBusiness(supabase, business.id, business.created_at))) {
+
+	// Un solo round-trip de latencia para el gate comercial, el catálogo y las
+	// asignaciones del servicio elegido: son independientes entre sí.
+	const [commerciallyUsable, structurallyReservableServices, assignedProfessionalsForService] =
+		await Promise.all([
+			canUsePublicBusiness(supabase, business.id, business.created_at),
+			getReservableServices(supabase, business.id),
+			input.serviceId
+				? getReservableProfessionals(supabase, { businessId: business.id, serviceId: input.serviceId })
+				: Promise.resolve([] as PublicProfessional[])
+		]);
+	if (!commerciallyUsable) {
 		return { business, services: [], professionals: [], slots: [], days: [], issue: 'commercial_unavailable' };
 	}
-
-	const structurallyReservableServices = await getReservableServices(supabase, business.id);
 	if (structurallyReservableServices.length === 0) {
 		return { business, services: [], professionals: [], slots: [], days: [], issue: 'no_services' };
 	}
@@ -433,14 +514,11 @@ export const loadPublicBookingState = async (
 	}
 
 	const selectedService = services.find((service) => service.id === input.serviceId) ?? null;
-	const assignedProfessionals = selectedService
-		? await getReservableProfessionals(supabase, { businessId: business.id, serviceId: selectedService.id })
-		: [];
 	const professionals = selectedService
 		? await getProfessionalsWithPublicAvailability(supabase, {
 				business,
 				serviceId: selectedService.id,
-				professionals: assignedProfessionals,
+				professionals: assignedProfessionalsForService,
 				fromDate: today,
 				maxDate
 			})
@@ -454,25 +532,35 @@ export const loadPublicBookingState = async (
 		return { business, services, professionals, slots: [], days: [], issue: null };
 	}
 
-	const daySlots = await collectPublicDaySlots(supabase, {
-		business: business as Business,
-		serviceId: selectedService.id,
-		professionalId: selectedProfessional.id,
-		fromDate: today,
-		maxDate
-	});
-	const selectedDateSlots = input.date
-		? await getAvailabilitySlots(supabase, {
-			business: business as Business,
-			serviceId: selectedService.id,
-			professionalId: selectedProfessional.id,
-			fromDate: input.date,
-			toDate: input.date,
-			publicOnly: true
-		})
-		: [];
+	const dayScan = await cachedScan(
+		`day-scan:${business.id}:${selectedService.id}:${selectedProfessional.id}:${today}:${maxDate}`,
+		SLOT_SCAN_CACHE_TTL_MS,
+		() =>
+			collectPublicDaySlots(supabase, {
+				business: business as Business,
+				serviceId: selectedService.id,
+				professionalId: selectedProfessional.id,
+				fromDate: today,
+				maxDate
+			})
+	);
+	// La fecha elegida casi siempre cae dentro del rango ya escaneado: filtrar es
+	// gratis. Solo se consulta aparte si quedó fuera (link viejo o "ver más días").
+	const dateWithinScan = input.date ? input.date >= today && input.date <= dayScan.scannedThrough : false;
+	const selectedDateSlots = !input.date
+		? []
+		: dateWithinScan
+			? dayScan.slots.filter((slot) => slot.date === input.date)
+			: await getAvailabilitySlots(supabase, {
+					business: business as Business,
+					serviceId: selectedService.id,
+					professionalId: selectedProfessional.id,
+					fromDate: input.date,
+					toDate: input.date,
+					publicOnly: true
+				});
 	const slots = input.date ? selectedDateSlots : [];
-	const days = summarizeSlotsByDate(uniqueSlots([...daySlots, ...selectedDateSlots]), business.timezone);
+	const days = summarizeSlotsByDate(uniqueSlots([...dayScan.slots, ...selectedDateSlots]), business.timezone);
 
 	return {
 		business,
@@ -545,6 +633,10 @@ const assertPublicBookingRateLimits = async (
 	if (patient?.blocked) throw new Error('PUBLIC_BOOKING_BLOCKED_PATIENT');
 	if (!patient?.id) return;
 
+	// Anti-abuso: solo contamos turnos PENDIENTES Y FUTUROS (reserved/confirmed/reschedule_requested
+	// con starts_at >= ahora). Los pasados, cancelados, atendidos y no asistidos NO cuentan, así que
+	// un paciente puede seguir sacando turnos a lo largo de su tratamiento. Se restringe únicamente
+	// cuando ya tiene 2 o más turnos pendientes futuros sin resolver.
 	const { count, error } = await supabase
 		.from('appointments')
 		.select('id', { count: 'exact', head: true })
@@ -553,7 +645,7 @@ const assertPublicBookingRateLimits = async (
 		.in('status', ['reserved', 'confirmed', 'reschedule_requested'])
 		.gte('starts_at', now.toISOString());
 	if (error) throw error;
-	if ((count ?? 0) >= 1) throw new Error('PUBLIC_BOOKING_ACTIVE_LIMIT');
+	if ((count ?? 0) >= 2) throw new Error('PUBLIC_BOOKING_ACTIVE_LIMIT');
 };
 
 export const createPublicBooking = async (
@@ -625,6 +717,7 @@ export const createPublicBooking = async (
 			internalNote: input.note?.trim() || null,
 			source: 'public_booking'
 		});
+		invalidatePublicBookingScans(business.id);
 
 		await recordPublicBookingAttempt(supabase, {
 			businessId: business.id,
@@ -680,7 +773,7 @@ export const getPublicBookingErrorMessage = (error: unknown) => {
 		return 'Hubo demasiados intentos de reserva. Probá nuevamente en unos minutos.';
 	}
 	if (raw.includes('PUBLIC_BOOKING_ACTIVE_LIMIT')) {
-		return 'Ya existe un turno activo para ese teléfono. Contactá al consultorio si necesitás otro.';
+		return 'Ya tenés 2 turnos pendientes con ese teléfono. Esperá a que pase alguno o comunicate con el consultorio para coordinar otro.';
 	}
 	if (raw.includes('PUBLIC_BOOKING_BLOCKED_PATIENT') || raw.includes('PATIENT_BLOCKED')) {
 		return 'No se pudo completar la reserva online. Contactá al consultorio.';
@@ -688,5 +781,18 @@ export const getPublicBookingErrorMessage = (error: unknown) => {
 	if (raw.includes('PUBLIC_CAPTCHA_REQUIRED') || raw.includes('PUBLIC_CAPTCHA_FAILED')) {
 		return 'No pudimos validar la protección anti-spam. Intentá nuevamente.';
 	}
-	return getHumanAppointmentErrorMessage(error);
+	if (raw.includes('PATIENT_NAME_ALREADY_EXISTS')) {
+		return 'Ya figura un paciente con ese nombre en el consultorio. Si ya sos paciente, comunicate con ellos para coordinar tu turno.';
+	}
+	if (raw.includes('PATIENT_DNI_ALREADY_EXISTS')) {
+		return 'Ya figura un paciente con ese DNI en el consultorio. Comunicate con ellos para coordinar tu turno.';
+	}
+	const human = getHumanAppointmentErrorMessage(error);
+	if (human !== 'No se pudo completar la acción.') return human;
+	// Diagnóstico temporal: si el error no está mapeado, mostramos el motivo real
+	// para poder darle un mensaje amigable. Reemplazar por texto amigable una vez identificado.
+	const reason = raw.trim();
+	return reason
+		? `No pudimos guardar tu reserva (motivo: ${reason}). Probá de nuevo o comunicate con el consultorio.`
+		: 'No pudimos guardar tu reserva. Probá de nuevo o comunicate con el consultorio.';
 };

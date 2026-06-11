@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { writeAuditLog } from './audit';
+import { resolveMapsUrl } from './location';
 import {
 	APPOINTMENT_STATUS_LABELS,
 	type AppointmentStatus,
@@ -23,12 +24,19 @@ export type PublicAppointmentView = {
 	ends_at: string;
 	service_name_snapshot: string;
 	professional_name_snapshot: string;
+	calendar_action_status: string;
+	calendar_action_at: string | null;
+	calendar_action_count: number;
+	calendar_sequence: number;
+	calendar_update_required_at: string | null;
 	business: {
 		id: string;
 		name: string;
 		slug: string;
 		phone: string | null;
 		address: string | null;
+		address_instructions: string | null;
+		maps_link: string | null;
 		logo_url: string | null;
 		timezone: string;
 		is_active: boolean;
@@ -43,6 +51,43 @@ export type PublicAppointmentView = {
 	is_past: boolean;
 };
 
+// Turno de muestra para DEMO_MODE: misma forma que la vista real para que páginas
+// y endpoints públicos funcionen sin Supabase.
+export const demoPublicAppointment = (token: string): PublicAppointmentView => ({
+	id: 'demo-appointment',
+	token,
+	status: 'reserved',
+	starts_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+	ends_at: new Date(Date.now() + 24 * 60 * 60 * 1000 + 30 * 60 * 1000).toISOString(),
+	service_name_snapshot: 'Consulta',
+	professional_name_snapshot: 'Dra. Pérez',
+	calendar_action_status: 'not_offered',
+	calendar_action_at: null,
+	calendar_action_count: 0,
+	calendar_sequence: 0,
+	calendar_update_required_at: null,
+	business: {
+		id: 'demo-business',
+		name: 'Consultorio demo',
+		slug: 'consultorio-demo',
+		phone: '351 555 0101',
+		address: 'Av. Demo 123',
+		address_instructions: 'Timbre 2B. Presentarse 10 minutos antes.',
+		maps_link: 'https://www.google.com/maps/search/?api=1&query=Av.%20Demo%20123',
+		logo_url: null,
+		timezone: 'America/Argentina/Cordoba',
+		is_active: true,
+		cancellation_policy: null
+	},
+	patient_name: 'Paciente demo',
+	public_status_label: 'Reservado',
+	public_actions_available: true,
+	can_confirm: true,
+	can_cancel: true,
+	can_request_reschedule: true,
+	is_past: false
+});
+
 const appointmentSelect = `
 	id,
 	confirmation_token,
@@ -51,6 +96,11 @@ const appointmentSelect = `
 	ends_at,
 	service_name_snapshot,
 	professional_name_snapshot,
+	calendar_action_status,
+	calendar_action_at,
+	calendar_action_count,
+	calendar_sequence,
+	calendar_update_required_at,
 	businesses!inner(${PUBLIC_BUSINESS_SELECT}),
 	patients(full_name)
 `;
@@ -97,12 +147,22 @@ export const loadPublicAppointmentByToken = async (
 		ends_at: String(data.ends_at),
 		service_name_snapshot: String(data.service_name_snapshot),
 		professional_name_snapshot: String(data.professional_name_snapshot),
+		calendar_action_status: String(data.calendar_action_status ?? 'not_offered'),
+		calendar_action_at: data.calendar_action_at ?? null,
+		calendar_action_count: Number(data.calendar_action_count ?? 0),
+		calendar_sequence: Number(data.calendar_sequence ?? 0),
+		calendar_update_required_at: data.calendar_update_required_at ?? null,
 		business: {
 			id: String(business.id),
 			name: String(business.name),
 			slug: String(business.slug),
 			phone: business.phone ?? null,
 			address: business.address ?? null,
+			address_instructions: business.address_instructions ?? null,
+			maps_link: resolveMapsUrl({
+				address: business.address ?? null,
+				maps_url: business.maps_url ?? null
+			}),
 			logo_url: business.logo_url ?? null,
 			timezone: String(business.timezone),
 			is_active: Boolean(business.is_active),

@@ -52,7 +52,11 @@
 			business.public_booking_enabled &&
 			data.readiness.reservableServices > 0 &&
 			data.readiness.reservableProfessionals > 0 &&
-			data.readiness.availabilityRules > 0
+			data.readiness.availabilityRules > 0 &&
+			Boolean(business.address)
+	);
+	const missingAddressWithPublicBooking = $derived(
+		business.public_booking_enabled && !business.address
 	);
 </script>
 
@@ -69,6 +73,13 @@
 			</span>
 		</div>
 	</div>
+
+	{#if missingAddressWithPublicBooking}
+		<div class="ux-alert">
+			Falta la dirección del consultorio. Los pacientes no van a saber dónde asistir al turno.
+			Cargala en "Datos visibles" y guardá.
+		</div>
+	{/if}
 
 	<div class="ux-card">
 		<div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -145,8 +156,40 @@
 				<input name="email" type="email" value={valueOf('email')} disabled={!canManage} class="ux-input" />
 			</label>
 			<label class="md:col-span-2">
-				<span class="ux-label">Dirección (opcional)</span>
-				<input name="address" value={valueOf('address')} disabled={!canManage} class="ux-input" />
+				<span class="ux-label">Dirección visible para pacientes</span>
+				<input
+					name="address"
+					value={valueOf('address')}
+					disabled={!canManage}
+					placeholder="Av. Santa Fe 1234, Piso 3, Consultorio B, CABA"
+					class="ux-input"
+				/>
+				<span class="mt-1 block text-xs text-white/45">
+					Aparece en la confirmación del turno, el evento de calendario y el botón "Cómo llegar".
+					Obligatoria para la reserva online.
+				</span>
+			</label>
+			<label class="md:col-span-2">
+				<span class="ux-label">Indicaciones para llegar (opcional)</span>
+				<textarea
+					name="address_instructions"
+					rows="2"
+					disabled={!canManage}
+					placeholder="Tocar timbre 4B. Entrada por galería. Presentarse 10 minutos antes."
+					class="ux-textarea">{valueOf('address_instructions')}</textarea>
+			</label>
+			<label class="md:col-span-2">
+				<span class="ux-label">Link de Google Maps (opcional)</span>
+				<input
+					name="maps_url"
+					value={valueOf('maps_url')}
+					disabled={!canManage}
+					placeholder="https://maps.app.goo.gl/..."
+					class="ux-input"
+				/>
+				<span class="mt-1 block text-xs text-white/45">
+					Si lo dejás vacío, generamos el mapa automáticamente desde la dirección.
+				</span>
 			</label>
 			<label class="md:col-span-2">
 				<span class="ux-label">Logo (opcional)</span>

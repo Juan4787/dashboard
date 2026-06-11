@@ -197,16 +197,22 @@
 		</div>
 	{/if}
 
+	{#if (data.reminderCount ?? 0) > 0}
+		<div class="ux-alert ux-alert-warning">
+			📋 {data.reminderCount} {data.reminderCount === 1 ? 'turno de mañana sin calendario registrado' : 'turnos de mañana sin calendario registrado'}.
+			<a href="/odonto/recordatorios" class="font-bold underline">Ver recordatorios</a>
+		</div>
+	{/if}
+
 	{#if needsSetup}
 		<div class="ux-card">
 			<h2 class="ux-section-title">Antes de tomar turnos</h2>
 			<p class="mt-1 text-sm text-white/55">Completá lo básico para poder agendar.</p>
 			<div class="mt-4 flex flex-wrap gap-2">
 				{#if data.professionals.length === 0}
-					<a href="/odonto/profesionales" class="ux-btn-primary">Cargar profesional</a>
-				{/if}
-				{#if data.services.length === 0}
-					<a href="/odonto/profesionales" class="ux-btn-secondary">Cargar servicio</a>
+					<a href="/odonto/configuracion/usuarios" class="ux-btn-primary">Agregar profesional</a>
+				{:else if data.services.length === 0}
+					<a href="/odonto/configuracion/usuarios" class="ux-btn-secondary">Cargar servicio</a>
 				{/if}
 			</div>
 		</div>

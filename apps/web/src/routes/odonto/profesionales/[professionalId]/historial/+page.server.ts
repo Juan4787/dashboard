@@ -7,7 +7,7 @@ import type { PageServerLoad } from './$types';
 export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) => {
 	if (!locals.auth) throw redirect(303, '/login');
 	if (env.DEMO_MODE === 'true') {
-		return { professional: null, entries: [], loadError: null, demo: true };
+		return { professional: null, appointments: [], entries: [], loadError: null, demo: true };
 	}
 
 	const { business } = await getOdontoContext({ locals, fetch, cookies });
@@ -23,18 +23,30 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 		.eq('id', params.professionalId)
 		.maybeSingle();
 
-	const { data: entries, error } = await admin
-		.from('clinical_entries')
-		.select('id, created_at, entry_type, description, patient_id, patients(full_name)')
-		.eq('business_id', businessId)
-		.eq('professional_id', params.professionalId)
-		.order('created_at', { ascending: false })
-		.limit(300);
+	const [appointmentsResult, entriesResult] = await Promise.all([
+		admin
+			.from('appointments')
+			.select('id, starts_at, status, service_name_snapshot, patient_id, patients(full_name)')
+			.eq('business_id', businessId)
+			.eq('professional_id', params.professionalId)
+			.order('starts_at', { ascending: false })
+			.limit(300),
+		admin
+			.from('clinical_entries')
+			.select('id, created_at, entry_type, description, patient_id, patients(full_name)')
+			.eq('business_id', businessId)
+			.eq('created_by_professional_id', params.professionalId)
+			.order('created_at', { ascending: false })
+			.limit(300)
+	]);
+
+	const loadError = appointmentsResult.error?.message ?? entriesResult.error?.message ?? null;
 
 	return {
 		professional: professional ?? null,
-		entries: entries ?? [],
-		loadError: error ? `No se pudo cargar el historial [${error.code ?? '?'}]: ${error.message ?? ''}` : null,
+		appointments: appointmentsResult.data ?? [],
+		entries: entriesResult.data ?? [],
+		loadError: loadError ? `No se pudo cargar parte del historial: ${loadError}` : null,
 		demo: false
 	};
 };

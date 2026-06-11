@@ -110,6 +110,12 @@ export const getHumanAppointmentErrorMessage = (error: unknown) => {
 		return 'Suscripción pendiente de regularización. Para volver a operar el consultorio, regularizá la suscripción.';
 	}
 	if (raw.includes('INVALID_PROFESSIONAL_STATUS')) return 'El profesional solo puede marcar asistencia o ausencia.';
+	if (raw.includes('PATIENT_NAME_ALREADY_EXISTS')) {
+		return 'Ya hay otro paciente con ese nombre. Abrí su ficha o usá un nombre distinto.';
+	}
+	if (raw.includes('PATIENT_DNI_ALREADY_EXISTS')) {
+		return 'Ya hay otro paciente con ese DNI. Abrí su ficha o corregí el dato.';
+	}
 
 	return 'No se pudo completar la acción.';
 };
@@ -354,7 +360,9 @@ export const rescheduleAppointment = async (
 	const now = input.now ?? new Date();
 	const { data: appointment, error: loadError } = await supabase
 		.from('appointments')
-		.select('id, service_id, professional_id, starts_at, ends_at, status')
+		.select(
+			'id, service_id, professional_id, starts_at, ends_at, status, calendar_sequence, calendar_action_count'
+		)
 		.eq('business_id', input.businessId)
 		.eq('id', input.appointmentId)
 		.maybeSingle();
@@ -374,6 +382,10 @@ export const rescheduleAppointment = async (
 	if (!service?.duration_minutes || !service.is_active) throw new Error('SERVICE_NOT_FOUND');
 
 	const endsAt = addMinutes(input.startsAt, Number(service.duration_minutes));
+	// Versionado del evento de calendario: el ICS del mismo turno sale con SEQUENCE
+	// incrementado, y si el paciente ya había registrado una acción de calendario el
+	// turno queda "pendiente de actualizar" (banner en /turno + sección Recordatorios).
+	const hadCalendarAction = Number((appointment as any).calendar_action_count ?? 0) > 0;
 	const { error } = await supabase
 		.from('appointments')
 		.update({
@@ -383,6 +395,8 @@ export const rescheduleAppointment = async (
 			confirmed_at: null,
 			reschedule_requested_at: null,
 			reminder_due_at: null,
+			calendar_sequence: Number((appointment as any).calendar_sequence ?? 0) + 1,
+			calendar_update_required_at: hadCalendarAction ? now.toISOString() : null,
 			updated_by_user_id: input.userId,
 			updated_at: now.toISOString()
 		})
@@ -402,7 +416,8 @@ export const rescheduleAppointment = async (
 			to_starts_at: input.startsAt.toISOString(),
 			to_ends_at: endsAt.toISOString(),
 			from_status: appointment.status,
-			to_status: 'reserved'
+			to_status: 'reserved',
+			calendar_update_required: hadCalendarAction
 		}
 	});
 };

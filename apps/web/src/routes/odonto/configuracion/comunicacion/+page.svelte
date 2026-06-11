@@ -119,4 +119,25 @@
 			{/if}
 		</div>
 	</div>
+
+	<div class="ux-card">
+		<h2 class="ux-section-title">Recordatorios push</h2>
+		<p class="mt-2 text-sm text-white/55">
+			Pacientes que activaron "Recibir recordatorio en este dispositivo" desde la página del turno.
+		</p>
+		<div class="mt-4 grid gap-3 sm:grid-cols-3">
+			<div class="ux-soft-card p-4">
+				<p class="text-sm font-bold text-white/55">Dispositivos activos</p>
+				<p class="mt-1 text-3xl font-bold text-white">{data.pushStats?.active ?? 0}</p>
+			</div>
+			<div class="ux-soft-card p-4">
+				<p class="text-sm font-bold text-white/55">Enviados (7 días)</p>
+				<p class="mt-1 text-3xl font-bold text-white">{data.pushStats?.sent7d ?? 0}</p>
+			</div>
+			<div class="ux-soft-card p-4">
+				<p class="text-sm font-bold text-white/55">Dados de baja (7 días)</p>
+				<p class="mt-1 text-3xl font-bold text-white">{data.pushStats?.revoked7d ?? 0}</p>
+			</div>
+		</div>
+	</div>
 </section>

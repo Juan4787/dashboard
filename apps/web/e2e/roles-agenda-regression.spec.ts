@@ -291,22 +291,32 @@ test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 		const pendingProfessionalName = `E2E Profesional Nuevo ${fixture.suffix}`;
 
 		await page.goto('/odonto/configuracion/usuarios');
-		await expect(page.getByRole('heading', { name: 'Roles' })).toBeVisible();
-		await expect(page.getByRole('heading', { name: 'Accesos' })).toHaveCount(0);
-		await expect(page.getByText(`E2E Profesional Base ${fixture.suffix}`)).toBeVisible();
+		await expect(page.getByRole('heading', { name: 'Equipo' })).toBeVisible();
 
+		await page.getByRole('button', { name: 'Agregar integrante' }).click();
 		await page.getByLabel('Email').fill(pendingProfessionalEmail);
 		await page.getByRole('button', { name: 'Siguiente' }).click();
-		await page.getByRole('button', { name: 'Profesional Accede a sus pacientes y turnos.' }).click();
+		await page.getByRole('button', { name: 'Profesional Atiende turnos y accede a sus pacientes.' }).click();
 		await page.getByRole('button', { name: 'Siguiente' }).click();
-		await page.getByRole('button', { name: /Profesional nuevo/ }).click();
 		await page.getByPlaceholder('Nombre y apellido').fill(pendingProfessionalName);
 		await page.getByRole('button', { name: 'Siguiente' }).click();
+		// Paso Servicios: Consulta y Otro servicio vienen incluidos.
+		await expect(page.getByText('Servicios que ofrece')).toBeVisible();
+		await expect(page.getByText('Consulta', { exact: true })).toBeVisible();
+		await expect(page.getByText('Otro servicio', { exact: true })).toBeVisible();
+		await page.getByRole('button', { name: 'Siguiente' }).click();
+		// Paso Horarios: obligatorio.
+		await page.getByRole('button', { name: 'Lunes a viernes' }).click();
+		await page.getByPlaceholder('9 a 13, 15 a 19').fill('9 a 12');
+		await page.getByRole('button', { name: 'Siguiente' }).click();
+		await expect(page.getByText('Servicios incluidos')).toBeVisible();
 		await page.getByRole('button', { name: 'Guardar rol' }).click();
-		await expect(page.getByText('Email habilitado.')).toBeVisible();
-		await expect(page.getByText(pendingProfessionalEmail)).toHaveCount(2);
-		await expect(page.getByText(pendingProfessionalName)).toBeVisible();
-		await expect(page.getByText('Rol pendiente')).toBeVisible();
+		await expect(page.getByText('Profesional creado y email habilitado.')).toBeVisible();
+
+		await page.getByRole('button', { name: /^Profesionales/ }).click();
+		await expect(page.getByText(pendingProfessionalEmail)).toBeVisible();
+		await expect(page.getByText('Pendiente', { exact: true })).toBeVisible();
+		await expect(page.getByRole('link', { name: 'Ver profesional' })).toBeVisible();
 
 		const { data: pendingInvite } = await admin
 			.from('business_user_invites')
@@ -361,15 +371,20 @@ test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 			.single();
 		expect(acceptedProfessionalLink?.id).toBeTruthy();
 
+		// La vista vieja de Profesionales redirige a Equipo.
 		await page.goto('/odonto/profesionales');
-		await page.waitForLoadState('networkidle');
-		await expect(page.getByRole('button', { name: 'Nuevo profesional' })).toBeEnabled();
-		await page.getByRole('button', { name: 'Nuevo profesional' }).click();
-		await expect(page.locator('input[name="name"]')).toBeVisible();
-		await page.locator('input[name="name"]').fill(`E2E Duplicado ${fixture.suffix}`);
-		await page.locator('input[name="email"]').fill(pendingProfessionalEmail.toUpperCase());
-		await page.getByRole('button', { name: 'Crear profesional' }).click();
-		await expect(page.getByText(`Ese correo ya está cargado en ${pendingProfessionalName}.`)).toBeVisible();
+		await page.waitForURL(/\/odonto\/configuracion\/usuarios/);
+
+		// No se puede duplicar un profesional con el mismo email.
+		const duplicateAttempt = await postAction(page, '/odonto/configuracion/usuarios?/add_user', {
+			email: pendingProfessionalEmail.toUpperCase(),
+			role: 'professional',
+			professional_name: `E2E Duplicado ${fixture.suffix}`,
+			weekdays: '1',
+			time_ranges: '9 a 12',
+			slot_interval_minutes: '15'
+		});
+		expect(duplicateAttempt.text).toContain('ya está asignado al rol Profesional');
 
 		const createOtherProfessionalAppointment = await postAction(page, '/odonto/agenda?/create_appointment', {
 			service_id: fixture.serviceId,

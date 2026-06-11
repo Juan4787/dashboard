@@ -9,6 +9,7 @@ import {
 	updateAppointmentStatus
 } from '$lib/server/appointments';
 import { getOdontoContext } from '$lib/server/odonto-context';
+import { countTomorrowUncovered } from '$lib/server/reminders';
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -70,6 +71,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 			services: [],
 			serviceProfessionalIds: {},
 			patients: [],
+			reminderCount: 0,
 			demo: true
 		};
 	}
@@ -153,6 +155,15 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 		return acc;
 	}, {});
 
+	// Aviso liviano de Recordatorios: count aproximado de mañana sin calendario
+	// registrado (el número exacto, con exclusiones de push/dispatch, vive en la sección).
+	let reminderCount = 0;
+	try {
+		reminderCount = await countTomorrowUncovered(supabase, business.business);
+	} catch (reminderError) {
+		console.error('Error contando recordatorios pendientes', reminderError);
+	}
+
 	let patientRows = patients ?? [];
 	if (patientId && !patientRows.some((patient: any) => patient.id === patientId)) {
 		const { data: selectedPatient } = await supabase
@@ -180,6 +191,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 		services: services ?? [],
 		serviceProfessionalIds,
 		patients: patientRows,
+		reminderCount,
 		demo: false
 	};
 };

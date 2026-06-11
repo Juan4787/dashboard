@@ -13,7 +13,8 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 			context: null,
 			account: null,
 			lastEvent: null,
-			bookingPath: '/reservar/consultorio-demo'
+			bookingPath: '/reservar/consultorio-demo',
+			pushStats: { active: 0, sent7d: 0, revoked7d: 0 }
 		};
 	}
 
@@ -22,7 +23,14 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 	if (!context) throw kitError(500, 'No se pudo resolver el negocio activo');
 	if (context.role === 'professional' || context.role === 'readonly') throw redirect(303, '/odonto/agenda');
 
-	const [{ data: account }, { data: lastEvent }] = await Promise.all([
+	const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+	const [
+		{ data: account },
+		{ data: lastEvent },
+		{ count: activePush },
+		{ count: pushSent7d },
+		{ count: pushRevoked7d }
+	] = await Promise.all([
 		supabase
 			.from('messaging_accounts')
 			.select('id, provider, status, phone_number, display_name, bot_enabled, last_error, updated_at')
@@ -36,7 +44,23 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 			.eq('business_id', context.business.id)
 			.order('received_at', { ascending: false })
 			.limit(1)
-			.maybeSingle()
+			.maybeSingle(),
+		supabase
+			.from('push_subscriptions')
+			.select('id', { count: 'exact', head: true })
+			.eq('business_id', context.business.id)
+			.is('revoked_at', null),
+		supabase
+			.from('audit_logs')
+			.select('id', { count: 'exact', head: true })
+			.eq('business_id', context.business.id)
+			.eq('action', 'appointment.push_sent')
+			.gte('created_at', sevenDaysAgo),
+		supabase
+			.from('push_subscriptions')
+			.select('id', { count: 'exact', head: true })
+			.eq('business_id', context.business.id)
+			.gte('revoked_at', sevenDaysAgo)
 	]);
 
 	return {
@@ -44,7 +68,12 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 		context,
 		account,
 		lastEvent,
-		bookingPath: `/reservar/${context.business.slug}`
+		bookingPath: `/reservar/${context.business.slug}`,
+		pushStats: {
+			active: activePush ?? 0,
+			sent7d: pushSent7d ?? 0,
+			revoked7d: pushRevoked7d ?? 0
+		}
 	};
 };
 

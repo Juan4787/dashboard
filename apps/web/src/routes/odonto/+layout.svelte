@@ -36,16 +36,23 @@
 		label: string;
 		href: string;
 		activePrefixes?: string[];
+		excludePrefixes?: string[];
 	};
 
 	const dailyNav: NavItem[] = [
 		{ label: 'Agenda', href: '/odonto/agenda', activePrefixes: ['/odonto/agenda', '/odonto/turnos'] },
+		{ label: 'Recordatorios', href: '/odonto/recordatorios', activePrefixes: ['/odonto/recordatorios'] },
 		{ label: 'Pacientes', href: '/odonto/pacientes', activePrefixes: ['/odonto/pacientes'] },
-		{ label: 'Profesionales', href: '/odonto/profesionales', activePrefixes: ['/odonto/profesionales'] },
+		{
+			label: 'Equipo',
+			href: '/odonto/configuracion/usuarios',
+			activePrefixes: ['/odonto/configuracion/usuarios', '/odonto/profesionales']
+		},
 		{
 			label: 'Configuración',
 			href: '/odonto/configuracion',
-			activePrefixes: ['/odonto/configuracion']
+			activePrefixes: ['/odonto/configuracion'],
+			excludePrefixes: ['/odonto/configuracion/usuarios']
 		}
 	];
 
@@ -61,7 +68,6 @@
 
 	const configNav: NavItem[] = [
 		{ label: 'Negocio', href: '/odonto/configuracion/negocio' },
-		{ label: 'Roles', href: '/odonto/configuracion/usuarios' },
 		{ label: 'Suscripción', href: '/odonto/configuracion/suscripcion' },
 		{ label: 'Comunicación', href: '/odonto/configuracion/comunicacion' }
 	];
@@ -159,7 +165,8 @@
 
 	const isActive = (href: string) => $page.url.pathname.startsWith(href);
 	const isNavItemActive = (item: NavItem) =>
-		(item.activePrefixes ?? [item.href]).some((prefix) => $page.url.pathname.startsWith(prefix));
+		(item.activePrefixes ?? [item.href]).some((prefix) => $page.url.pathname.startsWith(prefix)) &&
+		!(item.excludePrefixes ?? []).some((prefix) => $page.url.pathname.startsWith(prefix));
 
 	const closeMenus = () => {
 		configMenuOpen = false;
@@ -185,9 +192,10 @@
 		}
 		if (path.startsWith('/odonto/agenda')) return 'Agenda';
 		if (path.startsWith('/odonto/pacientes')) return 'Pacientes';
-		if (path.startsWith('/odonto/profesionales')) return 'Profesionales';
-		if (path.startsWith('/odonto/servicios')) return 'Profesionales';
-		if (path.startsWith('/odonto/disponibilidad')) return 'Profesionales';
+		if (path.startsWith('/odonto/configuracion/usuarios')) return 'Equipo';
+		if (path.startsWith('/odonto/profesionales')) return 'Equipo';
+		if (path.startsWith('/odonto/servicios')) return 'Equipo';
+		if (path.startsWith('/odonto/disponibilidad')) return 'Equipo';
 		if (path.startsWith('/odonto/recordatorios')) return 'Comunicación';
 		if (path.startsWith('/odonto/mensajes')) return 'Comunicación';
 		if (path.startsWith('/odonto/mis-turnos')) return 'Mis turnos';
@@ -205,7 +213,8 @@
 		if (path.startsWith('/odonto/turnos/')) return '/odonto/agenda';
 		if (path.startsWith('/odonto/agenda/semana')) return '/odonto/agenda';
 		if (path.startsWith('/odonto/pacientes/')) return '/odonto/pacientes';
-		if (path.startsWith('/odonto/profesionales/')) return '/odonto/profesionales';
+		if (path.startsWith('/odonto/profesionales/')) return '/odonto/configuracion/usuarios';
+		if (path.startsWith('/odonto/configuracion/usuarios')) return '/odonto/agenda';
 		if (path.startsWith('/odonto/configuracion/')) return '/odonto/configuracion';
 		if (path.startsWith('/odonto/maestro')) return '/odonto/agenda';
 		if (path.startsWith('/odonto/mis-turnos')) return '/odonto/agenda';
@@ -708,7 +717,7 @@
 				<circle cx="9" cy="8" r="3.1" />
 				<path d="M3.8 19v-1.3A3.7 3.7 0 0 1 7.5 14h3a3.7 3.7 0 0 1 3.7 3.7V19" />
 				<path d="M16 5.3a3 3 0 0 1 0 5.8M20.2 19v-1.3a3.5 3.5 0 0 0-2.6-3.3" />
-			{:else if label === 'Profesionales'}
+			{:else if label === 'Equipo'}
 				<rect x="4.5" y="3.5" width="15" height="17" rx="2.5" />
 				<circle cx="12" cy="9.8" r="2.4" />
 				<path d="M8.2 16.6a3.8 3.8 0 0 1 7.6 0" />

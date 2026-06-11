@@ -1,6 +1,7 @@
 import { env } from '$env/dynamic/private';
 import { env as publicEnv } from '$env/dynamic/public';
 import { createSupabaseAdminClient } from '$lib/server/supabase';
+import { resolveMapsUrl } from '$lib/server/location';
 import {
 	createPublicBooking,
 	getPublicBookingErrorMessage,
@@ -13,7 +14,13 @@ import type { Actions, PageServerLoad } from './$types';
 
 const valuesFromForm = (form: FormData) => Object.fromEntries(form.entries());
 
-export const load: PageServerLoad = async ({ params, fetch, url }) => {
+// OJO performance: este load NUNCA debe leer el parámetro `slot`. SvelteKit
+// trackea los search params accedidos: al no leerlo, elegir horario no re-ejecuta
+// el load (la página lo resuelve client-side desde page.url) y es instantáneo.
+export const load: PageServerLoad = async ({ params, fetch, url, setHeaders }) => {
+	// Disponibilidad y datos del negocio siempre frescos detrás de CDN.
+	setHeaders({ 'cache-control': 'no-store' });
+
 	if (env.DEMO_MODE === 'true') {
 		return {
 			state: {
@@ -45,9 +52,9 @@ export const load: PageServerLoad = async ({ params, fetch, url }) => {
 			selected: {
 				serviceId: url.searchParams.get('service_id') ?? '',
 				professionalId: url.searchParams.get('professional_id') ?? '',
-				date: url.searchParams.get('date') ?? '',
-				slot: url.searchParams.get('slot') ?? ''
+				date: url.searchParams.get('date') ?? ''
 			},
+			mapsLink: resolveMapsUrl({ address: 'Av. Demo 123' }),
 			turnstileSiteKey: null,
 			demo: true
 		};
@@ -67,9 +74,11 @@ export const load: PageServerLoad = async ({ params, fetch, url }) => {
 			selected: {
 				serviceId: url.searchParams.get('service_id') ?? '',
 				professionalId: url.searchParams.get('professional_id') ?? '',
-				date: url.searchParams.get('date') ?? '',
-				slot: url.searchParams.get('slot') ?? ''
+				date: url.searchParams.get('date') ?? ''
 			},
+			mapsLink: state.business
+				? resolveMapsUrl({ address: state.business.address, maps_url: state.business.maps_url })
+				: null,
 			turnstileSiteKey: publicEnv.PUBLIC_TURNSTILE_SITE_KEY ?? null,
 			demo: false
 		};
@@ -84,7 +93,8 @@ export const load: PageServerLoad = async ({ params, fetch, url }) => {
 				days: [],
 				issue: 'missing_service_role'
 			},
-			selected: { serviceId: '', professionalId: '', date: '', slot: '' },
+			selected: { serviceId: '', professionalId: '', date: '' },
+			mapsLink: null,
 			turnstileSiteKey: null,
 			demo: false
 		};

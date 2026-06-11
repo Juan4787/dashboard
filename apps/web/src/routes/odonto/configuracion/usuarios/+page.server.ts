@@ -11,10 +11,26 @@ import {
 	normalizeProfessionalEmail
 } from '$lib/server/professionals';
 import {
+	DEFAULT_SERVICE_NAMES,
+	ensureDefaultServicesAssigned,
+	isDefaultServiceName
+} from '$lib/server/default-services';
+import {
+	MAX_SLOT_INTERVAL_MINUTES,
+	MIN_SLOT_INTERVAL_MINUTES,
+	replaceProfessionalWeeklyRules,
+	timeRangesOverlap
+} from '$lib/server/availability-rules';
+import { setProfessionalServices } from '$lib/server/professional-services';
+import { writeAuditLog } from '$lib/server/audit';
+import { zonedDateTimeToUtc } from '$lib/server/availability';
+import {
 	createSupabaseAdminClient,
 	createSupabaseServerClient,
 	getAuthUserId
 } from '$lib/server/supabase';
+import { formatPriceLabel } from '$lib/utils/money-input';
+import { parseTimeRanges } from '$lib/utils/time-ranges';
 import { env } from '$env/dynamic/private';
 import { error as kitError, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
@@ -33,12 +49,12 @@ type BusinessRoleAccess = {
 	created_at: string;
 };
 
-type ProfessionalOption = {
+type ServiceOption = {
 	id: string;
 	name: string;
-	email: string | null;
-	is_active: boolean;
-	is_public: boolean;
+	duration_minutes: number;
+	price_label: string | null;
+	is_default: boolean;
 };
 
 const DEMO_MEMBERS: BusinessRoleAccess[] = [
@@ -65,6 +81,11 @@ const DEMO_MEMBERS: BusinessRoleAccess[] = [
 ];
 
 const EMAIL_FORMAT_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MIN_SERVICE_DURATION_MINUTES = 5;
+const MAX_SERVICE_DURATION_MINUTES = 480;
+
+// Roles que se ofrecen al agregar un integrante desde Equipo.
+const TEAM_ROLES = BUSINESS_ROLES.filter((role) => role !== 'readonly');
 
 const normalizeEmail = (value: FormDataEntryValue | null) =>
 	String(value ?? '')
@@ -101,23 +122,24 @@ const listRoleAccess = async (
 		.filter((item): item is BusinessRoleAccess => Boolean(item));
 };
 
-const listProfessionals = async (
+const listServices = async (
 	supabase: SupabaseClient,
 	businessId: string
-): Promise<ProfessionalOption[]> => {
+): Promise<ServiceOption[]> => {
 	const { data, error } = await supabase
-		.from('professionals')
-		.select('id, name, email, is_active, is_public')
+		.from('services')
+		.select('id, name, duration_minutes, price_label, is_active')
 		.eq('business_id', businessId)
+		.eq('is_active', true)
 		.order('sort_order')
 		.order('name');
 	if (error) throw error;
-	return ((data ?? []) as ProfessionalOption[]).map((item) => ({
+	return ((data ?? []) as any[]).map((item) => ({
 		id: String(item.id),
 		name: String(item.name ?? ''),
-		email: item.email ? String(item.email) : null,
-		is_active: Boolean(item.is_active),
-		is_public: Boolean(item.is_public)
+		duration_minutes: Number(item.duration_minutes ?? 0),
+		price_label: item.price_label ? String(item.price_label) : null,
+		is_default: isDefaultServiceName(String(item.name ?? ''))
 	}));
 };
 
@@ -154,11 +176,11 @@ const countOwners = (members: BusinessRoleAccess[]) =>
 
 const roleAccessErrorMessage = (error: { code?: string; message?: string } | null | undefined) => {
 	const raw = error?.message ?? '';
-	if (raw.includes('BUSINESS_MANAGE_DENIED')) return 'No tenés permisos para administrar roles.';
+	if (raw.includes('BUSINESS_MANAGE_DENIED')) return 'No tenés permisos para administrar el equipo.';
 	if (raw.includes('INVALID_EMAIL')) return 'Ingresá un email válido.';
 	if (raw.includes('INVALID_ROLE')) return 'El rol seleccionado no es válido.';
-	if (raw.includes('PROFESSIONAL_REQUIRED')) return 'Seleccioná o creá el profesional asociado.';
-	if (raw.includes('PROFESSIONAL_NOT_FOUND')) return 'No se encontró el profesional seleccionado.';
+	if (raw.includes('PROFESSIONAL_REQUIRED')) return 'Completá los datos del profesional.';
+	if (raw.includes('PROFESSIONAL_NOT_FOUND')) return 'No se encontró el profesional asociado.';
 	if (raw.includes('PROFESSIONAL_ALREADY_LINKED_TO_USER')) {
 		return 'Ese profesional ya está vinculado a otro usuario.';
 	}
@@ -397,6 +419,57 @@ const saveRoleAccessDirect = async ({
 	return { status: 'pending' };
 };
 
+type NewServiceInput = {
+	name: string;
+	duration_minutes: number;
+	price_label: string | null;
+};
+
+const parseNewServices = (raw: string): NewServiceInput[] => {
+	if (!raw.trim()) return [];
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw);
+	} catch {
+		throw new Error('INVALID_NEW_SERVICES');
+	}
+	if (!Array.isArray(parsed)) throw new Error('INVALID_NEW_SERVICES');
+	return parsed.map((item: any) => {
+		const name = String(item?.name ?? '').trim();
+		const duration = Number(item?.duration_minutes ?? 0);
+		if (!name) throw new Error('NEW_SERVICE_NAME_REQUIRED');
+		if (
+			!Number.isInteger(duration) ||
+			duration < MIN_SERVICE_DURATION_MINUTES ||
+			duration > MAX_SERVICE_DURATION_MINUTES
+		) {
+			throw new Error('NEW_SERVICE_DURATION_INVALID');
+		}
+		return {
+			name,
+			duration_minutes: duration,
+			price_label: formatPriceLabel(String(item?.price_label ?? '')) || null
+		};
+	});
+};
+
+const normalizeLocalDate = (date: string) => {
+	const trimmed = date.trim();
+	if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+	const match = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+	if (!match) return '';
+	const [, rawDay, rawMonth, rawYear] = match;
+	return `${rawYear}-${rawMonth.padStart(2, '0')}-${rawDay.padStart(2, '0')}`;
+};
+
+const parseLocalDateTime = (date: string, time: string, timeZone: string) => {
+	if (!date || !time) return null;
+	const normalizedDate = normalizeLocalDate(date);
+	if (!normalizedDate) return null;
+	const value = zonedDateTimeToUtc(normalizedDate, time, timeZone);
+	return Number.isNaN(value.getTime()) ? null : value;
+};
+
 export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 	if (!locals.auth) throw redirect(303, '/login');
 
@@ -404,8 +477,9 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 		return {
 			context: demoBusinessContext(),
 			members: DEMO_MEMBERS,
-			professionals: [],
-			roles: BUSINESS_ROLES,
+			services: [],
+			roles: TEAM_ROLES,
+			defaultServiceNames: DEFAULT_SERVICE_NAMES,
 			currentUserId: 'demo-user',
 			demo: true
 		};
@@ -413,16 +487,17 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 
 	const { supabase, context, currentUserId } = await getUsersPageContext({ locals, fetch, cookies });
 	if (context.role === 'professional') throw redirect(303, '/odonto/mis-turnos');
-	const [members, professionals] = await Promise.all([
+	const [members, services] = await Promise.all([
 		listRoleAccess(supabase, context.business.id),
-		listProfessionals(supabase, context.business.id)
+		listServices(supabase, context.business.id)
 	]);
 
 	return {
 		context,
 		members,
-		professionals,
-		roles: BUSINESS_ROLES,
+		services,
+		roles: TEAM_ROLES,
+		defaultServiceNames: DEFAULT_SERVICE_NAMES,
 		currentUserId,
 		demo: false
 	};
@@ -439,9 +514,6 @@ export const actions: Actions = {
 		const values = Object.fromEntries(form);
 		const email = normalizeEmail(form.get('email'));
 		const role = String(form.get('role') ?? '').trim();
-		const professionalMode = String(form.get('professional_mode') ?? 'existing');
-		const selectedProfessionalId = String(form.get('professional_id') ?? '').trim();
-		const newProfessionalName = String(form.get('professional_name') ?? '').trim();
 
 		if (!EMAIL_FORMAT_REGEX.test(email)) {
 			return fail(400, { message: 'Ingresá un email válido.', values });
@@ -452,7 +524,7 @@ export const actions: Actions = {
 
 		const { supabase, context, currentUserId } = await getUsersPageContext({ locals, fetch, cookies });
 		if (!context.canManage) {
-			return fail(403, { message: 'No tenés permisos para administrar roles.', values });
+			return fail(403, { message: 'No tenés permisos para administrar el equipo.', values });
 		}
 
 		const currentAccess = await listRoleAccess(supabase, context.business.id);
@@ -464,81 +536,219 @@ export const actions: Actions = {
 			});
 		}
 
+		const businessId = context.business.id;
 		let professionalId: string | null = null;
 		let createdProfessionalId: string | null = null;
+		const createdServiceIds: string[] = [];
+
 		if (role === 'professional') {
-			if (professionalMode === 'new') {
-				if (!newProfessionalName) {
-					return fail(400, { message: 'Ingresá el nombre del profesional.', values });
+			const professionalName = String(form.get('professional_name') ?? '').trim();
+			const specialty = String(form.get('professional_specialty') ?? '').trim();
+			if (!professionalName) {
+				return fail(400, { message: 'Completá el nombre del profesional para continuar.', values });
+			}
+
+			// Servicios: personalizados existentes seleccionados + nuevos creados en el wizard.
+			const selectedServiceIds = form
+				.getAll('service_ids')
+				.map((value) => String(value).trim())
+				.filter(Boolean);
+			let newServices: NewServiceInput[];
+			try {
+				newServices = parseNewServices(String(form.get('new_services') ?? ''));
+			} catch (error) {
+				const code = (error as Error)?.message ?? '';
+				if (code === 'NEW_SERVICE_NAME_REQUIRED') {
+					return fail(400, { message: 'No se puede crear un servicio adicional sin nombre.', values });
 				}
-				const existingProfessional = await findProfessionalByEmail(
-					supabase,
-					context.business.id,
-					normalizeProfessionalEmail(email)
-				);
-				if (existingProfessional) {
-					return fail(400, {
-						message: humanProfessionalEmailConflict(existingProfessional),
-						values
-					});
+				if (code === 'NEW_SERVICE_DURATION_INVALID') {
+					return fail(400, { message: 'La duración del servicio debe estar entre 5 y 480 minutos.', values });
 				}
-				const { data: created, error: createError } = await supabase
-					.from('professionals')
-					.insert({
-						business_id: context.business.id,
-						name: newProfessionalName,
-						email,
-						is_active: true,
-						is_public: false
-					})
-					.select('id')
-					.single();
-				if (createError || !created?.id) {
-					console.error('Error creando profesional pendiente', createError);
-					return fail(500, { message: 'No se pudo crear el profesional.', values });
+				return fail(400, { message: 'Los servicios cargados no son válidos.', values });
+			}
+
+			// Horarios de atención: obligatorios.
+			const weekdays = form
+				.getAll('weekdays')
+				.map((value) => Number(value))
+				.filter((value) => Number.isInteger(value) && value >= 0 && value <= 6);
+			const uniqueWeekdays = [...new Set(weekdays)];
+			const interval = Number(form.get('slot_interval_minutes') ?? 15);
+			const parsedRanges = parseTimeRanges(String(form.get('time_ranges') ?? ''));
+			if (uniqueWeekdays.length === 0) {
+				return fail(400, { message: 'Seleccioná al menos un día de atención.', values });
+			}
+			if (!parsedRanges || parsedRanges.length === 0) {
+				return fail(400, { message: 'Completá un horario válido, como 9 a 13 o 09:00-13:00.', values });
+			}
+			if (timeRangesOverlap(parsedRanges)) {
+				return fail(400, { message: 'Los horarios no pueden superponerse.', values });
+			}
+			if (
+				!Number.isInteger(interval) ||
+				interval < MIN_SLOT_INTERVAL_MINUTES ||
+				interval > MAX_SLOT_INTERVAL_MINUTES
+			) {
+				return fail(400, { message: 'Completá el intervalo: entre 5 y 120 minutos.', values });
+			}
+
+			// Cambio puntual: opcional, pero si se carga debe ser válido.
+			const exceptionDate = String(form.get('exception_date') ?? '').trim();
+			const exceptionTimeRange = String(form.get('exception_time_range') ?? '').trim();
+			const exceptionAppliesTo = String(form.get('exception_applies_to') ?? 'professional').trim();
+			const exceptionType = String(form.get('exception_type') ?? 'blocked').trim();
+			const exceptionReason = String(form.get('exception_reason') ?? '').trim();
+			const hasException = Boolean(exceptionDate || exceptionTimeRange);
+			let exceptionStartsAt: Date | null = null;
+			let exceptionEndsAt: Date | null = null;
+			if (hasException) {
+				const exceptionRanges = exceptionTimeRange ? parseTimeRanges(exceptionTimeRange) : null;
+				if (!exceptionRanges || exceptionRanges.length !== 1) {
+					return fail(400, { message: 'Para el cambio puntual cargá una sola franja horaria válida.', values });
 				}
-				professionalId = String(created.id);
-				createdProfessionalId = professionalId;
-			} else {
-				professionalId = selectedProfessionalId;
-				if (!professionalId) {
-					return fail(400, { message: 'Seleccioná un profesional.', values });
+				exceptionStartsAt = parseLocalDateTime(exceptionDate, exceptionRanges[0].start, context.business.timezone);
+				exceptionEndsAt = parseLocalDateTime(exceptionDate, exceptionRanges[0].end, context.business.timezone);
+				if (!exceptionStartsAt || !exceptionEndsAt || exceptionStartsAt >= exceptionEndsAt) {
+					return fail(400, { message: 'La franja del cambio puntual es inválida.', values });
 				}
-				const professionals = await listProfessionals(supabase, context.business.id);
-				const selectedProfessional = professionals.find((professional) => professional.id === professionalId);
-				if (!selectedProfessional) {
-					return fail(400, { message: 'No se encontró el profesional seleccionado.', values });
+				if (exceptionType !== 'blocked' && exceptionType !== 'extra_available') {
+					return fail(400, { message: 'El tipo de cambio puntual es inválido.', values });
 				}
-				const selectedEmail = normalizeProfessionalEmail(selectedProfessional.email);
-				if (selectedEmail && selectedEmail !== email) {
-					return fail(400, {
-						message: `Ese profesional ya tiene cargado ${selectedEmail}. Corregí el email del profesional o seleccioná otro perfil.`,
-						values
-					});
+			}
+
+			const existingProfessional = await findProfessionalByEmail(
+				supabase,
+				businessId,
+				normalizeProfessionalEmail(email)
+			);
+			if (existingProfessional) {
+				return fail(400, { message: humanProfessionalEmailConflict(existingProfessional), values });
+			}
+
+			const { data: createdProfessional, error: createError } = await supabase
+				.from('professionals')
+				.insert({
+					business_id: businessId,
+					name: professionalName,
+					specialty: specialty || null,
+					email,
+					is_active: true,
+					is_public: true
+				})
+				.select('id')
+				.single();
+			if (createError || !createdProfessional?.id) {
+				console.error('Error creando profesional', createError);
+				return fail(500, { message: 'No se pudo crear el profesional.', values });
+			}
+			professionalId = String(createdProfessional.id);
+			createdProfessionalId = professionalId;
+
+			const rollback = async (admin: SupabaseClient) => {
+				// Borrar el profesional limpia en cascada asignaciones, reglas y excepciones.
+				await admin.from('professionals').delete().eq('business_id', businessId).eq('id', createdProfessionalId);
+				if (createdServiceIds.length > 0) {
+					await admin.from('services').delete().eq('business_id', businessId).in('id', createdServiceIds);
 				}
-				const existingProfessional = await findProfessionalByEmail(
-					supabase,
-					context.business.id,
-					normalizeProfessionalEmail(email),
-					professionalId
-				);
-				if (existingProfessional) {
-					return fail(400, {
-						message: humanProfessionalEmailConflict(existingProfessional),
-						values
-					});
-				}
-				if (!selectedEmail) {
-					const { error: updateProfessionalEmailError } = await supabase
-						.from('professionals')
-						.update({ email, updated_at: new Date().toISOString() })
-						.eq('business_id', context.business.id)
-						.eq('id', professionalId);
-					if (updateProfessionalEmailError) {
-						console.error('Error actualizando email del profesional', updateProfessionalEmailError);
-						return fail(500, { message: roleAccessErrorMessage(updateProfessionalEmailError), values });
+			};
+
+			const admin = await createSupabaseAdminClient('odonto', fetch);
+			try {
+				// Consulta y Otro servicio: existen siempre y quedan asignados automáticamente.
+				const defaultServiceIds = await ensureDefaultServicesAssigned(supabase, businessId, professionalId);
+
+				for (const newService of newServices) {
+					const { data: createdService, error: serviceError } = await supabase
+						.from('services')
+						.insert({
+							business_id: businessId,
+							name: newService.name,
+							duration_minutes: newService.duration_minutes,
+							price_label: newService.price_label,
+							description: null,
+							buffer_before_minutes: 0,
+							buffer_after_minutes: 0,
+							is_public: true,
+							is_active: true
+						})
+						.select('id')
+						.single();
+					if (serviceError || !createdService?.id) {
+						throw serviceError ?? new Error('SERVICE_CREATE_FAILED');
 					}
+					createdServiceIds.push(String(createdService.id));
 				}
+
+				await setProfessionalServices(supabase, businessId, professionalId, [
+					...defaultServiceIds,
+					...selectedServiceIds,
+					...createdServiceIds
+				]);
+
+				await replaceProfessionalWeeklyRules(supabase, {
+					businessId,
+					professionalId,
+					weekdays: uniqueWeekdays,
+					ranges: parsedRanges,
+					slotIntervalMinutes: interval
+				});
+
+				if (hasException && exceptionStartsAt && exceptionEndsAt) {
+					const { error: exceptionError } = await supabase.from('availability_exceptions').insert({
+						business_id: businessId,
+						professional_id: exceptionAppliesTo === 'business' ? null : professionalId,
+						type: exceptionType,
+						starts_at: exceptionStartsAt.toISOString(),
+						ends_at: exceptionEndsAt.toISOString(),
+						reason: exceptionReason || null
+					});
+					if (exceptionError) throw exceptionError;
+				}
+
+				const result = await saveRoleAccessDirect({
+					admin,
+					businessId,
+					email,
+					role,
+					professionalId,
+					actorId: currentUserId,
+					actorRole: context.role,
+					currentAccess
+				});
+
+				await writeAuditLog(supabase, {
+					businessId,
+					userId: currentUserId,
+					action: 'professional.created',
+					entityType: 'professional',
+					entityId: professionalId,
+					metadata: {
+						name: professionalName,
+						email,
+						weekdays: uniqueWeekdays,
+						ranges: parsedRanges,
+						slot_interval_minutes: interval,
+						service_ids: [...defaultServiceIds, ...selectedServiceIds, ...createdServiceIds]
+					}
+				});
+
+				const status = String(result.status ?? '');
+				if (status === 'pending' || status === 'already_pending') {
+					return {
+						success: true,
+						message:
+							'Profesional creado y email habilitado. Cuando la persona cree su cuenta, va a entrar con rol Profesional.'
+					};
+				}
+				return { success: true, message: 'Profesional creado y rol asignado al consultorio.' };
+			} catch (error) {
+				await rollback(admin);
+				console.error('Error guardando alta de profesional', error);
+				const code = (error as { message?: string })?.message ?? '';
+				if (code === 'INVALID_SERVICE_ASSIGNMENT') {
+					return fail(400, { message: 'Algún servicio seleccionado no pertenece a este consultorio.', values });
+				}
+				return fail(500, { message: roleAccessErrorMessage(error as { code?: string; message?: string }), values });
 			}
 		}
 
@@ -547,7 +757,7 @@ export const actions: Actions = {
 		try {
 			result = await saveRoleAccessDirect({
 				admin,
-				businessId: context.business.id,
+				businessId,
 				email,
 				role,
 				professionalId,
@@ -556,13 +766,6 @@ export const actions: Actions = {
 				currentAccess
 			});
 		} catch (error) {
-			if (createdProfessionalId) {
-				await admin
-					.from('professionals')
-					.delete()
-					.eq('business_id', context.business.id)
-					.eq('id', createdProfessionalId);
-			}
 			console.error('Error guardando acceso al negocio', error);
 			return fail(500, { message: roleAccessErrorMessage(error as { code?: string; message?: string }), values });
 		}
@@ -599,7 +802,7 @@ export const actions: Actions = {
 
 		const { supabase, context } = await getUsersPageContext({ locals, fetch, cookies });
 		if (!context.canManage) {
-			return fail(403, { message: 'No tenés permisos para administrar roles.' });
+			return fail(403, { message: 'No tenés permisos para administrar el equipo.' });
 		}
 
 		const members = await listRoleAccess(supabase, context.business.id);
@@ -611,7 +814,7 @@ export const actions: Actions = {
 			return fail(400, { message: 'El consultorio debe conservar al menos un dueño.' });
 		}
 		if (role === 'professional' && !target.professional_id) {
-			return fail(400, { message: 'Para asignar rol profesional, usá Asignar rol y vinculá un profesional.' });
+			return fail(400, { message: 'Para asignar rol profesional, usá Agregar integrante con rol Profesional.' });
 		}
 
 		const { error } = await supabase.rpc('update_business_role_access', {
@@ -641,7 +844,7 @@ export const actions: Actions = {
 
 		const { supabase, context, currentUserId } = await getUsersPageContext({ locals, fetch, cookies });
 		if (!context.canManage) {
-			return fail(403, { message: 'No tenés permisos para administrar roles.' });
+			return fail(403, { message: 'No tenés permisos para administrar el equipo.' });
 		}
 
 		if (status === 'pending') {

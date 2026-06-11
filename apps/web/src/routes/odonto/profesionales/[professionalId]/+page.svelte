@@ -55,6 +55,7 @@
 			} | null;
 			services: Service[];
 			assignedServiceIds: string[];
+			defaultServiceIds: string[];
 			rules: Rule[];
 			exceptions: Exception[];
 			appointmentCount: number;
@@ -67,6 +68,7 @@
 
 	const canOperate = $derived(data.context.canOperate && !data.demo);
 	const canManage = $derived(data.context.canManage && !data.demo);
+	const defaultServiceIdSet = $derived(new Set(data.defaultServiceIds ?? []));
 	const professional = $derived(data.professional);
 	const appointmentCount = $derived(data.appointmentCount ?? 0);
 	const clinicalEntryCount = $derived(data.clinicalEntryCount ?? 0);
@@ -168,7 +170,7 @@
 
 <section class="ux-page">
 	<div class="ux-hero">
-		<BackLink href="/odonto/profesionales" label="Volver" class="mb-5" />
+		<BackLink href="/odonto/configuracion/usuarios" label="Volver" class="mb-5" />
 		<div class="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
 			<div>
 				<p class="ux-badge">Profesional</p>
@@ -293,9 +295,7 @@
 					</p>
 					<div class="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
 						<button type="button" class="ux-btn-secondary" onclick={() => (showDeleteConfirm = false)}>Cerrar</button>
-						{#if clinicalEntryCount > 0}
-							<a href={`/odonto/profesionales/${professional?.id}/historial`} class="ux-btn-primary">Ver historial</a>
-						{/if}
+						<a href={`/odonto/profesionales/${professional?.id}/historial`} class="ux-btn-primary">Ver historial</a>
 					</div>
 				{/if}
 			</Modal>
@@ -315,15 +315,16 @@
 
 				<div class="mt-5 grid gap-3">
 					{#each data.services as service}
-						<label class={`ux-choice flex items-center gap-4 p-4 ${selectedServiceIds.includes(service.id) ? 'ux-choice-active' : ''}`}>
+						{@const isDefault = defaultServiceIdSet.has(service.id)}
+						<label class={`ux-choice flex items-center gap-4 p-4 ${isDefault || selectedServiceIds.includes(service.id) ? 'ux-choice-active' : ''}`}>
 							<input
 								type="checkbox"
 								name="service_id"
 								value={service.id}
-								checked={selectedServiceIds.includes(service.id)}
-								disabled={!canOperate}
+								checked={isDefault || selectedServiceIds.includes(service.id)}
+								disabled={!canOperate || isDefault}
 								class="accent-[#7c3aed]"
-								onchange={() => toggleService(service.id)}
+								onchange={() => !isDefault && toggleService(service.id)}
 							/>
 							<span class="min-w-0 flex-1">
 								<span class="block font-black text-white">{service.name}</span>
@@ -331,6 +332,9 @@
 									{durationLabel(service.duration_minutes)}{service.price_label ? ` · ${service.price_label}` : ''}
 								</span>
 							</span>
+							{#if isDefault}
+								<span class="ux-badge ux-badge-success shrink-0">Incluido</span>
+							{/if}
 						</label>
 					{/each}
 					{#if data.services.length === 0}

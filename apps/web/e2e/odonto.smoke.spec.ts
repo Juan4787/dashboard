@@ -15,7 +15,7 @@ test.describe('Odontologia - flujo base', () => {
 
 		await expect(page.getByRole('link', { name: 'Agenda' })).toBeVisible();
 		await expect(page.getByRole('link', { name: 'Pacientes' })).toBeVisible();
-		await expect(page.getByRole('link', { name: 'Profesionales' })).toBeVisible();
+		await expect(page.getByRole('link', { name: 'Equipo' })).toBeVisible();
 		await expect(page.getByRole('button', { name: 'Configuración' })).toBeVisible();
 	});
 });
@@ -26,12 +26,25 @@ test.describe('Reserva pública - modo demo', () => {
 	test('muestra reserva pública, turno por token y aliases de respuesta', async ({ page }) => {
 		await page.goto('/reservar/consultorio-demo');
 		await expect(page.getByRole('heading', { name: 'Consultorio demo' })).toBeVisible();
+		await expect(page.getByText('Paso 1 de 5')).toBeVisible();
 		await expect(page.getByRole('heading', { name: '¿Qué necesitás?' })).toBeVisible();
-		await expect(page.getByRole('link', { name: /Consulta/i })).toBeVisible();
+		await expect(page.getByRole('link', { name: /Consulta/i }).first()).toBeVisible();
+
+		// El flujo colapsa los pasos resueltos y muestra el siguiente.
+		await page.getByRole('link', { name: /Evaluación inicial/i }).click();
+		await expect(page.getByRole('heading', { name: '¿Con quién?' })).toBeVisible();
+		await expect(page.getByRole('link', { name: 'Cambiar' })).toBeVisible();
+		await page.getByRole('link', { name: /Dra\. Pérez/i }).click();
+		await expect(page.getByRole('heading', { name: 'Elegí un día' })).toBeVisible();
 
 		await page.goto('/turno/demo-token');
 		await expect(page.getByRole('heading', { name: 'Tu turno' })).toBeVisible();
-		await expect(page.getByText('Tu turno está reservado.')).toBeVisible();
+		await expect(page.getByText(/Te esperamos el/)).toBeVisible();
+		// Dirección + CTAs de calendario (plan Calendario/dirección/recordatorios).
+		await expect(page.getByText('Av. Demo 123').first()).toBeVisible();
+		await expect(page.getByRole('link', { name: 'Cómo llegar' })).toBeVisible();
+		await expect(page.locator('summary').filter({ hasText: 'Agregar al calendario' })).toBeVisible();
+		await expect(page.locator('summary').filter({ hasText: 'Copiar detalles del turno' })).toBeVisible();
 		await expect(page.getByRole('button', { name: 'Confirmo que voy' })).toBeEnabled();
 		await expect(page.getByText('Necesito reprogramar')).toBeVisible();
 		await expect(page.locator('summary').filter({ hasText: 'Cancelar turno' })).toBeVisible();
@@ -42,5 +55,33 @@ test.describe('Reserva pública - modo demo', () => {
 		await expect(page).toHaveURL(/\/turno\/demo-token\?accion=cancelar$/);
 		await page.goto('/reprogramar/demo-token');
 		await expect(page).toHaveURL(/\/turno\/demo-token\?accion=reprogramar$/);
+	});
+
+	test('endpoints de calendario: ICS válido y redirects de tracking', async ({ request }) => {
+		const ics = await request.get('/turno/demo-token/calendario.ics');
+		expect(ics.status()).toBe(200);
+		expect(ics.headers()['content-type']).toContain('text/calendar');
+		expect(ics.headers()['content-disposition']).toContain('inline');
+		expect(ics.headers()['cache-control']).toContain('no-store');
+		const body = await ics.text();
+		expect(body).toContain('BEGIN:VCALENDAR');
+		expect(body).toContain('METHOD:PUBLISH');
+		// Título neutral: nunca el servicio (privacidad en pantalla bloqueada).
+		// Se desdobla el folding para poder buscar texto sin cortes de línea.
+		const unfolded = body.replace(/\r\n[ \t]/g, '');
+		expect(unfolded).toContain('SUMMARY:Turno en Consultorio demo');
+		expect(unfolded).not.toMatch(/Consulta(?!orio)/);
+
+		const download = await request.get('/turno/demo-token/calendario-descargar.ics');
+		expect(download.status()).toBe(200);
+		expect(download.headers()['content-disposition']).toContain('attachment');
+
+		const google = await request.get('/turno/demo-token/ir/google', { maxRedirects: 0 });
+		expect(google.status()).toBe(302);
+		expect(google.headers()['location']).toContain('calendar.google.com');
+
+		const maps = await request.get('/turno/demo-token/ir/maps', { maxRedirects: 0 });
+		expect(maps.status()).toBe(302);
+		expect(maps.headers()['location']).toContain('google.com/maps');
 	});
 });

@@ -5,6 +5,13 @@ import { zonedDateTimeToUtc } from '$lib/server/availability';
 import { getOdontoContext } from '$lib/server/odonto-context';
 import { createSupabaseAdminClient } from '$lib/server/supabase';
 import { idsFromForm, setProfessionalServices } from '$lib/server/professional-services';
+import { ensureDefaultServices, ensureDefaultServicesAssigned } from '$lib/server/default-services';
+import {
+	MAX_SLOT_INTERVAL_MINUTES,
+	MIN_SLOT_INTERVAL_MINUTES,
+	replaceProfessionalWeeklyRules,
+	timeRangesOverlap
+} from '$lib/server/availability-rules';
 import {
 	findProfessionalByEmail,
 	humanProfessionalEmailConflict,
@@ -18,8 +25,6 @@ import type { Actions, PageServerLoad } from './$types';
 const boolFromForm = (form: FormData, key: string) => form.get(key) === 'true';
 const MIN_SERVICE_DURATION_MINUTES = 5;
 const MAX_SERVICE_DURATION_MINUTES = 480;
-const MIN_SLOT_INTERVAL_MINUTES = 5;
-const MAX_SLOT_INTERVAL_MINUTES = 120;
 
 const parsePositiveInt = (value: FormDataEntryValue | null, fallback = 0) => {
 	const parsed = Number(value ?? fallback);
@@ -43,18 +48,6 @@ const parseLocalDateTime = (date: string, time: string, timeZone: string) => {
 	return Number.isNaN(value.getTime()) ? null : value;
 };
 
-const rangesOverlap = (ranges: Array<{ start: string; end: string }>) => {
-	const sorted = [...ranges].sort((a, b) => a.start.localeCompare(b.start));
-	return sorted.some((range, index) => index > 0 && range.start < sorted[index - 1].end);
-};
-
-const isMissingAvailabilityRpc = (error: { code?: string; message?: string } | null | undefined) =>
-	error?.code === 'PGRST202' ||
-	error?.code === '42883' ||
-	/error.*replace_professional_availability_rules|function.*replace_professional_availability_rules|could not find/i.test(
-		error?.message ?? ''
-	);
-
 const redirectToProfessional = (professionalId: string, tab = 'perfil') => {
 	throw redirect(303, `/odonto/profesionales/${professionalId}?tab=${tab}`);
 };
@@ -67,6 +60,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 			professional: null,
 			services: [],
 			assignedServiceIds: [],
+			defaultServiceIds: [],
 			rules: [],
 			exceptions: [],
 			tab: url.searchParams.get('tab') ?? 'perfil',
@@ -77,15 +71,26 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 	const { supabase, business } = await getOdontoContext({ locals, fetch, cookies });
 	if (!business.canOperate) throw redirect(303, business.role === 'professional' ? '/odonto/mis-turnos' : '/odonto/agenda');
 	const businessId = business.business.id;
+	const admin = await createSupabaseAdminClient('odonto', fetch);
 
-	const [{ data: professional, error: professionalError }, { data: services }, { data: assignments }, { data: rules }, { data: exceptions }, { count: appointmentCount }, { count: clinicalEntryCount }] =
+	const { data: professional, error: professionalError } = await supabase
+		.from('professionals')
+		.select('id, name, specialty, phone, email, is_active, is_public')
+		.eq('business_id', businessId)
+		.eq('id', params.professionalId)
+		.maybeSingle();
+	if (professionalError || !professional) throw kitError(404, 'Profesional no encontrado');
+
+	// Consulta y Otro servicio existen siempre y quedan asignados automáticamente.
+	let defaultServiceIds: string[] = [];
+	try {
+		defaultServiceIds = await ensureDefaultServicesAssigned(supabase, businessId, params.professionalId);
+	} catch (defaultsError) {
+		console.error('No se pudieron asegurar los servicios predeterminados', defaultsError);
+	}
+
+	const [{ data: services }, { data: assignments }, { data: rules }, { data: exceptions }, { count: appointmentCount }, { count: clinicalEntryCount }] =
 		await Promise.all([
-			supabase
-				.from('professionals')
-				.select('id, name, specialty, phone, email, is_active, is_public')
-				.eq('business_id', businessId)
-				.eq('id', params.professionalId)
-				.maybeSingle(),
 			supabase
 				.from('services')
 				.select('id, name, description, duration_minutes, buffer_before_minutes, buffer_after_minutes, price_label, is_active, is_public, sort_order')
@@ -111,25 +116,24 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 				.or(`professional_id.eq.${params.professionalId},professional_id.is.null`)
 				.order('starts_at', { ascending: false })
 				.limit(80),
-			supabase
+			admin
 				.from('appointments')
 				.select('id', { count: 'exact', head: true })
 				.eq('business_id', businessId)
 				.eq('professional_id', params.professionalId),
-			supabase
+			admin
 				.from('clinical_entries')
 				.select('id', { count: 'exact', head: true })
 				.eq('business_id', businessId)
-				.eq('professional_id', params.professionalId)
+				.eq('created_by_professional_id', params.professionalId)
 		]);
-
-	if (professionalError || !professional) throw kitError(404, 'Profesional no encontrado');
 
 	return {
 		context: business,
 		professional,
 		services: services ?? [],
 		assignedServiceIds: (assignments ?? []).map((item: any) => String(item.service_id)),
+		defaultServiceIds,
 		rules: rules ?? [],
 		exceptions: exceptions ?? [],
 		appointmentCount: appointmentCount ?? 0,
@@ -204,8 +208,19 @@ export const actions: Actions = {
 		const form = await request.formData();
 		const serviceIds = idsFromForm(form, 'service_id');
 
+		// Consulta y Otro servicio quedan asignados siempre, aunque no vengan en el formulario.
+		let defaultServiceIds: string[] = [];
 		try {
-			await setProfessionalServices(supabase, business.business.id, params.professionalId, serviceIds);
+			defaultServiceIds = await ensureDefaultServices(supabase, business.business.id);
+		} catch (defaultsError) {
+			console.error('No se pudieron asegurar los servicios predeterminados', defaultsError);
+		}
+
+		try {
+			await setProfessionalServices(supabase, business.business.id, params.professionalId, [
+				...defaultServiceIds,
+				...serviceIds
+			]);
 		} catch (assignmentError) {
 			console.error('Error asignando servicios al profesional', assignmentError);
 			const message =
@@ -307,7 +322,7 @@ export const actions: Actions = {
 			return fail(400, { message: 'Escribí los horarios como 9 a 13 o 09:00-13:00.' });
 		}
 		const ranges = parsedRanges;
-		if (rangesOverlap(ranges)) {
+		if (timeRangesOverlap(ranges)) {
 			return fail(400, { message: 'Los horarios no pueden superponerse.' });
 		}
 		if (!Number.isInteger(interval) || interval < MIN_SLOT_INTERVAL_MINUTES || interval > MAX_SLOT_INTERVAL_MINUTES) {
@@ -315,47 +330,17 @@ export const actions: Actions = {
 		}
 		const slotInterval = interval;
 
-		const { error: replaceError } = await supabase.rpc('replace_professional_availability_rules', {
-			p_business_id: business.business.id,
-			p_professional_id: params.professionalId,
-			p_weekdays: uniqueWeekdays,
-			p_ranges: ranges.map((range) => ({ start_time: range.start, end_time: range.end })),
-			p_slot_interval_minutes: slotInterval
-		});
-		if (replaceError) {
-			if (!isMissingAvailabilityRpc(replaceError)) {
-				console.error('Error guardando horarios', replaceError);
-				return fail(500, { message: 'No se pudieron guardar los horarios.' });
-			}
-
-			console.warn('RPC replace_professional_availability_rules no disponible; usando fallback compatible.');
-			const { error: deleteError } = await supabase
-				.from('availability_rules')
-				.delete()
-				.eq('business_id', business.business.id)
-				.eq('professional_id', params.professionalId)
-				.in('weekday', uniqueWeekdays);
-			if (deleteError) {
-				console.error('Error reemplazando horarios: no se pudieron limpiar reglas previas', deleteError);
-				return fail(500, { message: 'No se pudieron guardar los horarios.' });
-			}
-
-			const rows = uniqueWeekdays.flatMap((weekday) =>
-				ranges.map((range) => ({
-					business_id: business.business.id,
-					professional_id: params.professionalId,
-					weekday,
-					start_time: range.start,
-					end_time: range.end,
-					slot_interval_minutes: slotInterval,
-					is_active: true
-				}))
-			);
-			const { error: insertError } = await supabase.from('availability_rules').insert(rows);
-			if (insertError) {
-				console.error('Error reemplazando horarios: no se pudieron insertar reglas nuevas', insertError);
-				return fail(500, { message: 'No se pudieron guardar los horarios.' });
-			}
+		try {
+			await replaceProfessionalWeeklyRules(supabase, {
+				businessId: business.business.id,
+				professionalId: params.professionalId,
+				weekdays: uniqueWeekdays,
+				ranges,
+				slotIntervalMinutes: slotInterval
+			});
+		} catch (replaceError) {
+			console.error('Error guardando horarios', replaceError);
+			return fail(500, { message: 'No se pudieron guardar los horarios.' });
 		}
 
 		await writeAuditLog(supabase, {
@@ -547,7 +532,7 @@ export const actions: Actions = {
 	delete_professional: async ({ params, locals, fetch, cookies }) => {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
-		const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
+		const { business, userId } = await getOdontoContext({ locals, fetch, cookies });
 		if (!business.canManage) {
 			return fail(403, { message: 'Solo el dueño o un administrador puede eliminar profesionales.' });
 		}
@@ -559,8 +544,8 @@ export const actions: Actions = {
 		// No se puede eliminar un profesional con HISTORIAL (turnos o consultas clínicas):
 		// son registros de la agenda y de los pacientes que hay que conservar. Se archiva.
 		const [apptResult, entryResult] = await Promise.all([
-			supabase.from('appointments').select('id', { count: 'exact', head: true }).eq('business_id', businessId).eq('professional_id', profId),
-			supabase.from('clinical_entries').select('id', { count: 'exact', head: true }).eq('business_id', businessId).eq('professional_id', profId)
+			admin.from('appointments').select('id', { count: 'exact', head: true }).eq('business_id', businessId).eq('professional_id', profId),
+			admin.from('clinical_entries').select('id', { count: 'exact', head: true }).eq('business_id', businessId).eq('created_by_professional_id', profId)
 		]);
 		const apptCount = apptResult.count ?? 0;
 		const entryCount = entryResult.count ?? 0;
@@ -609,7 +594,7 @@ export const actions: Actions = {
 			});
 		}
 
-		await writeAuditLog(supabase, {
+		await writeAuditLog(admin, {
 			businessId: business.business.id,
 			userId,
 			action: 'professional.deleted',
@@ -617,6 +602,6 @@ export const actions: Actions = {
 			entityId: params.professionalId
 		});
 
-		throw redirect(303, '/odonto/profesionales');
+		throw redirect(303, '/odonto/configuracion/usuarios');
 	}
 };

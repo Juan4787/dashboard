@@ -1,63 +1,70 @@
 import { env } from '$env/dynamic/private';
+import { env as publicEnv } from '$env/dynamic/public';
 import { createSupabaseAdminClient } from '$lib/server/supabase';
 import {
 	applyPublicAppointmentAction,
+	demoPublicAppointment,
 	getPublicAppointmentMessage,
 	getPublicTokenErrorMessage,
-	loadPublicAppointmentByToken
+	loadPublicAppointmentByToken,
+	type PublicAppointmentView
 } from '$lib/server/public-appointments';
+import { markCalendarOffered } from '$lib/server/calendar-tracking';
+import { classifyUserAgent, isLikelyBotUserAgent } from '$lib/device';
 import { fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
-const loadDemoAppointment = (token: string) => ({
-	id: 'demo-appointment',
-	token,
-	status: 'reserved',
-	starts_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-	ends_at: new Date(Date.now() + 24 * 60 * 60 * 1000 + 30 * 60 * 1000).toISOString(),
-	service_name_snapshot: 'Consulta',
-	professional_name_snapshot: 'Dra. Pérez',
-	business: {
-		id: 'demo-business',
-		name: 'Consultorio demo',
-		slug: 'consultorio-demo',
-		phone: '351 555 0101',
-		address: 'Av. Demo 123',
-		logo_url: null,
-		timezone: 'America/Argentina/Cordoba',
-		is_active: true,
-		cancellation_policy: null
-	},
-	patient_name: 'Paciente demo',
-	public_status_label: 'Reservado',
-	public_actions_available: true,
-	can_confirm: true,
-	can_cancel: true,
-	can_request_reschedule: true,
-	is_past: false
-});
+const SOON_WINDOW_MS = 2 * 60 * 60 * 1000;
 
-export const load: PageServerLoad = async ({ params, fetch, url }) => {
+const isStartingSoon = (appointment: PublicAppointmentView, now: Date) => {
+	const remaining = new Date(appointment.starts_at).getTime() - now.getTime();
+	return remaining > 0 && remaining <= SOON_WINDOW_MS;
+};
+
+export const load: PageServerLoad = async ({ params, fetch, url, request, setHeaders }) => {
+	// La página expone datos del turno detrás del token: nunca debe quedar cacheada.
+	setHeaders({ 'cache-control': 'no-store' });
+	const userAgent = request.headers.get('user-agent');
+	const device = classifyUserAgent(userAgent);
+	const vapidPublicKey = publicEnv.PUBLIC_VAPID_PUBLIC_KEY?.trim() || null;
+
 	if (env.DEMO_MODE === 'true') {
-		const appointment = loadDemoAppointment(params.token);
-		return {
-			appointment,
-			message: getPublicAppointmentMessage(appointment as any),
-			created: url.searchParams.has('creado'),
-			suggestedAction: url.searchParams.get('accion') ?? '',
-			demo: true
-		};
-	}
-
-	try {
-		const supabase = await createSupabaseAdminClient('odonto', fetch);
-		const appointment = await loadPublicAppointmentByToken(supabase, params.token);
+		const appointment = demoPublicAppointment(params.token);
 		return {
 			appointment,
 			message: getPublicAppointmentMessage(appointment),
 			created: url.searchParams.has('creado'),
 			suggestedAction: url.searchParams.get('accion') ?? '',
-			demo: false
+			demo: true,
+			device,
+			isSoon: false,
+			vapidPublicKey
+		};
+	}
+
+	try {
+		const supabase = await createSupabaseAdminClient('odonto', fetch);
+		const now = new Date();
+		const appointment = await loadPublicAppointmentByToken(supabase, params.token, now);
+		if (
+			appointment &&
+			appointment.calendar_action_status === 'not_offered' &&
+			!appointment.is_past &&
+			appointment.status !== 'cancelled' &&
+			!isLikelyBotUserAgent(userAgent)
+		) {
+			// Best-effort: los previews de WhatsApp/Telegram quedan filtrados por UA.
+			await markCalendarOffered(supabase, appointment, now);
+		}
+		return {
+			appointment,
+			message: getPublicAppointmentMessage(appointment),
+			created: url.searchParams.has('creado'),
+			suggestedAction: url.searchParams.get('accion') ?? '',
+			demo: false,
+			device,
+			isSoon: appointment ? isStartingSoon(appointment, now) : false,
+			vapidPublicKey
 		};
 	} catch (error) {
 		console.error('Error cargando turno publico', error);
@@ -66,7 +73,10 @@ export const load: PageServerLoad = async ({ params, fetch, url }) => {
 			message: 'El enlace no es válido o no está disponible.',
 			created: false,
 			suggestedAction: '',
-			demo: false
+			demo: false,
+			device,
+			isSoon: false,
+			vapidPublicKey
 		};
 	}
 };

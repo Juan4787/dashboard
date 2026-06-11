@@ -5,6 +5,7 @@ import {
 	resolveActiveBusiness
 } from '$lib/server/business';
 import { createSupabaseServerClient } from '$lib/server/supabase';
+import { isValidMapsUrl } from '$lib/server/location';
 import { env } from '$env/dynamic/private';
 import { env as publicEnv } from '$env/dynamic/public';
 import { error as kitError, fail, redirect } from '@sveltejs/kit';
@@ -128,6 +129,8 @@ export const actions: Actions = {
 		const phone = String(form.get('phone') ?? '').trim();
 		const email = String(form.get('email') ?? '').trim();
 		const address = String(form.get('address') ?? '').trim();
+		const address_instructions = String(form.get('address_instructions') ?? '').trim();
+		const maps_url = String(form.get('maps_url') ?? '').trim();
 		const logo_url = String(form.get('logo_url') ?? '').trim();
 		const timezone = String(form.get('timezone') ?? '').trim() || 'America/Argentina/Cordoba';
 		const min_booking_notice_minutes = Number(form.get('min_booking_notice_minutes') ?? 1440);
@@ -180,6 +183,24 @@ export const actions: Actions = {
 				});
 			}
 		}
+		if (maps_url && !isValidMapsUrl(maps_url)) {
+			return fail(400, {
+				message:
+					'El link de Google Maps no parece válido. Pegá el link que te da el botón Compartir de Google Maps (empieza con https://maps.app.goo.gl o https://www.google.com/maps).',
+				values: Object.fromEntries(form)
+			});
+		}
+		// Sin dirección los pacientes no saben dónde asistir: no se puede habilitar la
+		// reserva pública. No es retroactivo: a quien ya la tiene activa no se lo apaga,
+		// solo se le muestra la advertencia en la página.
+		const wantsPublicBooking = form.get('public_booking_enabled') === 'true';
+		if (wantsPublicBooking && !address) {
+			return fail(400, {
+				message:
+					'Falta la dirección del consultorio. Los pacientes no van a saber dónde asistir al turno. Cargala antes de habilitar la reserva pública.',
+				values: Object.fromEntries(form)
+			});
+		}
 
 		const { error } = await supabase
 			.from('businesses')
@@ -190,9 +211,11 @@ export const actions: Actions = {
 				phone: phone || null,
 				email: email || null,
 				address: address || null,
+				address_instructions: address_instructions || null,
+				maps_url: maps_url || null,
 				logo_url: logo_url || null,
 				timezone,
-				public_booking_enabled: form.get('public_booking_enabled') === 'true',
+				public_booking_enabled: wantsPublicBooking,
 				whatsapp_enabled: form.get('whatsapp_enabled') === 'true',
 				allow_same_day_booking: form.get('allow_same_day_booking') === 'true',
 				min_booking_notice_minutes,

@@ -29,6 +29,8 @@ export type Business = {
 	phone: string | null;
 	email: string | null;
 	address: string | null;
+	address_instructions: string | null;
+	maps_url: string | null;
 	logo_url: string | null;
 	timezone: string;
 	public_booking_enabled: boolean;
@@ -60,6 +62,8 @@ const businessSelect = `
 	phone,
 	email,
 	address,
+	address_instructions,
+	maps_url,
 	logo_url,
 	timezone,
 	public_booking_enabled,
@@ -102,6 +106,8 @@ export const demoBusinessContext = (): BusinessContext => ({
 		phone: null,
 		email: null,
 		address: null,
+		address_instructions: null,
+		maps_url: null,
 		logo_url: null,
 		timezone: 'America/Argentina/Cordoba',
 		public_booking_enabled: true,
