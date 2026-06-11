@@ -19,6 +19,7 @@
 	"dependencies": {
 		"@supabase/supabase-js": "^2.105.4",
 		"@sveltejs/kit": "^2.59.1",
+		"web-push": "^3.6.7",
 		"ws": "^8.20.1"
 	}
 }
