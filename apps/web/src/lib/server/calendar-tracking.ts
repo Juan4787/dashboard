@@ -33,7 +33,8 @@ export const canRegisterCalendarAction = (appointment: PublicAppointmentView): b
 export const recordCalendarAction = async (
 	supabase: SupabaseClient,
 	appointment: PublicAppointmentView,
-	action: CalendarClickAction
+	action: CalendarClickAction,
+	options: { source?: string | null } = {}
 ) => {
 	const { error } = await supabase.rpc('record_calendar_action', {
 		p_appointment_id: appointment.id,
@@ -51,7 +52,8 @@ export const recordCalendarAction = async (
 		metadata: {
 			calendar_action: action,
 			calendar_provider: providerByAction[action],
-			previous_status: appointment.calendar_action_status
+			previous_status: appointment.calendar_action_status,
+			...(options.source ? { source: options.source } : {})
 		}
 	});
 };

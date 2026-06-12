@@ -10,8 +10,24 @@ import {
 	loadPublicAppointmentByToken,
 	type PublicAppointmentView
 } from '$lib/server/public-appointments';
-import { markCalendarOffered } from '$lib/server/calendar-tracking';
-import { classifyUserAgent, isLikelyBotUserAgent } from '$lib/device';
+import { canRegisterCalendarAction, markCalendarOffered } from '$lib/server/calendar-tracking';
+import {
+	buildAndroidCalendarIntentUrl,
+	isAndroidCalendarIntentVariant,
+	type AndroidCalendarIntentVariant
+} from '$lib/server/android-calendar-intent';
+import {
+	calendarDescriptionFor,
+	calendarLocationFor,
+	calendarSummaryFor
+} from '$lib/server/calendar-content';
+import { publicAppointmentUrl } from '$lib/server/messaging';
+import {
+	classifyUserAgent,
+	isLikelyBotUserAgent,
+	supportsAndroidCalendarIntent,
+	type DeviceClass
+} from '$lib/device';
 import { fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -20,6 +36,49 @@ const SOON_WINDOW_MS = 2 * 60 * 60 * 1000;
 const isStartingSoon = (appointment: PublicAppointmentView, now: Date) => {
 	const remaining = new Date(appointment.starts_at).getTime() - now.getTime();
 	return remaining > 0 && remaining <= SOON_WINDOW_MS;
+};
+
+// FASE 12 — modo del intent nativo Android: el override de QA `?ci=` gana sobre el
+// env (y fuerza el href aun fuera del gate de UA, para correr la matriz de
+// dispositivos sin redeploys); sin override rige ANDROID_CALENDAR_INTENT_MODE,
+// default off.
+const resolveAndroidIntentMode = (
+	url: URL
+): { variant: AndroidCalendarIntentVariant | null; forced: boolean } => {
+	const override = (url.searchParams.get('ci') ?? '').trim().toLowerCase();
+	if (override === 'off') return { variant: null, forced: true };
+	if (isAndroidCalendarIntentVariant(override)) return { variant: override, forced: true };
+	const fromEnv = (env.ANDROID_CALENDAR_INTENT_MODE ?? '').trim().toLowerCase();
+	if (isAndroidCalendarIntentVariant(fromEnv)) return { variant: fromEnv, forced: false };
+	return { variant: null, forced: false };
+};
+
+export type AndroidCalendarIntent = { url: string; variant: AndroidCalendarIntentVariant };
+
+const androidCalendarIntentFor = (
+	appointment: PublicAppointmentView | null,
+	device: DeviceClass,
+	userAgent: string | null,
+	url: URL
+): AndroidCalendarIntent | null => {
+	if (!appointment || device !== 'android') return null;
+	if (!canRegisterCalendarAction(appointment)) return null;
+	const { variant, forced } = resolveAndroidIntentMode(url);
+	if (!variant) return null;
+	if (!forced && !supportsAndroidCalendarIntent(userAgent)) return null;
+	return {
+		variant,
+		url: buildAndroidCalendarIntentUrl(variant, {
+			title: calendarSummaryFor(appointment),
+			description: calendarDescriptionFor(appointment),
+			location: calendarLocationFor(appointment),
+			startsAt: new Date(appointment.starts_at),
+			endsAt: new Date(appointment.ends_at),
+			// Fallback propio: si el intent no resuelve, Chrome navega acá y el
+			// tracking de Google queda registrado server-side con su origen.
+			fallbackUrl: `${publicAppointmentUrl(appointment.token)}/ir/google?source=android_native_fallback`
+		})
+	};
 };
 
 export const load: PageServerLoad = async ({ params, fetch, url, request, setHeaders }) => {
@@ -41,7 +100,8 @@ export const load: PageServerLoad = async ({ params, fetch, url, request, setHea
 			device,
 			isSoon: false,
 			vapidPublicKey,
-			publicSiteUrl
+			publicSiteUrl,
+			androidCalendarIntent: androidCalendarIntentFor(appointment, device, userAgent, url)
 		};
 	}
 
@@ -68,7 +128,8 @@ export const load: PageServerLoad = async ({ params, fetch, url, request, setHea
 			device,
 			isSoon: appointment ? isStartingSoon(appointment, now) : false,
 			vapidPublicKey,
-			publicSiteUrl
+			publicSiteUrl,
+			androidCalendarIntent: androidCalendarIntentFor(appointment, device, userAgent, url)
 		};
 	} catch (error) {
 		console.error('Error cargando turno publico', error);
@@ -81,7 +142,8 @@ export const load: PageServerLoad = async ({ params, fetch, url, request, setHea
 			device,
 			isSoon: false,
 			vapidPublicKey,
-			publicSiteUrl
+			publicSiteUrl,
+			androidCalendarIntent: null
 		};
 	}
 };

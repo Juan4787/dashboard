@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { classifyUserAgent, isLikelyBotUserAgent, refineDeviceClass } from './device';
+import {
+	classifyUserAgent,
+	isLikelyBotUserAgent,
+	refineDeviceClass,
+	supportsAndroidCalendarIntent
+} from './device';
 
 const UA = {
 	iphone:
@@ -13,7 +18,15 @@ const UA = {
 	windowsChrome:
 		'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
 	whatsappPreview: 'WhatsApp/2.23.20.0',
-	facebookBot: 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)'
+	facebookBot: 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
+	samsungInternet:
+		'Mozilla/5.0 (Linux; Android 14; SAMSUNG SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/23.0 Chrome/115.0.0.0 Mobile Safari/537.36',
+	androidWebView:
+		'Mozilla/5.0 (Linux; Android 13; Pixel 7 Build/TQ3A.230805.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/115.0.0.0 Mobile Safari/537.36',
+	instagramInApp:
+		'Mozilla/5.0 (Linux; Android 14; SM-S918B Build/UP1A.231005.007; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/125.0.0.0 Mobile Safari/537.36 Instagram 334.0.0.42.95 Android',
+	firefoxAndroid:
+		'Mozilla/5.0 (Android 14; Mobile; rv:126.0) Gecko/126.0 Firefox/126.0'
 };
 
 describe('classifyUserAgent', () => {
@@ -51,6 +64,29 @@ describe('isLikelyBotUserAgent', () => {
 
 	it('UA ausente cuenta como bot (no marcar offered)', () => {
 		expect(isLikelyBotUserAgent(null)).toBe(true);
+	});
+});
+
+describe('supportsAndroidCalendarIntent', () => {
+	it('acepta Chrome Android (incluye Custom Tabs: mismo UA) y Samsung Internet', () => {
+		expect(supportsAndroidCalendarIntent(UA.android)).toBe(true);
+		expect(supportsAndroidCalendarIntent(UA.samsungInternet)).toBe(true);
+	});
+
+	it('rechaza WebView embebido (wv / Version+Chrome) e Instagram in-app', () => {
+		expect(supportsAndroidCalendarIntent(UA.androidWebView)).toBe(false);
+		expect(supportsAndroidCalendarIntent(UA.instagramInApp)).toBe(false);
+	});
+
+	it('rechaza Firefox Android (no Chromium, sin fallback)', () => {
+		expect(supportsAndroidCalendarIntent(UA.firefoxAndroid)).toBe(false);
+	});
+
+	it('rechaza todo lo que no es Android', () => {
+		expect(supportsAndroidCalendarIntent(UA.iphone)).toBe(false);
+		expect(supportsAndroidCalendarIntent(UA.windowsChrome)).toBe(false);
+		expect(supportsAndroidCalendarIntent(null)).toBe(false);
+		expect(supportsAndroidCalendarIntent('')).toBe(false);
 	});
 });
 

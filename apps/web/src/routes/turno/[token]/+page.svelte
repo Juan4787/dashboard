@@ -14,6 +14,7 @@
 			isSoon: boolean;
 			vapidPublicKey: string | null;
 			publicSiteUrl: string;
+			androidCalendarIntent: { url: string; variant: 'data' | 'type' } | null;
 		};
 		form?: { success?: boolean; message?: string };
 	}>();
@@ -103,7 +104,31 @@
 	);
 	const needsCalendarUpdate = $derived(Boolean(appointment?.calendar_update_required_at));
 
-	type CalendarOption = { label: string; href: string; hint?: string };
+	// FASE 12 — copy del push por proximidad, espejo de las ventanas reales del job
+	// (24h y 2h): no se promete un aviso cuya ventana ya pasó.
+	const pushWindowsLabel = $derived.by(() => {
+		if (!appointment) return 'antes del turno';
+		const hoursUntil = (new Date(appointment.starts_at).getTime() - Date.now()) / 3_600_000;
+		if (hoursUntil > 24) return '24 horas y 2 horas antes del turno';
+		if (hoursUntil > 2) return '2 horas antes del turno';
+		return 'antes del turno';
+	});
+
+	// En Android el aviso fuerte es el push (CTA primario); el calendario pasa a
+	// conveniencia secundaria. Salvo cuando hay que ACTUALIZAR el calendario tras una
+	// reprogramación: ahí la tarea es de calendario y mantiene el botón primario.
+	const reminderIntro = $derived(
+		needsCalendarUpdate
+			? 'El turno cambió de fecha. Agregalo de nuevo para que tu calendario tenga el horario correcto.'
+			: device === 'android'
+				? 'Activá los avisos para que el teléfono te recuerde el turno y, si querés, guardalo también en tu calendario.'
+				: 'Agregá el turno a tu calendario para recibir avisos antes y tener la dirección a mano.'
+	);
+	const calendarSummaryClass = $derived(
+		device === 'android' && !needsCalendarUpdate ? 'ux-btn-secondary' : 'ux-btn-primary'
+	);
+
+	type CalendarOption = { label: string; href: string; hint?: string; isIntent?: boolean };
 	const calendarOptions = $derived.by((): CalendarOption[] => {
 		if (!appointment) return [];
 		if (device === 'ios') {
@@ -113,10 +138,21 @@
 			];
 		}
 		if (device === 'android') {
-			return [
-				{ label: 'Google Calendar', href: `${base}/ir/google`, hint: 'Recomendado' },
-				{ label: 'Calendario del teléfono', href: `${base}/calendario.ics?p=phone` }
-			];
+			// Sin .ics en el flujo principal Android (descarga archivo). El intent
+			// nativo va primero cuando la FASE 12 está activa; Google queda visible
+			// como escape (y es el destino del fallback automático del intent).
+			if (data.androidCalendarIntent) {
+				return [
+					{
+						label: 'Calendario del teléfono',
+						href: data.androidCalendarIntent.url,
+						hint: 'Recomendado',
+						isIntent: true
+					},
+					{ label: 'Google Calendar', href: `${base}/ir/google` }
+				];
+			}
+			return [{ label: 'Google Calendar', href: `${base}/ir/google`, hint: 'Recomendado' }];
 		}
 		if (device === 'desktop') {
 			return [
@@ -130,6 +166,27 @@
 			{ label: 'Google Calendar', href: `${base}/ir/google` }
 		];
 	});
+
+	// Registro best-effort del intento de intent nativo (audit-only en el server: NO
+	// cuenta como cobertura). Jamás bloquea la navegación del <a>.
+	const reportIntentAttempt = () => {
+		if (!data.androidCalendarIntent || data.demo) return;
+		const target = `${base}/calendario-intent`;
+		const payload = JSON.stringify({ variant: data.androidCalendarIntent.variant });
+		try {
+			if (navigator.sendBeacon?.(target, new Blob([payload], { type: 'application/json' }))) {
+				return;
+			}
+		} catch {
+			// sigue el fetch
+		}
+		fetch(target, {
+			method: 'POST',
+			keepalive: true,
+			headers: { 'content-type': 'application/json' },
+			body: payload
+		}).catch(() => {});
+	};
 
 	const copyDetailsText = $derived.by(() => {
 		if (!appointment || !whenLabels) return '';
@@ -161,6 +218,38 @@
 		}
 	};
 </script>
+
+{#snippet pushBlock(primary: boolean)}
+	{#if pushState !== 'unavailable'}
+		<div class="mt-4">
+			{#if pushState === 'subscribed'}
+				<p class="ux-alert ux-alert-success">
+					🔔 Avisos activados en este teléfono: te avisamos {pushWindowsLabel}.
+				</p>
+			{:else if pushState === 'denied'}
+				<p class="ux-empty">
+					Las notificaciones están bloqueadas en este navegador. Agregá el turno al
+					calendario para no olvidarte.
+				</p>
+			{:else}
+				<button
+					type="button"
+					class={primary ? 'ux-btn-primary w-full' : 'ux-btn-secondary w-full'}
+					disabled={pushState === 'working'}
+					onclick={enablePush}
+				>
+					{pushState === 'working' ? 'Activando…' : '🔔 Activar avisos en este teléfono'}
+				</button>
+				<p class="mt-2 text-center text-xs text-white/45">
+					Te avisamos {pushWindowsLabel}, sin instalar nada.
+				</p>
+				{#if pushState === 'error'}
+					<p class="ux-empty mt-2">No se pudo activar el aviso. Agregá el turno al calendario.</p>
+				{/if}
+			{/if}
+		</div>
+	{/if}
+{/snippet}
 
 {#snippet locationCard()}
 	<section class="ux-card">
@@ -247,14 +336,14 @@
 			{#if isActive}
 				<section class="ux-card">
 					<h2 class="ux-section-title">{needsCalendarUpdate ? 'Actualizá el calendario' : 'No te lo olvides'}</h2>
-					<p class="mt-2 text-sm text-white/70">
-						{needsCalendarUpdate
-							? 'El turno cambió de fecha. Agregalo de nuevo para que tu calendario tenga el horario correcto.'
-							: 'Agregá el turno a tu calendario para recibir avisos antes y tener la dirección a mano.'}
-					</p>
+					<p class="mt-2 text-sm text-white/70">{reminderIntro}</p>
 
-					<details class="mt-5 rounded-2xl border border-white/10 bg-white/[0.035]">
-						<summary class="ux-btn-primary block w-full cursor-pointer list-none text-center">
+					{#if device === 'android'}
+						{@render pushBlock(true)}
+					{/if}
+
+					<details class="mt-4 rounded-2xl border border-white/10 bg-white/[0.035]">
+						<summary class={`${calendarSummaryClass} block w-full cursor-pointer list-none text-center`}>
 							{needsCalendarUpdate ? '🔄 Actualizar calendario' : '📅 Agregar al calendario'}
 						</summary>
 						<div class="border-t border-white/10 p-4">
@@ -266,7 +355,11 @@
 							{/if}
 							<div class="grid gap-3">
 								{#each calendarOptions as option}
-									<a href={option.href} class="ux-choice flex items-center justify-between px-5 py-4">
+									<a
+										href={option.href}
+										class="ux-choice flex items-center justify-between px-5 py-4"
+										onclick={option.isIntent ? reportIntentAttempt : undefined}
+									>
 										<span class="font-bold text-white">{option.label}</span>
 										{#if option.hint}
 											<span class="ux-badge">{option.hint}</span>
@@ -274,39 +367,30 @@
 									</a>
 								{/each}
 							</div>
-							<p class="mt-4 text-xs text-white/45">
-								El evento incluye avisos sugeridos 24 horas y 2 horas antes, la dirección y este enlace.
-								Algunos calendarios usan tus recordatorios habituales.
-							</p>
+							{#if device === 'android'}
+								<p class="mt-4 text-xs text-white/45">
+									El evento guarda la dirección y este enlace; los avisos dependen de los
+									recordatorios habituales de tu calendario.
+									{#if pushState !== 'unavailable'}
+										Para avisos {pushWindowsLabel}, activá los avisos en este teléfono.
+									{/if}
+								</p>
+								<p class="mt-2 text-xs text-white/35">
+									<a href={`${base}/calendario-descargar.ics`} class="underline">
+										Descargar archivo de calendario (.ics)
+									</a>
+								</p>
+							{:else}
+								<p class="mt-4 text-xs text-white/45">
+									El evento incluye avisos sugeridos 24 horas y 2 horas antes, la dirección y este enlace.
+									Algunos calendarios usan tus recordatorios habituales.
+								</p>
+							{/if}
 						</div>
 					</details>
 
-					{#if pushState !== 'unavailable'}
-						<div class="mt-3">
-							{#if pushState === 'subscribed'}
-								<p class="ux-alert ux-alert-success">
-									🔔 Recordatorio activado en este dispositivo. Igual te recomendamos guardar el
-									turno en tu calendario.
-								</p>
-							{:else if pushState === 'denied'}
-								<p class="ux-empty">
-									Las notificaciones están bloqueadas en este navegador. El calendario sigue
-									siendo la mejor opción.
-								</p>
-							{:else}
-								<button
-									type="button"
-									class="ux-btn-secondary w-full"
-									disabled={pushState === 'working'}
-									onclick={enablePush}
-								>
-									{pushState === 'working' ? 'Activando…' : '🔔 Recibir recordatorio en este dispositivo'}
-								</button>
-								{#if pushState === 'error'}
-									<p class="ux-empty mt-2">No se pudo activar el recordatorio. Usá el calendario.</p>
-								{/if}
-							{/if}
-						</div>
+					{#if device !== 'android'}
+						{@render pushBlock(false)}
 					{/if}
 
 					<details class="mt-3 rounded-2xl border border-white/10 bg-white/[0.02]">

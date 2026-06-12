@@ -123,7 +123,7 @@
 	<div class="ux-card">
 		<h2 class="ux-section-title">Recordatorios push</h2>
 		<p class="mt-2 text-sm text-white/55">
-			Pacientes que activaron "Recibir recordatorio en este dispositivo" desde la página del turno.
+			Pacientes que activaron "Activar avisos en este teléfono" desde la página del turno.
 		</p>
 		<div class="mt-4 grid gap-3 sm:grid-cols-3">
 			<div class="ux-soft-card p-4">

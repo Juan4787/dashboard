@@ -293,6 +293,99 @@ iPad, Android Chrome, Samsung Internet, Android desde WhatsApp, desktop Chrome/F
    verificar SEQUENCE y banner → cancelar → verificar ICS CANCEL.
 5. Decisión documentada: pipeline Meta queda dormida; Recordatorios es el camino operativo.
 
+## FASE 12 — Android sin `.ics`: intent nativo + jerarquía de avisos (post-prueba real)
+
+> Origen: prueba en dispositivos reales (2026-06-12). En Android, el `.ics` descarga un
+> archivo que el paciente tiene que buscar y abrir a mano → DESCARTADO como flujo
+> principal Android. Además, no todos los Android tienen Google Calendar instalado, y
+> Google Calendar web móvil es un recordatorio débil. Esta fase reemplaza la fila
+> Android de la matriz de Fase 5.
+
+### Restricciones verificadas (se suman a §1)
+
+9. **Ninguna vía web puede garantizar alarmas 24h/2h en Android.** `ACTION_INSERT`
+   prellena título/fechas/lugar/descripción pero NO tiene extra documentado de
+   recordatorios; el template de Google ya estaba verificado (§1.1); el VALARM del
+   `.ics` solo lo respeta Apple (§1.7). En Android el evento queda con los defaults
+   del usuario (~30 min). ⇒ La única garantía 24h/2h en Android es el **push propio**,
+   que ya tiene exactamente esas ventanas (`claim_due_push_reminders`).
+10. **Chrome soporta `intent://` con fallback oficial** (`S.browser_fallback_url`,
+    que Chrome consume y no le llega a la app). Solo funciona desde un `<a href>` con
+    gesto real del usuario: si viene de JS sin gesto o de un redirect, va directo al
+    fallback. Extras tipados: `S.` string (URL-encoded), `l.` long (epoch millis).
+11. **Soporte por navegador Android**: Chromium con UI real (Chrome, Samsung Internet,
+    Edge; Custom Tabs = el Chrome del usuario, cubre WhatsApp) → OK. WebView crudo
+    (token `; wv)` en el UA: Instagram/Facebook/apps embebidas) → `ERR_UNKNOWN_URL_SCHEME`,
+    link muerto sin fallback. Firefox Android → sin soporte. ⇒ el href `intent://`
+    solo se emite tras un **gate de User-Agent**; fuera del gate, Android sigue con
+    Google Calendar como hasta ahora.
+
+### Decisiones
+
+1. **Jerarquía Android invertida.** CTA principal = push **"Activar avisos en este
+   teléfono"** con copy de beneficio explícito ("Te avisamos 24 h y 2 h antes del
+   turno"); el calendario pasa a conveniencia secundaria. iOS y desktop NO cambian
+   (iOS ya cumple el requisito completo vía `.ics` inline + VALARM; en desktop el
+   aviso fuerte vive en el teléfono).
+2. **Intent detrás de flag, con DOS variantes** (el matching de intent-filters varía
+   según la app de calendario; decide la matriz de dispositivos, no la especulación):
+   - `data`: `intent://com.android.calendar/events#Intent;scheme=content;action=android.intent.action.INSERT;…;end`
+   - `type`: `intent:#Intent;action=android.intent.action.INSERT;type=vnd.android.cursor.dir/event;…;end`
+   Flag: env `ANDROID_CALENDAR_INTENT_MODE` = `off` (default) | `data` | `type`.
+   Override de QA por query `?ci=off|data|type` (gana sobre el env y fuerza el href
+   incluso fuera del gate de UA, para correr la matriz sin redeploys; en manos de un
+   paciente solo cambia el href del botón, sin riesgo).
+3. **El intento NO cuenta como cobertura** (corrección sobre el borrador previo): el
+   click al intent se registra SOLO en `audit_logs`
+   (`appointment.calendar_intent_attempt`), sin tocar `calendar_action_status`.
+   Razón: el beacon dispara antes de saber si se abrió algo; si un intent fallido
+   marcara cobertura, el paciente desaparece de Recordatorios y se queda SIN ningún
+   aviso. Cobertura real solo la registran el fallback
+   `ir/google?source=android_native_fallback` (302 server-side, tracking de siempre)
+   o el push. Consistente con "`offered` nunca cuenta como cobertura".
+4. **`.ics` demovido en Android** a link terciario chico "Descargar archivo de
+   calendario (.ics)" (nunca más rotulado "Calendario del teléfono").
+5. **Sin lógica por marca** (Samsung/Xiaomi) salvo que la matriz demuestre necesidad.
+6. **Fine print honesto por dispositivo**: en Android no se prometen alarmas del
+   evento; la promesa 24h/2h vive en el push. En iOS se mantiene el texto actual.
+7. El copy del push es dinámico por proximidad: >24h → "24 h y 2 h antes";
+   2–24h → "2 h antes"; <2h → "antes del turno" (las ventanas del job ya se
+   comportan así).
+
+### Implementación
+
+- `lib/server/android-calendar-intent.ts`: builder puro de las dos variantes.
+  Encoding estricto: cada extra `S.` va con `encodeURIComponent` (sin `;`/`=`/saltos
+  crudos que rompan el parseo del Intent), `l.beginTime`/`l.endTime` en epoch millis,
+  `S.browser_fallback_url` URL absoluta encodeada. Tests de formato/encoding.
+- `lib/device.ts`: `supportsAndroidCalendarIntent(ua)` — gate Chromium-sin-WebView
+  (excluye `; wv)`, `Version/X … Chrome/`, FB/Instagram/Line, no-Chromium). Tests.
+- `/turno/[token]/+page.server.ts`: resuelve modo (query `?ci` > env > off), aplica
+  gate de UA (salvo override), arma el href con fallback absoluto
+  `…/ir/google?source=android_native_fallback` y pasa
+  `androidCalendarIntent: { url, variant } | null`.
+- `/turno/[token]/+page.svelte`: en Android el bloque push se renderiza ANTES del
+  calendario y con botón primario; el selector de calendario pasa a botón secundario;
+  la opción intent va primera dentro del selector (Google visible como escape);
+  beacon best-effort al tocar el intent (`navigator.sendBeacon` → fallback
+  `fetch keepalive`, nunca bloquea la navegación); `.ics` terciario.
+- `POST /turno/[token]/calendario-intent`: audit-only, responde 204 siempre,
+  valida token + turno vigente, DEMO_MODE no-op.
+- `ir/google`: acepta `?source=` (whitelist) y lo suma al metadata del audit.
+
+### Matriz de prueba (dispositivos reales, con `?ci=data` y `?ci=type`)
+
+- Samsung (Chrome directo, Chrome desde WhatsApp, Samsung Internet, con y sin
+  Google Calendar instalado), Xiaomi (Chrome, navegador propio), Pixel/Motorola
+  (Chrome directo y desde WhatsApp). Por cada combinación: ¿abre app nativa o
+  selector? ¿prellena título/fecha/lugar/descripción? ¿descarga algo? ¿cae al
+  fallback de Google? ¿no hace nada?
+- Éxito: abre calendario nativo o selector prellenado y guardar es 1 toque, sin
+  descarga; el fallback a Google funciona cuando el intent no resuelve.
+- Decisión posterior: si una variante funciona bien en Samsung → fijarla en el env
+  como default Android (gate mediante). Si es inconsistente → `off` y Android queda
+  push-first + Google (no se pierde nada respecto de hoy).
+
 ## Orden de PRs
 
 1. **PR 1** — Fases 0+1+2 (timezone, migración, ubicación + config + readiness).
@@ -393,6 +486,43 @@ iPad, Android Chrome, Samsung Internet, Android desde WhatsApp, desktop Chrome/F
   navegación client-side) + `reset()` tras intento fallido (token de un solo uso).
   Estado: 127 tests unitarios pasando, `svelte-check` 0 errores. Playwright NO se
   corrió en esta máquina (poca RAM): correr el smoke en staging/CI.
+
+- 2026-06-12 — **FASE 12 planificada.** La prueba real en Android confirmó que el
+  `.ics` descarga archivo (inaceptable como flujo principal). Investigación
+  verificada contra doc oficial de Chrome (intent: + `S.browser_fallback_url` +
+  requisito de gesto directo) y referencia de intents del calendario Android
+  (ACTION_INSERT sin extras de recordatorios → las alarmas 24h/2h en Android solo
+  las garantiza el push propio). Decisiones: jerarquía Android push-first, intent
+  con dos variantes detrás de `ANDROID_CALENDAR_INTENT_MODE` + override QA `?ci=`,
+  gate de UA Chromium-sin-WebView, tracking del intento audit-only (NO cobertura),
+  `.ics` terciario en Android. iOS y desktop sin cambios. Comienza implementación.
+- 2026-06-12 — **FASE 12 implementada completa.**
+  Librerías: `android-calendar-intent.ts` (builder puro de las variantes `data` y
+  `type`, encoding estricto con tests de round-trip que cubren `;`/`=`/saltos/tildes
+  y fallback completamente encodeado) y `supportsAndroidCalendarIntent` en
+  `device.ts` (acepta Chrome/Samsung Internet/Custom Tabs; rechaza WebView `wv`,
+  Instagram in-app, Firefox, no-Android — con tests de UA reales).
+  Server: `/turno/[token]` resuelve `?ci` > `ANDROID_CALENDAR_INTENT_MODE` > off,
+  aplica el gate de UA (salvo override de QA) y pasa `androidCalendarIntent`;
+  `POST calendario-intent` registra el intento SOLO en audit (204 siempre, valida
+  token + turno vigente, DEMO no-op); `ir/google` acepta `?source=` whitelisteado
+  y lo suma al audit (`android_native_fallback`).
+  UI `/turno/[token]`: en Android el push es CTA primario ("Activar avisos en este
+  teléfono", copy por proximidad 24h+2h / 2h / antes del turno), el calendario pasa
+  a botón secundario (salvo "Actualizar calendario" tras reprogramación, que sigue
+  primario), la opción intent va primera con beacon best-effort
+  (sendBeacon→fetch keepalive), Google visible como escape, `.ics` demovido a link
+  terciario "Descargar archivo de calendario (.ics)", fine print honesto (sin
+  prometer alarmas del evento en Android). iOS/desktop/unknown sin cambios; copy
+  referenciado en Configuración → Comunicación actualizado.
+  Verificación: 139 tests unitarios pasando (12 nuevos), `svelte-check` 0 errores,
+  y SSR manual en DEMO_MODE (curl): intent href bien formado en ambas variantes con
+  UA Android, `?ci=off`/default sin intent, desktop ignora `?ci`, beacon 204,
+  `ir/google?source=…` 302 a Google, fine print y `.ics` terciario presentes.
+  PENDIENTE (manual): matriz de dispositivos reales con `?ci=data` y `?ci=type`
+  (Samsung/Xiaomi/Pixel, Chrome/Samsung Internet/WhatsApp) y, según resultado,
+  fijar `ANDROID_CALENDAR_INTENT_MODE` en Netlify (default actual: off, Android
+  queda push-first + Google, sin pérdida respecto de hoy).
 
 ### Pendiente de rollout (manual, fuera del repo)
 
