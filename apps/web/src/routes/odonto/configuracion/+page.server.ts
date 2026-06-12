@@ -10,7 +10,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 	}
 
 	if (env.DEMO_MODE === 'true') {
-		return { demo: true, driveConnection: null, canLinkExternalFiles: true };
+		return { demo: true, driveConnection: null, canLinkExternalFiles: true, canViewSubscription: true };
 	}
 
 	const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
@@ -20,9 +20,10 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 		cookies
 	});
 	if (context?.role === 'professional') throw redirect(303, '/odonto/mis-turnos');
+	const canViewSubscription = context?.role === 'owner' || context?.role === 'admin';
 	const ownerId = await getAuthUserId(supabase, locals.auth.access_token);
 	if (!ownerId) {
-		return { demo: false, driveConnection: null, canLinkExternalFiles: false };
+		return { demo: false, driveConnection: null, canLinkExternalFiles: false, canViewSubscription };
 	}
 
 	const { data, error } = await supabase
@@ -38,7 +39,8 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 	return {
 		demo: false,
 		driveConnection: data ?? null,
-		canLinkExternalFiles: Boolean(context?.access.allowedCapabilities.canLinkExternalFiles)
+		canLinkExternalFiles: Boolean(context?.access.allowedCapabilities.canLinkExternalFiles),
+		canViewSubscription
 	};
 };
 

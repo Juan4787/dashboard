@@ -23,8 +23,10 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 	});
 	if (!context) throw kitError(500, 'No se pudo resolver el negocio activo');
 
+	if (context.role === 'professional') throw redirect(303, '/odonto/mis-turnos');
+	if (context.role === 'readonly') throw redirect(303, '/odonto/agenda');
 	if (context.role !== 'owner' && context.role !== 'admin') {
-		throw kitError(403, 'No tenés permisos para ver la suscripción.');
+		throw redirect(303, '/odonto/configuracion');
 	}
 
 	const { data: grants, error } = await supabase
