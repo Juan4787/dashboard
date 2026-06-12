@@ -58,10 +58,12 @@ describe('messaging helpers', () => {
 	});
 
 	it('construye una respuesta reactiva con el enlace público de reserva', () => {
-		const text = buildBotReplyText({ name: 'Consultorio Sonrisa', slug: 'sonrisa' });
+		const businessId = '11111111-1111-4111-8111-111111111111';
+		const text = buildBotReplyText({ id: businessId, name: 'Consultorio Sonrisa' });
 
 		expect(text).toContain('Consultorio Sonrisa');
-		expect(text).toContain('/reservar/sonrisa');
+		expect(text).toContain(`/reservar/${businessId}`);
+		expect(text).not.toContain('sonrisa');
 		expect(text).toContain('asesor');
 	});
 

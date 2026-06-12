@@ -69,6 +69,10 @@ export const load: PageServerLoad = async ({ params, fetch, url, setHeaders }) =
 			date: url.searchParams.get('date')
 		});
 
+		if (state.business && params.businessSlug !== state.business.id) {
+			throw redirect(302, `/reservar/${state.business.id}${url.search}`);
+		}
+
 		return {
 			state,
 			selected: {
@@ -82,7 +86,8 @@ export const load: PageServerLoad = async ({ params, fetch, url, setHeaders }) =
 			turnstileSiteKey: publicEnv.PUBLIC_TURNSTILE_SITE_KEY ?? null,
 			demo: false
 		};
-	} catch (error) {
+	} catch (error: any) {
+		if (error?.status && error?.location) throw error;
 		console.error('Error cargando reserva publica', error);
 		return {
 			state: {

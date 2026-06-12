@@ -251,7 +251,7 @@
 <section class="ux-page">
 	<div class="ux-hero">
 		<p class="ux-badge">Panel maestro</p>
-		<h1 class="ux-title mt-4">Accesos a Dental Suite</h1>
+		<h1 class="ux-title mt-4">Accesos a Cita Suite</h1>
 		<p class="ux-subtitle">
 			Gestioná acceso global por email y licencia comercial por consultorio. Los accesos existentes se preservan como permanentes.
 		</p>

@@ -154,10 +154,11 @@ export const getPublicBusinessBySlug = async (
 	supabase: SupabaseClient,
 	slug: string
 ): Promise<PublicBookingBusiness | null> => {
+	const isBusinessId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(slug);
 	const { data, error } = await supabase
 		.from('businesses')
 		.select(PUBLIC_BUSINESS_SELECT)
-		.eq('slug', slug)
+		.eq(isBusinessId ? 'id' : 'slug', slug)
 		.maybeSingle();
 	if (error) throw error;
 	return (data as PublicBookingBusiness | null) ?? null;

@@ -800,7 +800,7 @@
 												Ver profesional
 											</a>
 										{/if}
-										{#if member.status === 'active'}
+										{#if member.status === 'active' && member.role !== 'owner'}
 											<form method="POST" action="?/update_role" class="flex gap-2">
 												<input type="hidden" name="membership_id" value={member.id} />
 												<select name="role" disabled={!canManage} class="ux-select min-w-44">
@@ -811,13 +811,15 @@
 												<button type="submit" disabled={!canManage} class="ux-btn-secondary">Guardar</button>
 											</form>
 										{/if}
-										<form method="POST" action="?/remove_user">
-											<input type="hidden" name="access_id" value={member.id} />
-											<input type="hidden" name="status" value={member.status} />
-											<button type="submit" disabled={!canManage || member.user_id === data.currentUserId} class="ux-btn-danger">
-												Quitar
-											</button>
-										</form>
+										{#if member.role !== 'owner'}
+											<form method="POST" action="?/remove_user">
+												<input type="hidden" name="access_id" value={member.id} />
+												<input type="hidden" name="status" value={member.status} />
+												<button type="submit" disabled={!canManage || member.user_id === data.currentUserId} class="ux-btn-danger">
+													Quitar
+												</button>
+											</form>
+										{/if}
 									</div>
 								</div>
 							</div>

@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { page } from '$app/state';
 	import { formatDateTime, formatInTimeZone } from '$lib/utils/format';
 	import { refineDeviceClass, type DeviceClass } from '$lib/device';
 
@@ -14,6 +13,7 @@
 			device: DeviceClass;
 			isSoon: boolean;
 			vapidPublicKey: string | null;
+			publicSiteUrl: string;
 		};
 		form?: { success?: boolean; message?: string };
 	}>();
@@ -146,7 +146,7 @@
 			lines.push(`Indicaciones: ${appointment.business.address_instructions}`);
 		}
 		if (appointment.business.maps_link) lines.push(`Cómo llegar: ${appointment.business.maps_link}`);
-		lines.push(`Ver turno: ${page.url.origin}${base}`);
+		lines.push(`Ver turno: ${data.publicSiteUrl}${base}`);
 		return lines.join('\n');
 	});
 

@@ -43,7 +43,7 @@
 
 	const business = $derived(data.state.business);
 	const timezone = $derived(business?.timezone ?? 'America/Argentina/Cordoba');
-	const bookingPath = $derived(business?.slug ? `/reservar/${business.slug}` : page.url.pathname);
+	const bookingPath = $derived(page.url.pathname);
 
 	// ------------------------------------------------------------------
 	// Selección efectiva. El `slot` vive SOLO en la URL (el load del server

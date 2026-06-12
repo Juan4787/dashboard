@@ -1,5 +1,6 @@
 import { env } from '$env/dynamic/private';
 import { env as publicEnv } from '$env/dynamic/public';
+import { getPublicSiteUrl } from '$lib/server/messaging';
 import { createSupabaseAdminClient } from '$lib/server/supabase';
 import {
 	applyPublicAppointmentAction,
@@ -27,6 +28,7 @@ export const load: PageServerLoad = async ({ params, fetch, url, request, setHea
 	const userAgent = request.headers.get('user-agent');
 	const device = classifyUserAgent(userAgent);
 	const vapidPublicKey = publicEnv.PUBLIC_VAPID_PUBLIC_KEY?.trim() || null;
+	const publicSiteUrl = getPublicSiteUrl();
 
 	if (env.DEMO_MODE === 'true') {
 		const appointment = demoPublicAppointment(params.token);
@@ -38,7 +40,8 @@ export const load: PageServerLoad = async ({ params, fetch, url, request, setHea
 			demo: true,
 			device,
 			isSoon: false,
-			vapidPublicKey
+			vapidPublicKey,
+			publicSiteUrl
 		};
 	}
 
@@ -64,7 +67,8 @@ export const load: PageServerLoad = async ({ params, fetch, url, request, setHea
 			demo: false,
 			device,
 			isSoon: appointment ? isStartingSoon(appointment, now) : false,
-			vapidPublicKey
+			vapidPublicKey,
+			publicSiteUrl
 		};
 	} catch (error) {
 		console.error('Error cargando turno publico', error);
@@ -76,7 +80,8 @@ export const load: PageServerLoad = async ({ params, fetch, url, request, setHea
 			demo: false,
 			device,
 			isSoon: false,
-			vapidPublicKey
+			vapidPublicKey,
+			publicSiteUrl
 		};
 	}
 };

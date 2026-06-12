@@ -482,10 +482,9 @@
 		<div class="mx-auto hidden max-w-7xl items-center justify-between gap-6 px-6 py-4 md:flex">
 			<div class="flex min-w-0 items-center gap-3">
 				<picture>
-					<source srcset="/logo-mejorado.webp" type="image/webp" />
 					<img
-						src="/logo-mejorado.png"
-						alt="Dental Suite"
+						src="/logo-cita-suite.png"
+						alt="Cita Suite"
 						class="h-14 w-14 shrink-0 rounded-2xl"
 						width="56"
 						height="56"
@@ -585,9 +584,8 @@
 					}}
 				>
 					<picture>
-						<source srcset="/logo-mejorado.webp" type="image/webp" />
 						<img
-							src="/logo-mejorado.png"
+							src="/logo-cita-suite.png"
 							alt=""
 							class="h-10 w-10 shrink-0 rounded-xl"
 							width="40"
@@ -679,8 +677,8 @@
 			<div
 				class={`mb-4 rounded-2xl border px-4 py-3 text-sm font-bold ${
 					accessTone === 'danger'
-						? 'border-red-300 bg-red-50 text-red-900 dark:border-red-400/25 dark:bg-red-500/12 dark:text-red-100'
-						: 'border-amber-300 bg-amber-50 text-amber-950 dark:border-amber-400/25 dark:bg-amber-400/12 dark:text-amber-100'
+						? 'border-red-300 bg-red-50 text-red-900 dark:border-red-300/60 dark:bg-red-200 dark:text-red-950'
+						: 'border-amber-300 bg-amber-100 text-amber-950 dark:border-amber-200/70 dark:bg-amber-200 dark:text-amber-950'
 				}`}
 			>
 				{commercialNotice}

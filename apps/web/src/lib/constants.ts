@@ -26,3 +26,5 @@ export const CASE_EVENT_TYPES = [
 	'Visita',
 	'Nota'
 ] as const;
+
+export const PUBLIC_SITE_URL_FALLBACK = 'https://cita-suite.netlify.app';

@@ -5,7 +5,7 @@ const input: CalendarLinkInput = {
 	title: 'Turno en Clínica Sabrina',
 	startsAt: new Date('2026-06-15T17:30:00.000Z'),
 	endsAt: new Date('2026-06-15T18:00:00.000Z'),
-	details: 'Dirección: Av. Santa Fe 1234\nVer turno: https://turnos.example/turno/tok',
+	details: 'Dirección: Av. Santa Fe 1234\nVer turno: https://cita-suite.netlify.app/turno/tok',
 	location: 'Av. Santa Fe 1234, CABA',
 	timezone: 'America/Argentina/Cordoba'
 };

@@ -115,9 +115,16 @@ export const actions: Actions = {
 		const form = await request.formData();
 		const email = String(form.get('email') ?? '').trim().toLowerCase();
 		const password = String(form.get('password') ?? '');
+		const acceptedTerms = form.get('accepted_terms') === 'true';
 
 		if (!email || !password) {
 			return fail(400, { message: 'Completá correo electrónico y contraseña.', email });
+		}
+		if (!acceptedTerms) {
+			return fail(400, {
+				message: 'Para crear la cuenta tenés que aceptar los términos y condiciones.',
+				email
+			});
 		}
 		if (password.length < 6) {
 			return fail(400, { message: 'La contraseña debe tener al menos 6 caracteres', email });

@@ -1,5 +1,6 @@
 import { env } from '$env/dynamic/private';
 import { env as publicEnv } from '$env/dynamic/public';
+import { PUBLIC_SITE_URL_FALLBACK } from '$lib/constants';
 import crypto from 'crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { writeAuditLog } from './audit';
@@ -121,13 +122,13 @@ const toWhatsAppRecipient = (phoneE164: string) => phoneE164.replace(/\D/g, '');
 export const getPublicSiteUrl = () => {
 	const publicSiteUrl = (publicEnv as Record<string, string | undefined>).PUBLIC_SITE_URL;
 	const privateSiteUrl = (env as Record<string, string | undefined>).PUBLIC_SITE_URL;
-	const raw = publicSiteUrl?.trim() || privateSiteUrl?.trim() || 'http://localhost:5173';
+	const raw = publicSiteUrl?.trim() || privateSiteUrl?.trim() || PUBLIC_SITE_URL_FALLBACK;
 	return raw.replace(/\/$/, '');
 };
 
 export const publicAppointmentUrl = (token: string) => `${getPublicSiteUrl()}/turno/${token}`;
 
-export const bookingUrl = (slug: string) => `${getPublicSiteUrl()}/reservar/${slug}`;
+export const bookingUrl = (businessId: string) => `${getPublicSiteUrl()}/reservar/${businessId}`;
 
 export const resolveMessagingSecret = (secretName?: string | null) => {
 	const key = secretName?.trim() || 'WHATSAPP_ACCESS_TOKEN';
@@ -768,8 +769,8 @@ export const applyProviderMessageStatus = async (
 export const isHumanRequest = (text?: string | null) =>
 	/\b(asesor|humano|persona|recepci[oó]n|secretar[ií]a|hablar|ayuda)\b/i.test(text ?? '');
 
-export const buildBotReplyText = (business: { name: string; slug: string }) =>
-	`Hola. Somos ${business.name}.\n\nPara sacar turno, entrá acá:\n${bookingUrl(business.slug)}\n\nAhí elegís servicio, profesional, día y horario disponible.\n\nPara hablar con una persona, escribí "asesor".`;
+export const buildBotReplyText = (business: { id: string; name: string }) =>
+	`Hola. Somos ${business.name}.\n\nPara sacar turno, entrá acá:\n${bookingUrl(business.id)}\n\nAhí elegís servicio, profesional, día y horario disponible.\n\nPara hablar con una persona, escribí "asesor".`;
 
 export const sendBotBookingLinkReply = async (
 	supabase: SupabaseClient,

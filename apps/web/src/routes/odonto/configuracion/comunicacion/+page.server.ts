@@ -13,7 +13,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 			context: null,
 			account: null,
 			lastEvent: null,
-			bookingPath: '/reservar/consultorio-demo',
+			bookingPath: '/reservar/demo-business',
 			pushStats: { active: 0, sent7d: 0, revoked7d: 0 }
 		};
 	}
@@ -68,7 +68,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 		context,
 		account,
 		lastEvent,
-		bookingPath: `/reservar/${context.business.slug}`,
+		bookingPath: `/reservar/${context.business.id}`,
 		pushStats: {
 			active: activePush ?? 0,
 			sent7d: pushSent7d ?? 0,

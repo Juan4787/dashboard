@@ -5,6 +5,7 @@
 	const formEmail = $derived(form?.email ?? '');
 	let email = $state('');
 	let password = $state('');
+	let acceptedTerms = $state(false);
 
 	$effect(() => {
 		if (formEmail) {
@@ -17,10 +18,9 @@
 	<div class="w-full max-w-md rounded-3xl border border-white/10 bg-white/5 p-6 shadow-2xl backdrop-blur sm:p-8">
 		<div class="mb-7 flex flex-col items-center text-center">
 			<picture>
-				<source srcset="/logo-mejorado.webp" type="image/webp" />
-				<img src="/logo-mejorado.png" alt="Dental Suite" class="h-16 w-16 rounded-2xl shadow-lg" width="64" height="64" decoding="async" />
+				<img src="/logo-cita-suite.png" alt="Cita Suite" class="h-16 w-16 rounded-2xl shadow-lg" width="64" height="64" decoding="async" />
 			</picture>
-			<h1 class="mt-4 text-2xl font-bold text-white">Dental Suite</h1>
+			<h1 class="mt-4 text-2xl font-bold text-white">Cita Suite</h1>
 			<p class="mt-1 text-sm text-white/55">
 				{mode === 'register' ? 'Creá tu cuenta para empezar.' : 'Ingresá a tu consultorio.'}
 			</p>
@@ -90,6 +90,25 @@
 					</svg>
 					{form.message}
 				</p>
+			{/if}
+
+			{#if mode === 'register'}
+				<label class="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-left text-sm leading-5 text-white/70">
+					<input
+						name="accepted_terms"
+						type="checkbox"
+						value="true"
+						required
+						bind:checked={acceptedTerms}
+						class="mt-1 h-4 w-4 rounded border-white/20 bg-white/10 text-[#7c3aed] focus:ring-[#8b5cf6]"
+					/>
+					<span>
+						Leí y acepto los
+						<a href="/terminos" class="font-bold text-[#c4b5fd] hover:underline" target="_blank" rel="noreferrer">Términos y condiciones</a>
+						y la
+						<a href="/privacidad" class="font-bold text-[#c4b5fd] hover:underline" target="_blank" rel="noreferrer">Política de privacidad</a>.
+					</span>
+				</label>
 			{/if}
 
 			<button type="submit" class="ux-btn-primary w-full text-base">

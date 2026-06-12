@@ -1,4 +1,5 @@
 import { env } from '$env/dynamic/private';
+import { PUBLIC_SITE_URL_FALLBACK } from '$lib/constants';
 import { createSupabaseServerClient, isMasterEmail } from '$lib/server/supabase';
 import { fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
@@ -49,7 +50,7 @@ export const actions: Actions = {
 			env.DEPLOY_URL ??
 			(env.VERCEL_URL ? `https://${env.VERCEL_URL}` : '');
 		const baseUrl = rawSiteUrl ? rawSiteUrl.replace(/\/+$/, '') : '';
-		const redirectTo = baseUrl ? `${baseUrl}/reset/callback` : 'http://localhost:5173/reset/callback';
+		const redirectTo = `${baseUrl || PUBLIC_SITE_URL_FALLBACK}/reset/callback`;
 
 		const { error } = await supabase.auth.resetPasswordForEmail(email, {
 			redirectTo
