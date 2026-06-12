@@ -487,6 +487,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 
 	const { supabase, context, currentUserId } = await getUsersPageContext({ locals, fetch, cookies });
 	if (context.role === 'professional') throw redirect(303, '/odonto/mis-turnos');
+	if (context.role !== 'owner' && context.role !== 'admin') throw redirect(303, '/odonto/agenda');
 	const [members, services] = await Promise.all([
 		listRoleAccess(supabase, context.business.id),
 		listServices(supabase, context.business.id)

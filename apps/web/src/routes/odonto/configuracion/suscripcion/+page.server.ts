@@ -24,10 +24,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 	if (!context) throw kitError(500, 'No se pudo resolver el negocio activo');
 
 	if (context.role === 'professional') throw redirect(303, '/odonto/mis-turnos');
-	if (context.role === 'readonly') throw redirect(303, '/odonto/agenda');
-	if (context.role !== 'owner' && context.role !== 'admin') {
-		throw redirect(303, '/odonto/configuracion');
-	}
+	if (context.role !== 'owner' && context.role !== 'admin') throw redirect(303, '/odonto/agenda');
 
 	const { data: grants, error } = await supabase
 		.from('access_grants')

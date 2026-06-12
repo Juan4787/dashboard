@@ -87,19 +87,15 @@
 		if (activeBusiness?.role === 'readonly') {
 			return readonlyNav;
 		}
+		if (activeBusiness?.role === 'reception') {
+			return dailyNav.filter((item) => item.label !== 'Equipo' && item.label !== 'Configuración');
+		}
 		return dailyNav;
 	});
 
 	const canShowConfigMenu = $derived(
-		!commercialLockActive && activeBusiness?.role !== 'professional' && activeBusiness?.role !== 'readonly'
-	);
-	const canViewSubscription = $derived(
-		activeBusiness?.role === 'owner' || activeBusiness?.role === 'admin'
-	);
-	const visibleConfigNav = $derived.by(() =>
-		configNav.filter(
-			(item) => item.href !== '/odonto/configuracion/suscripcion' || canViewSubscription
-		)
+		!commercialLockActive &&
+			(activeBusiness?.role === 'owner' || activeBusiness?.role === 'admin')
 	);
 	const primaryMobileNav = $derived.by(() =>
 		visibleNav.filter((item) => item.label !== 'Configuración')
@@ -399,7 +395,7 @@
 							<p class="mt-4 px-1 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
 								Configuración
 							</p>
-							{#each visibleConfigNav as item}
+							{#each configNav as item}
 								<a
 									href={item.href}
 									class={`rounded-xl px-4 py-3 text-sm font-semibold transition ${
@@ -541,7 +537,7 @@
 									class="absolute left-1/2 top-full z-30 mt-3 w-64 -translate-x-1/2 rounded-2xl border border-neutral-200 bg-white p-2 shadow-2xl shadow-black/10 dark:border-white/10 dark:bg-[#101f35] dark:shadow-black/40"
 									role="menu"
 								>
-									{#each visibleConfigNav as configItem}
+									{#each configNav as configItem}
 										<a
 											href={configItem.href}
 											class={`block rounded-xl px-4 py-3 text-sm font-semibold transition ${

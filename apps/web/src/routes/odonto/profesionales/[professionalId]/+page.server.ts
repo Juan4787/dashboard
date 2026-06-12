@@ -69,7 +69,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 	}
 
 	const { supabase, business } = await getOdontoContext({ locals, fetch, cookies });
-	if (!business.canOperate) throw redirect(303, business.role === 'professional' ? '/odonto/mis-turnos' : '/odonto/agenda');
+	if (!business.canManage) throw redirect(303, business.role === 'professional' ? '/odonto/mis-turnos' : '/odonto/agenda');
 	const businessId = business.business.id;
 	const admin = await createSupabaseAdminClient('odonto', fetch);
 

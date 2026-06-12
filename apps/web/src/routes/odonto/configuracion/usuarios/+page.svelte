@@ -385,8 +385,6 @@
 	{/if}
 	{#if data.demo}
 		<p class="ux-empty">El equipo no se modifica en modo demo.</p>
-	{:else if !data.context.canManage}
-		<p class="ux-empty">Tu permiso actual permite ver el equipo, pero no administrarlo.</p>
 	{/if}
 
 	{#if showWizard}

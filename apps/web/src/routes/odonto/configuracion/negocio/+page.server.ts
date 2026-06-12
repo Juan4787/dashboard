@@ -37,6 +37,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 		throw kitError(500, 'No se pudo resolver el negocio activo');
 	}
 	if (context.role === 'professional') throw redirect(303, '/odonto/mis-turnos');
+	if (context.role !== 'owner' && context.role !== 'admin') throw redirect(303, '/odonto/agenda');
 
 	const [
 		{ count: services },

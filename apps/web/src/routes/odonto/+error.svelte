@@ -5,13 +5,13 @@
 	const homeHref = $derived(
 		$page.data?.activeBusiness?.role === 'professional' ? '/odonto/mis-turnos' : '/odonto/agenda'
 	);
-	const title = $derived(isNotFound ? 'No encontramos lo que buscás' : 'Algo no salió como esperábamos');
+	const title = $derived(isNotFound ? 'Página no encontrada' : 'No se pudo cargar la página');
 	const detail = $derived.by(() => {
 		const message = $page.error?.message ?? '';
 		if (!message || message === 'Internal Error' || message === 'Not Found') {
 			return isNotFound
 				? 'El contenido no existe o ya no está disponible.'
-				: 'Ocurrió un problema al cargar esta sección. Probá de nuevo en unos segundos.';
+				: 'Hubo una falla de conexión con el servidor. Reintentá en unos segundos.';
 		}
 		return message;
 	});

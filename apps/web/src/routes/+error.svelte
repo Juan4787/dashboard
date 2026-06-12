@@ -2,13 +2,13 @@
 	import { page } from '$app/stores';
 
 	const isNotFound = $derived($page.status === 404);
-	const title = $derived(isNotFound ? 'No encontramos esa página' : 'Algo no salió como esperábamos');
+	const title = $derived(isNotFound ? 'Página no encontrada' : 'No se pudo cargar la página');
 	const detail = $derived.by(() => {
 		const message = $page.error?.message ?? '';
 		if (!message || message === 'Internal Error' || message === 'Not Found') {
 			return isNotFound
 				? 'El enlace no existe o ya no está disponible.'
-				: 'Ocurrió un problema inesperado. Probá de nuevo en unos segundos.';
+				: 'Hubo una falla de conexión con el servidor. Reintentá en unos segundos.';
 		}
 		return message;
 	});

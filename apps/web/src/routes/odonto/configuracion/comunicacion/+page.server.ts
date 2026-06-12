@@ -21,7 +21,8 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 	const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
 	const context = await resolveActiveBusiness({ supabase, accessToken: locals.auth.access_token, cookies });
 	if (!context) throw kitError(500, 'No se pudo resolver el negocio activo');
-	if (context.role === 'professional' || context.role === 'readonly') throw redirect(303, '/odonto/agenda');
+	if (context.role === 'professional') throw redirect(303, '/odonto/mis-turnos');
+	if (context.role !== 'owner' && context.role !== 'admin') throw redirect(303, '/odonto/agenda');
 
 	const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 	const [
