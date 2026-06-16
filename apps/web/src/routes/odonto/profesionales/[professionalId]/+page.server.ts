@@ -4,6 +4,7 @@ import { writeAuditLog } from '$lib/server/audit';
 import { zonedDateTimeToUtc } from '$lib/server/availability';
 import { getOdontoContext } from '$lib/server/odonto-context';
 import { createSupabaseAdminClient } from '$lib/server/supabase';
+import { professionalHasFollowUps } from '$lib/server/follow-ups';
 import { idsFromForm, setProfessionalServices } from '$lib/server/professional-services';
 import { ensureDefaultServices, ensureDefaultServicesAssigned } from '$lib/server/default-services';
 import {
@@ -19,6 +20,7 @@ import {
 } from '$lib/server/professionals';
 import { formatPriceLabel } from '$lib/utils/money-input';
 import { parseTimeRanges } from '$lib/utils/time-ranges';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { error as kitError, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -52,6 +54,175 @@ const redirectToProfessional = (professionalId: string, tab = 'perfil') => {
 	throw redirect(303, `/odonto/profesionales/${professionalId}?tab=${tab}`);
 };
 
+type SaveResult<T = unknown> =
+	| { ok: true; data?: T }
+	| { ok: false; status: 400 | 403 | 500; message: string };
+
+const failSave = (result: Extract<SaveResult, { ok: false }>) =>
+	fail(result.status, { message: result.message });
+
+type OdontoSupabase = SupabaseClient<any, any, any>;
+
+const saveProfessionalProfile = async (
+	supabase: OdontoSupabase,
+	businessId: string,
+	professionalId: string,
+	form: FormData
+): Promise<SaveResult<{ email: string | null }>> => {
+	const name = String(form.get('name') ?? '').trim();
+	if (!name) return { ok: false, status: 400, message: 'El nombre es obligatorio.' };
+	const isAvailable = boolFromForm(form, 'is_available');
+	const email = normalizeProfessionalEmail(form.get('email'));
+	const existingProfessional = await findProfessionalByEmail(supabase, businessId, email, professionalId);
+	if (existingProfessional) {
+		return { ok: false, status: 400, message: humanProfessionalEmailConflict(existingProfessional) };
+	}
+
+	const { error } = await supabase
+		.from('professionals')
+		.update({
+			name,
+			specialty: String(form.get('specialty') ?? '').trim() || null,
+			phone: String(form.get('phone') ?? '').trim() || null,
+			email,
+			is_public: isAvailable,
+			is_active: isAvailable,
+			updated_at: new Date().toISOString()
+		})
+		.eq('business_id', businessId)
+		.eq('id', professionalId);
+
+	if (error) {
+		console.error('Error actualizando profesional', error);
+		return {
+			ok: false,
+			status: 500,
+			message: error.message?.includes('PROFESSIONAL_EMAIL_ALREADY_EXISTS')
+				? 'Ese correo ya está cargado en otro profesional.'
+				: 'No se pudo actualizar el profesional.'
+		};
+	}
+
+	return { ok: true, data: { email } };
+};
+
+const saveProfessionalServices = async (
+	supabase: OdontoSupabase,
+	businessId: string,
+	professionalId: string,
+	form: FormData
+): Promise<SaveResult<{ serviceIds: string[] }>> => {
+	const serviceIds = idsFromForm(form, 'service_id');
+
+	let defaultServiceIds: string[] = [];
+	try {
+		defaultServiceIds = await ensureDefaultServices(supabase, businessId);
+	} catch (defaultsError) {
+		console.error('No se pudieron asegurar los servicios predeterminados', defaultsError);
+	}
+
+	try {
+		await setProfessionalServices(supabase, businessId, professionalId, [
+			...defaultServiceIds,
+			...serviceIds
+		]);
+	} catch (assignmentError) {
+		console.error('Error asignando servicios al profesional', assignmentError);
+		const message =
+			assignmentError instanceof Error && assignmentError.message === 'INVALID_SERVICE_ASSIGNMENT'
+				? 'Algún servicio seleccionado no pertenece a este consultorio.'
+				: 'No se pudieron actualizar los servicios de este profesional.';
+		return { ok: false, status: 500, message };
+	}
+
+	return { ok: true, data: { serviceIds } };
+};
+
+const saveProfessionalWeeklyRules = async (
+	supabase: OdontoSupabase,
+	businessId: string,
+	professionalId: string,
+	form: FormData
+): Promise<SaveResult<{ weekdays: number[]; ranges: NonNullable<ReturnType<typeof parseTimeRanges>>; slotInterval: number }>> => {
+	const weekdays = form
+		.getAll('weekdays')
+		.map((value) => Number(value))
+		.filter((value) => Number.isInteger(value) && value >= 0 && value <= 6);
+	const uniqueWeekdays = [...new Set(weekdays)];
+	const interval = Number(form.get('slot_interval_minutes') ?? 15);
+	const parsedRanges = parseTimeRanges(String(form.get('time_ranges') ?? ''));
+	if (uniqueWeekdays.length === 0) return { ok: false, status: 400, message: 'Elegí al menos un día.' };
+	if (!parsedRanges || parsedRanges.length === 0) {
+		return { ok: false, status: 400, message: 'Escribí los horarios como 9 a 13 o 09:00-13:00.' };
+	}
+	const ranges = parsedRanges;
+	if (timeRangesOverlap(ranges)) {
+		return { ok: false, status: 400, message: 'Los horarios no pueden superponerse.' };
+	}
+	if (!Number.isInteger(interval) || interval < MIN_SLOT_INTERVAL_MINUTES || interval > MAX_SLOT_INTERVAL_MINUTES) {
+		return { ok: false, status: 400, message: 'El descanso entre consultas debe estar entre 5 y 120 minutos.' };
+	}
+
+	try {
+		await replaceProfessionalWeeklyRules(supabase, {
+			businessId,
+			professionalId,
+			weekdays: uniqueWeekdays,
+			ranges,
+			slotIntervalMinutes: interval
+		});
+	} catch (replaceError) {
+		console.error('Error guardando horarios', replaceError);
+		return { ok: false, status: 500, message: 'No se pudieron guardar los horarios.' };
+	}
+
+	return { ok: true, data: { weekdays: uniqueWeekdays, ranges, slotInterval: interval } };
+};
+
+const createAvailabilityException = async (
+	supabase: OdontoSupabase,
+	businessId: string,
+	professionalId: string,
+	timeZone: string,
+	form: FormData
+): Promise<SaveResult<{ id: string | null; professionalId: string | null; type: string }>> => {
+	const appliesTo = String(form.get('applies_to') ?? 'professional');
+	const targetProfessionalId = appliesTo === 'business' ? null : professionalId;
+	const type = String(form.get('type') ?? '').trim();
+	const date = String(form.get('date') ?? '').trim();
+	const timeRange = String(form.get('time_range') ?? '').trim();
+	const parsedRanges = timeRange ? parseTimeRanges(timeRange) : null;
+	if (parsedRanges && parsedRanges.length > 1) {
+		return { ok: false, status: 400, message: 'Para un cambio puntual cargá una sola franja horaria.' };
+	}
+	const parsedRange = parsedRanges?.[0] ?? null;
+	const startTime = parsedRange ? parsedRange.start : '';
+	const endTime = parsedRange ? parsedRange.end : '';
+	const startsAt = parseLocalDateTime(date, startTime, timeZone);
+	const endsAt = parseLocalDateTime(date, endTime, timeZone);
+	if (!startsAt || !endsAt || startsAt >= endsAt) return { ok: false, status: 400, message: 'La franja es inválida.' };
+	if (type !== 'blocked' && type !== 'extra_available') return { ok: false, status: 400, message: 'Tipo de cambio inválido.' };
+
+	const { data, error } = await supabase
+		.from('availability_exceptions')
+		.insert({
+			business_id: businessId,
+			professional_id: targetProfessionalId,
+			type,
+			starts_at: startsAt.toISOString(),
+			ends_at: endsAt.toISOString(),
+			reason: String(form.get('reason') ?? '').trim() || null
+		})
+		.select('id')
+		.single();
+	if (error) {
+		console.error('Error creando excepción', error);
+		return { ok: false, status: 500, message: 'No se pudo guardar el cambio puntual.' };
+	}
+
+	return { ok: true, data: { id: data?.id ?? null, professionalId: targetProfessionalId, type } };
+};
+
 export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url }) => {
 	if (!locals.auth) throw redirect(303, '/login');
 	if (env.DEMO_MODE === 'true') {
@@ -64,11 +235,12 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 			rules: [],
 			exceptions: [],
 			tab: url.searchParams.get('tab') ?? 'perfil',
+			userId: null,
 			demo: true
 		};
 	}
 
-	const { supabase, business } = await getOdontoContext({ locals, fetch, cookies });
+	const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
 	if (!business.canManage) throw redirect(303, business.role === 'professional' ? '/odonto/mis-turnos' : '/odonto/agenda');
 	const businessId = business.business.id;
 	const admin = await createSupabaseAdminClient('odonto', fetch);
@@ -104,7 +276,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 				.eq('professional_id', params.professionalId),
 			supabase
 				.from('availability_rules')
-				.select('id, weekday, start_time, end_time, slot_interval_minutes, is_active')
+				.select('id, weekday, start_time, end_time, slot_interval_minutes, is_active, created_at')
 				.eq('business_id', businessId)
 				.eq('professional_id', params.professionalId)
 				.order('weekday')
@@ -134,14 +306,15 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 		services: services ?? [],
 		assignedServiceIds: (assignments ?? []).map((item: any) => String(item.service_id)),
 		defaultServiceIds,
-		rules: rules ?? [],
-		exceptions: exceptions ?? [],
-		appointmentCount: appointmentCount ?? 0,
-		clinicalEntryCount: clinicalEntryCount ?? 0,
-		tab: url.searchParams.get('tab') ?? 'perfil',
-		demo: false
+			rules: rules ?? [],
+			exceptions: exceptions ?? [],
+			appointmentCount: appointmentCount ?? 0,
+			clinicalEntryCount: clinicalEntryCount ?? 0,
+			tab: url.searchParams.get('tab') ?? 'perfil',
+			userId,
+			demo: false
+		};
 	};
-};
 
 export const actions: Actions = {
 	update_profile: async ({ request, params, locals, fetch, cookies }) => {
@@ -151,42 +324,8 @@ export const actions: Actions = {
 		if (!business.canOperate) return fail(403, { message: 'No tenés permisos para editar profesionales.' });
 
 		const form = await request.formData();
-		const name = String(form.get('name') ?? '').trim();
-		if (!name) return fail(400, { message: 'El nombre es obligatorio.' });
-		const isAvailable = boolFromForm(form, 'is_available');
-		const email = normalizeProfessionalEmail(form.get('email'));
-		const existingProfessional = await findProfessionalByEmail(
-			supabase,
-			business.business.id,
-			email,
-			params.professionalId
-		);
-		if (existingProfessional) {
-			return fail(400, { message: humanProfessionalEmailConflict(existingProfessional) });
-		}
-
-		const { error } = await supabase
-			.from('professionals')
-			.update({
-				name,
-				specialty: String(form.get('specialty') ?? '').trim() || null,
-				phone: String(form.get('phone') ?? '').trim() || null,
-				email,
-				is_public: isAvailable,
-				is_active: isAvailable,
-				updated_at: new Date().toISOString()
-			})
-			.eq('business_id', business.business.id)
-			.eq('id', params.professionalId);
-
-		if (error) {
-			console.error('Error actualizando profesional', error);
-			return fail(500, {
-				message: error.message?.includes('PROFESSIONAL_EMAIL_ALREADY_EXISTS')
-					? 'Ese correo ya está cargado en otro profesional.'
-					: 'No se pudo actualizar el profesional.'
-			});
-		}
+		const profileResult = await saveProfessionalProfile(supabase, business.business.id, params.professionalId, form);
+		if (!profileResult.ok) return failSave(profileResult);
 
 		await writeAuditLog(supabase, {
 			businessId: business.business.id,
@@ -196,7 +335,7 @@ export const actions: Actions = {
 			entityId: params.professionalId
 		});
 
-		redirectToProfessional(params.professionalId, 'perfil');
+		return { success: true, message: 'Perfil guardado.' };
 	},
 
 	save_services: async ({ request, params, locals, fetch, cookies }) => {
@@ -206,29 +345,8 @@ export const actions: Actions = {
 		if (!business.canOperate) return fail(403, { message: 'No tenés permisos para asignar servicios.' });
 
 		const form = await request.formData();
-		const serviceIds = idsFromForm(form, 'service_id');
-
-		// Consulta y Otro servicio quedan asignados siempre, aunque no vengan en el formulario.
-		let defaultServiceIds: string[] = [];
-		try {
-			defaultServiceIds = await ensureDefaultServices(supabase, business.business.id);
-		} catch (defaultsError) {
-			console.error('No se pudieron asegurar los servicios predeterminados', defaultsError);
-		}
-
-		try {
-			await setProfessionalServices(supabase, business.business.id, params.professionalId, [
-				...defaultServiceIds,
-				...serviceIds
-			]);
-		} catch (assignmentError) {
-			console.error('Error asignando servicios al profesional', assignmentError);
-			const message =
-				assignmentError instanceof Error && assignmentError.message === 'INVALID_SERVICE_ASSIGNMENT'
-					? 'Algún servicio seleccionado no pertenece a este consultorio.'
-					: 'No se pudieron actualizar los servicios de este profesional.';
-			return fail(500, { message });
-		}
+		const servicesResult = await saveProfessionalServices(supabase, business.business.id, params.professionalId, form);
+		if (!servicesResult.ok) return failSave(servicesResult);
 
 		await writeAuditLog(supabase, {
 			businessId: business.business.id,
@@ -236,10 +354,10 @@ export const actions: Actions = {
 			action: 'professional.services_updated',
 			entityType: 'professional',
 			entityId: params.professionalId,
-			metadata: { service_ids: serviceIds }
+			metadata: { service_ids: servicesResult.data?.serviceIds ?? [] }
 		});
 
-		redirectToProfessional(params.professionalId, 'servicios');
+		return { success: true, message: 'Servicios guardados.' };
 	},
 
 	create_service: async ({ request, params, locals, fetch, cookies }) => {
@@ -300,7 +418,7 @@ export const actions: Actions = {
 			metadata: { professional_id: params.professionalId, name, duration_minutes: duration }
 		});
 
-		redirectToProfessional(params.professionalId, 'servicios');
+		return { success: true, message: 'Servicio creado y asignado.', serviceId: data.id };
 	},
 
 	save_weekly_rules: async ({ request, params, locals, fetch, cookies }) => {
@@ -310,38 +428,8 @@ export const actions: Actions = {
 		if (!business.canOperate) return fail(403, { message: 'No tenés permisos para editar horarios.' });
 
 		const form = await request.formData();
-		const weekdays = form
-			.getAll('weekdays')
-			.map((value) => Number(value))
-			.filter((value) => Number.isInteger(value) && value >= 0 && value <= 6);
-		const uniqueWeekdays = [...new Set(weekdays)];
-		const interval = Number(form.get('slot_interval_minutes') ?? 15);
-		const parsedRanges = parseTimeRanges(String(form.get('time_ranges') ?? ''));
-		if (uniqueWeekdays.length === 0) return fail(400, { message: 'Elegí al menos un día.' });
-		if (!parsedRanges || parsedRanges.length === 0) {
-			return fail(400, { message: 'Escribí los horarios como 9 a 13 o 09:00-13:00.' });
-		}
-		const ranges = parsedRanges;
-		if (timeRangesOverlap(ranges)) {
-			return fail(400, { message: 'Los horarios no pueden superponerse.' });
-		}
-		if (!Number.isInteger(interval) || interval < MIN_SLOT_INTERVAL_MINUTES || interval > MAX_SLOT_INTERVAL_MINUTES) {
-			return fail(400, { message: 'El intervalo debe estar entre 5 y 120 minutos.' });
-		}
-		const slotInterval = interval;
-
-		try {
-			await replaceProfessionalWeeklyRules(supabase, {
-				businessId: business.business.id,
-				professionalId: params.professionalId,
-				weekdays: uniqueWeekdays,
-				ranges,
-				slotIntervalMinutes: slotInterval
-			});
-		} catch (replaceError) {
-			console.error('Error guardando horarios', replaceError);
-			return fail(500, { message: 'No se pudieron guardar los horarios.' });
-		}
+		const scheduleResult = await saveProfessionalWeeklyRules(supabase, business.business.id, params.professionalId, form);
+		if (!scheduleResult.ok) return failSave(scheduleResult);
 
 		await writeAuditLog(supabase, {
 			businessId: business.business.id,
@@ -349,10 +437,14 @@ export const actions: Actions = {
 			action: 'availability_rules.replaced',
 			entityType: 'professional',
 			entityId: params.professionalId,
-			metadata: { weekdays: uniqueWeekdays, ranges, slot_interval_minutes: slotInterval }
+			metadata: {
+				weekdays: scheduleResult.data?.weekdays ?? [],
+				ranges: scheduleResult.data?.ranges ?? [],
+				slot_interval_minutes: scheduleResult.data?.slotInterval ?? null
+			}
 		});
 
-		redirectToProfessional(params.professionalId, 'horarios');
+		return { success: true, message: 'Horarios guardados.' };
 	},
 
 	delete_rule: async ({ request, params, locals, fetch, cookies }) => {
@@ -384,7 +476,7 @@ export const actions: Actions = {
 			entityId: ruleId
 		});
 
-		redirectToProfessional(params.professionalId, 'horarios');
+		return { success: true, message: 'Horario eliminado.' };
 	},
 
 	create_exception: async ({ request, params, locals, fetch, cookies }) => {
@@ -394,50 +486,28 @@ export const actions: Actions = {
 		if (!business.canOperate) return fail(403, { message: 'No tenés permisos para crear excepciones.' });
 
 		const form = await request.formData();
-		const appliesTo = String(form.get('applies_to') ?? 'professional');
-		const professionalId = appliesTo === 'business' ? null : params.professionalId;
-		const type = String(form.get('type') ?? '').trim();
-		const date = String(form.get('date') ?? '').trim();
-		const timeRange = String(form.get('time_range') ?? '').trim();
-		const parsedRanges = timeRange ? parseTimeRanges(timeRange) : null;
-		if (parsedRanges && parsedRanges.length > 1) {
-			return fail(400, { message: 'Para un cambio puntual cargá una sola franja horaria.' });
-		}
-		const parsedRange = parsedRanges?.[0] ?? null;
-		const startTime = parsedRange ? parsedRange.start : '';
-		const endTime = parsedRange ? parsedRange.end : '';
-		const startsAt = parseLocalDateTime(date, startTime, business.business.timezone);
-		const endsAt = parseLocalDateTime(date, endTime, business.business.timezone);
-		if (!startsAt || !endsAt || startsAt >= endsAt) return fail(400, { message: 'La franja es inválida.' });
-		if (type !== 'blocked' && type !== 'extra_available') return fail(400, { message: 'Tipo de cambio inválido.' });
-
-		const { data, error } = await supabase
-			.from('availability_exceptions')
-			.insert({
-				business_id: business.business.id,
-				professional_id: professionalId,
-				type,
-				starts_at: startsAt.toISOString(),
-				ends_at: endsAt.toISOString(),
-				reason: String(form.get('reason') ?? '').trim() || null
-			})
-			.select('id')
-			.single();
-		if (error) {
-			console.error('Error creando excepción', error);
-			return fail(500, { message: 'No se pudo guardar el cambio puntual.' });
-		}
+		const exceptionResult = await createAvailabilityException(
+			supabase,
+			business.business.id,
+			params.professionalId,
+			business.business.timezone,
+			form
+		);
+		if (!exceptionResult.ok) return failSave(exceptionResult);
 
 		await writeAuditLog(supabase, {
 			businessId: business.business.id,
 			userId,
 			action: 'availability_exception.created',
 			entityType: 'availability_exception',
-			entityId: data?.id ?? null,
-			metadata: { professional_id: professionalId, type }
+			entityId: exceptionResult.data?.id ?? null,
+			metadata: {
+				professional_id: exceptionResult.data?.professionalId ?? null,
+				type: exceptionResult.data?.type
+			}
 		});
 
-		redirectToProfessional(params.professionalId, 'horarios');
+		return { success: true, message: 'Cambio puntual guardado.' };
 	},
 
 	delete_exception: async ({ request, params, locals, fetch, cookies }) => {
@@ -468,7 +538,93 @@ export const actions: Actions = {
 			entityId: exceptionId
 		});
 
-		redirectToProfessional(params.professionalId, 'horarios');
+		return { success: true, message: 'Cambio puntual eliminado.' };
+	},
+
+	save_all: async ({ request, params, locals, fetch, cookies }) => {
+		if (!locals.auth) throw redirect(303, '/login');
+		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
+		const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
+		if (!business.canOperate) return fail(403, { message: 'No tenés permisos para editar profesionales.' });
+
+		const form = await request.formData();
+		const savedSections: string[] = [];
+
+		if (boolFromForm(form, 'save_profile')) {
+			const profileResult = await saveProfessionalProfile(supabase, business.business.id, params.professionalId, form);
+			if (!profileResult.ok) return failSave(profileResult);
+			await writeAuditLog(supabase, {
+				businessId: business.business.id,
+				userId,
+				action: 'professional.updated',
+				entityType: 'professional',
+				entityId: params.professionalId,
+				metadata: { via: 'save_all' }
+			});
+			savedSections.push('perfil');
+		}
+
+		if (boolFromForm(form, 'save_services')) {
+			const servicesResult = await saveProfessionalServices(supabase, business.business.id, params.professionalId, form);
+			if (!servicesResult.ok) return failSave(servicesResult);
+			await writeAuditLog(supabase, {
+				businessId: business.business.id,
+				userId,
+				action: 'professional.services_updated',
+				entityType: 'professional',
+				entityId: params.professionalId,
+				metadata: { via: 'save_all', service_ids: servicesResult.data?.serviceIds ?? [] }
+			});
+			savedSections.push('servicios');
+		}
+
+		if (boolFromForm(form, 'save_schedule')) {
+			const scheduleResult = await saveProfessionalWeeklyRules(supabase, business.business.id, params.professionalId, form);
+			if (!scheduleResult.ok) return failSave(scheduleResult);
+			await writeAuditLog(supabase, {
+				businessId: business.business.id,
+				userId,
+				action: 'availability_rules.replaced',
+				entityType: 'professional',
+				entityId: params.professionalId,
+				metadata: {
+					via: 'save_all',
+					weekdays: scheduleResult.data?.weekdays ?? [],
+					ranges: scheduleResult.data?.ranges ?? [],
+					slot_interval_minutes: scheduleResult.data?.slotInterval ?? null
+				}
+			});
+			savedSections.push('horarios');
+		}
+
+		if (boolFromForm(form, 'save_exception')) {
+			const exceptionResult = await createAvailabilityException(
+				supabase,
+				business.business.id,
+				params.professionalId,
+				business.business.timezone,
+				form
+			);
+			if (!exceptionResult.ok) return failSave(exceptionResult);
+			await writeAuditLog(supabase, {
+				businessId: business.business.id,
+				userId,
+				action: 'availability_exception.created',
+				entityType: 'availability_exception',
+				entityId: exceptionResult.data?.id ?? null,
+				metadata: {
+					via: 'save_all',
+					professional_id: exceptionResult.data?.professionalId ?? null,
+					type: exceptionResult.data?.type
+				}
+			});
+			savedSections.push('disponibilidad');
+		}
+
+		return {
+			success: true,
+			message: savedSections.length > 0 ? `Guardado: ${savedSections.join(', ')}.` : 'No había cambios pendientes.'
+		};
 	},
 
 	archive_professional: async ({ params, locals, fetch, cookies }) => {
@@ -543,16 +699,18 @@ export const actions: Actions = {
 
 		// No se puede eliminar un profesional con HISTORIAL (turnos o consultas clínicas):
 		// son registros de la agenda y de los pacientes que hay que conservar. Se archiva.
-		const [apptResult, entryResult] = await Promise.all([
+		const [apptResult, entryResult, followUpCount] = await Promise.all([
 			admin.from('appointments').select('id', { count: 'exact', head: true }).eq('business_id', businessId).eq('professional_id', profId),
-			admin.from('clinical_entries').select('id', { count: 'exact', head: true }).eq('business_id', businessId).eq('created_by_professional_id', profId)
+			admin.from('clinical_entries').select('id', { count: 'exact', head: true }).eq('business_id', businessId).eq('created_by_professional_id', profId),
+			professionalHasFollowUps(admin, businessId, profId)
 		]);
 		const apptCount = apptResult.count ?? 0;
 		const entryCount = entryResult.count ?? 0;
-		if (apptCount > 0 || entryCount > 0) {
+		if (apptCount > 0 || entryCount > 0 || followUpCount > 0) {
 			const parts: string[] = [];
 			if (apptCount > 0) parts.push(`${apptCount} turno${apptCount === 1 ? '' : 's'}`);
 			if (entryCount > 0) parts.push(`${entryCount} consulta${entryCount === 1 ? '' : 's'} clínica${entryCount === 1 ? '' : 's'}`);
+			if (followUpCount > 0) parts.push(`${followUpCount} seguimiento${followUpCount === 1 ? '' : 's'}`);
 			return fail(400, {
 				message: `No se puede eliminar a este profesional: tiene ${parts.join(' y ')} en su historial. Archivalo para conservar esos registros.`
 			});

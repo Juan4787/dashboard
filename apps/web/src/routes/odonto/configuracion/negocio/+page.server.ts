@@ -135,7 +135,6 @@ export const actions: Actions = {
 		const maps_url = String(form.get('maps_url') ?? '').trim();
 		const logo_url = String(form.get('logo_url') ?? '').trim();
 		const timezone = String(form.get('timezone') ?? '').trim() || 'America/Argentina/Cordoba';
-		const min_booking_notice_minutes = Number(form.get('min_booking_notice_minutes') ?? 1440);
 		const max_booking_days_ahead = Number(form.get('max_booking_days_ahead') ?? 60);
 		const cancellation_policy = String(form.get('cancellation_policy') ?? '').trim();
 
@@ -147,18 +146,6 @@ export const actions: Actions = {
 		}
 		if (!isBusinessIndustry(industry)) {
 			return fail(400, { message: 'La industria seleccionada no es válida.', values: Object.fromEntries(form) });
-		}
-		if (!Number.isInteger(min_booking_notice_minutes) || min_booking_notice_minutes < 0) {
-			return fail(400, {
-				message: 'La anticipación mínima debe ser un número entero mayor o igual a 0.',
-				values: Object.fromEntries(form)
-			});
-		}
-		if (min_booking_notice_minutes > 10080) {
-			return fail(400, {
-				message: 'La anticipación mínima no puede superar 7 días.',
-				values: Object.fromEntries(form)
-			});
 		}
 		if (!Number.isInteger(max_booking_days_ahead) || max_booking_days_ahead < 1 || max_booking_days_ahead > 90) {
 			return fail(400, {
@@ -219,8 +206,6 @@ export const actions: Actions = {
 				timezone,
 				public_booking_enabled: wantsPublicBooking,
 				whatsapp_enabled: form.get('whatsapp_enabled') === 'true',
-				allow_same_day_booking: form.get('allow_same_day_booking') === 'true',
-				min_booking_notice_minutes,
 				max_booking_days_ahead,
 				cancellation_policy: cancellation_policy || null,
 				is_active: form.get('is_active') === 'true',

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { afterNavigate } from '$app/navigation';
+	import DayFilterPicker from '$lib/components/agenda/DayFilterPicker.svelte';
 	import ManualAppointmentWizard from '$lib/components/agenda/ManualAppointmentWizard.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import { tick } from 'svelte';
@@ -18,6 +20,7 @@
 		internal_note: string | null;
 		patients?: { full_name: string; phone_e164: string | null; dni?: string | null; email?: string | null } | null;
 	};
+	type AppointmentGroups = { upcoming: Appointment[]; past: Appointment[] };
 	type Professional = { id: string; name: string; specialty?: string | null; is_active: boolean };
 	type Service = { id: string; name: string; duration_minutes: number };
 	type Patient = { id: string; full_name: string; phone_e164: string | null; blocked: boolean };
@@ -27,10 +30,11 @@
 		data: {
 			context: { canOperate: boolean };
 			date: string;
+			anyDay: boolean;
+			anyDayLimited: boolean;
 			selectedProfessionalId: string;
 			selectedStatus: string;
 			selectedServiceId: string;
-			selectedQuery: string;
 			selectedPatientId: string;
 			searchApplied: boolean;
 			appointments: Appointment[];
@@ -40,6 +44,7 @@
 			services: Service[];
 			serviceProfessionalIds: Record<string, string[]>;
 			patients: Patient[];
+			reminderCount?: number;
 			demo: boolean;
 		};
 		form?: { message?: string; values?: Record<string, unknown> };
@@ -83,14 +88,11 @@
 	const statCount = (status: string) => data.stats.find((stat: Stat) => stat.status === status)?.count ?? 0;
 	const statusFilterEntries = $derived(Object.entries(statusLabels));
 	const hasActiveSearch = $derived(
-		Boolean(data.selectedProfessionalId || data.selectedStatus || data.selectedServiceId || data.selectedQuery)
-	);
-	const resultLabel = $derived(
-		`${data.appointments.length} ${data.appointments.length === 1 ? 'turno' : 'turnos'}`
+		Boolean(data.selectedProfessionalId || data.selectedStatus || data.selectedServiceId || data.anyDay)
 	);
 	const searchSummary = $derived.by(() => {
 		const parts: string[] = [];
-		if (data.selectedQuery) parts.push(`"${data.selectedQuery}"`);
+		if (data.anyDay) parts.push('Cualquier día');
 		const professional = data.professionals.find((item: Professional) => item.id === data.selectedProfessionalId);
 		if (professional) parts.push(professional.name);
 		const service = data.services.find((item: Service) => item.id === data.selectedServiceId);
@@ -109,18 +111,106 @@
 	const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 	const prevDate = $derived(shiftDate(data.date, -1));
 	const nextDate = $derived(shiftDate(data.date, 1));
-	const isToday = $derived(data.date === todayStr);
+	const isToday = $derived(!data.anyDay && data.date === todayStr);
 	const buildAgendaHref = (date: string) => {
 		const params = new URLSearchParams();
 		params.set('date', date);
 		if (data.selectedProfessionalId) params.set('professional_id', data.selectedProfessionalId);
 		if (data.selectedServiceId) params.set('service_id', data.selectedServiceId);
 		if (data.selectedStatus) params.set('status', data.selectedStatus);
-		if (data.selectedQuery) params.set('q', data.selectedQuery);
 		return `/odonto/agenda?${params.toString()}`;
 	};
 	const weekHref = $derived(
 		`/odonto/agenda/semana?date=${data.date}${data.selectedProfessionalId ? `&professional_id=${data.selectedProfessionalId}` : ''}`
+	);
+
+	const localDateOf = (value: string) => {
+		const d = new Date(value);
+		return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+	};
+	const shortDayLabel = (value: string) => {
+		const d = new Date(value);
+		const label = new Intl.DateTimeFormat('es-AR', { weekday: 'short', day: 'numeric', month: 'short' }).format(d);
+		return d.getFullYear() === today.getFullYear() ? label : `${label} ${d.getFullYear()}`;
+	};
+
+	// Buscador en vivo: independiente de los filtros, busca por nombre o
+	// teléfono en todas las fechas a medida que se escribe.
+	let searchInput = $state('');
+	let liveResults = $state<AppointmentGroups | null>(null);
+	let liveLoading = $state(false);
+	let liveError = $state('');
+	let liveRequest = 0;
+
+	const liveQuery = $derived(searchInput.trim());
+	const liveActive = $derived(liveQuery.length > 0);
+
+	const loadLiveResults = async (query: string) => {
+		const request = ++liveRequest;
+		liveLoading = true;
+		liveError = '';
+		try {
+			const response = await fetch(`/odonto/agenda/buscar?q=${encodeURIComponent(query)}`);
+			const payload = await response.json();
+			if (request !== liveRequest) return;
+			if (!response.ok) {
+				liveResults = { upcoming: [], past: [] };
+				liveError = payload?.message ?? 'No se pudo buscar. Probá de nuevo.';
+				return;
+			}
+			liveResults = {
+				upcoming: Array.isArray(payload?.upcoming) ? payload.upcoming : [],
+				past: Array.isArray(payload?.past) ? payload.past : []
+			};
+		} catch {
+			if (request !== liveRequest) return;
+			liveResults = { upcoming: [], past: [] };
+			liveError = 'No se pudo buscar. Probá de nuevo.';
+		} finally {
+			if (request === liveRequest) liveLoading = false;
+		}
+	};
+
+	$effect(() => {
+		const query = liveQuery;
+		if (!query) {
+			liveRequest += 1;
+			liveResults = null;
+			liveLoading = false;
+			liveError = '';
+			return;
+		}
+		const timeout = window.setTimeout(() => void loadLiveResults(query), 200);
+		return () => window.clearTimeout(timeout);
+	});
+
+	// Al navegar (botón "Buscar", flechas de día, "Hoy") mandan los filtros:
+	// se limpia el buscador y la lista vuelve a los resultados del servidor.
+	afterNavigate(() => {
+		liveRequest += 1;
+		searchInput = '';
+		liveResults = null;
+		liveLoading = false;
+		liveError = '';
+	});
+
+	const splitByNow = (list: Appointment[]): AppointmentGroups => {
+		const nowIso = new Date().toISOString();
+		return {
+			upcoming: list.filter((appointment: Appointment) => appointment.starts_at >= nowIso),
+			past: list.filter((appointment: Appointment) => appointment.starts_at < nowIso)
+		};
+	};
+	const displayGroups = $derived.by((): AppointmentGroups | null => {
+		if (liveActive) return liveResults ?? { upcoming: [], past: [] };
+		if (data.anyDay) return splitByNow(data.appointments);
+		return null;
+	});
+	const visibleCount = $derived(
+		displayGroups ? displayGroups.upcoming.length + displayGroups.past.length : data.appointments.length
+	);
+	const resultLabel = $derived(
+		liveActive && liveResults === null ? '…' : `${visibleCount} ${visibleCount === 1 ? 'turno' : 'turnos'}`
 	);
 
 	const needsSetup = $derived(data.professionals.length === 0 || data.services.length === 0);
@@ -149,26 +239,58 @@
 	});
 </script>
 
+{#snippet appointmentRow(appointment: Appointment, showDate: boolean)}
+	<a
+		href={`/odonto/turnos/${appointment.id}?from_date=${showDate ? localDateOf(appointment.starts_at) : data.date}`}
+		class="ux-choice flex items-center gap-3 p-3 sm:gap-4 sm:p-4"
+	>
+		<div class={`shrink-0 text-center ${showDate ? 'w-16 sm:w-24' : 'w-14 sm:w-20'}`}>
+			{#if showDate}
+				<p class="text-[11px] font-bold uppercase tracking-wide text-[#c4b5fd]">{shortDayLabel(appointment.starts_at)}</p>
+			{/if}
+			<p class="text-xl font-bold text-white sm:text-2xl">{timeOnly(appointment.starts_at)}</p>
+			<p class="mt-0.5 text-xs text-white/40">{timeOnly(appointment.ends_at)}</p>
+		</div>
+		<div class="min-w-0 flex-1">
+			<p class="truncate text-base font-bold text-white sm:text-lg">{appointment.patients?.full_name ?? 'Paciente'}</p>
+			<p class="mt-0.5 truncate text-sm text-white/55">
+				{appointment.service_name_snapshot} · {appointment.professional_name_snapshot}
+			</p>
+			<div class="mt-2 flex flex-wrap gap-2">
+				<span class={statusTone[appointment.status] ?? 'ux-badge'}>{statusLabels[appointment.status] ?? appointment.status}</span>
+				{#if appointment.source === 'public_booking'}<span class="ux-badge">Online</span>{/if}
+			</div>
+		</div>
+		<svg class="h-5 w-5 shrink-0 text-white/30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6" /></svg>
+	</a>
+{/snippet}
+
 <section class="ux-page">
 	<div class="ux-hero">
 		<div class="flex items-center gap-2">
-			<a
-				href={buildAgendaHref(prevDate)}
-				class="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-white/10 bg-white/[0.04] text-white/80 transition hover:bg-white/10"
-				aria-label="Día anterior"
-			>
-				<svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m14 6-6 6 6 6" /></svg>
-			</a>
+			{#if !data.anyDay}
+				<a
+					href={buildAgendaHref(prevDate)}
+					class="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-white/10 bg-white/[0.04] text-white/80 transition hover:bg-white/10"
+					aria-label="Día anterior"
+				>
+					<svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m14 6-6 6 6 6" /></svg>
+				</a>
+			{/if}
 			<div class="min-w-0 flex-1 text-center">
-				<h1 class="text-lg font-bold leading-tight tracking-tight text-white sm:text-2xl lg:text-4xl">{dayLabel(data.date)}</h1>
+				<h1 class="text-lg font-bold leading-tight tracking-tight text-white sm:text-2xl lg:text-4xl">
+					{data.anyDay ? 'Cualquier día' : dayLabel(data.date)}
+				</h1>
 			</div>
-			<a
-				href={buildAgendaHref(nextDate)}
-				class="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-white/10 bg-white/[0.04] text-white/80 transition hover:bg-white/10"
-				aria-label="Día siguiente"
-			>
-				<svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m10 6 6 6-6 6" /></svg>
-			</a>
+			{#if !data.anyDay}
+				<a
+					href={buildAgendaHref(nextDate)}
+					class="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-white/10 bg-white/[0.04] text-white/80 transition hover:bg-white/10"
+					aria-label="Día siguiente"
+				>
+					<svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m10 6 6 6-6 6" /></svg>
+				</a>
+			{/if}
 		</div>
 
 		<div class="mt-5 flex flex-wrap items-center justify-center gap-2 sm:justify-start">
@@ -200,7 +322,7 @@
 	{#if (data.reminderCount ?? 0) > 0}
 		<div class="ux-alert ux-alert-warning">
 			📋 {data.reminderCount} {data.reminderCount === 1 ? 'turno de mañana sin calendario registrado' : 'turnos de mañana sin calendario registrado'}.
-			<a href="/odonto/recordatorios" class="font-bold underline">Ver recordatorios</a>
+			<a href="/odonto/recordatorios" class="font-bold underline">Ver turnos para recordar</a>
 		</div>
 	{/if}
 
@@ -220,15 +342,31 @@
 
 	{#if showSearch}
 		<div transition:slide={{ duration: 180 }} class="ux-card scroll-mt-5" bind:this={searchSection}>
-			<form method="GET" class="grid gap-4 lg:grid-cols-[1.25fr_1fr_1fr_1fr_1fr_auto]">
-				<label>
-					<span class="ux-label">Paciente, teléfono o servicio</span>
-					<input name="q" value={data.selectedQuery} placeholder="Buscar turno" class="ux-input" />
-				</label>
-				<label>
+			<label>
+				<span class="ux-label">Paciente o teléfono</span>
+				<input
+					type="search"
+					bind:value={searchInput}
+					placeholder="Ej: Juan Carlos"
+					autocomplete="off"
+					class="ux-input"
+				/>
+			</label>
+			<p class="mt-2 text-xs font-semibold text-white/40">
+				Busca en todas las fechas a medida que escribís, sin usar los filtros.
+			</p>
+
+			<div class="my-5 flex items-center gap-3" aria-hidden="true">
+				<span class="h-px flex-1 bg-white/10"></span>
+				<span class="text-xs font-bold uppercase tracking-wide text-white/40">O buscá con filtros</span>
+				<span class="h-px flex-1 bg-white/10"></span>
+			</div>
+
+			<form method="GET" class="grid gap-4 lg:grid-cols-[1.15fr_1fr_1fr_1fr_auto]">
+				<div>
 					<span class="ux-label">Día</span>
-					<input type="date" name="date" value={data.date} class="ux-input" />
-				</label>
+					<DayFilterPicker value={data.anyDay ? 'any' : data.date} />
+				</div>
 				<label>
 					<span class="ux-label">Profesional</span>
 					<select name="professional_id" class="ux-select">
@@ -284,15 +422,72 @@
 	<div class="ux-card">
 		<div class="flex items-center justify-between gap-3">
 			<div class="min-w-0">
-				<h2 class="ux-section-title">{hasActiveSearch ? 'Resultado de búsqueda' : 'Turnos del día'}</h2>
-				{#if searchSummary}
+				<h2 class="ux-section-title">
+					{liveActive ? 'Resultado del buscador' : hasActiveSearch ? 'Resultado de búsqueda' : 'Turnos del día'}
+				</h2>
+				{#if liveActive}
+					<p class="mt-1 truncate text-sm font-semibold text-white/50">“{liveQuery}”</p>
+				{:else if searchSummary}
 					<p class="mt-1 truncate text-sm font-semibold text-white/50">{searchSummary}</p>
 				{/if}
 			</div>
 			<span class="ux-badge shrink-0">{resultLabel}</span>
 		</div>
 
-		{#if data.appointments.length === 0}
+		{#if liveActive && liveLoading}
+			<p class="mt-4 text-sm font-semibold text-white/45" aria-live="polite">Buscando…</p>
+		{/if}
+		{#if liveActive && liveError}
+			<p class="ux-alert mt-4">{liveError}</p>
+		{/if}
+
+		{#if displayGroups}
+			{#if visibleCount > 0}
+				<div class="mt-5 grid gap-5">
+					{#if displayGroups.upcoming.length > 0}
+						<div>
+							<p class="text-xs font-bold uppercase tracking-wide text-white/40">Próximos</p>
+							<div class="mt-2 grid gap-3">
+								{#each displayGroups.upcoming as appointment (appointment.id)}
+									{@render appointmentRow(appointment, true)}
+								{/each}
+							</div>
+						</div>
+					{/if}
+					{#if displayGroups.past.length > 0}
+						<div>
+							<p class="text-xs font-bold uppercase tracking-wide text-white/40">Anteriores</p>
+							<div class="mt-2 grid gap-3">
+								{#each displayGroups.past as appointment (appointment.id)}
+									{@render appointmentRow(appointment, true)}
+								{/each}
+							</div>
+						</div>
+					{/if}
+				</div>
+				{#if !liveActive && data.anyDayLimited}
+					<p class="mt-4 text-sm font-semibold text-white/45">
+						Mostramos los turnos más cercanos a hoy. Refiná los filtros para acotar la búsqueda.
+					</p>
+				{/if}
+			{:else if liveActive && (liveLoading || liveResults === null)}
+				<!-- Esperando la primera respuesta del buscador. -->
+			{:else if liveActive}
+				<div class="mt-5">
+					<EmptyState
+						title="Sin resultados"
+						description={`No encontramos pacientes con nombre o teléfono que coincidan con “${liveQuery}”.`}
+					/>
+				</div>
+			{:else}
+				<div class="mt-5">
+					<EmptyState
+						title="Sin resultados"
+						description="No encontramos turnos con esa búsqueda. Probá con otros filtros."
+					/>
+				</div>
+			{/if}
+		{:else if data.appointments.length === 0}
 			<div class="mt-5">
 				{#if hasActiveSearch}
 					<EmptyState
@@ -315,27 +510,8 @@
 			</div>
 		{:else}
 			<div class="mt-5 grid gap-3">
-				{#each data.appointments as appointment}
-					<a
-						href={`/odonto/turnos/${appointment.id}?from_date=${data.date}`}
-						class="ux-choice flex items-center gap-3 p-3 sm:gap-4 sm:p-4"
-					>
-						<div class="w-14 shrink-0 text-center sm:w-20">
-							<p class="text-xl font-bold text-white sm:text-2xl">{timeOnly(appointment.starts_at)}</p>
-							<p class="mt-0.5 text-xs text-white/40">{timeOnly(appointment.ends_at)}</p>
-						</div>
-						<div class="min-w-0 flex-1">
-							<p class="truncate text-base font-bold text-white sm:text-lg">{appointment.patients?.full_name ?? 'Paciente'}</p>
-							<p class="mt-0.5 truncate text-sm text-white/55">
-								{appointment.service_name_snapshot} · {appointment.professional_name_snapshot}
-							</p>
-							<div class="mt-2 flex flex-wrap gap-2">
-								<span class={statusTone[appointment.status] ?? 'ux-badge'}>{statusLabels[appointment.status] ?? appointment.status}</span>
-								{#if appointment.source === 'public_booking'}<span class="ux-badge">Online</span>{/if}
-							</div>
-						</div>
-						<svg class="h-5 w-5 shrink-0 text-white/30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6" /></svg>
-					</a>
+				{#each data.appointments as appointment (appointment.id)}
+					{@render appointmentRow(appointment, false)}
 				{/each}
 			</div>
 		{/if}

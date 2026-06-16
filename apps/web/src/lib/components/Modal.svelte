@@ -1,7 +1,8 @@
 <script lang="ts">
 import { createEventDispatcher } from 'svelte';
 
-let { open = false, title = '', children, dismissible = false } = $props();
+// dismissible: cierra al click afuera / Escape. closable: muestra la X (cierre explícito) sin click-afuera.
+let { open = false, title = '', children, dismissible = false, closable = false } = $props();
 
 const dispatch = createEventDispatcher<{ close: void }>();
 const close = () => dispatch('close');
@@ -27,7 +28,7 @@ const close = () => dispatch('close');
 	<div class="w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-card dark:border dark:border-[#1f3554] dark:bg-[#0f1f36]">
 			<div class="flex items-center justify-between border-b border-neutral-100 px-6 py-4 dark:border-[#1f3554]">
 				<h3 class="text-lg font-semibold text-neutral-900 dark:text-white">{title}</h3>
-				{#if dismissible}
+				{#if dismissible || closable}
 					<button
 						type="button"
 						class="grid h-9 w-9 place-items-center rounded-full text-neutral-500 transition hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-[#13243d]"

@@ -81,7 +81,7 @@
 	<div class="ux-hero">
 		<div class="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
 			<div>
-				<h1 class="ux-title">Recordatorios</h1>
+				<h1 class="ux-title">Turnos para recordar</h1>
 				<p class="ux-subtitle">
 					Pacientes con turno {dayLabel} que no registraron el turno en su calendario.
 					Reforzá el recordatorio por WhatsApp: el mensaje ya sale escrito, solo revisás y enviás.

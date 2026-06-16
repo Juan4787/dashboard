@@ -36,7 +36,6 @@
 		other: 'Otro'
 	};
 	const industryLabel = (industry: BusinessIndustry) => industryLabels[industry] ?? industry;
-	const minNoticeOptions = [0, 60, 240, 1440, 2880];
 	const maxBookingOptions = [15, 30, 60, 90];
 	const timezoneOptions = [
 		'America/Argentina/Buenos_Aires',
@@ -45,7 +44,6 @@
 		'America/Argentina/Salta',
 		'America/Argentina/Tucuman'
 	];
-	const currentMinNotice = $derived(Number(valueOf('min_booking_notice_minutes', 1440)));
 	const currentMaxBookingDays = $derived(Number(valueOf('max_booking_days_ahead', 60)));
 	const isPublicReady = $derived(
 		business.is_active &&
@@ -195,20 +193,7 @@
 				<span class="ux-label">Logo (opcional)</span>
 				<input name="logo_url" value={valueOf('logo_url')} disabled={!canManage} class="ux-input" />
 			</label>
-			<label>
-				<span class="ux-label">Anticipación mínima</span>
-				<select name="min_booking_notice_minutes" disabled={!canManage} class="ux-select">
-					{#if !minNoticeOptions.includes(currentMinNotice)}
-						<option value={currentMinNotice} selected>{currentMinNotice} minutos</option>
-					{/if}
-					<option value="0" selected={valueOf('min_booking_notice_minutes', 1440) === '0'}>Sin anticipación mínima</option>
-					<option value="60" selected={valueOf('min_booking_notice_minutes', 1440) === '60'}>1 hora antes</option>
-					<option value="240" selected={valueOf('min_booking_notice_minutes', 1440) === '240'}>4 horas antes</option>
-					<option value="1440" selected={valueOf('min_booking_notice_minutes', 1440) === '1440'}>24 horas antes</option>
-					<option value="2880" selected={valueOf('min_booking_notice_minutes', 1440) === '2880'}>48 horas antes</option>
-				</select>
-			</label>
-			<label>
+			<label class="md:col-span-2">
 				<span class="ux-label">Mostrar horarios hasta</span>
 				<select name="max_booking_days_ahead" disabled={!canManage} class="ux-select">
 					{#if !maxBookingOptions.includes(currentMaxBookingDays)}
@@ -226,14 +211,10 @@
 			</label>
 		</div>
 
-		<div class="mt-6 grid gap-3 sm:grid-cols-2">
+		<div class="mt-6">
 			<label class="ux-choice flex items-center gap-3 px-4 py-3">
 				<input type="checkbox" name="public_booking_enabled" value="true" checked={checkedOf('public_booking_enabled', business.public_booking_enabled)} disabled={!canManage} class="accent-[#7c3aed]" />
 				<span class="font-bold text-white">Reserva online activa</span>
-			</label>
-			<label class="ux-choice flex items-center gap-3 px-4 py-3">
-				<input type="checkbox" name="allow_same_day_booking" value="true" checked={checkedOf('allow_same_day_booking', business.allow_same_day_booking)} disabled={!canManage} class="accent-[#7c3aed]" />
-				<span class="font-bold text-white">Permitir reservar turnos para hoy</span>
 			</label>
 		</div>
 

@@ -590,7 +590,7 @@ export const actions: Actions = {
 				interval < MIN_SLOT_INTERVAL_MINUTES ||
 				interval > MAX_SLOT_INTERVAL_MINUTES
 			) {
-				return fail(400, { message: 'Completá el intervalo: entre 5 y 120 minutos.', values });
+				return fail(400, { message: 'Completá el descanso entre consultas: entre 5 y 120 minutos.', values });
 			}
 
 			// Cambio puntual: opcional, pero si se carga debe ser válido.
@@ -783,6 +783,96 @@ export const actions: Actions = {
 		}
 
 		return { success: true, message: 'Rol asignado al consultorio.' };
+	},
+	make_attending: async ({ request, locals, fetch, cookies }) => {
+		if (!locals.auth) throw redirect(303, '/login');
+		if (env.DEMO_MODE === 'true') {
+			return fail(400, { message: 'No disponible en modo demo.' });
+		}
+
+		const form = await request.formData();
+		const targetUserId = String(form.get('user_id') ?? '').trim();
+		const professionalName = String(form.get('name') ?? '').trim();
+
+		const { supabase, context, currentUserId } = await getUsersPageContext({ locals, fetch, cookies });
+		if (!context.canManage) {
+			return fail(403, { message: 'No tenés permisos para administrar el equipo.' });
+		}
+		if (!targetUserId) return fail(400, { message: 'Elegí a la persona del equipo.' });
+		if (!professionalName) return fail(400, { message: 'El nombre profesional es obligatorio.' });
+
+		const currentAccess = await listRoleAccess(supabase, context.business.id);
+		const member = currentAccess.find((m) => m.status === 'active' && m.user_id === targetUserId);
+		if (!member) return fail(400, { message: 'No se encontró a esa persona activa en el equipo.' });
+		if (member.role !== 'owner' && member.role !== 'admin') {
+			return fail(400, {
+				message: 'Desde acá solo se configura como atendible al dueño o a un administrador.'
+			});
+		}
+		if (context.role === 'admin' && member.role === 'owner') {
+			return fail(403, { message: 'Un administrador no puede configurar al dueño.' });
+		}
+		if (member.professional_id) {
+			return fail(400, { message: 'Esa persona ya tiene un perfil profesional.' });
+		}
+
+		const businessId = context.business.id;
+		const admin = await createSupabaseAdminClient('odonto', fetch);
+
+		const { data: existingLink, error: existingLinkError } = await admin
+			.from('professional_users')
+			.select('id')
+			.eq('business_id', businessId)
+			.eq('user_id', targetUserId)
+			.limit(1)
+			.maybeSingle();
+		if (existingLinkError) {
+			console.error('Error verificando vínculo profesional', existingLinkError);
+			return fail(500, { message: 'No se pudo verificar el perfil profesional.' });
+		}
+		if (existingLink?.id) {
+			return fail(400, { message: 'Esa persona ya tiene un perfil profesional.' });
+		}
+
+		// Sin email: la identidad como usuario va por professional_users (evita choques de unicidad de email).
+		const { data: createdProfessional, error: createError } = await admin
+			.from('professionals')
+			.insert({ business_id: businessId, name: professionalName, is_active: true, is_public: true })
+			.select('id')
+			.single();
+		if (createError || !createdProfessional?.id) {
+			console.error('Error creando profesional atendible', createError);
+			return fail(500, { message: 'No se pudo crear el perfil profesional.' });
+		}
+		const professionalId = String(createdProfessional.id);
+
+		const { error: linkError } = await admin.from('professional_users').insert({
+			business_id: businessId,
+			professional_id: professionalId,
+			user_id: targetUserId
+		});
+		if (linkError) {
+			await admin.from('professionals').delete().eq('business_id', businessId).eq('id', professionalId);
+			console.error('Error vinculando profesional al usuario', linkError);
+			return fail(500, { message: 'No se pudo vincular el perfil profesional a la persona.' });
+		}
+
+		try {
+			await ensureDefaultServicesAssigned(supabase, businessId, professionalId);
+		} catch (defaultsError) {
+			console.error('No se pudieron asegurar servicios por defecto del atendible', defaultsError);
+		}
+
+		await writeAuditLog(admin, {
+			businessId,
+			userId: currentUserId,
+			action: 'professional.created_attending',
+			entityType: 'professional',
+			entityId: professionalId,
+			metadata: { user_id: targetUserId, name: professionalName }
+		});
+
+		throw redirect(303, `/odonto/profesionales/${professionalId}?tab=servicios`);
 	},
 	update_role: async ({ request, locals, fetch, cookies }) => {
 		if (!locals.auth) throw redirect(303, '/login');

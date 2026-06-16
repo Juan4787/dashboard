@@ -105,6 +105,9 @@ export const publicHash = (value?: string | null) => {
 	return crypto.createHash('sha256').update(normalized).digest('hex');
 };
 
+const hasVisibleProfessionalName = (professional: { name?: unknown } | null | undefined) =>
+	String(professional?.name ?? '').trim().length > 0;
+
 export const recordPublicBookingAttempt = async (
 	supabase: SupabaseClient,
 	input: BookingAttemptInput
@@ -205,7 +208,7 @@ export const getReservableServices = async (
 				.order('name'),
 			supabase
 				.from('professionals')
-				.select('id, is_active, is_public')
+				.select('id, name, is_active, is_public')
 				.eq('business_id', businessId)
 				.eq('is_active', true)
 				.eq('is_public', true),
@@ -215,7 +218,11 @@ export const getReservableServices = async (
 	if (professionalsError) throw professionalsError;
 	if (assignmentsError) throw assignmentsError;
 
-	const publicProfessionalIds = new Set((professionals ?? []).map((professional: any) => String(professional.id)));
+	const publicProfessionalIds = new Set(
+		(professionals ?? [])
+			.filter((professional: any) => hasVisibleProfessionalName(professional))
+			.map((professional: any) => String(professional.id))
+	);
 	const reservableServiceIds = new Set(
 		(assignments ?? [])
 			.filter((assignment: any) => publicProfessionalIds.has(String(assignment.professional_id)))
@@ -246,11 +253,11 @@ export const getReservableProfessionals = async (
 
 	return (data ?? [])
 		.map((row: any) => row.professionals)
-		.filter((professional: any) => professional?.is_active && professional?.is_public)
+		.filter((professional: any) => professional?.is_active && professional?.is_public && hasVisibleProfessionalName(professional))
 		.sort((a: any, b: any) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0) || String(a.name).localeCompare(String(b.name)))
 		.map((professional: any) => ({
 			id: String(professional.id),
-			name: String(professional.name),
+			name: String(professional.name).trim(),
 			specialty: professional.specialty ?? null,
 			avatar_url: professional.avatar_url ?? null
 		}));

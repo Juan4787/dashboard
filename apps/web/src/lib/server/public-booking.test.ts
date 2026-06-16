@@ -112,9 +112,10 @@ const queryBuilder = (data: unknown) => {
 	return builder;
 };
 
-const createSupabaseMock = () => ({
+const createSupabaseMock = (overrides: { professionalName?: string } = {}) => ({
 	from: (table: string) => ({
 		select: (columns: string) => {
+			const professionalName = overrides.professionalName ?? 'Dra. Uno';
 			if (table === 'businesses') return queryBuilder(business);
 			if (table === 'business_subscriptions') return queryBuilder(subscription);
 			if (table === 'services') {
@@ -132,7 +133,7 @@ const createSupabaseMock = () => ({
 				]);
 			}
 			if (table === 'professionals') {
-				return queryBuilder([{ id: 'pro-1', is_active: true, is_public: true }]);
+				return queryBuilder([{ id: 'pro-1', name: professionalName, is_active: true, is_public: true }]);
 			}
 			if (table === 'professional_services') {
 				if (columns.includes('professionals!inner')) {
@@ -141,7 +142,7 @@ const createSupabaseMock = () => ({
 							professional_id: 'pro-1',
 							professionals: {
 								id: 'pro-1',
-								name: 'Dra. Uno',
+								name: professionalName,
 								specialty: null,
 								avatar_url: null,
 								is_active: true,
@@ -205,6 +206,19 @@ describe('loadPublicBookingState (performance del flujo público)', () => {
 		expect(getAvailabilitySlotsMock).toHaveBeenCalledTimes(2);
 		const dates = state.days.map((day) => day.date);
 		expect(dates).toEqual([...dates].sort());
+	});
+
+	it('no ofrece profesionales públicos sin nombre visible', async () => {
+		const supabase = createSupabaseMock({ professionalName: '   ' }) as never;
+
+		const state = await loadPublicBookingState(supabase, {
+			slug: business.slug,
+			serviceId: 'svc-1'
+		});
+
+		expect(state.issue).toBe('no_services');
+		expect(state.professionals).toEqual([]);
+		expect(getAvailabilitySlotsMock).not.toHaveBeenCalled();
 	});
 
 	it('navegar de nuevo con la misma selección reusa el caché (cero escaneos nuevos)', async () => {

@@ -1,5 +1,65 @@
 import { describe, expect, it } from 'vitest';
-import { addMinutes, overlaps, zonedDateTimeToUtc } from './availability';
+import { addMinutes, getAvailabilitySlots, overlaps, zonedDateTimeToUtc } from './availability';
+
+const business = {
+	id: 'biz-1',
+	timezone: 'America/Argentina/Cordoba',
+	is_active: true,
+	public_booking_enabled: true,
+	min_booking_notice_minutes: 0,
+	max_booking_days_ahead: 30
+};
+
+const queryBuilder = (data: unknown) => {
+	const builder: Record<string, unknown> = {};
+	for (const method of ['eq', 'in', 'lt', 'gt', 'neq']) {
+		builder[method] = () => builder;
+	}
+	builder.maybeSingle = async () => ({ data, error: null });
+	(builder as { then: unknown }).then = (resolve: (value: unknown) => unknown) =>
+		resolve({ data, error: null });
+	return builder;
+};
+
+const supabaseForAvailability = (input: {
+	professionalName: string;
+	rules: unknown[];
+	exceptions?: unknown[];
+}) => ({
+	from: (table: string) => ({
+		select: () => {
+			if (table === 'services') {
+				return queryBuilder({
+					id: 'svc-1',
+					business_id: business.id,
+					name: 'Consulta',
+					duration_minutes: 30,
+					buffer_before_minutes: 0,
+					buffer_after_minutes: 0,
+					is_public: true,
+					is_active: true
+				});
+			}
+			if (table === 'professional_services') {
+				return queryBuilder([
+					{
+						professional_id: 'pro-1',
+						professionals: {
+							id: 'pro-1',
+							name: input.professionalName,
+							is_public: true,
+							is_active: true
+						}
+					}
+				]);
+			}
+			if (table === 'availability_rules') return queryBuilder(input.rules);
+			if (table === 'availability_exceptions') return queryBuilder(input.exceptions ?? []);
+			if (table === 'appointments') return queryBuilder([]);
+			return queryBuilder([]);
+		}
+	})
+});
 
 describe('availability core', () => {
 	it('detecta solapamientos con rango semiabierto', () => {
@@ -12,5 +72,60 @@ describe('availability core', () => {
 	it('convierte fecha/hora de Argentina a UTC sin depender del timezone del servidor', () => {
 		const utc = zonedDateTimeToUtc('2026-05-13', '09:30', 'America/Argentina/Cordoba');
 		expect(utc.toISOString()).toBe('2026-05-13T12:30:00.000Z');
+	});
+
+	it('no genera slots públicos para profesionales sin nombre visible', async () => {
+		const slots = await getAvailabilitySlots(
+			supabaseForAvailability({
+				professionalName: '   ',
+				rules: [
+					{
+						id: 'rule-1',
+						professional_id: 'pro-1',
+						weekday: 1,
+						start_time: '09:00',
+						end_time: '10:00',
+						slot_interval_minutes: 30,
+						is_active: true
+					}
+				]
+			}) as never,
+			{
+				business: business as never,
+				serviceId: 'svc-1',
+				fromDate: '2026-06-22',
+				toDate: '2026-06-22',
+				publicOnly: true
+			}
+		);
+
+		expect(slots).toEqual([]);
+	});
+
+	it('no genera slots públicos para profesionales sin horario semanal activo', async () => {
+		const slots = await getAvailabilitySlots(
+			supabaseForAvailability({
+				professionalName: 'Dra. Uno',
+				rules: [],
+				exceptions: [
+					{
+						id: 'exc-1',
+						professional_id: 'pro-1',
+						starts_at: '2026-06-22T12:00:00.000Z',
+						ends_at: '2026-06-22T13:00:00.000Z',
+						type: 'extra_available'
+					}
+				]
+			}) as never,
+			{
+				business: business as never,
+				serviceId: 'svc-1',
+				fromDate: '2026-06-22',
+				toDate: '2026-06-22',
+				publicOnly: true
+			}
+		);
+
+		expect(slots).toEqual([]);
 	});
 });

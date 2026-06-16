@@ -3,6 +3,7 @@
 	import { navigating } from '$app/stores';
 	import { onDestroy, onMount } from 'svelte';
 	import OdontoRouteSkeleton from '$lib/components/skeleton/OdontoRouteSkeleton.svelte';
+	import FollowUpsNotice from '$lib/components/seguimientos/FollowUpsNotice.svelte';
 
 	let { data, children } = $props();
 	let mobileMenuOpen = $state(false);
@@ -34,6 +35,7 @@
 
 	type NavItem = {
 		label: string;
+		shortLabel?: string;
 		href: string;
 		activePrefixes?: string[];
 		excludePrefixes?: string[];
@@ -41,23 +43,34 @@
 
 	const dailyNav: NavItem[] = [
 		{ label: 'Agenda', href: '/odonto/agenda', activePrefixes: ['/odonto/agenda', '/odonto/turnos'] },
-		{ label: 'Recordatorios', href: '/odonto/recordatorios', activePrefixes: ['/odonto/recordatorios'] },
-		{ label: 'Pacientes', href: '/odonto/pacientes', activePrefixes: ['/odonto/pacientes'] },
 		{
-			label: 'Equipo',
-			href: '/odonto/configuracion/usuarios',
-			activePrefixes: ['/odonto/configuracion/usuarios', '/odonto/profesionales']
+			label: 'Turnos para recordar',
+			shortLabel: 'Recordar',
+			href: '/odonto/recordatorios',
+			activePrefixes: ['/odonto/recordatorios']
 		},
+		{
+			label: 'Seguimientos',
+			shortLabel: 'Seguir',
+			href: '/odonto/seguimientos',
+			activePrefixes: ['/odonto/seguimientos']
+		},
+		{ label: 'Pacientes', href: '/odonto/pacientes', activePrefixes: ['/odonto/pacientes'] },
 		{
 			label: 'Configuración',
 			href: '/odonto/configuracion',
-			activePrefixes: ['/odonto/configuracion'],
-			excludePrefixes: ['/odonto/configuracion/usuarios']
+			activePrefixes: ['/odonto/configuracion', '/odonto/profesionales']
 		}
 	];
 
 	const professionalNav: NavItem[] = [
 		{ label: 'Mis turnos', href: '/odonto/mis-turnos', activePrefixes: ['/odonto/mis-turnos'] },
+		{
+			label: 'Seguimientos',
+			shortLabel: 'Seguir',
+			href: '/odonto/seguimientos',
+			activePrefixes: ['/odonto/seguimientos']
+		},
 		{ label: 'Pacientes', href: '/odonto/pacientes', activePrefixes: ['/odonto/pacientes'] }
 	];
 
@@ -68,6 +81,7 @@
 
 	const configNav: NavItem[] = [
 		{ label: 'Negocio', href: '/odonto/configuracion/negocio' },
+		{ label: 'Equipo', href: '/odonto/configuracion/usuarios' },
 		{ label: 'Suscripción', href: '/odonto/configuracion/suscripcion' },
 		{ label: 'Comunicación', href: '/odonto/configuracion/comunicacion' }
 	];
@@ -88,7 +102,7 @@
 			return readonlyNav;
 		}
 		if (activeBusiness?.role === 'reception') {
-			return dailyNav.filter((item) => item.label !== 'Equipo' && item.label !== 'Configuración');
+			return dailyNav.filter((item) => item.label !== 'Configuración');
 		}
 		return dailyNav;
 	});
@@ -200,7 +214,8 @@
 		if (path.startsWith('/odonto/profesionales')) return 'Equipo';
 		if (path.startsWith('/odonto/servicios')) return 'Equipo';
 		if (path.startsWith('/odonto/disponibilidad')) return 'Equipo';
-		if (path.startsWith('/odonto/recordatorios')) return 'Comunicación';
+		if (path.startsWith('/odonto/seguimientos')) return 'Seguimientos';
+		if (path.startsWith('/odonto/recordatorios')) return 'Turnos para recordar';
 		if (path.startsWith('/odonto/mensajes')) return 'Comunicación';
 		if (path.startsWith('/odonto/mis-turnos')) return 'Mis turnos';
 		if (path.startsWith('/odonto/configuracion')) return 'Configuración';
@@ -217,6 +232,7 @@
 		if (path.startsWith('/odonto/turnos/')) return '/odonto/agenda';
 		if (path.startsWith('/odonto/agenda/semana')) return '/odonto/agenda';
 		if (path.startsWith('/odonto/pacientes/')) return '/odonto/pacientes';
+		if (path.startsWith('/odonto/seguimientos/importantes')) return '/odonto/seguimientos';
 		if (path.startsWith('/odonto/profesionales/')) return '/odonto/configuracion/usuarios';
 		if (path.startsWith('/odonto/configuracion/usuarios')) return '/odonto/agenda';
 		if (path.startsWith('/odonto/configuracion/')) return '/odonto/configuracion';
@@ -230,6 +246,8 @@
 		if (routeId === '/odonto/agenda') return 'agenda';
 		if (routeId === '/odonto/turnos/[appointmentId]') return 'appointmentDetail';
 		if (routeId === '/odonto/mis-turnos') return 'appointments';
+		if (routeId === '/odonto/seguimientos') return 'config';
+		if (routeId === '/odonto/seguimientos/importantes') return 'config';
 		if (routeId === '/odonto/recordatorios') return 'config';
 		if (routeId === '/odonto/mensajes') return 'config';
 		if (routeId === '/odonto/disponibilidad') return 'professionals';
@@ -244,6 +262,7 @@
 		if (path.startsWith('/odonto/agenda')) return 'agenda';
 		if (path.startsWith('/odonto/turnos/')) return 'appointmentDetail';
 		if (path.startsWith('/odonto/mis-turnos')) return 'appointments';
+		if (path.startsWith('/odonto/seguimientos')) return 'config';
 		if (path.startsWith('/odonto/recordatorios')) return 'config';
 		if (path.startsWith('/odonto/mensajes')) return 'config';
 		if (path.startsWith('/odonto/disponibilidad')) return 'professionals';
@@ -688,6 +707,9 @@
 				{commercialNotice}
 			</div>
 		{/if}
+		{#if !commercialLockActive && data?.followUps?.count > 0}
+			<FollowUpsNotice notice={data.followUps} todayISO={data.followUpsTodayISO} />
+		{/if}
 		{#if commercialLockActive}
 			<section class="mx-auto mt-8 max-w-2xl rounded-3xl border border-amber-300/40 bg-amber-400/12 p-8 text-center shadow-2xl shadow-amber-950/10 dark:border-amber-400/25 dark:bg-amber-400/10">
 				<p class="mx-auto inline-flex rounded-full bg-amber-400/15 px-3 py-1 text-xs font-black uppercase tracking-wide text-amber-900 dark:text-amber-100">
@@ -726,6 +748,13 @@
 			{:else if label === 'Mis turnos'}
 				<rect x="3.5" y="5" width="17" height="15.5" rx="2.5" />
 				<path d="M3.5 9.5h17M8 3.5v3M16 3.5v3M9 14.7l2 2 4-4" />
+			{:else if label === 'Turnos para recordar'}
+				<path d="M18 8.5a6 6 0 0 0-12 0c0 6-2.5 8-2.5 8h17s-2.5-2-2.5-8" />
+				<path d="M13.7 20.5a2 2 0 0 1-3.4 0" />
+			{:else if label === 'Seguimientos'}
+				<rect x="4.5" y="4.5" width="15" height="16" rx="2.5" />
+				<path d="M9 4.5h6v2.5H9z" />
+				<path d="M8.5 12.5l2.2 2.2 4.8-4.8" />
 			{:else}
 				<circle cx="5.5" cy="12" r="1.4" fill="currentColor" stroke="none" />
 				<circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" />
@@ -756,7 +785,7 @@
 						>
 							{@render navIcon(item.label)}
 						</span>
-						{item.label}
+						{item.shortLabel ?? item.label}
 					</a>
 				{/each}
 				<button

@@ -2,7 +2,9 @@
 	import { deserialize } from '$app/forms';
 	import { page } from '$app/stores';
 	import { env } from '$env/dynamic/public';
+	import { invalidateAll } from '$app/navigation';
 	import Modal from '$lib/components/Modal.svelte';
+	import FollowUpComposer from '$lib/components/seguimientos/FollowUpComposer.svelte';
 	import DateTimePartsInput from '$lib/components/DateTimePartsInput.svelte';
 	import DatePartsInput from '$lib/components/DatePartsInput.svelte';
 	import { CLINICAL_ENTRY_TYPES } from '$lib/constants';
@@ -47,6 +49,7 @@
 	let showRadiographDeleteConfirm = $state(false);
 	let showRadiographModal = $state(false);
 	let showMobileActions = $state(false);
+	let showFollowUpModal = $state(false);
 	let deleteRadiographConfirmText = $state('');
 	let deleteRadiographTargetId = $state<string | null>(null);
 	let tab = $state<'historial' | 'datos' | 'radiografias'>('historial');
@@ -889,6 +892,11 @@ const openNewEntryModal = () => {
 	showEntryModal = true;
 };
 
+const handleFollowUpCreated = async () => {
+	showFollowUpModal = false;
+	await invalidateAll();
+};
+
 const preventEnterSubmit = (event: KeyboardEvent) => {
 	if (event.key !== 'Enter') return;
 	const target = event.target as HTMLElement | null;
@@ -960,6 +968,15 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 					>
 						+ Nuevo turno
 					</a>
+				{/if}
+				{#if data.followUpParticipates}
+					<button
+						class="ux-btn-secondary md:col-span-2 md:justify-self-start lg:col-span-1"
+						type="button"
+						onclick={() => (showFollowUpModal = true)}
+					>
+						+ Agregar seguimiento
+					</button>
 				{/if}
 			</div>
 		</div>
@@ -1735,6 +1752,18 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				Nuevo turno
 			</a>
 		{/if}
+		{#if data.followUpParticipates}
+			<button
+				type="button"
+				class="block w-full rounded-xl border border-[#7c3aed]/40 px-4 py-3 text-center text-sm font-semibold text-[#7c3aed] transition hover:bg-[#7c3aed]/10 dark:text-[#c4b5fd]"
+				onclick={() => {
+					showMobileActions = false;
+					showFollowUpModal = true;
+				}}
+			>
+				Agregar seguimiento
+			</button>
+		{/if}
 		{#if isProfessional}
 			<button
 				type="button"
@@ -1825,6 +1854,16 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 			</button>
 		</div>
 	</div>
+</Modal>
+
+<Modal open={showFollowUpModal} title="Agregar seguimiento" closable on:close={() => (showFollowUpModal = false)}>
+	<FollowUpComposer
+		patient={{ id: data.patient.id, full_name: data.patient.full_name }}
+		canAssign={data.followUpCanAssign}
+		todayISO={data.followUpTodayISO}
+		onCancel={() => (showFollowUpModal = false)}
+		onCreated={handleFollowUpCreated}
+	/>
 </Modal>
 
 <Modal open={showEntryModal} title={`Registrar consulta - ${data.patient.full_name}`} on:close={() => (showEntryModal = false)}>

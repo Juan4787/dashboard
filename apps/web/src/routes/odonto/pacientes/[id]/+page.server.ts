@@ -12,6 +12,11 @@ import { parseMoneyInteger } from '$lib/utils/money-input';
 import { fail, redirect, error as kitError } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import type { ClinicalEntry } from '$lib/types';
+import {
+	businessTodayISO,
+	roleParticipatesInFollowUps,
+	roleSeesAllFollowUps
+} from '$lib/server/follow-ups';
 
 const getLatestEntryDate = (patientId: string, entries: { patient_id: string; created_at: string }[]) =>
 	entries
@@ -369,6 +374,9 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 				canManageDriveFolders: true,
 				canManageRadiographs: true
 			},
+			followUpParticipates: false,
+			followUpCanAssign: false,
+			followUpTodayISO: '',
 			demo: true
 		};
 	}
@@ -571,6 +579,9 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 		role: context.role,
 		currentUserId: ownerId,
 		permissions,
+		followUpParticipates: roleParticipatesInFollowUps(context.role),
+		followUpCanAssign: roleSeesAllFollowUps(context.role),
+		followUpTodayISO: businessTodayISO(context.business.timezone),
 		demo: false
 	};
 };

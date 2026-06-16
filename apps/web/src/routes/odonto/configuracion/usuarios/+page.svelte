@@ -2,6 +2,7 @@
 	import type { BusinessContext, BusinessRole } from '$lib/server/business';
 	import { formatPriceLabel } from '$lib/utils/money-input';
 	import { normalizeTimeRangesInput, parseTimeRanges } from '$lib/utils/time-ranges';
+	import { enhance } from '$app/forms';
 
 	type RoleAccess = {
 		id: string;
@@ -64,6 +65,17 @@
 	const services = $derived(data.services as Service[]);
 	const customServices = $derived(services.filter((service) => !service.is_default));
 	const canManage = $derived(data.context.canManage && !data.demo);
+
+	// ----- Configurar atendible (dueño/admin que también atiende pacientes) -----
+	let showAttendingForm = $state(false);
+	let attendingUserId = $state('');
+	let attendingName = $state('');
+	let attendingError = $state('');
+	const attendingEligible = $derived(
+		members.filter((m) => m.status === 'active' && (m.role === 'owner' || m.role === 'admin'))
+	);
+	const attendingPending = $derived(attendingEligible.filter((m) => !m.professional_id && m.user_id));
+	const attendingActive = $derived(attendingEligible.filter((m) => m.professional_id));
 
 	// Categorías desplegables de la pantalla Equipo.
 	type Category = { id: string; title: string; role: BusinessRole };
@@ -240,7 +252,7 @@
 			}
 			const interval = Number(slotInterval);
 			if (!Number.isInteger(interval) || interval < 5 || interval > 120) {
-				intervalError = 'Completá el intervalo: entre 5 y 120 minutos.';
+				intervalError = 'Completá el descanso entre consultas: entre 5 y 120 minutos.';
 				valid = false;
 			} else {
 				intervalError = '';
@@ -629,7 +641,7 @@
 								{/if}
 							</label>
 							<label>
-								<span class="ux-label">Intervalo</span>
+								<span class="ux-label">Descanso entre consultas</span>
 								<input
 									type="number"
 									inputmode="numeric"
@@ -727,7 +739,7 @@
 						<p class="mt-1 text-xl font-black text-white">
 							{weeklyPreview.map((range) => `${range.start} a ${range.end}`).join(', ')}
 						</p>
-						<p class="mt-4 text-sm font-bold text-white/45">Intervalo</p>
+						<p class="mt-4 text-sm font-bold text-white/45">Descanso entre consultas</p>
 						<p class="mt-1 text-xl font-black text-white">{slotInterval} minutos</p>
 						{#if hasExceptionLoaded}
 							<p class="mt-4 text-sm font-bold text-white/45">Cambio puntual</p>
@@ -745,6 +757,89 @@
 				</div>
 			{/if}
 		</form>
+	{/if}
+
+	{#if attendingEligible.length > 0}
+		<div class="ux-card">
+			<h2 class="ux-section-title">¿El dueño o un administrador también atiende pacientes?</h2>
+			<p class="mt-2 text-sm text-white/55">
+				Si una persona del equipo también atiende pacientes, creá su perfil profesional para configurar
+				horarios y servicios: así aparece en la agenda y puede recibir turnos y seguimientos. No cambia su rol.
+			</p>
+
+			{#if attendingActive.length > 0}
+				<div class="mt-4 grid gap-2">
+					{#each attendingActive as m (m.id)}
+						<div class="ux-choice flex items-center justify-between gap-3 p-4">
+							<span class="min-w-0 truncate font-bold text-white">{m.email}</span>
+							<a href={`/odonto/profesionales/${m.professional_id}`} class="ux-btn-secondary shrink-0 text-sm">
+								Ver profesional
+							</a>
+						</div>
+					{/each}
+				</div>
+			{/if}
+
+			{#if attendingPending.length > 0}
+				{#if !showAttendingForm}
+					<button
+						type="button"
+						onclick={() => (showAttendingForm = true)}
+						disabled={!canManage}
+						class="ux-btn-primary mt-4 disabled:opacity-50"
+					>
+						Configurar
+					</button>
+				{:else}
+					<form
+						method="POST"
+						action="?/make_attending"
+						class="mt-4 grid gap-3"
+						use:enhance={() => {
+							attendingError = '';
+							return async ({ result }) => {
+								if (result.type === 'redirect') {
+									window.location.assign(result.location);
+									return;
+								}
+								if (result.type === 'failure') {
+									attendingError = (result.data?.message as string) ?? 'No se pudo configurar.';
+									return;
+								}
+								if (result.type === 'error') {
+									attendingError = 'Ocurrió un error. Intentá de nuevo.';
+								}
+							};
+						}}
+					>
+						<label class="block">
+							<span class="ux-label">Persona del equipo</span>
+							<select name="user_id" bind:value={attendingUserId} required class="ux-select">
+								<option value="" disabled>Elegí…</option>
+								{#each attendingPending as m (m.id)}
+									<option value={m.user_id}>{m.email} · {roleLabels[m.role]}</option>
+								{/each}
+							</select>
+						</label>
+						<label class="block">
+							<span class="ux-label">Nombre profesional (como aparece en la agenda)</span>
+							<input name="name" bind:value={attendingName} placeholder="Ej: Dr. Juan Pérez" required class="ux-input" />
+						</label>
+						{#if attendingError}<p class="ux-alert">{attendingError}</p>{/if}
+						<div class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+							<button type="button" onclick={() => (showAttendingForm = false)} class="ux-btn-secondary">Cancelar</button>
+							<button type="submit" disabled={!canManage} class="ux-btn-primary disabled:opacity-50">
+								Crear perfil profesional
+							</button>
+						</div>
+					</form>
+				{/if}
+			{:else}
+				<p class="mt-4 text-sm text-white/45">
+					Todos los dueños y administradores del equipo ya tienen su perfil profesional.
+				</p>
+			{/if}
+		</div>
 	{/if}
 
 	<div class="grid gap-4">
@@ -793,7 +888,7 @@
 									</div>
 
 									<div class="flex flex-col gap-2 sm:flex-row sm:items-center">
-										{#if member.role === 'professional' && member.professional_id}
+										{#if member.professional_id && (member.role === 'professional' || member.role === 'owner' || member.role === 'admin')}
 											<a href={`/odonto/profesionales/${member.professional_id}`} class="ux-btn-primary text-center">
 												Ver profesional
 											</a>

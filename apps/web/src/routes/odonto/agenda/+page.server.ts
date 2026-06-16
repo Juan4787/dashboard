@@ -29,28 +29,13 @@ const todayForTimezone = (timeZone: string) => {
 	return `${parts.year}-${parts.month}-${parts.day}`;
 };
 
-const normalizeSearch = (value: string) =>
-	value
-		.trim()
-		.toLowerCase()
-		.normalize('NFD')
-		.replace(/\p{Diacritic}/gu, '');
+const APPOINTMENT_COLUMNS =
+	'id, patient_id, service_id, professional_id, starts_at, ends_at, status, source, service_name_snapshot, professional_name_snapshot, internal_note, cancelled_reason, patients(full_name, phone_e164, dni, email)';
 
-const appointmentMatchesQuery = (appointment: any, query: string) => {
-	if (!query) return true;
-	const haystack = [
-		appointment.patients?.full_name,
-		appointment.patients?.phone_e164,
-		appointment.patients?.dni,
-		appointment.patients?.email,
-		appointment.service_name_snapshot,
-		appointment.professional_name_snapshot,
-		appointment.internal_note
-	]
-		.map((value) => normalizeSearch(String(value ?? '')))
-		.join(' ');
-	return haystack.includes(query);
-};
+// Tope por grupo (próximos/anteriores) al buscar con "Cualquier día".
+const ANY_DAY_LIMIT = 100;
+
+const isIsoDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
 
 export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 	if (!locals.auth) throw redirect(303, '/login');
@@ -58,10 +43,11 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 		return {
 			context: demoBusinessContext(),
 			date: today(),
+			anyDay: false,
+			anyDayLimited: false,
 			selectedProfessionalId: '',
 			selectedStatus: '',
 			selectedServiceId: '',
-			selectedQuery: '',
 			selectedPatientId: '',
 			searchApplied: false,
 			appointments: [],
@@ -78,28 +64,55 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 
 	const { supabase, business } = await getOdontoContext({ locals, fetch, cookies });
 	if (business.role === 'professional') throw redirect(303, '/odonto/mis-turnos');
-	const date = url.searchParams.get('date') ?? todayForTimezone(business.business.timezone);
+	const dateParam = String(url.searchParams.get('date') ?? '').trim();
+	const anyDay = dateParam === 'any';
+	// Las fechas malformadas caen en "hoy" (antes rompían zonedDateTimeToUtc).
+	const date = !anyDay && isIsoDate(dateParam) ? dateParam : todayForTimezone(business.business.timezone);
 	const professionalId = url.searchParams.get('professional_id') ?? '';
 	const status = url.searchParams.get('status') ?? '';
 	const serviceId = url.searchParams.get('service_id') ?? '';
-	const query = String(url.searchParams.get('q') ?? '').trim();
 	const patientId = url.searchParams.get('patient_id') ?? '';
-	const normalizedQuery = normalizeSearch(query);
 	const searchApplied =
-		url.searchParams.has('date') ||
-		Boolean(professionalId || status || serviceId || normalizedQuery || patientId);
-	const dayStart = zonedDateTimeToUtc(date, '00:00', business.business.timezone);
-	const dayEnd = zonedDateTimeToUtc(date, '23:59', business.business.timezone);
+		url.searchParams.has('date') || Boolean(professionalId || status || serviceId || patientId);
 
-	const { data: dayAppointments, error: appointmentsError } = await supabase
-		.from('appointments')
-		.select(
-			'id, patient_id, service_id, professional_id, starts_at, ends_at, status, source, service_name_snapshot, professional_name_snapshot, internal_note, cancelled_reason, patients(full_name, phone_e164, dni, email)'
-		)
-		.eq('business_id', business.business.id)
-		.gte('starts_at', dayStart.toISOString())
-		.lte('starts_at', dayEnd.toISOString())
-		.order('starts_at');
+	let dayAppointments: any[] | null = null;
+	let appointmentsError: unknown = null;
+	let anyDayLimited = false;
+	if (anyDay) {
+		// "Cualquier día": los filtros van directo a SQL y se traen dos ventanas
+		// acotadas — próximos (ascendente) y anteriores (descendente).
+		const baseQuery = () => {
+			let builder = supabase
+				.from('appointments')
+				.select(APPOINTMENT_COLUMNS)
+				.eq('business_id', business.business.id);
+			if (professionalId) builder = builder.eq('professional_id', professionalId);
+			if (serviceId) builder = builder.eq('service_id', serviceId);
+			if (patientId) builder = builder.eq('patient_id', patientId);
+			if (status) builder = builder.eq('status', status);
+			return builder;
+		};
+		const nowIso = new Date().toISOString();
+		const [upcomingResult, pastResult] = await Promise.all([
+			baseQuery().gte('starts_at', nowIso).order('starts_at').limit(ANY_DAY_LIMIT),
+			baseQuery().lt('starts_at', nowIso).order('starts_at', { ascending: false }).limit(ANY_DAY_LIMIT)
+		]);
+		appointmentsError = upcomingResult.error ?? pastResult.error;
+		const upcoming = upcomingResult.data ?? [];
+		const past = pastResult.data ?? [];
+		anyDayLimited = upcoming.length === ANY_DAY_LIMIT || past.length === ANY_DAY_LIMIT;
+		dayAppointments = [...upcoming, ...past];
+	} else {
+		const dayStart = zonedDateTimeToUtc(date, '00:00', business.business.timezone);
+		const dayEnd = zonedDateTimeToUtc(date, '23:59', business.business.timezone);
+		({ data: dayAppointments, error: appointmentsError } = await supabase
+			.from('appointments')
+			.select(APPOINTMENT_COLUMNS)
+			.eq('business_id', business.business.id)
+			.gte('starts_at', dayStart.toISOString())
+			.lte('starts_at', dayEnd.toISOString())
+			.order('starts_at'));
+	}
 	if (appointmentsError) {
 		console.error('Error cargando agenda diaria', appointmentsError);
 	}
@@ -109,7 +122,6 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 		if (serviceId && appointment.service_id !== serviceId) return false;
 		if (patientId && appointment.patient_id !== patientId) return false;
 		if (status && appointment.status !== status) return false;
-		if (!appointmentMatchesQuery(appointment, normalizedQuery)) return false;
 		return true;
 	});
 
@@ -178,10 +190,11 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 	return {
 		context: business,
 		date,
+		anyDay,
+		anyDayLimited,
 		selectedProfessionalId: professionalId,
 		selectedStatus: status,
 		selectedServiceId: serviceId,
-		selectedQuery: query,
 		selectedPatientId: patientId,
 		searchApplied,
 		appointments: appointments ?? [],

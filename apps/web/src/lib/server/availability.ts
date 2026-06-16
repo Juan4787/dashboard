@@ -72,6 +72,8 @@ export type AvailabilityInput = {
 };
 
 const pad = (value: number) => String(value).padStart(2, '0');
+const hasVisibleProfessionalName = (professional: Pick<ProfessionalRow, 'name'>) =>
+	String(professional.name ?? '').trim().length > 0;
 
 export const addMinutes = (date: Date, minutes: number) =>
 	new Date(date.getTime() + minutes * 60_000);
@@ -146,19 +148,10 @@ const weekdayForDate = (date: string, timeZone: string) => {
 	return map[value ?? 'Sun'];
 };
 
-const clampRangeToBusinessRules = (
-	business: Business,
-	fromDate: string,
-	toDate: string,
-	publicOnly: boolean
-) => {
+const clampRangeToBusinessRules = (business: Business, fromDate: string, toDate: string) => {
 	const dates = dateRange(fromDate, toDate);
 	const maxDate = addMinutes(new Date(), business.max_booking_days_ahead * 24 * 60);
-	const today = zonedDateParts(new Date(), business.timezone).date;
-	return dates.filter((date) => {
-		if (publicOnly && !business.allow_same_day_booking && date === today) return false;
-		return zonedDateTimeToUtc(date, '00:00', business.timezone) <= maxDate;
-	});
+	return dates.filter((date) => zonedDateTimeToUtc(date, '00:00', business.timezone) <= maxDate);
 };
 
 export const getAvailabilitySlots = async (
@@ -191,12 +184,15 @@ export const getAvailabilitySlots = async (
 
 	const professionals = (assignments ?? [])
 		.map((row: any) => row.professionals as ProfessionalRow)
-		.filter((professional) => professional?.is_active && (!publicOnly || professional.is_public));
+		.filter(
+			(professional) =>
+				professional?.is_active && (!publicOnly || (professional.is_public && hasVisibleProfessionalName(professional)))
+		);
 
 	if (professionals.length === 0) return [];
 	const professionalIds = professionals.map((professional) => professional.id);
 
-	const dates = clampRangeToBusinessRules(business, input.fromDate, input.toDate, publicOnly);
+	const dates = clampRangeToBusinessRules(business, input.fromDate, input.toDate);
 	if (dates.length === 0) return [];
 
 	const rangeStart = zonedDateTimeToUtc(dates[0], '00:00', business.timezone);
@@ -235,13 +231,14 @@ export const getAvailabilitySlots = async (
 	if (exceptionsError) throw exceptionsError;
 	if (blocksError) throw blocksError;
 
-	const minNoticeAt = addMinutes(new Date(), business.min_booking_notice_minutes);
+	const now = new Date();
 	const allSlots: AvailabilitySlot[] = [];
 
 	for (const date of dates) {
 		const weekday = weekdayForDate(date, business.timezone);
 		for (const professional of professionals) {
 			const professionalRules = ((rules ?? []) as RuleRow[]).filter((rule) => rule.professional_id === professional.id);
+			if (publicOnly && professionalRules.length === 0) continue;
 			const professionalStepOptions = professionalRules
 				.map((rule) => rule.slot_interval_minutes)
 				.filter((value) => value > 0);
@@ -281,7 +278,7 @@ export const getAvailabilitySlots = async (
 					const endsAt = addMinutes(startsAt, service.duration_minutes);
 					const blockingStart = addMinutes(startsAt, -service.buffer_before_minutes);
 					const blockingEnd = addMinutes(endsAt, service.buffer_after_minutes);
-					if (startsAt < minNoticeAt) continue;
+					if (startsAt < now) continue;
 					if (blockingStart < interval.start || blockingEnd > interval.end) continue;
 
 					const blockedByException = blockingExceptions.some((exception) =>
@@ -301,7 +298,7 @@ export const getAvailabilitySlots = async (
 						starts_at: startsAt.toISOString(),
 						ends_at: endsAt.toISOString(),
 						professional_id: professional.id,
-						professional_name: professional.name
+						professional_name: publicOnly ? professional.name.trim() : professional.name
 					});
 				}
 			}
