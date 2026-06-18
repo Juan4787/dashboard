@@ -736,7 +736,8 @@ export const actions: Actions = {
 		if (prepError) {
 			console.error('Error preparando el borrado del profesional', prepError);
 			return fail(400, {
-				message: `No se pudo preparar el borrado [${prepError.code ?? '?'}]: ${prepError.message ?? 'error desconocido'}`
+				message:
+					'No se pudo eliminar el profesional en este momento. Reintentá en unos segundos o archivalo para conservar sus registros.'
 			});
 		}
 
@@ -747,9 +748,12 @@ export const actions: Actions = {
 			.eq('id', profId);
 		if (error) {
 			console.error('Error eliminando profesional', error);
-			return fail(400, {
-				message: `No se pudo eliminar [${error.code ?? '?'}]: ${error.message ?? ''}${error.details ? ` — ${error.details}` : ''}`
-			});
+			// 23503 = FK: aún tiene registros asociados → guiar a archivar (nunca exponer el código al usuario).
+			const message =
+				error.code === '23503'
+					? 'No se puede eliminar a este profesional porque tiene registros asociados. Archivalo para conservarlos.'
+					: 'No se pudo eliminar el profesional en este momento. Reintentá en unos segundos o archivalo para conservar sus registros.';
+			return fail(400, { message });
 		}
 
 		await writeAuditLog(admin, {

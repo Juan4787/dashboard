@@ -111,7 +111,8 @@
 		business_not_found: 'El enlace de reserva no está disponible.',
 		booking_disabled: 'La reserva online no está disponible en este momento.',
 		commercial_unavailable: 'La reserva online no está disponible en este momento. Contactá al consultorio.',
-		missing_service_role: 'La reserva online necesita configuración del servidor.',
+		missing_service_role:
+			'La reserva online no está disponible en este momento. Reintentá en unos segundos o comunicate con el consultorio.',
 		no_services: 'No hay servicios disponibles para reservar online en este momento.',
 		no_professionals: 'No hay profesionales con horarios disponibles para ese servicio.',
 		no_availability: 'No hay horarios disponibles para los próximos días.'

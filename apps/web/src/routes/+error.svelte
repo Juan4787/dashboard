@@ -1,16 +1,22 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 
-	const isNotFound = $derived($page.status === 404);
+	const status = $derived($page.status);
+	const isNotFound = $derived(status === 404);
 	const title = $derived(isNotFound ? 'Página no encontrada' : 'No se pudo cargar la página');
 	const detail = $derived.by(() => {
 		const message = $page.error?.message ?? '';
-		if (!message || message === 'Internal Error' || message === 'Not Found') {
-			return isNotFound
-				? 'El enlace no existe o ya no está disponible.'
-				: 'Hubo una falla de conexión con el servidor. Reintentá en unos segundos.';
+		// Errores de servidor (5xx): nunca exponer detalles internos al usuario.
+		if (status >= 500) {
+			return 'Hubo una falla de conexión con el servidor. Reintentá en unos segundos.';
 		}
-		return message;
+		// 404 / otros 4xx: mostramos el mensaje propio si es claro (ej. enlaces inválidos).
+		if (message && message !== 'Internal Error' && message !== 'Not Found') {
+			return message;
+		}
+		return isNotFound
+			? 'El enlace no existe o ya no está disponible.'
+			: 'No se pudo cargar la página. Reintentá en unos segundos.';
 	});
 </script>
 
