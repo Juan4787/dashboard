@@ -105,3 +105,9 @@ export const normalizeTimeRangesInput = (value: string) => {
 	const ranges = parseTimeRanges(value);
 	return ranges ? formatTimeRanges(ranges) : value;
 };
+
+export const normalizeTimeRangesForCommit = (value: string) => {
+	const ranges = parseTimeRanges(value);
+	if (!ranges || ranges.length === 0) return { ok: false as const };
+	return { ok: true as const, value: formatTimeRanges(ranges), ranges };
+};

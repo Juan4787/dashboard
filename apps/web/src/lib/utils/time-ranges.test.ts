@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { formatTimeRanges, normalizeTimeRangesInput, normalizeTimeValue, parseTimeRanges } from './time-ranges';
+import {
+	formatTimeRanges,
+	normalizeTimeRangesForCommit,
+	normalizeTimeRangesInput,
+	normalizeTimeValue,
+	parseTimeRanges
+} from './time-ranges';
 
 describe('time range input helpers', () => {
 	it('normalizes single hours and compact hour/minute values', () => {
@@ -30,5 +36,15 @@ describe('time range input helpers', () => {
 		expect(parseTimeRanges('13-9')).toBeNull();
 		expect(parseTimeRanges('25-30')).toBeNull();
 		expect(formatTimeRanges([{ start: '09:00', end: '13:00' }])).toBe('09:00-13:00');
+	});
+
+	it('commits only interpretable ranges', () => {
+		expect(normalizeTimeRangesForCommit('9-15')).toEqual({
+			ok: true,
+			value: '09:00-15:00',
+			ranges: [{ start: '09:00', end: '15:00' }]
+		});
+		expect(normalizeTimeRangesForCommit('09:00-')).toEqual({ ok: false });
+		expect(normalizeTimeRangesForCommit('')).toEqual({ ok: false });
 	});
 });

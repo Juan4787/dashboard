@@ -580,7 +580,7 @@ export const actions: Actions = {
 				return fail(400, { message: 'Seleccioná al menos un día de atención.', values });
 			}
 			if (!parsedRanges || parsedRanges.length === 0) {
-				return fail(400, { message: 'Completá un horario válido, como 9 a 13 o 09:00-13:00.', values });
+				return fail(400, { message: 'Horario inválido.', values });
 			}
 			if (timeRangesOverlap(parsedRanges)) {
 				return fail(400, { message: 'Los horarios no pueden superponerse.', values });

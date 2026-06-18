@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { BusinessContext, BusinessRole } from '$lib/server/business';
 	import { formatPriceLabel } from '$lib/utils/money-input';
-	import { normalizeTimeRangesInput, parseTimeRanges } from '$lib/utils/time-ranges';
+	import { normalizeTimeRangesForCommit, normalizeTimeRangesInput, parseTimeRanges } from '$lib/utils/time-ranges';
 	import { enhance } from '$app/forms';
 
 	type RoleAccess = {
@@ -134,6 +134,8 @@
 	let timeError = $state('');
 	let intervalError = $state('');
 	let exceptionError = $state('');
+	let weeklyTimeRangeFocused = $state(false);
+	let weeklyTimeRangeErrorValue = $state('');
 
 	const steps = $derived(
 		role === 'professional'
@@ -207,6 +209,21 @@
 		timeError = '';
 		intervalError = '';
 		exceptionError = '';
+		weeklyTimeRangeFocused = false;
+		weeklyTimeRangeErrorValue = '';
+	};
+
+	const commitWeeklyTimeRanges = () => {
+		const result = normalizeTimeRangesForCommit(weeklyTimeRanges);
+		if (!result.ok) {
+			timeError = 'Horario inválido';
+			weeklyTimeRangeErrorValue = weeklyTimeRanges;
+			return false;
+		}
+		weeklyTimeRanges = result.value;
+		timeError = '';
+		weeklyTimeRangeErrorValue = '';
+		return true;
 	};
 
 	const toggleWizard = () => {
@@ -243,12 +260,8 @@
 			} else {
 				daysError = '';
 			}
-			const ranges = parseTimeRanges(weeklyTimeRanges);
-			if (!ranges || ranges.length === 0) {
-				timeError = 'Completá un horario válido, como 9 a 13.';
+			if (!commitWeeklyTimeRanges()) {
 				valid = false;
-			} else {
-				timeError = '';
 			}
 			const interval = Number(slotInterval);
 			if (!Number.isInteger(interval) || interval < 5 || interval > 120) {
@@ -324,19 +337,13 @@
 		newServicePrice = input.value;
 	};
 
-	const normalizeScheduleInput = (event: Event) => {
-		const input = event.currentTarget as HTMLInputElement;
-		input.value = normalizeTimeRangesInput(input.value);
-		weeklyTimeRanges = input.value;
+	const handleWeeklyTimeRangeFocus = () => {
+		weeklyTimeRangeFocused = true;
 	};
 
-	const handleScheduleTyping = (event: Event) => {
-		const input = event.currentTarget as HTMLInputElement;
-		const digits = input.value.replace(/\D/g, '');
-		if (/^[\d\s]+$/.test(input.value) && digits.length >= 8 && digits.length % 8 === 0) {
-			input.value = normalizeTimeRangesInput(input.value);
-			weeklyTimeRanges = input.value;
-		}
+	const handleWeeklyTimeRangeBlur = () => {
+		weeklyTimeRangeFocused = false;
+		commitWeeklyTimeRanges();
 	};
 
 	const normalizeExceptionDate = (event: Event) => {
@@ -356,6 +363,15 @@
 	};
 
 	const weeklyPreview = $derived(parseTimeRanges(weeklyTimeRanges) ?? []);
+	const weeklyTimeRangeFeedback = $derived.by(() => {
+		if (timeError && weeklyTimeRangeErrorValue === weeklyTimeRanges) {
+			return { message: timeError, className: 'ux-alert mt-3' };
+		}
+		if (weeklyTimeRangeFocused && weeklyTimeRanges.trim() && !parseTimeRanges(weeklyTimeRanges)) {
+			return { message: 'Horario incompleto', className: 'ux-alert ux-alert-warning mt-3' };
+		}
+		return null;
+	});
 	const selectedCustomServices = $derived(customServices.filter((service) => selectedServiceIds.includes(service.id)));
 	const summaryAdditionalServices = $derived([
 		...selectedCustomServices.map((service) => service.name),
@@ -377,6 +393,13 @@
 	);
 
 	const durationLabel = (minutes: number) => `${minutes} ${minutes === 1 ? 'minuto' : 'minutos'}`;
+
+	const handleWizardSubmit = (event: SubmitEvent) => {
+		if (role !== 'professional') return;
+		if (commitWeeklyTimeRanges()) return;
+		event.preventDefault();
+		stepIndex = steps.indexOf('horarios');
+	};
 </script>
 
 <section class="ux-page">
@@ -400,7 +423,7 @@
 	{/if}
 
 	{#if showWizard}
-		<form method="POST" action="?/add_user" class="ux-card scroll-mt-5">
+		<form method="POST" action="?/add_user" class="ux-card scroll-mt-5" onsubmit={handleWizardSubmit}>
 			<div class="flex items-center justify-between gap-4">
 				<h2 class="ux-section-title">Agregar integrante</h2>
 				<div class="flex gap-2">
@@ -626,10 +649,17 @@
 									placeholder="9 a 13, 15 a 19"
 									bind:value={weeklyTimeRanges}
 									disabled={!canManage}
-									class={`ux-input text-lg font-bold ${timeError ? 'border-red-400/60' : ''}`}
-									oninput={handleScheduleTyping}
-									onblur={normalizeScheduleInput}
+									aria-invalid={Boolean(timeError && weeklyTimeRangeErrorValue === weeklyTimeRanges)}
+									aria-describedby={weeklyTimeRangeFeedback ? 'weekly-time-ranges-feedback' : undefined}
+									class={`ux-input text-lg font-bold ${timeError && weeklyTimeRangeErrorValue === weeklyTimeRanges ? 'border-red-400/60' : ''}`}
+									onfocus={handleWeeklyTimeRangeFocus}
+									onblur={handleWeeklyTimeRangeBlur}
 								/>
+								{#if weeklyTimeRangeFeedback}
+									<p id="weekly-time-ranges-feedback" class={weeklyTimeRangeFeedback.className}>
+										{weeklyTimeRangeFeedback.message}
+									</p>
+								{/if}
 								{#if weeklyPreview.length > 0}
 									<div class="mt-3 flex flex-wrap gap-2">
 										{#each weeklyPreview as range}
@@ -654,9 +684,6 @@
 								/>
 							</label>
 						</div>
-						{#if timeError}
-							<p class="ux-alert mt-3">{timeError}</p>
-						{/if}
 						{#if intervalError}
 							<p class="ux-alert mt-3">{intervalError}</p>
 						{/if}

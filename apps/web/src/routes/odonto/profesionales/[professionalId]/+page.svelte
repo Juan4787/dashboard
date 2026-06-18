@@ -5,7 +5,12 @@
 	import { clearTtlDraft, loadTtlDraft, saveTtlDraft } from '$lib/client/ttl-draft';
 	import { formatDateTime } from '$lib/utils/format';
 	import { formatPriceLabel } from '$lib/utils/money-input';
-	import { formatTimeRanges, normalizeTimeRangesInput, parseTimeRanges } from '$lib/utils/time-ranges';
+	import {
+		formatTimeRanges,
+		normalizeTimeRangesForCommit,
+		normalizeTimeRangesInput,
+		parseTimeRanges
+	} from '$lib/utils/time-ranges';
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { onMount } from 'svelte';
 	import Modal from '$lib/components/Modal.svelte';
@@ -234,6 +239,10 @@
 	let pendingNavigationHref = $state<string | null>(null);
 	let guardError = $state('');
 	let saveAllForm = $state<HTMLFormElement | null>(null);
+	let scheduleTimeRangeInput = $state<HTMLInputElement | null>(null);
+	let scheduleTimeRangeFocused = $state(false);
+	let scheduleTimeRangeError = $state('');
+	let scheduleTimeRangeErrorValue = $state('');
 	let allowNavigation = false;
 
 	$effect(() => {
@@ -312,6 +321,15 @@
 		serviceDelta.count === 1 ? '1 cambio sin guardar' : `${serviceDelta.count} cambios sin guardar`
 	);
 	const weeklyPreview = $derived(parseTimeRanges(draft.schedule.timeRanges) ?? []);
+	const scheduleTimeRangeFeedback = $derived.by(() => {
+		if (scheduleTimeRangeError && scheduleTimeRangeErrorValue === draft.schedule.timeRanges) {
+			return { message: scheduleTimeRangeError, className: 'ux-alert mt-3' };
+		}
+		if (scheduleTimeRangeFocused && draft.schedule.timeRanges.trim() && !parseTimeRanges(draft.schedule.timeRanges)) {
+			return { message: 'Horario incompleto', className: 'ux-alert ux-alert-warning mt-3' };
+		}
+		return null;
+	});
 	const guardTitle = $derived.by(() => {
 		if (hasUnsavedChanges && hasMissingMinimum) return 'Tenés cambios sin guardar y datos pendientes';
 		if (hasUnsavedChanges) return 'Tenés cambios sin guardar';
@@ -351,26 +369,38 @@
 		input.value = formatPriceLabel(input.value);
 	};
 
-	const normalizeScheduleInput = (event: Event) => {
-		const input = event.currentTarget as HTMLInputElement;
-		input.value = normalizeTimeRangesInput(input.value);
-		draft.schedule.timeRanges = input.value;
+	const commitScheduleTimeRanges = () => {
+		const result = normalizeTimeRangesForCommit(draft.schedule.timeRanges);
+		if (!result.ok) {
+			scheduleTimeRangeError = 'Horario inválido';
+			scheduleTimeRangeErrorValue = draft.schedule.timeRanges;
+			return false;
+		}
+		draft.schedule.timeRanges = result.value;
+		scheduleTimeRangeError = '';
+		scheduleTimeRangeErrorValue = '';
+		return true;
 	};
 
-	const handleScheduleTyping = (event: Event) => {
-		const input = event.currentTarget as HTMLInputElement;
-		const digits = input.value.replace(/\D/g, '');
-		if (/^[\d\s]+$/.test(input.value) && digits.length >= 8 && digits.length % 8 === 0) {
-			input.value = normalizeTimeRangesInput(input.value);
-			draft.schedule.timeRanges = input.value;
-		}
+	const handleScheduleFocus = () => {
+		scheduleTimeRangeFocused = true;
+	};
+
+	const handleScheduleBlur = () => {
+		scheduleTimeRangeFocused = false;
+		commitScheduleTimeRanges();
 	};
 
 	const normalizeScheduleBeforeSubmit = (event: SubmitEvent) => {
+		if (!commitScheduleTimeRanges()) {
+			event.preventDefault();
+			scheduleTimeRangeInput?.focus();
+			return;
+		}
 		const form = event.currentTarget as HTMLFormElement;
 		const input = form.elements.namedItem('time_ranges') as HTMLInputElement | null;
 		if (input) {
-			input.value = normalizeTimeRangesInput(input.value);
+			input.value = draft.schedule.timeRanges;
 			draft.schedule.timeRanges = input.value;
 		}
 	};
@@ -508,7 +538,11 @@
 	};
 
 	const requestSaveAll = () => {
-		draft.schedule.timeRanges = normalizeTimeRangesInput(draft.schedule.timeRanges);
+		if (dirtyFields.schedule && !commitScheduleTimeRanges()) {
+			activeTab = 'horarios';
+			scheduleTimeRangeInput?.focus();
+			return;
+		}
 		draft.exception.timeRange = normalizeTimeRangesInput(draft.exception.timeRange);
 		saveAllForm?.requestSubmit();
 	};
@@ -533,7 +567,8 @@
 	});
 
 	$effect(() => {
-		if (!draftReady || hasUnsavedChanges) return;
+		// A shorthand like 09:00-20 is equivalent to 09:00-20:00, but must stay raw while editing.
+		if (!draftReady || hasUnsavedChanges || scheduleTimeRangeFocused) return;
 		const serverDraft = buildServerDraft(data);
 		baseline = cloneDraft(serverDraft);
 		draft = cloneDraft(serverDraft);
@@ -897,14 +932,28 @@
 						<input
 							name="time_ranges"
 							type="text"
-							required
 							placeholder="9 a 13, 15 a 19"
+							bind:this={scheduleTimeRangeInput}
 							bind:value={draft.schedule.timeRanges}
 							disabled={!canOperate}
-							class={`ux-input text-lg font-bold ${fieldStateClass(dirtyFields.schedule, missingItems.includes('Horarios de atención'))}`}
-							oninput={handleScheduleTyping}
-							onblur={normalizeScheduleInput}
+							aria-invalid={Boolean(
+								(scheduleTimeRangeError && scheduleTimeRangeErrorValue === draft.schedule.timeRanges) ||
+									missingItems.includes('Horarios de atención')
+							)}
+							aria-describedby={scheduleTimeRangeFeedback ? 'schedule-time-ranges-feedback' : undefined}
+							class={`ux-input text-lg font-bold ${fieldStateClass(
+								dirtyFields.schedule,
+								Boolean(scheduleTimeRangeError && scheduleTimeRangeErrorValue === draft.schedule.timeRanges) ||
+									missingItems.includes('Horarios de atención')
+							)}`}
+							onfocus={handleScheduleFocus}
+							onblur={handleScheduleBlur}
 						/>
+						{#if scheduleTimeRangeFeedback}
+							<p id="schedule-time-ranges-feedback" class={scheduleTimeRangeFeedback.className}>
+								{scheduleTimeRangeFeedback.message}
+							</p>
+						{/if}
 						{#if weeklyPreview.length > 0}
 							<div class="mt-3 flex flex-wrap gap-2">
 								{#each weeklyPreview as range}

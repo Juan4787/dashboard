@@ -153,7 +153,7 @@ const saveProfessionalWeeklyRules = async (
 	const parsedRanges = parseTimeRanges(String(form.get('time_ranges') ?? ''));
 	if (uniqueWeekdays.length === 0) return { ok: false, status: 400, message: 'Elegí al menos un día.' };
 	if (!parsedRanges || parsedRanges.length === 0) {
-		return { ok: false, status: 400, message: 'Escribí los horarios como 9 a 13 o 09:00-13:00.' };
+		return { ok: false, status: 400, message: 'Horario inválido.' };
 	}
 	const ranges = parsedRanges;
 	if (timeRangesOverlap(ranges)) {

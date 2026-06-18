@@ -31,6 +31,18 @@
 	type PushState = 'unavailable' | 'idle' | 'working' | 'subscribed' | 'denied' | 'error';
 	let pushState = $state<PushState>('unavailable');
 
+	const base = $derived(appointment ? `/turno/${appointment.token}` : '');
+
+	const savePushSubscriptionForAppointment = async (subscription: PushSubscription) => {
+		if (!base) return false;
+		const response = await fetch(`${base}/push`, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify(subscription.toJSON())
+		});
+		return response.ok;
+	};
+
 	onMount(async () => {
 		refinedDevice = refineDeviceClass(data.device, navigator);
 		const effective = refinedDevice ?? data.device;
@@ -44,7 +56,12 @@
 			pushState = 'idle';
 			try {
 				const registration = await navigator.serviceWorker.getRegistration('/push-sw.js');
-				if (await registration?.pushManager.getSubscription()) pushState = 'subscribed';
+				const subscription = await registration?.pushManager.getSubscription();
+				if (subscription) {
+					// La suscripción del navegador puede existir por un turno anterior.
+					// Hay que asociarla también al turno actual: la tabla es (appointment_id, endpoint).
+					pushState = (await savePushSubscriptionForAppointment(subscription)) ? 'subscribed' : 'error';
+				}
 			} catch {
 				pushState = 'idle';
 			}
@@ -74,18 +91,12 @@
 					userVisibleOnly: true,
 					applicationServerKey: urlBase64ToUint8Array(data.vapidPublicKey)
 				}));
-			const response = await fetch(`${base}/push`, {
-				method: 'POST',
-				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify(subscription.toJSON())
-			});
-			pushState = response.ok ? 'subscribed' : 'error';
+			pushState = (await savePushSubscriptionForAppointment(subscription)) ? 'subscribed' : 'error';
 		} catch {
 			pushState = 'error';
 		}
 	};
 
-	const base = $derived(appointment ? `/turno/${appointment.token}` : '');
 	const timezone = $derived(appointment?.business?.timezone ?? 'America/Argentina/Cordoba');
 	const whenLabels = $derived(
 		appointment ? formatInTimeZone(appointment.starts_at, timezone) : null

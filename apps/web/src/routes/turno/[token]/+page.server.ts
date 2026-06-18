@@ -86,7 +86,7 @@ export const load: PageServerLoad = async ({ params, fetch, url, request, setHea
 	setHeaders({ 'cache-control': 'no-store' });
 	const userAgent = request.headers.get('user-agent');
 	const device = classifyUserAgent(userAgent);
-	const vapidPublicKey = publicEnv.PUBLIC_VAPID_PUBLIC_KEY?.trim() || null;
+	const vapidPublicKey = publicEnv.PUBLIC_VAPID_PUBLIC_KEY?.trim() || env.VAPID_PUBLIC_KEY?.trim() || null;
 	const publicSiteUrl = getPublicSiteUrl();
 
 	if (env.DEMO_MODE === 'true') {
