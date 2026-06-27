@@ -87,6 +87,42 @@ const restGetSingle = async <T>(path: string): Promise<T> => {
 	return rows[0];
 };
 
+const restGetMany = async <T>(path: string): Promise<T[]> => {
+	const { url, key } = restEnv();
+	const response = await fetch(`${url}/rest/v1/${path}`, { headers: restHeaders(key) });
+	if (!response.ok) throw new Error(`GET ${path} falló: ${await response.text()}`);
+	return (await response.json()) as T[];
+};
+
+const restDelete = async (path: string, { optional = false } = {}) => {
+	const { url, key } = restEnv();
+	const response = await fetch(`${url}/rest/v1/${path}`, {
+		method: 'DELETE',
+		headers: { ...restHeaders(key), prefer: 'return=minimal' }
+	});
+	if (!response.ok && !optional) throw new Error(`DELETE ${path} falló: ${await response.text()}`);
+};
+
+// Borra TODO lo marcado "E2E " que este flujo crea en el negocio real (profesionales,
+// servicios, reglas, asignaciones, vínculos, turnos y pacientes). Idempotente: limpia
+// también corridas previas. La service_role se usa sólo dentro de este proceso.
+const cleanupE2EFixtures = async () => {
+	const profs = await restGetMany<{ id: string }>('professionals?name=like.E2E*&select=id');
+	const patients = await restGetMany<{ id: string }>('patients?full_name=like.E2E*&select=id');
+	const profIds = profs.map((p) => p.id);
+	const patientIds = patients.map((p) => p.id);
+	const inList = (ids: string[]) => `(${ids.join(',')})`;
+	if (profIds.length) await restDelete(`appointments?professional_id=in.${inList(profIds)}`, { optional: true });
+	if (patientIds.length) await restDelete(`appointments?patient_id=in.${inList(patientIds)}`, { optional: true });
+	if (profIds.length) await restDelete(`availability_rules?professional_id=in.${inList(profIds)}`, { optional: true });
+	if (profIds.length) await restDelete(`professional_services?professional_id=in.${inList(profIds)}`, { optional: true });
+	if (patientIds.length) await restDelete(`professional_patient_links?patient_id=in.${inList(patientIds)}`, { optional: true });
+	if (profIds.length) await restDelete(`professional_patient_links?professional_id=in.${inList(profIds)}`, { optional: true });
+	await restDelete('services?name=like.E2E*', { optional: true });
+	await restDelete('professionals?name=like.E2E*', { optional: true });
+	await restDelete('patients?full_name=like.E2E*', { optional: true });
+};
+
 const restInsertSingle = async <T>(table: string, row: Record<string, unknown>, select = 'id'): Promise<T> => {
 	const { url, key } = restEnv();
 	const response = await fetch(`${url}/rest/v1/${table}?select=${select}`, {
@@ -111,8 +147,12 @@ const createPublicBookingFixtures = async (input: {
 	serviceName: string;
 	unavailableServiceName: string;
 }) => {
+	// El identificador público puede ser el slug o, si el negocio no tiene slug, el
+	// id (UUID) — igual que getPublicBusinessBySlug en la app. Resolvemos por la
+	// columna correcta para no asumir que siempre hay slug.
+	const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.slug);
 	const business = await restGetSingle<{ id: string }>(
-		`businesses?slug=eq.${encodeURIComponent(input.slug)}&select=id`
+		`businesses?${isUuid ? 'id' : 'slug'}=eq.${encodeURIComponent(input.slug)}&select=id`
 	);
 
 	const professional = await restInsertSingle<{ id: string }>('professionals', {
@@ -221,6 +261,10 @@ test.describe.configure({ mode: 'serial' });
 test.describe('Dental Suite - flujo operativo completo', () => {
 	test.skip(!email || !password, 'Definí E2E_EMAIL y E2E_PASSWORD para correr el flujo completo.');
 
+	// Limpia las fixtures "E2E " antes y después: deja el negocio real sin basura de prueba.
+	test.beforeAll(cleanupE2EFixtures);
+	test.afterAll(cleanupE2EFixtures);
+
 	test('profesional, servicio, disponibilidad, reserva pública, agenda y protección contra solapamiento', async ({ page }) => {
 		test.setTimeout(300_000);
 
@@ -265,7 +309,7 @@ test.describe('Dental Suite - flujo operativo completo', () => {
 		await page.getByRole('link', { name: new RegExp(serviceName) }).click();
 		const professionalStep = section(page, '¿Con quién?');
 		await expect(professionalStep.getByRole('link', { name: new RegExp(professionalName) })).toBeVisible();
-		await expect(professionalStep.getByText('Primer horario:')).toBeVisible();
+		await expect(professionalStep.getByText('Primer turno:')).toBeVisible();
 		await expect(professionalStep.getByText(unavailableProfessionalName)).toHaveCount(0);
 		await expect(professionalStep.getByText(unassignedProfessionalName)).toHaveCount(0);
 		await professionalStep.getByRole('link', { name: new RegExp(professionalName) }).click();
@@ -286,8 +330,9 @@ test.describe('Dental Suite - flujo operativo completo', () => {
 		await page.getByRole('button', { name: 'Confirmar reserva' }).click();
 		await expect(page.getByRole('heading', { name: 'Listo, tu turno quedó reservado' })).toBeVisible();
 		await expect(page.getByText('Resumen de la reserva')).toBeVisible();
-		await expect(page.getByText(serviceName)).toBeVisible();
-		await expect(page.getByText(professionalName)).toBeVisible();
+		await expect(page.getByText(serviceName).first()).toBeVisible();
+		// El nombre del profesional aparece en el resumen y en el texto copiable del turno.
+		await expect(page.getByText(professionalName).first()).toBeVisible();
 		const publicTokenUrl = page.url();
 
 		await page.goto(selectedBookingUrl.toString());
@@ -320,7 +365,7 @@ test.describe('Dental Suite - flujo operativo completo', () => {
 		await expect(page.getByText(overlapPatient)).toHaveCount(0);
 		await expect(page.getByText(serviceName)).toBeVisible();
 		await expect(page.getByText(professionalName)).toBeVisible();
-		await expect(page.getByText('Reserva online').first()).toBeVisible();
+		await expect(page.getByText('Online', { exact: true }).first()).toBeVisible();
 
 		await page.goto(publicTokenUrl);
 		await page.getByRole('button', { name: 'Confirmo que voy' }).click();
@@ -328,7 +373,7 @@ test.describe('Dental Suite - flujo operativo completo', () => {
 		await page.goto(`/odonto/agenda?date=${selectedDate}&status=confirmed`);
 		await page.waitForLoadState('networkidle');
 		await openDayAppointmentsPanel(page);
-		const confirmedAppointment = page.locator('details, article').filter({ hasText: patientName }).first();
+		const confirmedAppointment = page.locator('a.ux-choice').filter({ hasText: patientName }).first();
 		await expect(confirmedAppointment).toBeVisible();
 		await expect(confirmedAppointment.getByText('Confirmado')).toBeVisible();
 

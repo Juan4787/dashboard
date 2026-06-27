@@ -797,10 +797,8 @@ export const getPublicBookingErrorMessage = (error: unknown) => {
 	}
 	const human = getHumanAppointmentErrorMessage(error);
 	if (human !== 'No se pudo completar la acción.') return human;
-	// Diagnóstico temporal: si el error no está mapeado, mostramos el motivo real
-	// para poder darle un mensaje amigable. Reemplazar por texto amigable una vez identificado.
-	const reason = raw.trim();
-	return reason
-		? `No pudimos guardar tu reserva (motivo: ${reason}). Probá de nuevo o comunicate con el consultorio.`
-		: 'No pudimos guardar tu reserva. Probá de nuevo o comunicate con el consultorio.';
+	// Nunca exponer el motivo técnico al paciente: el error real queda en los logs
+	// del servidor (console.error en el action) y en public_booking_attempts (error_code).
+	// Acá sólo un mensaje amigable y genérico.
+	return 'No pudimos guardar tu reserva. Probá de nuevo en unos minutos o comunicate con el consultorio.';
 };
