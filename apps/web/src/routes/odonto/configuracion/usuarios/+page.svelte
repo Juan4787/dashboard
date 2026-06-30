@@ -39,7 +39,7 @@
 			currentUserId: string | null;
 			demo: boolean;
 		};
-		form?: { success?: boolean; message?: string; values?: Record<string, FormDataEntryValue> };
+		form?: { success?: boolean; message?: string; openRole?: BusinessRole; values?: Record<string, FormDataEntryValue> };
 	}>();
 
 	const roleLabels: Record<BusinessRole, string> = {
@@ -90,7 +90,8 @@
 			? [...baseCategories, { id: 'readonly', title: 'Solo lectura', role: 'readonly' as BusinessRole }]
 			: baseCategories
 	);
-	let openCategories = $state<Record<string, boolean>>({});
+	// svelte-ignore state_referenced_locally
+	let openCategories = $state<Record<string, boolean>>(form?.success && form.openRole ? { [form.openRole]: true } : {});
 	const toggleCategory = (id: string) => {
 		openCategories = { ...openCategories, [id]: !openCategories[id] };
 	};

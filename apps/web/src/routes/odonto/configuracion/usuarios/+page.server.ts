@@ -737,11 +737,12 @@ export const actions: Actions = {
 				if (status === 'pending' || status === 'already_pending') {
 					return {
 						success: true,
+						openRole: 'professional',
 						message:
 							'Profesional creado y email habilitado. Cuando la persona cree su cuenta, va a entrar con rol Profesional.'
 					};
 				}
-				return { success: true, message: 'Profesional creado y rol asignado al consultorio.' };
+				return { success: true, openRole: 'professional', message: 'Profesional creado y rol asignado al consultorio.' };
 			} catch (error) {
 				await rollback(admin);
 				console.error('Error guardando alta de profesional', error);
@@ -773,16 +774,17 @@ export const actions: Actions = {
 
 		const status = String(result.status ?? '');
 		if (status === 'already_active' || status === 'already_pending') {
-			return { success: true, message: 'Ese correo ya tenía ese rol asignado.' };
+			return { success: true, openRole: role, message: 'Ese correo ya tenía ese rol asignado.' };
 		}
 		if (status === 'pending') {
 			return {
 				success: true,
+				openRole: role,
 				message: 'Email habilitado. Cuando la persona cree su cuenta, el rol se asignará automáticamente.'
 			};
 		}
 
-		return { success: true, message: 'Rol asignado al consultorio.' };
+		return { success: true, openRole: role, message: 'Rol asignado al consultorio.' };
 	},
 	make_attending: async ({ request, locals, fetch, cookies }) => {
 		if (!locals.auth) throw redirect(303, '/login');

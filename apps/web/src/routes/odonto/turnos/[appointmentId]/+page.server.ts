@@ -9,6 +9,11 @@ import {
 	updateProfessionalAppointmentStatus
 } from '$lib/server/appointments';
 import { getOdontoContext } from '$lib/server/odonto-context';
+import { createSupabaseAdminClient } from '$lib/server/supabase';
+import { resetPushRemindersForReschedule } from '$lib/server/push';
+import { buildRescheduleWhatsAppMessage, buildWaMeUrl } from '$lib/server/reminders';
+import { publicRescheduleUrl } from '$lib/server/messaging';
+import { isLikelyPhoneE164 } from '$lib/server/phone';
 import { error as kitError, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -53,6 +58,9 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 			minReprogramDate: new Date().toISOString().slice(0, 10),
 			reprogramSlots: [],
 			fromDate: '',
+			justRescheduled: false,
+			rescheduleWhatsAppUrl: null,
+			reschedulePublicUrl: null,
 			demo: true
 		};
 	}
@@ -61,7 +69,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 	const { data, error } = await supabase
 		.from('appointments')
 		.select(
-			'id, business_id, patient_id, service_id, professional_id, starts_at, ends_at, blocking_starts_at, blocking_ends_at, status, source, service_name_snapshot, professional_name_snapshot, duration_minutes_snapshot, buffer_before_minutes_snapshot, buffer_after_minutes_snapshot, confirmed_at, cancelled_at, cancelled_reason, reschedule_requested_at, attended_at, no_show_at, internal_note, created_by_user_id, updated_by_user_id, cancelled_by_user_id, created_at, updated_at, patients(id, full_name, phone_e164, email, blocked)'
+			'id, business_id, patient_id, service_id, professional_id, starts_at, ends_at, blocking_starts_at, blocking_ends_at, status, source, confirmation_token, service_name_snapshot, professional_name_snapshot, duration_minutes_snapshot, buffer_before_minutes_snapshot, buffer_after_minutes_snapshot, confirmed_at, cancelled_at, cancelled_reason, reschedule_requested_at, attended_at, no_show_at, internal_note, created_by_user_id, updated_by_user_id, cancelled_by_user_id, created_at, updated_at, patients(id, full_name, phone_e164, email, blocked)'
 		)
 		.eq('business_id', business.business.id)
 		.eq('id', params.appointmentId)
@@ -116,6 +124,32 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 		(usersResult.data ?? []).map((user: any) => [String(user.user_id), user.email ?? String(user.user_id).slice(0, 8)])
 	);
 
+	// Botón "Enviar actualización por WhatsApp": solo si el turno sigue activo, hay un
+	// teléfono E.164 plausible y un token. El enlace privado muestra SOLO el aviso de
+	// reprogramación. El texto va precargado y neutral (sin datos clínicos).
+	const patient = (data as any).patients;
+	const phone =
+		patient?.phone_e164 && isLikelyPhoneE164(String(patient.phone_e164))
+			? String(patient.phone_e164)
+			: null;
+	const token = (data as any).confirmation_token ? String((data as any).confirmation_token) : null;
+	const canNotifyReschedule = ['reserved', 'confirmed', 'reschedule_requested'].includes(data.status);
+	let rescheduleWhatsAppUrl: string | null = null;
+	let reschedulePublicUrl: string | null = null;
+	if (canNotifyReschedule && phone && token) {
+		reschedulePublicUrl = publicRescheduleUrl(token);
+		rescheduleWhatsAppUrl = buildWaMeUrl(
+			phone,
+			buildRescheduleWhatsAppMessage({
+				patientName: String(patient?.full_name ?? 'Paciente'),
+				startsAt: String(data.starts_at),
+				timezone: business.business.timezone,
+				businessName: business.business.name,
+				rescheduleUrl: reschedulePublicUrl
+			})
+		);
+	}
+
 	return {
 		context: business,
 		appointment: data,
@@ -126,6 +160,9 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 		minReprogramDate,
 		reprogramSlots,
 		fromDate,
+		justRescheduled: url.searchParams.get('rescheduled') === '1',
+		rescheduleWhatsAppUrl,
+		reschedulePublicUrl,
 		demo: false
 	};
 };
@@ -218,6 +255,23 @@ export const actions: Actions = {
 			return fail(400, { message: getHumanAppointmentErrorMessage(error) });
 		}
 
-		throw redirect(303, `/odonto/turnos/${params.appointmentId}?from_date=${slot.date}&reprogram_date=${slot.date}`);
+		// Invalida los avisos push del horario viejo y deja que se recalculen 24h/2h para
+		// el nuevo. push_subscriptions es service-role only (RLS sin policies), por eso
+		// va con cliente admin. Best-effort: el turno ya quedó reprogramado y el job de
+		// envío revalida el estado vivo, así que un fallo acá no debe abortar la acción.
+		try {
+			const admin = await createSupabaseAdminClient('odonto', fetch);
+			await resetPushRemindersForReschedule(admin, {
+				businessId: business.business.id,
+				appointmentId: params.appointmentId
+			});
+		} catch (pushError) {
+			console.error('Error reseteando avisos push tras reprogramar', pushError);
+		}
+
+		throw redirect(
+			303,
+			`/odonto/turnos/${params.appointmentId}?from_date=${slot.date}&reprogram_date=${slot.date}&rescheduled=1`
+		);
 	}
 };

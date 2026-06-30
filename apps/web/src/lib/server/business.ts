@@ -1,7 +1,7 @@
 import { env } from '$env/dynamic/private';
 import type { Cookies } from '@sveltejs/kit';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { getAuthUserId } from './supabase';
+import { createSupabaseAdminClient, getAuthUserId } from './supabase';
 import {
 	getBusinessAccessState,
 	type BusinessAccessState,
@@ -185,7 +185,14 @@ const loadMemberships = async (
 	if (memberships.length === 0) return [];
 
 	const businessIds = memberships.map((membership) => membership.business.id);
-	const { data: subscriptions, error: subscriptionError } = await supabase
+	let subscriptionClient = supabase;
+	try {
+		subscriptionClient = await createSupabaseAdminClient('odonto');
+	} catch {
+		subscriptionClient = supabase;
+	}
+
+	const { data: subscriptions, error: subscriptionError } = await subscriptionClient
 		.from('business_subscriptions')
 		.select(
 			'id, business_id, commercial_access_enabled, is_permanent, subscription_status, access_starts_at, paid_until, grace_until, restricted_until, archived_at, last_payment_at, last_payment_amount, last_grant_duration_seconds, expiration_notice_enabled, access_source, access_note, updated_by, created_at, updated_at'

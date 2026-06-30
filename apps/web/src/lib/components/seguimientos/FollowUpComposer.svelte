@@ -85,24 +85,32 @@
 		}
 	};
 
-	// --- Inicialización: edición (prefill) o creación (restaurar borrador) ---
-	if (mode === 'edit' && existing) {
-		selectedPatient = existing.patient;
-		remindOn = existing.remindOn;
-		message = existing.message ?? '';
-		step = 'data';
-	} else if (patient) {
-		selectedPatient = patient;
-		step = 'data';
-		// svelte-ignore state_referenced_locally
-		const d = readDraft(`${FIXED_PATIENT_DRAFT_PREFIX}${patient.id}`);
-		if (d && d.patientId === patient.id) {
-			remindOn = d.remindOn ?? '';
-			message = d.message ?? '';
+	const initializeFromProps = (
+		initialMode: 'create' | 'edit',
+		initialExisting: ExistingFollowUp | null,
+		initialPatient: PatientLite | null
+	) => {
+		if (initialMode === 'edit' && initialExisting) {
+			selectedPatient = initialExisting.patient;
+			remindOn = initialExisting.remindOn;
+			message = initialExisting.message ?? '';
+			step = 'data';
+		} else if (initialPatient) {
+			selectedPatient = initialPatient;
+			step = 'data';
+			const d = readDraft(`${FIXED_PATIENT_DRAFT_PREFIX}${initialPatient.id}`);
+			if (d && d.patientId === initialPatient.id) {
+				remindOn = d.remindOn ?? '';
+				message = d.message ?? '';
+			}
+		} else {
+			clearDraft('');
 		}
-	} else {
-		clearDraft('');
-	}
+	};
+
+	// --- Inicialización: edición (prefill) o creación (restaurar borrador) ---
+	// svelte-ignore state_referenced_locally
+	initializeFromProps(mode, existing, patient);
 
 	const fullLabel = (iso: string) => {
 		if (!iso) return '';

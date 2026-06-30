@@ -464,6 +464,14 @@ a {
 		box-shadow: none;
 	}
 
+	/* CTA enfatizado: el botón principal de la pantalla (push en Android, calendario en
+	   iOS). Más alto y con tipografía mayor para que destaque sin requerir scroll. */
+	.ux-btn-cta {
+		min-height: calc(var(--tap) + 0.5rem);
+		padding: 1rem 1.5rem;
+		font-size: 1.05rem;
+	}
+
 	/* ------------------------------- Badges ------------------------------- */
 	.ux-badge {
 		display: inline-flex;

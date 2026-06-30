@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+	DEFAULT_BOT_REPLY_TEMPLATE_BODY,
 	DEFAULT_REMINDER_TEMPLATE_BODY,
 	MockMessagingProvider,
 	buildBotReplyText,
@@ -65,6 +66,18 @@ describe('messaging helpers', () => {
 		expect(text).toContain(`/reservar/${businessId}`);
 		expect(text).not.toContain('sonrisa');
 		expect(text).toContain('asesor');
+	});
+
+	it('renderiza el mensaje automático configurable del bot', () => {
+		const businessId = '11111111-1111-4111-8111-111111111111';
+		const text = buildBotReplyText(
+			{ id: businessId, name: 'Consultorio Norte' },
+			'Hola, somos {{business_name}}. Reservá acá: {{booking_url}}'
+		);
+
+		expect(DEFAULT_BOT_REPLY_TEMPLATE_BODY).toContain('{{booking_url}}');
+		expect(text).toContain('Hola, somos Consultorio Norte.');
+		expect(text).toContain(`/reservar/${businessId}`);
 	});
 
 	it('traduce errores técnicos a mensajes operativos', () => {

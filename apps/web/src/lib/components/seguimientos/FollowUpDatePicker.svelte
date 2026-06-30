@@ -45,7 +45,10 @@
 	]);
 
 	let showCalendar = $state(false);
-	let view = $state(partsOf(value || todayISO));
+	const initialView = (initialValue: string, initialTodayISO: string) =>
+		partsOf(initialValue || initialTodayISO);
+	// svelte-ignore state_referenced_locally
+	let view = $state(initialView(value, todayISO));
 
 	const grid = $derived.by(() => {
 		const first = new Date(Date.UTC(view.y, view.m, 1));

@@ -10,6 +10,7 @@ import {
 } from '$lib/server/appointments';
 import { getOdontoContext } from '$lib/server/odonto-context';
 import { countTomorrowUncovered } from '$lib/server/reminders';
+import { createSupabaseAdminClient } from '$lib/server/supabase';
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -247,7 +248,8 @@ export const actions: Actions = {
 		}
 
 		try {
-			const created = await createManualAppointment(supabase, {
+			const admin = await createSupabaseAdminClient('odonto', fetch);
+			const created = await createManualAppointment(admin, {
 				businessId: business.business.id,
 				ownerId: userId,
 				createdByUserId: userId,

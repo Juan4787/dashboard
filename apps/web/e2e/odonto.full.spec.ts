@@ -328,11 +328,14 @@ test.describe('Dental Suite - flujo operativo completo', () => {
 		await page.getByLabel('Teléfono').fill(patientPhone);
 		await page.getByLabel('Correo electrónico (opcional)').fill(`paciente-${suffix}@example.com`);
 		await page.getByRole('button', { name: 'Confirmar reserva' }).click();
+		await expect(page).toHaveURL(/\/turno\/[^/?]+\?creado=1$/, { timeout: 60_000 });
 		await expect(page.getByRole('heading', { name: 'Listo, tu turno quedó reservado' })).toBeVisible();
-		await expect(page.getByText('Resumen de la reserva')).toBeVisible();
-		await expect(page.getByText(serviceName).first()).toBeVisible();
-		// El nombre del profesional aparece en el resumen y en el texto copiable del turno.
-		await expect(page.getByText(professionalName).first()).toBeVisible();
+		const bookingSummary = page.locator('section').filter({
+			has: page.getByRole('heading', { name: 'Resumen de la reserva' })
+		});
+		await expect(bookingSummary).toBeVisible();
+		await expect(bookingSummary.getByText(serviceName)).toBeVisible();
+		await expect(bookingSummary.getByText(professionalName)).toBeVisible();
 		const publicTokenUrl = page.url();
 
 		await page.goto(selectedBookingUrl.toString());

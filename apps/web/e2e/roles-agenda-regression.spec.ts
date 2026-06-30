@@ -267,6 +267,33 @@ const postAction = async (
 		{ url, fields }
 	);
 
+const openDayAppointmentsPanel = async (page: Page) => {
+	const heading = page.getByRole('heading', { name: /Turnos del día|Resultado de búsqueda/ });
+	if (await heading.first().isVisible({ timeout: 1000 }).catch(() => false)) return;
+	const button = page.getByRole('button', { name: 'Ver turnos del día' });
+	await expect(button).toBeVisible();
+	await button.click();
+	await expect(heading.first()).toBeVisible();
+};
+
+const openReprogramPanel = async (page: Page) => {
+	const panel = page.locator('details#reprogramar');
+	const isOpen = await panel.evaluate((node) => (node as HTMLDetailsElement).open).catch(() => false);
+	if (!isOpen) await panel.locator('summary').click();
+	await expect(panel.getByRole('heading', { name: 'Reprogramar' })).toBeVisible();
+	return panel;
+};
+
+const ensureCategoryOpen = async (page: Page, name: RegExp) => {
+	const button = page.getByRole('button', { name });
+	await expect(button).toBeVisible();
+	if ((await button.getAttribute('aria-expanded')) === 'true') return;
+	await expect(async () => {
+		await button.click();
+		await expect(button).toHaveAttribute('aria-expanded', 'true', { timeout: 1000 });
+	}).toPass({ timeout: 10_000 });
+};
+
 test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 	test.skip(!allowDestructive || !supabaseUrl || !serviceRoleKey, 'Requiere E2E_ALLOW_DESTRUCTIVE=true y ODONTO_SUPABASE_* local/staging.');
 
@@ -293,7 +320,11 @@ test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 		await page.goto('/odonto/configuracion/usuarios');
 		await expect(page.getByRole('heading', { name: 'Equipo' })).toBeVisible();
 
-		await page.getByRole('button', { name: 'Agregar integrante' }).click();
+		const addMemberButton = page.getByRole('button', { name: 'Agregar integrante' });
+		await expect(async () => {
+			await addMemberButton.click();
+			await expect(page.getByRole('heading', { name: 'Agregar integrante' })).toBeVisible({ timeout: 1000 });
+		}).toPass({ timeout: 10_000 });
 		await page.getByLabel('Email').fill(pendingProfessionalEmail);
 		await page.getByRole('button', { name: 'Siguiente' }).click();
 		await page.getByRole('button', { name: 'Profesional Atiende turnos y accede a sus pacientes.' }).click();
@@ -313,7 +344,7 @@ test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 		await page.getByRole('button', { name: 'Guardar rol' }).click();
 		await expect(page.getByText('Profesional creado y email habilitado.')).toBeVisible();
 
-		await page.getByRole('button', { name: /^Profesionales/ }).click();
+		await ensureCategoryOpen(page, /^Profesionales/);
 		await expect(page.getByText(pendingProfessionalEmail)).toBeVisible();
 		await expect(page.getByText('Pendiente', { exact: true })).toBeVisible();
 		await expect(page.getByRole('link', { name: 'Ver profesional' })).toBeVisible();
@@ -336,6 +367,7 @@ test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 		await expect(pendingPage.locator('form').getByRole('button', { name: 'Crear cuenta' })).toBeVisible();
 		await pendingPage.getByLabel('Correo electrónico').fill(pendingProfessionalEmail);
 		await pendingPage.getByLabel('Contraseña').fill(password);
+		await pendingPage.getByLabel(/Leí y acepto/).check();
 		await pendingPage.locator('form').getByRole('button', { name: 'Crear cuenta' }).click();
 		await expect(pendingPage).toHaveURL(/\/odonto\/mis-turnos/);
 		await expect(pendingPage.getByRole('link', { name: 'Mis turnos' })).toBeVisible();
@@ -416,7 +448,7 @@ test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 		expect(appointment?.confirmed_at).toBeNull();
 
 		await page.goto(`/odonto/agenda?date=${fixture.date}`);
-		await page.getByRole('button', { name: 'Ver turnos del día' }).click();
+		await openDayAppointmentsPanel(page);
 		await expect(page.getByText('Reservado').first()).toBeVisible();
 		await expect(page.getByText('Confirmado')).toHaveCount(0);
 		await expect(page.getByRole('link', { name: 'Semana' })).toBeVisible();
@@ -458,10 +490,9 @@ test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 		await expect(page.getByText('El paciente confirmó el turno desde el enlace')).toBeVisible();
 		await expect(page.getByText('appointment.public_confirmed')).toHaveCount(0);
 
-		await page.getByText('Más detalles').click();
-		await expect(page.locator('input[type="date"][name="reprogram_date"]')).toHaveAttribute('min', /\d{4}-\d{2}-\d{2}/);
-		await expect(page.locator('select[name="slot_starts_at"]')).toBeEnabled();
-		await expect(page.locator('select[name="slot_starts_at"] option', { hasText: '10:30' })).toHaveCount(1);
+		const reprogramPanel = await openReprogramPanel(page);
+		await expect(reprogramPanel.locator('input[type="hidden"][name="reprogram_date"]')).toHaveValue(fixture.date);
+		await expect(reprogramPanel.getByRole('button', { name: '10:30' })).toHaveCount(1);
 
 		const createSameProfessionalBlock = await postAction(page, '/odonto/agenda?/create_appointment', {
 			service_id: fixture.serviceId,
@@ -474,7 +505,7 @@ test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 		expect(createSameProfessionalBlock.status).toBeLessThan(500);
 
 		await page.goto(`/odonto/turnos/${appointment?.id}?from_date=${fixture.date}&reprogram_date=${fixture.date}`);
-		await page.getByText('Más detalles').click();
-		await expect(page.locator('select[name="slot_starts_at"] option', { hasText: '10:30' })).toHaveCount(0);
+		const reprogramPanelAfterBlock = await openReprogramPanel(page);
+		await expect(reprogramPanelAfterBlock.getByRole('button', { name: '10:30' })).toHaveCount(0);
 	});
 });

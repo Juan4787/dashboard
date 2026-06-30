@@ -89,6 +89,17 @@ const login = async (page: Page) => {
 	).toBeVisible({ timeout: 15_000 });
 };
 
+const openFollowUpDialog = async (page: Page) => {
+	const dialogTitle = page.getByRole('heading', { name: 'Agregar seguimiento' });
+	if (await dialogTitle.isVisible({ timeout: 1000 }).catch(() => false)) return;
+	const button = page.getByRole('button', { name: 'Agregar seguimiento' });
+	await expect(button).toBeVisible();
+	await expect(async () => {
+		await button.click();
+		await expect(dialogTitle).toBeVisible({ timeout: 1000 });
+	}).toPass({ timeout: 10_000 });
+};
+
 test.describe.configure({ mode: 'serial' });
 
 test.describe('Seguimientos — cobertura E2E', () => {
@@ -113,7 +124,7 @@ test.describe('Seguimientos — cobertura E2E', () => {
 	test('el formulario NO se cierra al clickear afuera y SÍ con la X', async ({ page }) => {
 		await login(page);
 		await page.goto('/odonto/seguimientos');
-		await page.getByRole('button', { name: 'Agregar seguimiento' }).click();
+		await openFollowUpDialog(page);
 
 		const dialogTitle = page.getByRole('heading', { name: 'Agregar seguimiento' });
 		await expect(dialogTitle).toBeVisible();
@@ -132,7 +143,7 @@ test.describe('Seguimientos — cobertura E2E', () => {
 	}) => {
 		await login(page);
 		await page.goto('/odonto/seguimientos');
-		await page.getByRole('button', { name: 'Agregar seguimiento' }).click();
+		await openFollowUpDialog(page);
 
 		const patientInput = page.getByLabel('Paciente');
 		await expect(patientInput).toBeVisible();
@@ -164,7 +175,7 @@ test.describe('Seguimientos — cobertura E2E', () => {
 
 		await login(page);
 		await page.goto('/odonto/seguimientos');
-		await page.getByRole('button', { name: 'Agregar seguimiento' }).click();
+		await openFollowUpDialog(page);
 
 		const patientInput = page.getByLabel('Paciente');
 		await patientInput.fill((name as string).slice(0, Math.max(3, Math.min((name as string).length, 8))));

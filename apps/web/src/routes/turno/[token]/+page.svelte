@@ -28,7 +28,14 @@
 
 	// Push secundario: solo con soporte real, nunca en iOS (requeriría instalar la web
 	// app en el home), y el permiso se pide recién al tocar el botón.
-	type PushState = 'unavailable' | 'idle' | 'working' | 'subscribed' | 'denied' | 'error';
+	type PushState =
+		| 'unavailable'
+		| 'idle'
+		| 'working'
+		| 'subscribed'
+		| 'denied'
+		| 'awaiting_permission'
+		| 'error';
 	let pushState = $state<PushState>('unavailable');
 
 	const base = $derived(appointment ? `/turno/${appointment.token}` : '');
@@ -43,46 +50,25 @@
 		return response.ok;
 	};
 
-	onMount(async () => {
-		refinedDevice = refineDeviceClass(data.device, navigator);
-		const effective = refinedDevice ?? data.device;
-		if (
-			data.vapidPublicKey &&
-			effective !== 'ios' &&
-			'serviceWorker' in navigator &&
-			'PushManager' in window &&
-			'Notification' in window
-		) {
-			pushState = 'idle';
-			try {
-				const registration = await navigator.serviceWorker.getRegistration('/push-sw.js');
-				const subscription = await registration?.pushManager.getSubscription();
-				if (subscription) {
-					// La suscripción del navegador puede existir por un turno anterior.
-					// Hay que asociarla también al turno actual: la tabla es (appointment_id, endpoint).
-					pushState = (await savePushSubscriptionForAppointment(subscription)) ? 'subscribed' : 'error';
-				}
-			} catch {
-				pushState = 'idle';
-			}
-		}
-	});
-
 	const urlBase64ToUint8Array = (base64: string) => {
 		const padding = '='.repeat((4 - (base64.length % 4)) % 4);
 		const normalized = (base64 + padding).replace(/-/g, '+').replace(/_/g, '/');
 		return Uint8Array.from(atob(normalized), (char) => char.charCodeAt(0));
 	};
 
-	const enablePush = async () => {
-		if (!data.vapidPublicKey) return;
+	// Soporte real de push (se fija en onMount; nunca en iOS).
+	let pushSupported = false;
+	// Candado anti-reentrada: requestPermission y visibilitychange pueden disparar el
+	// alta a la vez. El upsert del backend es idempotente, pero evitamos subscribe() dobles.
+	let syncing = false;
+
+	// Requiere el permiso YA concedido: registra el SW, suscribe (o recupera) y guarda el
+	// endpoint contra el turno actual.
+	const syncPushSubscription = async () => {
+		if (!data.vapidPublicKey || syncing) return;
+		syncing = true;
 		pushState = 'working';
 		try {
-			const permission = await Notification.requestPermission();
-			if (permission !== 'granted') {
-				pushState = 'denied';
-				return;
-			}
 			const registration = await navigator.serviceWorker.register('/push-sw.js');
 			await navigator.serviceWorker.ready;
 			const subscription =
@@ -94,8 +80,74 @@
 			pushState = (await savePushSubscriptionForAppointment(subscription)) ? 'subscribed' : 'error';
 		} catch {
 			pushState = 'error';
+		} finally {
+			syncing = false;
 		}
 	};
+
+	const enablePush = async () => {
+		if (!data.vapidPublicKey || syncing) return;
+		pushState = 'working';
+		try {
+			const permission = await Notification.requestPermission();
+			if (permission === 'granted') {
+				await syncPushSubscription();
+			} else if (permission === 'denied') {
+				// Bloqueo real del navegador. Si lo desbloquea en Configuración y vuelve,
+				// el visibilitychange lo detecta y activa los avisos igual.
+				pushState = 'denied';
+			} else {
+				// 'default': no resolvió acá (p. ej. Android lo derivó a Configuración).
+				// NO es un bloqueo: esperamos a que vuelva a la pantalla.
+				pushState = 'awaiting_permission';
+			}
+		} catch {
+			pushState = 'error';
+		}
+	};
+
+	onMount(() => {
+		refinedDevice = refineDeviceClass(data.device, navigator);
+		const effective = refinedDevice ?? data.device;
+		pushSupported = Boolean(
+			data.vapidPublicKey &&
+				effective !== 'ios' &&
+				'serviceWorker' in navigator &&
+				'PushManager' in window &&
+				'Notification' in window
+		);
+		if (!pushSupported) return;
+
+		pushState = 'idle';
+		// Recupera una suscripción ya existente del navegador (de un turno anterior) y la
+		// asocia a este turno: la tabla es (appointment_id, endpoint).
+		void (async () => {
+			try {
+				const registration = await navigator.serviceWorker.getRegistration('/push-sw.js');
+				const subscription = await registration?.pushManager.getSubscription();
+				if (subscription && pushState === 'idle' && !syncing) {
+					pushState = (await savePushSubscriptionForAppointment(subscription)) ? 'subscribed' : 'error';
+				}
+			} catch {
+				// se queda en idle: el botón sigue disponible
+			}
+		})();
+
+		// Núcleo del fix de UX: al volver a la pantalla (tras conceder el permiso en
+		// Configuración) reconsultamos el estado REAL y activamos los avisos. También
+		// recupera de un 'denied' previo si el usuario lo desbloqueó.
+		const onVisible = () => {
+			if (document.visibilityState !== 'visible' || syncing) return;
+			if (pushState === 'subscribed') return;
+			if (Notification.permission === 'granted') {
+				void syncPushSubscription();
+			} else if (Notification.permission === 'denied' && pushState === 'awaiting_permission') {
+				pushState = 'denied';
+			}
+		};
+		document.addEventListener('visibilitychange', onVisible);
+		return () => document.removeEventListener('visibilitychange', onVisible);
+	});
 
 	const timezone = $derived(appointment?.business?.timezone ?? 'America/Argentina/Cordoba');
 	const whenLabels = $derived(
@@ -135,9 +187,15 @@
 				? 'Activá los avisos para que el teléfono te recuerde el turno y, si querés, guardalo también en tu calendario.'
 				: 'Agregá el turno a tu calendario para recibir avisos antes y tener la dirección a mano.'
 	);
-	const calendarSummaryClass = $derived(
-		device === 'android' && !needsCalendarUpdate ? 'ux-btn-secondary' : 'ux-btn-primary'
-	);
+	const calendarSummaryClass = $derived.by(() => {
+		// Reprogramación: actualizar el calendario ES la tarea → CTA enfatizado.
+		if (needsCalendarUpdate) return 'ux-btn-primary ux-btn-cta';
+		// En Android el push es el CTA principal; el calendario queda secundario.
+		if (device === 'android') return 'ux-btn-secondary';
+		// En iOS no hay push: el calendario es el CTA principal → enfatizado.
+		if (device === 'ios') return 'ux-btn-primary ux-btn-cta';
+		return 'ux-btn-primary';
+	});
 
 	type CalendarOption = { label: string; href: string; hint?: string; isIntent?: boolean };
 	const calendarOptions = $derived.by((): CalendarOption[] => {
@@ -237,6 +295,18 @@
 				<p class="ux-alert ux-alert-success">
 					🔔 Avisos activados en este teléfono: te avisamos {pushWindowsLabel}.
 				</p>
+			{:else if pushState === 'awaiting_permission'}
+				<p class="ux-alert">
+					Concedé el permiso de notificaciones y volvé a esta pantalla: activamos los avisos
+					automáticamente.
+				</p>
+				<button
+					type="button"
+					class={primary ? 'ux-btn-primary w-full mt-3' : 'ux-btn-secondary w-full mt-3'}
+					onclick={enablePush}
+				>
+					Volver a intentar
+				</button>
 			{:else if pushState === 'denied'}
 				<p class="ux-empty">
 					Las notificaciones están bloqueadas en este navegador. Agregá el turno al
@@ -245,7 +315,7 @@
 			{:else}
 				<button
 					type="button"
-					class={primary ? 'ux-btn-primary w-full' : 'ux-btn-secondary w-full'}
+					class={primary ? 'ux-btn-primary ux-btn-cta w-full' : 'ux-btn-secondary w-full'}
 					disabled={pushState === 'working'}
 					onclick={enablePush}
 				>
@@ -282,6 +352,80 @@
 	</section>
 {/snippet}
 
+{#snippet reminderCard()}
+	<section class="ux-card">
+		<h2 class="ux-section-title">{needsCalendarUpdate ? 'Actualizá el calendario' : 'No te lo olvides'}</h2>
+		<p class="mt-2 text-sm text-white/70">{reminderIntro}</p>
+
+		{#if device === 'android'}
+			{@render pushBlock(true)}
+		{/if}
+
+		<details class="mt-4 rounded-2xl border border-white/10 bg-white/[0.035]">
+			<summary class={`${calendarSummaryClass} block w-full cursor-pointer list-none text-center`}>
+				{needsCalendarUpdate ? '🔄 Actualizar calendario' : '📅 Agregar al calendario'}
+			</summary>
+			<div class="border-t border-white/10 p-4">
+				{#if hasCalendarAction && !needsCalendarUpdate}
+					<p class="ux-alert mb-4">
+						Ya registramos una acción de calendario para este turno. Si lo agregás otra vez,
+						podrías recibir avisos duplicados.
+					</p>
+				{/if}
+				<div class="grid gap-3">
+					{#each calendarOptions as option}
+						<a
+							href={option.href}
+							class="ux-choice flex items-center justify-between px-5 py-4"
+							onclick={option.isIntent ? reportIntentAttempt : undefined}
+						>
+							<span class="font-bold text-white">{option.label}</span>
+							{#if option.hint}
+								<span class="ux-badge">{option.hint}</span>
+							{/if}
+						</a>
+					{/each}
+				</div>
+				{#if device === 'android'}
+					<p class="mt-4 text-xs text-white/45">
+						El evento guarda la dirección y este enlace; los avisos dependen de los
+						recordatorios habituales de tu calendario.
+						{#if pushState !== 'unavailable'}
+							Para avisos {pushWindowsLabel}, activá los avisos en este teléfono.
+						{/if}
+					</p>
+					<p class="mt-2 text-xs text-white/35">
+						<a href={`${base}/calendario-descargar.ics`} class="underline">
+							Descargar archivo de calendario (.ics)
+						</a>
+					</p>
+				{:else}
+					<p class="mt-4 text-xs text-white/45">
+						El evento incluye avisos sugeridos 24 horas y 2 horas antes, la dirección y este enlace.
+						Algunos calendarios usan tus recordatorios habituales.
+					</p>
+				{/if}
+			</div>
+		</details>
+
+		{#if device !== 'android'}
+			{@render pushBlock(false)}
+		{/if}
+
+		<details class="mt-3 rounded-2xl border border-white/10 bg-white/[0.02]">
+			<summary class="cursor-pointer list-none px-5 py-3 text-sm font-bold text-white/70">
+				Copiar detalles del turno
+			</summary>
+			<div class="border-t border-white/10 p-4">
+				<pre class="overflow-x-auto whitespace-pre-wrap text-sm text-white/80">{copyDetailsText}</pre>
+				<button type="button" class="ux-btn-secondary mt-3 w-full" onclick={copyDetails}>
+					{copied ? 'Copiado ✓' : 'Copiar al portapapeles'}
+				</button>
+			</div>
+		</details>
+	</section>
+{/snippet}
+
 <main class="min-h-screen bg-[#06111f] px-4 py-6 text-white sm:py-10">
 	<div class="mx-auto flex w-full max-w-3xl flex-col gap-5">
 		<section class="ux-hero">
@@ -311,6 +455,10 @@
 				{@render locationCard()}
 			{/if}
 
+			{#if isActive}
+				{@render reminderCard()}
+			{/if}
+
 			<section class="ux-card">
 				<div class="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
 					<div>
@@ -338,84 +486,18 @@
 				{#if appointment.business.cancellation_policy}
 					<p class="ux-empty mt-5">{appointment.business.cancellation_policy}</p>
 				{/if}
+
+				<a
+					href={`${base}/comprobante.pdf`}
+					download="comprobante-turno.pdf"
+					class="ux-btn-secondary mt-6 w-full"
+				>
+					🧾 Guardar comprobante
+				</a>
 			</section>
 
 			{#if !data.isSoon && appointment.business.address}
 				{@render locationCard()}
-			{/if}
-
-			{#if isActive}
-				<section class="ux-card">
-					<h2 class="ux-section-title">{needsCalendarUpdate ? 'Actualizá el calendario' : 'No te lo olvides'}</h2>
-					<p class="mt-2 text-sm text-white/70">{reminderIntro}</p>
-
-					{#if device === 'android'}
-						{@render pushBlock(true)}
-					{/if}
-
-					<details class="mt-4 rounded-2xl border border-white/10 bg-white/[0.035]">
-						<summary class={`${calendarSummaryClass} block w-full cursor-pointer list-none text-center`}>
-							{needsCalendarUpdate ? '🔄 Actualizar calendario' : '📅 Agregar al calendario'}
-						</summary>
-						<div class="border-t border-white/10 p-4">
-							{#if hasCalendarAction && !needsCalendarUpdate}
-								<p class="ux-alert mb-4">
-									Ya registramos una acción de calendario para este turno. Si lo agregás otra vez,
-									podrías recibir avisos duplicados.
-								</p>
-							{/if}
-							<div class="grid gap-3">
-								{#each calendarOptions as option}
-									<a
-										href={option.href}
-										class="ux-choice flex items-center justify-between px-5 py-4"
-										onclick={option.isIntent ? reportIntentAttempt : undefined}
-									>
-										<span class="font-bold text-white">{option.label}</span>
-										{#if option.hint}
-											<span class="ux-badge">{option.hint}</span>
-										{/if}
-									</a>
-								{/each}
-							</div>
-							{#if device === 'android'}
-								<p class="mt-4 text-xs text-white/45">
-									El evento guarda la dirección y este enlace; los avisos dependen de los
-									recordatorios habituales de tu calendario.
-									{#if pushState !== 'unavailable'}
-										Para avisos {pushWindowsLabel}, activá los avisos en este teléfono.
-									{/if}
-								</p>
-								<p class="mt-2 text-xs text-white/35">
-									<a href={`${base}/calendario-descargar.ics`} class="underline">
-										Descargar archivo de calendario (.ics)
-									</a>
-								</p>
-							{:else}
-								<p class="mt-4 text-xs text-white/45">
-									El evento incluye avisos sugeridos 24 horas y 2 horas antes, la dirección y este enlace.
-									Algunos calendarios usan tus recordatorios habituales.
-								</p>
-							{/if}
-						</div>
-					</details>
-
-					{#if device !== 'android'}
-						{@render pushBlock(false)}
-					{/if}
-
-					<details class="mt-3 rounded-2xl border border-white/10 bg-white/[0.02]">
-						<summary class="cursor-pointer list-none px-5 py-3 text-sm font-bold text-white/70">
-							Copiar detalles del turno
-						</summary>
-						<div class="border-t border-white/10 p-4">
-							<pre class="overflow-x-auto whitespace-pre-wrap text-sm text-white/80">{copyDetailsText}</pre>
-							<button type="button" class="ux-btn-secondary mt-3 w-full" onclick={copyDetails}>
-								{copied ? 'Copiado ✓' : 'Copiar al portapapeles'}
-							</button>
-						</div>
-					</details>
-				</section>
 			{/if}
 
 			{#if isCancelled}

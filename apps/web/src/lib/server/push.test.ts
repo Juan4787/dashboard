@@ -15,7 +15,11 @@ vi.mock('$env/dynamic/private', () => ({ env: envState.privateEnv }));
 vi.mock('$env/dynamic/public', () => ({ env: envState.publicEnv }));
 
 import webpush from 'web-push';
-import { isValidSubscriptionPayload, sendDuePushReminders } from './push';
+import {
+	isValidSubscriptionPayload,
+	resetPushRemindersForReschedule,
+	sendDuePushReminders
+} from './push';
 
 const now = new Date('2026-06-11T12:00:00.000Z');
 
@@ -176,5 +180,80 @@ describe('sendDuePushReminders', () => {
 		const { supabase } = createSupabaseMock({}, { data: [], error: null });
 		const result = await sendDuePushReminders(supabase, { now });
 		expect(result).toMatchObject({ configured: false, sent: 0 });
+	});
+});
+
+describe('resetPushRemindersForReschedule', () => {
+	// Mock que captura el payload del update y los filtros eq/is aplicados.
+	const makeMock = (data: unknown = [{ id: 'sub-1' }]) => {
+		const calls = {
+			update: null as Record<string, unknown> | null,
+			eq: [] as Array<[string, unknown]>,
+			is: [] as Array<[string, unknown]>,
+			table: ''
+		};
+		const chain: any = {
+			update(payload: Record<string, unknown>) {
+				calls.update = payload;
+				return chain;
+			},
+			eq(col: string, val: unknown) {
+				calls.eq.push([col, val]);
+				return chain;
+			},
+			is(col: string, val: unknown) {
+				calls.is.push([col, val]);
+				return chain;
+			},
+			select: () => chain,
+			then: (resolve: (v: unknown) => unknown) =>
+				Promise.resolve({ data, error: null }).then(resolve)
+		};
+		const supabase = {
+			from(table: string) {
+				calls.table = table;
+				return chain;
+			}
+		} as any;
+		return { supabase, calls };
+	};
+
+	it('limpia sent/claimed de 24h y 2h del turno, sin tocar revocadas', async () => {
+		const { supabase, calls } = makeMock([{ id: 'sub-1' }, { id: 'sub-2' }]);
+		const count = await resetPushRemindersForReschedule(supabase, {
+			businessId: 'biz-1',
+			appointmentId: 'apt-1',
+			now
+		});
+
+		expect(count).toBe(2);
+		expect(calls.table).toBe('push_subscriptions');
+		expect(calls.update).toEqual({
+			push_24h_claimed_at: null,
+			push_24h_sent_at: null,
+			push_2h_claimed_at: null,
+			push_2h_sent_at: null,
+			updated_at: now.toISOString()
+		});
+		expect(calls.eq).toEqual([
+			['business_id', 'biz-1'],
+			['appointment_id', 'apt-1']
+		]);
+		expect(calls.is).toEqual([['revoked_at', null]]);
+	});
+
+	it('propaga el error de Supabase', async () => {
+		const chain: any = {
+			update: () => chain,
+			eq: () => chain,
+			is: () => chain,
+			select: () => chain,
+			then: (resolve: (v: unknown) => unknown) =>
+				Promise.resolve({ data: null, error: new Error('boom') }).then(resolve)
+		};
+		const supabase = { from: () => chain } as any;
+		await expect(
+			resetPushRemindersForReschedule(supabase, { businessId: 'b', appointmentId: 'a' })
+		).rejects.toThrow('boom');
 	});
 });

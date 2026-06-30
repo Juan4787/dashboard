@@ -24,6 +24,9 @@
 			minReprogramDate: string;
 			reprogramSlots: Slot[];
 			fromDate: string;
+			justRescheduled: boolean;
+			rescheduleWhatsAppUrl: string | null;
+			reschedulePublicUrl: string | null;
 			demo: boolean;
 		};
 		form?: { success?: boolean; message?: string };
@@ -127,17 +130,43 @@
 		return { y, m, d };
 	};
 
-	const todayIso = data.minReprogramDate;
-	const initParts = parseIso(data.reprogramDate);
+	const initialReprogramState = (initialData: {
+		reprogramDate: string;
+		minReprogramDate: string;
+		reprogramSlots: Slot[];
+	}) => ({
+		todayIso: initialData.minReprogramDate,
+		reprogramDate: initialData.reprogramDate,
+		reprogramSlots: initialData.reprogramSlots,
+		initParts: parseIso(initialData.reprogramDate)
+	});
 
-	let selectedDate = $state(data.reprogramDate);
+	// svelte-ignore state_referenced_locally
+	const reprogramInitial = initialReprogramState(data);
+	const todayIso = reprogramInitial.todayIso;
+	const initParts = reprogramInitial.initParts;
+
+	let selectedDate = $state(reprogramInitial.reprogramDate);
 	let viewYear = $state(initParts.y);
 	let viewMonth = $state(initParts.m - 1);
-	let slotsCache = $state<Record<string, Slot[]>>({ [data.reprogramDate]: data.reprogramSlots ?? [] });
+	let slotsCache = $state<Record<string, Slot[]>>({
+		[reprogramInitial.reprogramDate]: reprogramInitial.reprogramSlots ?? []
+	});
 	let loadingSlots = $state(false);
 	let slotsError = $state<string | null>(null);
 	let selectedSlot = $state('');
 	let submitting = $state(false);
+
+	$effect(() => {
+		const nextParts = parseIso(data.reprogramDate);
+		selectedDate = data.reprogramDate;
+		viewYear = nextParts.y;
+		viewMonth = nextParts.m - 1;
+		slotsCache = { [data.reprogramDate]: data.reprogramSlots ?? [] };
+		selectedSlot = '';
+		slotsError = null;
+		loadingSlots = false;
+	});
 
 	const weekdayLabels = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
 
@@ -250,6 +279,42 @@
 		<p class={`rounded-2xl px-4 py-3 text-sm font-semibold ${form.success ? 'bg-emerald-400/15 text-emerald-100' : 'bg-red-500/15 text-red-100'}`}>
 			{form.message}
 		</p>
+	{/if}
+
+	{#if data.justRescheduled && data.appointment}
+		<div class="rounded-3xl border border-emerald-400/30 bg-emerald-400/10 p-5">
+			<h2 class="text-lg font-semibold text-emerald-50">Turno reprogramado</h2>
+			<p class="mt-2 text-sm text-emerald-100/80">
+				Los avisos del horario anterior se invalidaron y los recordatorios se recalcularon para
+				la nueva fecha. Avisale al paciente del cambio.
+			</p>
+			{#if data.rescheduleWhatsAppUrl}
+				<div class="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+					<a
+						href={data.rescheduleWhatsAppUrl}
+						target="_blank"
+						rel="noreferrer"
+						class="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-5 py-3 text-sm font-bold text-white transition hover:bg-emerald-400"
+					>
+						Enviar actualización por WhatsApp
+					</a>
+					{#if data.reschedulePublicUrl}
+						<a
+							href={data.reschedulePublicUrl}
+							target="_blank"
+							rel="noreferrer"
+							class="text-sm font-semibold text-emerald-100/80 underline"
+						>
+							Ver lo que verá el paciente
+						</a>
+					{/if}
+				</div>
+			{:else}
+				<p class="mt-4 text-sm font-semibold text-amber-100">
+					Este paciente no tiene un teléfono válido cargado: avisale del cambio por otro medio.
+				</p>
+			{/if}
+		</div>
 	{/if}
 
 	{#if data.appointment}

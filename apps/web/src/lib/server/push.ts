@@ -86,6 +86,35 @@ export const saveAppointmentPushSubscription = async (
 	});
 };
 
+// Reprogramación: invalida los avisos pendientes del horario VIEJO y deja que se
+// recalculen los de 24h/2h para el NUEVO horario. Limpiar *_sent_at desbloquea el
+// reenvío (el job no reenvía si sent_at ya está marcado) y limpiar *_claimed_at
+// libera cualquier claim en vuelo; las ventanas se computan en claim_due_push_reminders
+// contra el starts_at vivo, así que tras esto apuntan automáticamente a la fecha nueva.
+// Requiere cliente service-role (push_subscriptions tiene RLS sin policies). No toca
+// suscripciones revocadas (endpoint muerto: no resucita).
+export const resetPushRemindersForReschedule = async (
+	supabase: SupabaseClient,
+	input: { businessId: string; appointmentId: string; now?: Date }
+): Promise<number> => {
+	const now = (input.now ?? new Date()).toISOString();
+	const { data, error } = await supabase
+		.from('push_subscriptions')
+		.update({
+			push_24h_claimed_at: null,
+			push_24h_sent_at: null,
+			push_2h_claimed_at: null,
+			push_2h_sent_at: null,
+			updated_at: now
+		})
+		.eq('business_id', input.businessId)
+		.eq('appointment_id', input.appointmentId)
+		.is('revoked_at', null)
+		.select('id');
+	if (error) throw error;
+	return (data ?? []).length;
+};
+
 type ClaimedReminder = {
 	subscription_id: string;
 	appointment_id: string;

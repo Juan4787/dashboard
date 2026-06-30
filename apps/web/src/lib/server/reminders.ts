@@ -5,9 +5,19 @@
 // - status reserved/confirmed, dentro de la ventana Hoy/Mañana (TZ del negocio), futuro.
 // - sin acción de calendario (not_offered/offered) → "Sin calendario registrado",
 //   o reprogramado después de una acción → "Calendario pendiente de actualizar".
-// - sin suscripción push activa (cobertura secundaria) y sin dispatch automático
+// - sin suscripción push FIABLE (cobertura secundaria) y sin dispatch automático
 //   activo (pipeline Meta dormida: si algún día se prende, acá no se duplica).
 // "offered" NUNCA cuenta como cobertura: solo significa que vio la pantalla.
+//
+// Fiabilidad del push (ver isReliablyActivePushSubscription): NO alcanza con que la
+// fila exista sin revocar. `revoked_at` solo se marca cuando (a) el turno termina,
+// (b) un envío devuelve 410/404, o (c) failed_count llega al máximo. Un endpoint
+// muerto (permiso revocado / datos del sitio borrados) sigue sin revocar hasta el
+// próximo intento de envío. Por eso solo se excluye un turno de la lista manual
+// cuando la suscripción está sin revocar Y sin ningún fallo de entrega registrado.
+// Sesgo deliberado: sub-excluir (un WhatsApp de más) es inocuo; sobre-excluir deja
+// al paciente sin ningún recordatorio. Si el push de 24h falla, failed_count sube y
+// el turno reaparece acá a tiempo.
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { formatInTimeZone } from '$lib/utils/format';
@@ -122,6 +132,26 @@ export const buildReminderWhatsAppMessage = (input: ReminderMessageInput): strin
 export const buildWaMeUrl = (phoneE164: string, message: string): string =>
 	`https://wa.me/${phoneE164.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
 
+// --- Mensaje manual de WhatsApp para reprogramación (§48: neutral) -----------
+
+export type RescheduleMessageInput = {
+	patientName: string;
+	startsAt: string;
+	timezone: string;
+	businessName: string;
+	rescheduleUrl: string;
+};
+
+export const buildRescheduleWhatsAppMessage = (input: RescheduleMessageInput): string => {
+	const { dateLabel, timeLabel } = formatInTimeZone(input.startsAt, input.timezone);
+	return [
+		`Hola ${input.patientName}. Reprogramamos tu turno en ${input.businessName}.`,
+		`Nueva fecha: ${dateLabel} a las ${timeLabel}.`,
+		'',
+		`Mirá el detalle actualizado acá: ${input.rescheduleUrl}`
+	].join('\n');
+};
+
 // --- Clasificación de cobertura (pura, testeable) ----------------------------
 
 export type CoverageInput = {
@@ -137,6 +167,19 @@ export const classifyReminderCoverage = (input: CoverageInput): ReminderCoverage
 	if (UNCOVERED_CALENDAR_STATUSES.has(input.calendar_action_status)) return 'sin_calendario';
 	return null;
 };
+
+// Detección FIABLE de push activo (pura, testeable). Solo se considera que el turno
+// está cubierto por push cuando la suscripción no fue revocada y no acumula ningún
+// fallo de entrega: failed_count > 0 significa que el push service ya rechazó algún
+// envío, así que no podemos asegurar que el paciente vaya a recibir el recordatorio.
+export type PushSubscriptionReliabilityInput = {
+	revoked_at: string | null;
+	failed_count: number | null;
+};
+
+export const isReliablyActivePushSubscription = (
+	row: PushSubscriptionReliabilityInput
+): boolean => row.revoked_at == null && Number(row.failed_count ?? 0) === 0;
 
 // --- Carga principal ----------------------------------------------------------
 
@@ -180,7 +223,7 @@ export const loadReminderCandidates = async (
 	const [{ data: pushRows }, { data: dispatchRows }] = await Promise.all([
 		supabase
 			.from('push_subscriptions')
-			.select('appointment_id')
+			.select('appointment_id, revoked_at, failed_count')
 			.eq('business_id', business.id)
 			.in('appointment_id', ids)
 			.is('revoked_at', null),
@@ -192,7 +235,11 @@ export const loadReminderCandidates = async (
 			.in('appointment_id', ids)
 	]);
 
-	const pushed = new Set((pushRows ?? []).map((row: any) => String(row.appointment_id)));
+	const pushed = new Set(
+		(pushRows ?? [])
+			.filter((row: any) => isReliablyActivePushSubscription(row))
+			.map((row: any) => String(row.appointment_id))
+	);
 	const dispatched = new Set(
 		(dispatchRows ?? [])
 			.filter((row: any) => ACTIVE_DISPATCH_STATUSES.includes(String(row.status)))

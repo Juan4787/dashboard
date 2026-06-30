@@ -26,8 +26,11 @@ export type MessageDispatchType = (typeof MESSAGE_DISPATCH_TYPES)[number];
 export type MessagingProviderName = 'mock' | 'meta_cloud' | 'bsp';
 
 export const REMINDER_TEMPLATE_NAME = 'appointment_reminder_24h';
+export const BOT_REPLY_TEMPLATE_NAME = 'bot_reply';
 export const DEFAULT_REMINDER_TEMPLATE_BODY =
 	'Hola {{1}}, te recordamos tu turno en {{2}} el {{3}} a las {{4}}.\n\nPodés confirmar, cancelar o pedir reprogramación acá:\n{{5}}';
+export const DEFAULT_BOT_REPLY_TEMPLATE_BODY =
+	'Hola. Somos {{business_name}}.\n\nPara sacar turno, entrá acá:\n{{booking_url}}\n\nAhí elegís servicio, profesional, día y horario disponible.\n\nPara hablar con una persona, escribí "asesor".';
 export const AUTOMATIC_REMINDERS_ENABLED = env.WHATSAPP_AUTOMATIC_REMINDERS_ENABLED === 'true';
 
 export const dispatchStatusLabels: Record<MessageDispatchStatus, string> = {
@@ -127,6 +130,11 @@ export const getPublicSiteUrl = () => {
 };
 
 export const publicAppointmentUrl = (token: string) => `${getPublicSiteUrl()}/turno/${token}`;
+
+// Enlace privado que muestra SOLO el aviso de reprogramación (no la página completa
+// de gestión del turno). Lleva el mismo token; el contenido se renderiza minimal.
+export const publicRescheduleUrl = (token: string) =>
+	`${getPublicSiteUrl()}/turno/${token}/reprogramado`;
 
 export const bookingUrl = (businessId: string) => `${getPublicSiteUrl()}/reservar/${businessId}`;
 
@@ -290,6 +298,23 @@ export const loadReminderTemplate = async (
 	return (data as MessageTemplate | null) ?? null;
 };
 
+export const loadBotReplyTemplate = async (
+	supabase: SupabaseClient,
+	businessId: string
+): Promise<MessageTemplate | null> => {
+	const { data, error } = await supabase
+		.from('message_templates')
+		.select('id, business_id, provider, provider_template_id, name, category, language, status, body')
+		.eq('business_id', businessId)
+		.eq('name', BOT_REPLY_TEMPLATE_NAME)
+		.eq('status', 'approved')
+		.order('created_at', { ascending: true })
+		.limit(1)
+		.maybeSingle();
+	if (error) throw error;
+	return (data as MessageTemplate | null) ?? null;
+};
+
 export const ensureMockMessagingSetup = async (supabase: SupabaseClient, businessId: string) => {
 	const now = new Date().toISOString();
 	const { data: existingAccount, error: existingAccountError } = await supabase
@@ -366,6 +391,40 @@ export const ensureMockMessagingSetup = async (supabase: SupabaseClient, busines
 					created_at: now
 				});
 	if (templateError) throw templateError;
+
+	const { data: existingBotTemplate, error: existingBotTemplateError } = await supabase
+		.from('message_templates')
+		.select('id')
+		.eq('business_id', businessId)
+		.eq('name', BOT_REPLY_TEMPLATE_NAME)
+		.eq('language', 'es_AR')
+		.maybeSingle();
+	if (existingBotTemplateError) throw existingBotTemplateError;
+
+	const botTemplatePayload = {
+		business_id: businessId,
+		provider: 'mock',
+		name: BOT_REPLY_TEMPLATE_NAME,
+		category: 'service',
+		language: 'es_AR',
+		status: 'approved',
+		body: DEFAULT_BOT_REPLY_TEMPLATE_BODY,
+		updated_at: now
+	};
+
+	const { error: botTemplateError } = existingBotTemplate?.id
+		? await supabase
+				.from('message_templates')
+				.update(botTemplatePayload)
+				.eq('id', existingBotTemplate.id)
+				.eq('business_id', businessId)
+		: await supabase
+				.from('message_templates')
+				.insert({
+					...botTemplatePayload,
+					created_at: now
+				});
+	if (botTemplateError) throw botTemplateError;
 	return account;
 };
 
@@ -769,8 +828,15 @@ export const applyProviderMessageStatus = async (
 export const isHumanRequest = (text?: string | null) =>
 	/\b(asesor|humano|persona|recepci[oó]n|secretar[ií]a|hablar|ayuda)\b/i.test(text ?? '');
 
-export const buildBotReplyText = (business: { id: string; name: string }) =>
-	`Hola. Somos ${business.name}.\n\nPara sacar turno, entrá acá:\n${bookingUrl(business.id)}\n\nAhí elegís servicio, profesional, día y horario disponible.\n\nPara hablar con una persona, escribí "asesor".`;
+export const renderBotReplyBody = (body: string, business: { id: string; name: string }) =>
+	body
+		.replaceAll('{{business_name}}', business.name)
+		.replaceAll('{{booking_url}}', bookingUrl(business.id));
+
+export const buildBotReplyText = (
+	business: { id: string; name: string },
+	body = DEFAULT_BOT_REPLY_TEMPLATE_BODY
+) => renderBotReplyBody(body, business);
 
 export const sendBotBookingLinkReply = async (
 	supabase: SupabaseClient,
@@ -782,7 +848,8 @@ export const sendBotBookingLinkReply = async (
 	}
 ) => {
 	const now = input.now ?? new Date();
-	const text = buildBotReplyText(input.business);
+	const template = await loadBotReplyTemplate(supabase, input.business.id);
+	const text = buildBotReplyText(input.business, template?.body ?? DEFAULT_BOT_REPLY_TEMPLATE_BODY);
 	const { data: dispatch, error: insertError } = await supabase
 		.from('message_dispatches')
 		.insert({

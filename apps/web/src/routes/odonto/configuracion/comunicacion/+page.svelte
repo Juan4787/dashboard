@@ -6,16 +6,28 @@
 			demo: boolean;
 			context: any;
 			account: any;
+			botTemplate: any;
+			defaultBotReplyBody: string;
 			lastEvent: any;
 			bookingPath: string;
+			pushStats?: { active: number; sent7d: number; revoked7d: number };
 		};
 		form?: { success?: boolean; message?: string };
 	}>();
 
 	const canManage = $derived(Boolean(data.context?.canManage));
 	const replyEnabled = $derived(Boolean(data.account?.bot_enabled && data.account?.status === 'active'));
+	const initialProvider = () => data.account?.provider ?? 'meta_cloud';
+	const initialReplyBody = () => data.botTemplate?.body ?? data.defaultBotReplyBody;
+	let selectedProvider = $state(initialProvider());
+	let replyBody = $state(initialReplyBody());
 	const siteUrl = $derived(typeof window === 'undefined' ? '' : window.location.origin);
 	const bookingUrl = $derived(`${siteUrl}${data.bookingPath}`);
+	const previewReply = $derived(
+		(replyBody || data.defaultBotReplyBody)
+			.replaceAll('{{business_name}}', data.context?.business?.name ?? 'Consultorio')
+			.replaceAll('{{booking_url}}', bookingUrl || data.bookingPath)
+	);
 	let copied = $state(false);
 
 	const copyBookingUrl = async () => {
@@ -66,6 +78,13 @@
 					</select>
 				</label>
 				<label>
+					<span class="ux-label">Conexión</span>
+					<select name="provider" class="ux-select" bind:value={selectedProvider} disabled={!canManage || data.demo}>
+						<option value="meta_cloud">WhatsApp real</option>
+						<option value="mock">Prueba interna</option>
+					</select>
+				</label>
+				<label>
 					<span class="ux-label">Nombre visible (opcional)</span>
 					<input
 						name="display_name"
@@ -74,8 +93,8 @@
 						disabled={!canManage || data.demo}
 					/>
 				</label>
-				<label class="md:col-span-2">
-					<span class="ux-label">Teléfono de WhatsApp (opcional)</span>
+				<label>
+					<span class="ux-label">Teléfono de WhatsApp</span>
 					<input
 						name="phone_number"
 						class="ux-input"
@@ -83,6 +102,51 @@
 						placeholder="+54 9 ..."
 						disabled={!canManage || data.demo}
 					/>
+				</label>
+				{#if selectedProvider === 'meta_cloud'}
+					<label>
+						<span class="ux-label">Phone Number ID</span>
+						<input
+							name="phone_number_id"
+							class="ux-input"
+							value={data.account?.phone_number_id ?? ''}
+							placeholder="123456789012345"
+							disabled={!canManage || data.demo}
+						/>
+					</label>
+					<label>
+						<span class="ux-label">WABA ID (opcional)</span>
+						<input
+							name="waba_id"
+							class="ux-input"
+							value={data.account?.waba_id ?? ''}
+							placeholder="123456789012345"
+							disabled={!canManage || data.demo}
+						/>
+					</label>
+					<label class="md:col-span-2">
+						<span class="ux-label">Variable del token</span>
+						<input
+							name="access_token_secret_name"
+							class="ux-input"
+							value={data.account?.access_token_secret_name ?? 'WHATSAPP_ACCESS_TOKEN'}
+							placeholder="WHATSAPP_ACCESS_TOKEN"
+							disabled={!canManage || data.demo}
+						/>
+					</label>
+				{/if}
+				<label class="md:col-span-2">
+					<span class="ux-label">Mensaje automático</span>
+					<textarea
+						name="reply_body"
+						class="ux-input min-h-44"
+						maxlength="1000"
+						bind:value={replyBody}
+						disabled={!canManage || data.demo}
+					></textarea>
+					<p class="mt-2 text-xs font-bold text-white/45">
+						Variables: {'{{business_name}}'} y {'{{booking_url}}'}
+					</p>
 				</label>
 			</div>
 			<button class="ux-btn-primary w-full sm:w-fit" disabled={!canManage || data.demo}>Guardar comunicación</button>
@@ -107,10 +171,7 @@
 		<div class="ux-card">
 			<h2 class="ux-section-title">Mensaje que recibirá</h2>
 			<div class="mt-5 rounded-3xl border border-white/10 bg-[#0b1626] p-5">
-				<p class="text-sm leading-6 text-white/82">
-					Hola. Podés reservar tu turno desde este link:
-				</p>
-				<p class="mt-3 break-all text-sm font-bold text-[#c4b5fd]">{bookingUrl || data.bookingPath}</p>
+				<p class="whitespace-pre-line break-words text-sm leading-6 text-white/82">{previewReply}</p>
 			</div>
 			{#if data.lastEvent}
 				<p class="mt-4 text-xs font-bold text-white/45">

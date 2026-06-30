@@ -15,8 +15,13 @@ test.describe('Odontologia - flujo base', () => {
 
 		await expect(page.getByRole('link', { name: 'Agenda' })).toBeVisible();
 		await expect(page.getByRole('link', { name: 'Pacientes' })).toBeVisible();
-		await expect(page.getByRole('link', { name: 'Equipo' })).toBeVisible();
-		await expect(page.getByRole('button', { name: 'Configuración' })).toBeVisible();
+		const configMenu = page.getByRole('button', { name: 'Configuración' });
+		await expect(configMenu).toBeVisible();
+		await expect(async () => {
+			await configMenu.click();
+			await expect(configMenu).toHaveAttribute('aria-expanded', 'true', { timeout: 1000 });
+		}).toPass();
+		await expect(page.getByRole('menuitem', { name: 'Equipo' })).toBeVisible();
 	});
 });
 
@@ -41,8 +46,9 @@ test.describe('Reserva pública - modo demo', () => {
 		await expect(page.getByRole('heading', { name: 'Tu turno' })).toBeVisible();
 		await expect(page.getByText(/Te esperamos el/)).toBeVisible();
 		// Dirección + CTAs de calendario (plan Calendario/dirección/recordatorios).
-		await expect(page.getByText('Av. Demo 123').first()).toBeVisible();
-		await expect(page.getByRole('link', { name: 'Cómo llegar' })).toBeVisible();
+		const locationCard = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Dónde es' }) });
+		await expect(locationCard.getByText('Av. Demo 123')).toBeVisible();
+		await expect(locationCard.getByRole('link', { name: 'Cómo llegar' })).toBeVisible();
 		await expect(page.locator('summary').filter({ hasText: 'Agregar al calendario' })).toBeVisible();
 		await expect(page.locator('summary').filter({ hasText: 'Copiar detalles del turno' })).toBeVisible();
 		await expect(page.getByRole('button', { name: 'Confirmo que voy' })).toBeEnabled();
