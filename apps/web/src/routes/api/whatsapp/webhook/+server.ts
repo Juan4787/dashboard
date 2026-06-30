@@ -23,7 +23,13 @@ export const POST: RequestHandler = async ({ request, fetch }) => {
 		return json({ message: 'Firma inválida.' }, { status: 401 });
 	}
 
-	const payload = JSON.parse(body);
+	let payload: unknown;
+	try {
+		payload = JSON.parse(body);
+	} catch {
+		return json({ message: 'Cuerpo inválido.' }, { status: 400 });
+	}
+
 	const supabase = await createSupabaseAdminClient('odonto', fetch);
 	const result = await processWhatsAppWebhookPayload(supabase, payload);
 	return json(result);

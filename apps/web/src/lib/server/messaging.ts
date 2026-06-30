@@ -1088,7 +1088,10 @@ export const processWhatsAppWebhookPayload = async (
 
 export const verifyWebhookSignature = (body: string, signatureHeader?: string | null) => {
 	const secret = env.WHATSAPP_APP_SECRET?.trim();
-	if (!secret) return true;
+	// Falla-cerrado: sin el app secret no podemos verificar la firma, así que se
+	// rechaza. El webhook es un endpoint público y se procesa con cliente admin;
+	// aceptar sin verificar permitiría payloads forjados.
+	if (!secret) return false;
 	if (!signatureHeader?.startsWith('sha256=')) return false;
 	const expected =
 		'sha256=' + crypto.createHmac('sha256', secret).update(body, 'utf8').digest('hex');
