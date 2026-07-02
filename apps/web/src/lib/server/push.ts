@@ -11,6 +11,7 @@ import webpush from 'web-push';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { writeAuditLog } from './audit';
 import { formatInTimeZone } from '$lib/utils/format';
+import { addMinutes } from './appointments';
 import { publicAppointmentUrl } from './messaging';
 import type { PublicAppointmentView } from './public-appointments';
 
@@ -115,6 +116,102 @@ export const resetPushRemindersForReschedule = async (
 	return (data ?? []).length;
 };
 
+// Aviso inmediato de reprogramación: una notificación ya MOSTRADA en el navegador no
+// se puede borrar sin enviar otro push. Este aviso sale en el momento con el MISMO tag
+// que el recordatorio de 24h, así pisa la notificación vieja (horario viejo) aun en
+// service workers sin la lógica de `group`, e informa el horario nuevo. No toca los
+// flags sent/claimed: los recordatorios de 24h/2h del nuevo horario siguen su curso.
+// Requiere cliente service-role (push_subscriptions tiene RLS sin policies).
+export const sendReschedulePushNotice = async (
+	supabase: SupabaseClient,
+	input: { businessId: string; appointmentId: string; now?: Date }
+) => {
+	if (!isPushConfigured()) return { configured: false, sent: 0, failed: 0, revoked: 0 };
+	ensureVapid();
+	const now = input.now ?? new Date();
+
+	const { data: appointment, error: appointmentError } = await supabase
+		.from('appointments')
+		.select('id, status, starts_at, confirmation_token, businesses!inner(name, timezone)')
+		.eq('id', input.appointmentId)
+		.eq('business_id', input.businessId)
+		.maybeSingle();
+	if (appointmentError) throw appointmentError;
+	const business = (appointment as any)?.businesses;
+	if (
+		!appointment ||
+		!['reserved', 'confirmed'].includes(String(appointment.status)) ||
+		new Date(appointment.starts_at) <= now
+	) {
+		return { configured: true, sent: 0, failed: 0, revoked: 0 };
+	}
+
+	const { data: subscriptions, error: subscriptionsError } = await supabase
+		.from('push_subscriptions')
+		.select('id, endpoint, p256dh, auth')
+		.eq('business_id', input.businessId)
+		.eq('appointment_id', input.appointmentId)
+		.is('revoked_at', null);
+	if (subscriptionsError) throw subscriptionsError;
+	if (!subscriptions || subscriptions.length === 0) {
+		return { configured: true, sent: 0, failed: 0, revoked: 0 };
+	}
+
+	const { dateLabel, timeLabel } = formatInTimeZone(
+		String(appointment.starts_at),
+		String(business.timezone)
+	);
+	// Payload neutral (§67), como los recordatorios.
+	const payload = JSON.stringify({
+		title: `Turno en ${business.name}`,
+		body: `Tu turno fue reprogramado para el ${dateLabel} a las ${timeLabel}.`,
+		url: publicAppointmentUrl(String(appointment.confirmation_token)),
+		tag: `turno-${input.appointmentId}-24h`,
+		group: `turno-${input.appointmentId}`
+	});
+
+	let sent = 0;
+	let failed = 0;
+	let revoked = 0;
+	for (const subscription of subscriptions) {
+		try {
+			await webpush.sendNotification(
+				{
+					endpoint: String(subscription.endpoint),
+					keys: { p256dh: String(subscription.p256dh), auth: String(subscription.auth) }
+				},
+				payload,
+				{ TTL: 3600, urgency: 'high' }
+			);
+			sent += 1;
+		} catch (sendError) {
+			failed += 1;
+			console.error('Error enviando push de reprogramación', sendError);
+			try {
+				if (isGoneError(sendError)) {
+					await revokeEndpoint(supabase, String(subscription.endpoint), now);
+					revoked += 1;
+				}
+			} catch (cleanupError) {
+				console.error('Error revocando endpoint tras push de reprogramación', cleanupError);
+			}
+		}
+	}
+
+	if (sent > 0) {
+		await writeAuditLog(supabase, {
+			businessId: input.businessId,
+			userId: null,
+			action: 'appointment.push_reschedule_notice',
+			entityType: 'appointment',
+			entityId: input.appointmentId,
+			metadata: { sent, failed }
+		});
+	}
+
+	return { configured: true, sent, failed, revoked };
+};
+
 type ClaimedReminder = {
 	subscription_id: string;
 	appointment_id: string;
@@ -124,6 +221,15 @@ type ClaimedReminder = {
 	auth: string;
 	reminder_kind: '24h' | '2h';
 };
+
+// Mismas ventanas que claim_due_push_reminders, evaluadas contra el starts_at VIVO:
+// si una reprogramación corrió entre el claim y el envío, el turno puede haber salido
+// de la ventana del kind reclamado. Enviar igual consumiría el sent_at con días de
+// anticipación y el recordatorio real nunca saldría.
+const isWithinReminderWindow = (kind: '24h' | '2h', startsAt: Date, now: Date) =>
+	kind === '24h'
+		? startsAt > addMinutes(now, 2 * 60) && startsAt <= addMinutes(now, 24 * 60)
+		: startsAt > now && startsAt <= addMinutes(now, 2 * 60);
 
 const isGoneError = (error: unknown) => {
 	const statusCode = (error as { statusCode?: number })?.statusCode;
@@ -204,7 +310,7 @@ export const sendDuePushReminders = async (
 			if (
 				!appointment ||
 				!['reserved', 'confirmed'].includes(String(appointment.status)) ||
-				new Date(appointment.starts_at) <= now
+				!isWithinReminderWindow(claimed.reminder_kind, new Date(appointment.starts_at), now)
 			) {
 				await releaseClaim(supabase, claimed, 0, now);
 				continue;
@@ -214,12 +320,14 @@ export const sendDuePushReminders = async (
 				String(appointment.starts_at),
 				String(business.timezone)
 			);
-			// Payload neutral (§67): sin servicio, sin datos clínicos.
+			// Payload neutral (§67): sin servicio, sin datos clínicos. `group` permite al
+			// service worker cerrar notificaciones viejas del mismo turno (otro kind).
 			const payload = JSON.stringify({
 				title: `Turno en ${business.name}`,
 				body: `Te recordamos tu turno el ${dateLabel} a las ${timeLabel}.`,
 				url: publicAppointmentUrl(String(appointment.confirmation_token)),
-				tag: `turno-${claimed.appointment_id}-${claimed.reminder_kind}`
+				tag: `turno-${claimed.appointment_id}-${claimed.reminder_kind}`,
+				group: `turno-${claimed.appointment_id}`
 			});
 
 			await webpush.sendNotification(

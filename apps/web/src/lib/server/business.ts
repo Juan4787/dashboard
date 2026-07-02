@@ -113,7 +113,7 @@ export const demoBusinessContext = (): BusinessContext => ({
 		public_booking_enabled: true,
 		whatsapp_enabled: false,
 		allow_same_day_booking: false,
-		min_booking_notice_minutes: 1440,
+		min_booking_notice_minutes: 0,
 		max_booking_days_ahead: 60,
 		cancellation_policy: null,
 		is_active: true

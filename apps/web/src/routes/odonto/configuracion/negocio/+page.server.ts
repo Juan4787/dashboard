@@ -136,6 +136,7 @@ export const actions: Actions = {
 		const logo_url = String(form.get('logo_url') ?? '').trim();
 		const timezone = String(form.get('timezone') ?? '').trim() || 'America/Argentina/Cordoba';
 		const max_booking_days_ahead = Number(form.get('max_booking_days_ahead') ?? 60);
+		const min_booking_notice_minutes = Number(form.get('min_booking_notice_minutes') ?? 0);
 		const cancellation_policy = String(form.get('cancellation_policy') ?? '').trim();
 
 		if (!name) {
@@ -150,6 +151,17 @@ export const actions: Actions = {
 		if (!Number.isInteger(max_booking_days_ahead) || max_booking_days_ahead < 1 || max_booking_days_ahead > 90) {
 			return fail(400, {
 				message: 'Los días máximos hacia adelante deben estar entre 1 y 90.',
+				values: Object.fromEntries(form)
+			});
+		}
+		// Tope de 7 días: más que eso deja la agenda pública inservible por error de tipeo.
+		if (
+			!Number.isInteger(min_booking_notice_minutes) ||
+			min_booking_notice_minutes < 0 ||
+			min_booking_notice_minutes > 7 * 24 * 60
+		) {
+			return fail(400, {
+				message: 'La anticipación mínima debe estar entre 0 y 7 días.',
 				values: Object.fromEntries(form)
 			});
 		}
@@ -207,6 +219,7 @@ export const actions: Actions = {
 				public_booking_enabled: wantsPublicBooking,
 				whatsapp_enabled: form.get('whatsapp_enabled') === 'true',
 				max_booking_days_ahead,
+				min_booking_notice_minutes,
 				cancellation_policy: cancellation_policy || null,
 				is_active: form.get('is_active') === 'true',
 				updated_at: new Date().toISOString()

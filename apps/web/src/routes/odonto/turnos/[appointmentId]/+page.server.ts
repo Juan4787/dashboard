@@ -10,7 +10,7 @@ import {
 } from '$lib/server/appointments';
 import { getOdontoContext } from '$lib/server/odonto-context';
 import { createSupabaseAdminClient } from '$lib/server/supabase';
-import { resetPushRemindersForReschedule } from '$lib/server/push';
+import { resetPushRemindersForReschedule, sendReschedulePushNotice } from '$lib/server/push';
 import { buildRescheduleWhatsAppMessage, buildWaMeUrl } from '$lib/server/reminders';
 import { publicRescheduleUrl } from '$lib/server/messaging';
 import { isLikelyPhoneE164 } from '$lib/server/phone';
@@ -255,18 +255,24 @@ export const actions: Actions = {
 			return fail(400, { message: getHumanAppointmentErrorMessage(error) });
 		}
 
-		// Invalida los avisos push del horario viejo y deja que se recalculen 24h/2h para
-		// el nuevo. push_subscriptions es service-role only (RLS sin policies), por eso
-		// va con cliente admin. Best-effort: el turno ya quedó reprogramado y el job de
-		// envío revalida el estado vivo, así que un fallo acá no debe abortar la acción.
+		// Invalida los avisos push del horario viejo (redundante con el trigger de BD
+		// appointments_reset_push_reminders: acá queda como refuerzo) y manda el aviso
+		// inmediato de reprogramación, que además pisa la notificación vieja que pudiera
+		// seguir visible en el navegador del paciente. push_subscriptions es service-role
+		// only (RLS sin policies), por eso va con cliente admin. Best-effort: el turno ya
+		// quedó reprogramado, así que un fallo acá no debe abortar la acción.
 		try {
 			const admin = await createSupabaseAdminClient('odonto', fetch);
 			await resetPushRemindersForReschedule(admin, {
 				businessId: business.business.id,
 				appointmentId: params.appointmentId
 			});
+			await sendReschedulePushNotice(admin, {
+				businessId: business.business.id,
+				appointmentId: params.appointmentId
+			});
 		} catch (pushError) {
-			console.error('Error reseteando avisos push tras reprogramar', pushError);
+			console.error('Error notificando avisos push tras reprogramar', pushError);
 		}
 
 		throw redirect(

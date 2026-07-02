@@ -37,6 +37,16 @@
 	};
 	const industryLabel = (industry: BusinessIndustry) => industryLabels[industry] ?? industry;
 	const maxBookingOptions = [15, 30, 60, 90];
+	const minNoticeOptions = [0, 60, 120, 360, 720, 1440, 2880];
+	const minNoticeLabels: Record<number, string> = {
+		0: 'Sin mínimo (hasta último momento)',
+		60: '1 hora antes',
+		120: '2 horas antes',
+		360: '6 horas antes',
+		720: '12 horas antes',
+		1440: '24 horas antes',
+		2880: '48 horas antes'
+	};
 	const timezoneOptions = [
 		'America/Argentina/Buenos_Aires',
 		'America/Argentina/Cordoba',
@@ -45,6 +55,7 @@
 		'America/Argentina/Tucuman'
 	];
 	const currentMaxBookingDays = $derived(Number(valueOf('max_booking_days_ahead', 60)));
+	const currentMinNoticeMinutes = $derived(Number(valueOf('min_booking_notice_minutes', 0)));
 	const isPublicReady = $derived(
 		business.is_active &&
 			business.public_booking_enabled &&
@@ -204,6 +215,21 @@
 					<option value="60" selected={valueOf('max_booking_days_ahead', 60) === '60'}>60 días adelante</option>
 					<option value="90" selected={valueOf('max_booking_days_ahead', 60) === '90'}>90 días adelante</option>
 				</select>
+			</label>
+			<label class="md:col-span-2">
+				<span class="ux-label">Anticipación mínima para reservas online</span>
+				<select name="min_booking_notice_minutes" disabled={!canManage} class="ux-select">
+					{#if !minNoticeOptions.includes(currentMinNoticeMinutes)}
+						<option value={currentMinNoticeMinutes} selected>{Math.round(currentMinNoticeMinutes / 60)} horas antes</option>
+					{/if}
+					{#each minNoticeOptions as option}
+						<option value={option} selected={currentMinNoticeMinutes === option}>{minNoticeLabels[option]}</option>
+					{/each}
+				</select>
+				<span class="mt-1 block text-xs text-white/45">
+					Los pacientes no van a poder reservar online con menos anticipación que esta.
+					No afecta a los turnos que carga el consultorio.
+				</span>
 			</label>
 			<label class="md:col-span-2">
 				<span class="ux-label">Política de cancelación (opcional)</span>

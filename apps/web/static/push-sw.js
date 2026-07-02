@@ -17,7 +17,25 @@ self.addEventListener('push', (event) => {
 		tag: payload.tag || 'turno-recordatorio',
 		renotify: true
 	};
-	event.waitUntil(self.registration.showNotification(title, options));
+	// `group` agrupa las notificaciones del mismo turno: antes de mostrar la nueva se
+	// cierran las viejas del grupo (p.ej. el aviso de 24h con el horario anterior a una
+	// reprogramación). El tag igual pisa la del mismo kind; esto cubre los kinds cruzados.
+	const group = typeof payload.group === 'string' && payload.group ? payload.group : null;
+	const show = async () => {
+		if (group && typeof self.registration.getNotifications === 'function') {
+			try {
+				const shown = await self.registration.getNotifications();
+				for (const notification of shown) {
+					const tag = notification.tag || '';
+					if (tag.indexOf(group + '-') === 0 && tag !== options.tag) notification.close();
+				}
+			} catch {
+				// Best-effort: si no se pueden listar, se muestra igual la nueva.
+			}
+		}
+		return self.registration.showNotification(title, options);
+	};
+	event.waitUntil(show());
 });
 
 self.addEventListener('notificationclick', (event) => {

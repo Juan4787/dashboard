@@ -232,6 +232,11 @@ export const getAvailabilitySlots = async (
 	if (blocksError) throw blocksError;
 
 	const now = new Date();
+	// Anticipación mínima configurada por el negocio: aplica SOLO a la reserva pública.
+	// El panel (recepción/admin) puede seguir tomando y reprogramando turnos inmediatos.
+	const minStartsAt = publicOnly
+		? addMinutes(now, Math.max(0, Number(business.min_booking_notice_minutes ?? 0)))
+		: now;
 	const allSlots: AvailabilitySlot[] = [];
 
 	for (const date of dates) {
@@ -278,7 +283,7 @@ export const getAvailabilitySlots = async (
 					const endsAt = addMinutes(startsAt, service.duration_minutes);
 					const blockingStart = addMinutes(startsAt, -service.buffer_before_minutes);
 					const blockingEnd = addMinutes(endsAt, service.buffer_after_minutes);
-					if (startsAt < now) continue;
+					if (startsAt < minStartsAt) continue;
 					if (blockingStart < interval.start || blockingEnd > interval.end) continue;
 
 					const blockedByException = blockingExceptions.some((exception) =>

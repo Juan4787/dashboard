@@ -18,7 +18,8 @@ import webpush from 'web-push';
 import {
 	isValidSubscriptionPayload,
 	resetPushRemindersForReschedule,
-	sendDuePushReminders
+	sendDuePushReminders,
+	sendReschedulePushNotice
 } from './push';
 
 const now = new Date('2026-06-11T12:00:00.000Z');
@@ -173,6 +174,27 @@ describe('sendDuePushReminders', () => {
 		expect(updates.some((u) => u.payload.push_24h_claimed_at === null)).toBe(true);
 	});
 
+	it('reprogramado fuera de la ventana tras el claim: libera el claim sin enviar', async () => {
+		// Carrera claim→reschedule→send: el claim se tomó con el horario viejo (en
+		// ventana), pero el turno vivo quedó a 5 días. Enviar consumiría el sent_at de
+		// 24h con días de anticipación y el recordatorio real nunca saldría.
+		const { supabase, updates } = createSupabaseMock(
+			{
+				push_subscriptions: [{ data: [] }, { data: null }],
+				appointments: [
+					{ data: { ...liveAppointment, starts_at: '2026-06-16T11:00:00.000Z' }, error: null }
+				]
+			},
+			{ data: [claimedRow], error: null }
+		);
+
+		const result = await sendDuePushReminders(supabase, { now });
+		expect(webpush.sendNotification).not.toHaveBeenCalled();
+		expect(result.sent).toBe(0);
+		expect(updates.some((u) => u.payload.push_24h_claimed_at === null)).toBe(true);
+		expect(updates.some((u) => u.payload.push_24h_sent_at)).toBe(false);
+	});
+
 	it('sin VAPID configurado no hace nada', async () => {
 		delete envState.privateEnv.VAPID_PUBLIC_KEY;
 		delete envState.privateEnv.VAPID_PRIVATE_KEY;
@@ -180,6 +202,89 @@ describe('sendDuePushReminders', () => {
 		const { supabase } = createSupabaseMock({}, { data: [], error: null });
 		const result = await sendDuePushReminders(supabase, { now });
 		expect(result).toMatchObject({ configured: false, sent: 0 });
+	});
+});
+
+describe('sendReschedulePushNotice', () => {
+	const subscriptionRow = {
+		id: 'sub-1',
+		endpoint: 'https://push.example/ep-1',
+		p256dh: 'p256dh-key',
+		auth: 'auth-key'
+	};
+
+	it('envía el aviso con el tag del recordatorio de 24h y sin tocar flags sent/claimed', async () => {
+		vi.mocked(webpush.sendNotification).mockResolvedValue({} as any);
+		const { supabase, updates } = createSupabaseMock(
+			{
+				appointments: [{ data: liveAppointment, error: null }],
+				push_subscriptions: [{ data: [subscriptionRow], error: null }]
+			},
+			{ data: null, error: null }
+		);
+
+		const result = await sendReschedulePushNotice(supabase, {
+			businessId: 'biz-1',
+			appointmentId: 'apt-1',
+			now
+		});
+
+		expect(result.sent).toBe(1);
+		expect(webpush.sendNotification).toHaveBeenCalledTimes(1);
+		const payload = JSON.parse(vi.mocked(webpush.sendNotification).mock.calls[0][1] as string);
+		expect(payload.body).toContain('reprogramado');
+		expect(payload.body).toContain('a las 08:00');
+		// Mismo tag que el aviso de 24h: pisa la notificación vieja en el navegador.
+		expect(payload.tag).toBe('turno-apt-1-24h');
+		expect(payload.group).toBe('turno-apt-1');
+		expect(payload.url).toContain('/turno/tok-1');
+		// Los recordatorios del nuevo horario siguen su curso: no se marca nada.
+		expect(
+			updates.some(
+				(u) =>
+					'push_24h_sent_at' in u.payload ||
+					'push_2h_sent_at' in u.payload ||
+					'push_24h_claimed_at' in u.payload ||
+					'push_2h_claimed_at' in u.payload
+			)
+		).toBe(false);
+	});
+
+	it('turno cancelado o pasado: no envía nada', async () => {
+		const { supabase } = createSupabaseMock(
+			{
+				appointments: [{ data: { ...liveAppointment, status: 'cancelled' }, error: null }]
+			},
+			{ data: null, error: null }
+		);
+
+		const result = await sendReschedulePushNotice(supabase, {
+			businessId: 'biz-1',
+			appointmentId: 'apt-1',
+			now
+		});
+		expect(result.sent).toBe(0);
+		expect(webpush.sendNotification).not.toHaveBeenCalled();
+	});
+
+	it('endpoint muerto (410): revoca la suscripción', async () => {
+		vi.mocked(webpush.sendNotification).mockRejectedValue({ statusCode: 410 });
+		const { supabase, updates } = createSupabaseMock(
+			{
+				appointments: [{ data: liveAppointment, error: null }],
+				push_subscriptions: [{ data: [subscriptionRow], error: null }, { data: null }]
+			},
+			{ data: null, error: null }
+		);
+
+		const result = await sendReschedulePushNotice(supabase, {
+			businessId: 'biz-1',
+			appointmentId: 'apt-1',
+			now
+		});
+		expect(result.failed).toBe(1);
+		expect(result.revoked).toBe(1);
+		expect(updates.some((u) => u.payload.revoked_at)).toBe(true);
 	});
 });
 
