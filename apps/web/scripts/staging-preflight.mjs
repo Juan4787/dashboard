@@ -13,7 +13,9 @@ const REQUIRED_ENV = [
 	'INTERNAL_JOB_SECRET',
 	'WHATSAPP_VERIFY_TOKEN',
 	'DEMO_MODE',
-	'MASTER_EMAIL'
+	'MASTER_EMAIL',
+	'MP_ACCESS_TOKEN',
+	'MP_WEBHOOK_SECRET'
 ];
 
 const RECOMMENDED_ENV = [
@@ -24,7 +26,8 @@ const RECOMMENDED_ENV = [
 	'TURNSTILE_SECRET_KEY',
 	'WHATSAPP_APP_SECRET',
 	'WHATSAPP_ACCESS_TOKEN',
-	'WHATSAPP_GRAPH_API_VERSION'
+	'WHATSAPP_GRAPH_API_VERSION',
+	'MP_SUBSCRIPTION_AMOUNT_ARS'
 ];
 
 const SECRET_KEYS = new Set([
@@ -38,7 +41,9 @@ const SECRET_KEYS = new Set([
 	'INTERNAL_JOB_SECRET',
 	'WHATSAPP_VERIFY_TOKEN',
 	'WHATSAPP_APP_SECRET',
-	'WHATSAPP_ACCESS_TOKEN'
+	'WHATSAPP_ACCESS_TOKEN',
+	'MP_ACCESS_TOKEN',
+	'MP_WEBHOOK_SECRET'
 ]);
 
 const PLACEHOLDER_PARTS = ['your-', 'xxxxx', 'odonto-anon-key', 'odonto-service-role-key', 'admin-anon-key', 'admin-service-role-key'];
@@ -59,6 +64,10 @@ const REQUIRED_FILES = [
 	'apps/web/src/routes/cancelar/[token]/+page.server.ts',
 	'apps/web/src/routes/reprogramar/[token]/+page.server.ts',
 	'apps/web/src/routes/api/whatsapp/webhook/+server.ts',
+	'apps/web/src/routes/api/mercadopago/webhook/+server.ts',
+	'apps/web/src/lib/server/mercadopago.ts',
+	'supabase/migrations/20260704120000_mercadopago_billing.sql',
+	'supabase/migrations/20260704130000_mp_billing_hardening.sql',
 	'apps/web/src/routes/internal/jobs/generate-reminder-dispatches/+server.ts',
 	'apps/web/src/routes/internal/jobs/process-message-dispatches/+server.ts',
 	'apps/web/src/routes/odonto/configuracion/whatsapp/+page.server.ts',
@@ -96,7 +105,9 @@ const REQUIRED_REMOTE_TABLES = [
 	'message_templates',
 	'message_dispatches',
 	'inbound_messages',
-	'whatsapp_webhook_events'
+	'whatsapp_webhook_events',
+	'mp_subscriptions',
+	'mp_webhook_events'
 ];
 
 const args = new Set(process.argv.slice(2));

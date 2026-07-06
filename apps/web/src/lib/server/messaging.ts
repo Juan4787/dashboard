@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { writeAuditLog } from './audit';
 import { getBusinessAccessState, type BusinessSubscriptionRow } from './commercial-access';
+import { hmacSha256HexMatches } from './hmac';
 import { normalizePhoneE164 } from './phone';
 
 export const MESSAGE_DISPATCH_STATUSES = [
@@ -1093,11 +1094,5 @@ export const verifyWebhookSignature = (body: string, signatureHeader?: string | 
 	// aceptar sin verificar permitiría payloads forjados.
 	if (!secret) return false;
 	if (!signatureHeader?.startsWith('sha256=')) return false;
-	const expected =
-		'sha256=' + crypto.createHmac('sha256', secret).update(body, 'utf8').digest('hex');
-	try {
-		return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signatureHeader));
-	} catch {
-		return false;
-	}
+	return hmacSha256HexMatches(secret, body, signatureHeader.slice(7));
 };

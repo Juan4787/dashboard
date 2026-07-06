@@ -2,10 +2,22 @@
 	import BackLink from '$lib/components/BackLink.svelte';
 	import type { BusinessSubscriptionRow } from '$lib/server/commercial-access';
 
-	let { data } = $props();
+	let { data, form } = $props();
 
 	const access = $derived(data.context.access);
 	const subscription = $derived((access.subscription ?? {}) as Partial<BusinessSubscriptionRow>);
+	const mpSub = $derived(data.mpSubscription);
+	const mpReturn = $derived(data.mpReturn);
+	// Anti doble-click: los forms son POST nativos (sin enhance, porque el 303
+	// externo a MP no funciona con fetch); se deshabilita el botón al enviar.
+	let mpSubmitting = $state(false);
+	const mpPaid = $derived(
+		Boolean(
+			mpReturn &&
+				(mpReturn.creditedNow ||
+					(mpReturn.subscriptionStatus === 'authorized' && access.commercialStatus === 'active'))
+		)
+	);
 
 	const formatDateTime = (value?: string | null, empty = 'No vence') =>
 		value ? new Date(value).toLocaleString('es-AR') : empty;
@@ -85,7 +97,9 @@
 			</div>
 			<div class="ux-soft-card p-4">
 				<p class="text-sm font-bold text-white/45">Cómo regularizar</p>
-				<p class="mt-2 font-bold text-white">Contactá soporte del sistema.</p>
+				<p class="mt-2 font-bold text-white">
+					{access.isPermanent ? 'Contactá soporte del sistema.' : 'Suscribite con Mercado Pago más abajo.'}
+				</p>
 			</div>
 		</div>
 
@@ -93,6 +107,114 @@
 			<p class="ux-alert ux-alert-success mt-5">{subscription.access_note}</p>
 		{/if}
 	</div>
+
+	{#if !access.isPermanent}
+		<div class="ux-card">
+			<h2 class="ux-section-title">Suscripción con Mercado Pago</h2>
+			<p class="mt-2 text-sm text-white/55">
+				Débito automático mensual de <span class="font-bold text-white">{money(data.mpAmount)}</span>.
+				Autorizás una vez en Mercado Pago y el acceso se renueva solo. Los medios de pago
+				disponibles los muestra Mercado Pago al momento de autorizar.
+			</p>
+
+			{#if form?.message && !form?.success}
+				<p class="ux-alert ux-alert-danger mt-4">{form.message}</p>
+			{/if}
+			{#if form?.success}
+				<p class="ux-alert ux-alert-success mt-4">{form.message}</p>
+			{/if}
+
+			{#if mpReturn}
+				{#if mpReturn.accessBlocked}
+					<p class="ux-alert ux-alert-warning mt-4">
+						Tu pago se registró correctamente, pero la habilitación del acceso requiere una
+						revisión del administrador. Ya quedó avisado.
+					</p>
+				{:else if mpPaid}
+					<p class="ux-alert ux-alert-success mt-4">
+						¡Pago acreditado! Tu acceso ya está activo y se renueva automáticamente cada mes.
+					</p>
+				{:else if mpReturn.subscriptionStatus === 'authorized'}
+					<p class="ux-alert ux-alert-success mt-4">
+						Suscripción autorizada. El primer cobro está en proceso y tu acceso se acredita
+						solo en los próximos minutos; podés actualizar esta página para verlo.
+					</p>
+				{:else if mpReturn.subscriptionStatus === 'pending'}
+					<p class="ux-alert ux-alert-warning mt-4">
+						La autorización quedó pendiente en Mercado Pago. Si la completaste recién, dale
+						unos minutos; si no, podés reintentar desde acá.
+					</p>
+				{:else}
+					<p class="ux-alert ux-alert-warning mt-4">
+						Todavía no vimos una suscripción activa. Si autorizaste el débito recién, el
+						sistema la acredita solo en unos minutos.
+					</p>
+				{/if}
+			{:else if data.mpReturnFailed}
+				<p class="ux-alert ux-alert-warning mt-4">
+					No pudimos confirmar con Mercado Pago en este momento. Si autorizaste la
+					suscripción, el pago se acredita automáticamente; no hace falta pagar de nuevo.
+				</p>
+			{/if}
+
+			{#if mpSub?.status === 'authorized' || mpSub?.status === 'paused'}
+				<div class="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+					<div class="ux-soft-card p-4">
+						<p class="text-sm font-bold text-white/45">Estado</p>
+						<p class="mt-2 font-bold text-white">{mpSub.status === 'authorized' ? 'Activa' : 'Pausada'}</p>
+					</div>
+					<div class="ux-soft-card p-4">
+						<p class="text-sm font-bold text-white/45">Monto mensual</p>
+						<p class="mt-2 font-bold text-white">{money(mpSub.transaction_amount)}</p>
+					</div>
+					<div class="ux-soft-card p-4">
+						<p class="text-sm font-bold text-white/45">Próximo cobro</p>
+						<p class="mt-2 font-bold text-white">{formatDateTime(mpSub.next_charge_at, 'Programado por MP')}</p>
+					</div>
+					<div class="ux-soft-card p-4">
+						<p class="text-sm font-bold text-white/45">Pagador</p>
+						<p class="mt-2 break-all font-bold text-white">{mpSub.payer_email ?? 'Sin registrar'}</p>
+					</div>
+				</div>
+				{#if mpSub.status === 'paused'}
+					<p class="ux-alert ux-alert-warning mt-4">
+						Mercado Pago pausó esta suscripción (suele pasar por cobros fallidos). Podés
+						actualizar el medio de pago desde tu cuenta de Mercado Pago, o cancelarla acá y
+						crear una nueva.
+					</p>
+				{/if}
+				<form method="POST" action="?/cancel" class="mt-5" onsubmit={() => (mpSubmitting = true)}>
+					<input type="hidden" name="preapproval_id" value={mpSub.preapproval_id} />
+					<button type="submit" disabled={mpSubmitting} class="ux-btn-secondary">
+						{mpSubmitting ? 'Cancelando…' : 'Cancelar suscripción'}
+					</button>
+					<p class="mt-2 text-sm text-white/45">
+						Al cancelar no se generan más cobros; el tiempo ya pagado sigue vigente hasta su
+						vencimiento.
+					</p>
+				</form>
+			{:else}
+				{#if mpSub?.status === 'pending'}
+					<p class="mt-4 text-sm text-white/55">
+						Hay una autorización pendiente sin completar. Podés retomarla iniciando la
+						suscripción de nuevo.
+					</p>
+				{:else if mpSub?.status === 'cancelled'}
+					<p class="mt-4 text-sm text-white/55">
+						Tu suscripción anterior fue cancelada. Podés suscribirte de nuevo cuando quieras.
+					</p>
+				{/if}
+				<form method="POST" action="?/subscribe" class="mt-5" onsubmit={() => (mpSubmitting = true)}>
+					<button type="submit" disabled={mpSubmitting} class="ux-btn-primary">
+						{mpSubmitting ? 'Redirigiendo a Mercado Pago…' : 'Suscribirme con Mercado Pago'}
+					</button>
+					<p class="mt-2 text-sm text-white/45">
+						Te redirigimos a Mercado Pago para autorizar el débito mensual de forma segura.
+					</p>
+				</form>
+			{/if}
+		</div>
+	{/if}
 
 	<div class="ux-card">
 		<div class="flex items-center justify-between gap-4">

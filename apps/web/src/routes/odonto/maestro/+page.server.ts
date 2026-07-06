@@ -3,6 +3,13 @@ import {
 	getBusinessAccessState,
 	type BusinessSubscriptionRow
 } from '$lib/server/commercial-access';
+import {
+	cancelPreapproval,
+	pickRelevantMpSubscription,
+	reconcileMercadoPago,
+	settleApprovedChargesForPreapproval,
+	type MpSubscriptionRow
+} from '$lib/server/mercadopago';
 import { normalizeSlug } from '$lib/server/business';
 import {
 	createSupabaseAdminClient,
@@ -151,6 +158,18 @@ const buildMasterData = async (
 		.select('id, business_id, operation, duration_unit, duration_seconds, amount, source, note, admin_email, paid_until_before, paid_until_after, status_before, status_after, created_at')
 		.order('created_at', { ascending: false })
 		.limit(200);
+	const mpSubsRes = await admin
+		.from('mp_subscriptions')
+		.select(
+			'business_id, preapproval_id, status, payer_email, transaction_amount, next_charge_at, last_synced_at'
+		)
+		.order('created_at', { ascending: false });
+	const mpAttentionRes = await admin
+		.from('mp_webhook_events')
+		.select('id, received_at, topic, action, resource_id, processing_status, processing_detail, business_id')
+		.eq('requires_attention', true)
+		.order('received_at', { ascending: false })
+		.limit(20);
 
 	if (emailsRes.error) throw emailsRes.error;
 	if (businessesRes.error) throw businessesRes.error;
@@ -161,6 +180,13 @@ const buildMasterData = async (
 	if (membershipsRes.error) throw membershipsRes.error;
 	if (grantsRes.error) {
 		console.error('Error cargando access_grants', grantsRes.error);
+	}
+	// Compatibilidad: si las tablas MP no existen todavía, el panel sigue legible.
+	if (mpSubsRes.error) {
+		console.error('Error cargando mp_subscriptions', mpSubsRes.error);
+	}
+	if (mpAttentionRes.error) {
+		console.error('Error cargando eventos MP con atención', mpAttentionRes.error);
 	}
 
 	const emailsByUserId = await listAuthEmailsById(admin);
@@ -189,6 +215,14 @@ const buildMasterData = async (
 		grantsByBusinessId.set(businessId, list);
 	}
 
+	const mpSubsByBusinessId = new Map<string, MpSubscriptionRow[]>();
+	for (const sub of (mpSubsRes.data ?? []) as MpSubscriptionRow[]) {
+		const businessId = String(sub.business_id);
+		const list = mpSubsByBusinessId.get(businessId) ?? [];
+		list.push(sub);
+		mpSubsByBusinessId.set(businessId, list);
+	}
+
 	const normalizedMasterEmail = masterEmail.trim().toLowerCase();
 	const isProtectedEmail = (value?: string | null) => {
 		const email = String(value ?? '').trim().toLowerCase();
@@ -207,7 +241,10 @@ const buildMasterData = async (
 			members,
 			owners,
 			primaryOwnerEmail: owners[0]?.email ?? members[0]?.email ?? null,
-			recentGrants: grantsByBusinessId.get(String(business.id)) ?? []
+			recentGrants: grantsByBusinessId.get(String(business.id)) ?? [],
+			mpSubscription: pickRelevantMpSubscription(
+				mpSubsByBusinessId.get(String(business.id)) ?? []
+			)
 		};
 	}).filter((business: any) => {
 		const ownerEmails = (business.owners ?? [])
@@ -217,10 +254,25 @@ const buildMasterData = async (
 		return !ownerEmails.some((email: string) => isProtectedEmail(email));
 	});
 
+	const businessNameById = new Map(
+		businesses.map((business: any) => [String(business.id), String(business.name ?? '')])
+	);
+	// Solo eventos de negocios visibles en el panel (o globales, sin negocio):
+	// los negocios filtrados por protección no deben filtrarse por acá.
+	const mpAttention = ((mpAttentionRes.data ?? []) as any[])
+		.filter((event) => !event.business_id || businessNameById.has(String(event.business_id)))
+		.map((event) => ({
+			...event,
+			businessName: event.business_id
+				? businessNameById.get(String(event.business_id)) ?? null
+				: null
+		}));
+
 	return {
 		emails: (emailsRes.data ?? []).filter((item: any) => !isProtectedEmail(String(item.email ?? ''))),
 		businesses,
-		statuses: COMMERCIAL_STATUSES
+		statuses: COMMERCIAL_STATUSES,
+		mpAttention
 	};
 };
 
@@ -241,6 +293,7 @@ export const load: PageServerLoad = async ({ locals, fetch }) => {
 			emails: [],
 			businesses: [],
 			statuses: COMMERCIAL_STATUSES,
+			mpAttention: [],
 			masterEmail: master.email,
 			loadError: 'No se pudo cargar el panel maestro. Revisá la conexión y las migraciones.'
 		};
@@ -574,5 +627,86 @@ export const actions: Actions = {
 		});
 
 		return { success: true, message: `Sesiones cerradas: ${revoked}.` };
+	},
+	mp_cancel_subscription: async ({ request, locals, fetch }) => {
+		if (!locals.auth) throw redirect(303, '/login');
+		ensureMaster(locals.auth.access_token);
+		const form = await request.formData();
+		const businessId = String(form.get('business_id') ?? '').trim();
+		const preapprovalId = String(form.get('preapproval_id') ?? '').trim();
+		if (!businessId || !preapprovalId) {
+			return fail(400, { message: 'Faltan datos de la suscripción a cancelar.' });
+		}
+
+		const admin = await createSupabaseAdminClient('odonto', fetch);
+		// La suscripción tiene que pertenecer al negocio indicado.
+		const { data: owned, error: ownedError } = await admin
+			.from('mp_subscriptions')
+			.select('preapproval_id')
+			.eq('preapproval_id', preapprovalId)
+			.eq('business_id', businessId)
+			.maybeSingle();
+		if (ownedError) {
+			console.error('Error verificando suscripción MP a cancelar', ownedError);
+			return fail(500, { message: 'No se pudo verificar la suscripción.' });
+		}
+		if (!owned) {
+			return fail(404, { message: 'La suscripción no corresponde a ese consultorio.' });
+		}
+
+		// Se asienta cualquier cobro aprobado sin registrar antes de cancelar:
+		// una vez cancelada la fila sale del filtro de conciliación.
+		try {
+			await settleApprovedChargesForPreapproval(admin, fetch, businessId, preapprovalId);
+		} catch (error) {
+			console.error('No se pudo asentar el cobro final antes de cancelar (maestro)', error);
+		}
+
+		let cancelled;
+		try {
+			cancelled = await cancelPreapproval(fetch, preapprovalId);
+		} catch (error) {
+			console.error('Error cancelando suscripción MP desde maestro', error);
+			return fail(502, { message: 'Mercado Pago no respondió. Probá de nuevo en unos minutos.' });
+		}
+		if (!cancelled.ok) {
+			console.error('MP rechazó la cancelación desde maestro', cancelled.status, cancelled.data);
+			return fail(502, { message: 'Mercado Pago no aceptó la cancelación.' });
+		}
+
+		const { error: updateError } = await admin
+			.from('mp_subscriptions')
+			.update({
+				status: cancelled.data?.status ?? 'cancelled',
+				last_synced_at: new Date().toISOString(),
+				raw: cancelled.data ?? { status: 'cancelled' }
+			})
+			.eq('preapproval_id', preapprovalId);
+		if (updateError) {
+			console.error('No se pudo sincronizar la suscripción cancelada', updateError);
+		}
+
+		return {
+			success: true,
+			message: 'Suscripción de Mercado Pago cancelada: no se generarán más cobros. El acceso vigente no se modificó.'
+		};
+	},
+	mp_reconcile_now: async ({ locals, fetch }) => {
+		if (!locals.auth) throw redirect(303, '/login');
+		ensureMaster(locals.auth.access_token);
+
+		const admin = await createSupabaseAdminClient('odonto', fetch);
+		let summary;
+		try {
+			summary = await reconcileMercadoPago(admin, fetch, { limit: 20 });
+		} catch (error) {
+			console.error('Error corriendo conciliación manual', error);
+			return fail(500, { message: 'La conciliación falló. Revisá los logs.' });
+		}
+
+		return {
+			success: true,
+			message: `Conciliación: ${summary.scanned} suscripciones revisadas, ${summary.credited} pagos acreditados, ${summary.attention} para revisar, ${summary.errors} errores.`
+		};
 	}
 };

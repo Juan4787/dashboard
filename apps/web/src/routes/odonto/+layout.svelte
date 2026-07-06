@@ -91,7 +91,18 @@
 		const access = activeBusiness?.access;
 		if (!access) return false;
 		if ($page.url.pathname.startsWith('/odonto/maestro')) return false;
-		return !access.commercialAccessEnabled || access.commercialStatus === 'restricted';
+		// La página de suscripción queda fuera del bloqueo: es el camino de
+		// autoservicio para regularizar con Mercado Pago (su propio server
+		// redirige a los roles sin permiso).
+		if ($page.url.pathname.startsWith('/odonto/configuracion/suscripcion')) return false;
+		// 'archived' incluye el archivado por vencimiento total (restricted_until
+		// pasado con acceso habilitado): sin esto, el bloqueo desaparecía justo
+		// en el estado más vencido y la UI quedaba navegable pero rota por RLS.
+		return (
+			!access.commercialAccessEnabled ||
+			access.commercialStatus === 'restricted' ||
+			access.commercialStatus === 'archived'
+		);
 	});
 	const visibleNav = $derived.by(() => {
 		if (commercialLockActive) return [];
@@ -721,9 +732,29 @@
 				<p class="mx-auto mt-3 max-w-lg text-base font-semibold text-neutral-700 dark:text-amber-50/80">
 					Para volver a operar el consultorio, regularizá la suscripción.
 				</p>
-				<p class="mt-6 rounded-2xl border border-amber-300/35 bg-white/70 px-4 py-3 text-sm font-bold text-amber-950 dark:bg-[#13243d]/70 dark:text-amber-100">
-					Contactá soporte del sistema.
-				</p>
+				{#if (activeBusiness?.role === 'owner' || activeBusiness?.role === 'admin') && activeBusiness?.access?.commercialAccessEnabled}
+					<!-- Bloqueo por vencimiento: el pago SÍ reactiva solo. -->
+					<a
+						href="/odonto/configuracion/suscripcion"
+						class="mt-6 inline-flex items-center justify-center rounded-2xl bg-amber-400 px-6 py-3 text-sm font-black text-amber-950 shadow-lg transition hover:bg-amber-300"
+					>
+						Regularizar con Mercado Pago
+					</a>
+					<p class="mt-3 text-sm font-semibold text-neutral-600 dark:text-amber-50/70">
+						Suscribite y tu acceso se reactiva al instante.
+					</p>
+				{:else if activeBusiness?.role === 'owner' || activeBusiness?.role === 'admin'}
+					<!-- Kill-switch del administrador: un pago NO reactiva (lo manual
+					     gana); prometer autoservicio acá sería cobrar sin servicio. -->
+					<p class="mt-6 rounded-2xl border border-amber-300/35 bg-white/70 px-4 py-3 text-sm font-bold text-amber-950 dark:bg-[#13243d]/70 dark:text-amber-100">
+						El acceso fue suspendido por el administrador del sistema. Contactá a soporte
+						para regularizar; un pago no lo reactiva automáticamente.
+					</p>
+				{:else}
+					<p class="mt-6 rounded-2xl border border-amber-300/35 bg-white/70 px-4 py-3 text-sm font-bold text-amber-950 dark:bg-[#13243d]/70 dark:text-amber-100">
+						Contactá al responsable del consultorio.
+					</p>
+				{/if}
 			</section>
 		{:else if showSkeleton}
 			<OdontoRouteSkeleton kind={skeletonKind} />

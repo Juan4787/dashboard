@@ -32,6 +32,14 @@
 			updated_at?: string | null;
 		} | null;
 		recentGrants: any[];
+		mpSubscription: {
+			preapproval_id: string;
+			status: string;
+			payer_email?: string | null;
+			transaction_amount?: number | null;
+			next_charge_at?: string | null;
+			last_synced_at?: string | null;
+		} | null;
 	};
 
 	type EmailRow = {
@@ -246,6 +254,38 @@
 		const input = event.currentTarget as HTMLInputElement;
 		input.value = formatMoneyInteger(input.value);
 	};
+
+	const MP_STATUS_LABELS: Record<string, string> = {
+		authorized: 'MP: Activa',
+		paused: 'MP: Pausada',
+		pending: 'MP: Pendiente',
+		cancelled: 'MP: Cancelada'
+	};
+	const mpStatusLabel = (status?: string | null) =>
+		status ? MP_STATUS_LABELS[status] ?? `MP: ${status}` : null;
+	const mpStatusClass = (status?: string | null) => {
+		if (status === 'authorized') return 'ux-badge ux-badge-success';
+		if (status === 'paused' || status === 'pending') return 'ux-badge ux-badge-warning';
+		return 'ux-badge';
+	};
+
+	let mpReconciling = $state(false);
+
+	const beforeMpCancelSubmit = (event: SubmitEvent, business: BusinessCard) => {
+		const formEl = event.currentTarget as HTMLFormElement;
+		if (formEl.dataset.confirmedSubmit === '1') {
+			delete formEl.dataset.confirmedSubmit;
+			return;
+		}
+		event.preventDefault();
+		confirmModal = {
+			formId: formEl.id,
+			title: 'Cancelar suscripción de Mercado Pago',
+			body: `Vas a cancelar la suscripción de Mercado Pago de ${business.name}: no se generarán más cobros automáticos. El acceso vigente no se modifica.`,
+			tone: 'danger',
+			confirm: 'Cancelar suscripción'
+		};
+	};
 </script>
 
 <section class="ux-page">
@@ -263,6 +303,40 @@
 	{#if data.loadError}
 		<p class="ux-alert">{data.loadError}</p>
 	{/if}
+
+	<div class="ux-card">
+		<div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+			<div>
+				<h2 class="ux-section-title">Mercado Pago</h2>
+				<p class="mt-1 text-sm text-white/55">
+					Cobros automáticos y eventos que requieren tu revisión. La conciliación corre sola
+					cada ~6 h; podés forzarla acá.
+				</p>
+			</div>
+			<form method="post" action="?/mp_reconcile_now" onsubmit={() => (mpReconciling = true)}>
+				<button class="ux-btn-secondary" disabled={mpReconciling}>
+					{mpReconciling ? 'Conciliando…' : 'Conciliar ahora'}
+				</button>
+			</form>
+		</div>
+		{#if (data.mpAttention ?? []).length === 0}
+			<p class="ux-empty mt-4">Sin eventos pendientes de revisión.</p>
+		{:else}
+			<div class="mt-4 space-y-3">
+				{#each data.mpAttention as event}
+					<div class="ux-soft-card p-4">
+						<div class="flex flex-wrap items-center justify-between gap-3">
+							<p class="font-bold text-white">
+								{event.businessName ?? 'Sin negocio'} · {event.topic ?? 'evento'}
+							</p>
+							<time class="text-sm text-white/50">{formatDateTime(event.received_at)}</time>
+						</div>
+						<p class="mt-2 text-sm text-white/70">{event.processing_detail}</p>
+					</div>
+				{/each}
+			</div>
+		{/if}
+	</div>
 
 	<div class="grid gap-5 lg:grid-cols-[1fr_auto]">
 		<div class="ux-card">
@@ -422,6 +496,11 @@
 						<div class="flex flex-wrap items-center gap-3">
 							<h2 class="text-2xl font-black text-white">{business.name}</h2>
 							<span class={statusClass(business)}>{statusLabel(business)}</span>
+							{#if business.mpSubscription}
+								<span class={mpStatusClass(business.mpSubscription.status)}>
+									{mpStatusLabel(business.mpSubscription.status)}
+								</span>
+							{/if}
 						</div>
 						<p class="mt-2 text-sm text-white/55">/{business.slug}</p>
 						<p class="mt-3 text-sm text-white/70">
@@ -497,6 +576,18 @@
 								<input type="hidden" name="business_id" value={business.id} />
 								<button class="ux-btn-secondary w-full">Cerrar sesiones</button>
 							</form>
+							{#if business.mpSubscription && (business.mpSubscription.status === 'authorized' || business.mpSubscription.status === 'paused')}
+								<form
+									id={`business-mp-cancel-${business.id}`}
+									method="post"
+									action="?/mp_cancel_subscription"
+									onsubmit={(event) => beforeMpCancelSubmit(event, business)}
+								>
+									<input type="hidden" name="business_id" value={business.id} />
+									<input type="hidden" name="preapproval_id" value={business.mpSubscription.preapproval_id} />
+									<button class="ux-btn-danger w-full">Cancelar suscripción MP</button>
+								</form>
+							{/if}
 							<button
 								type="button"
 								class="ux-btn-secondary w-full"

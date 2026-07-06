@@ -37,7 +37,14 @@ const config = {
 						],
 						'frame-src': ['https://drive.google.com', 'https://accounts.google.com'],
 						'base-uri': ['self'],
-						'form-action': ['self']
+						// Mercado Pago: el action de suscripción responde al POST del
+						// form con un 303 al checkout de MP; los navegadores aplican
+						// form-action a toda la cadena de redirects del envío.
+						'form-action': [
+							'self',
+							'https://*.mercadopago.com.ar',
+							'https://*.mercadopago.com'
+						]
 					}
 			  }
 			: undefined

@@ -64,11 +64,22 @@ export const handle: Handle = async ({ event, resolve }) => {
 			? { module: moduleCookie, access_token: accessToken, refresh_token: refreshToken }
 			: null;
 
+	const clearAuthCookies = () => {
+		const options = { path: '/' };
+		event.cookies.delete('sb-module', options);
+		event.cookies.delete('sb-access-token', options);
+		event.cookies.delete('sb-refresh-token', options);
+	};
+
 	const isDemo = env.DEMO_MODE === 'true';
 	if (event.locals.auth && !isDemo) {
-		if (isJwtExpired(event.locals.auth.access_token)) {
-			try {
-				const supabase = await createSupabaseServerClient('odonto', null, event.fetch);
+		try {
+			const supabase = await createSupabaseServerClient(
+				event.locals.auth.module,
+				null,
+				event.fetch
+			);
+			if (isJwtExpired(event.locals.auth.access_token)) {
 				const { data, error } = await supabase.auth.refreshSession({
 					refresh_token: event.locals.auth.refresh_token
 				});
@@ -93,13 +104,15 @@ export const handle: Handle = async ({ event, resolve }) => {
 					access_token: session.access_token,
 					refresh_token: session.refresh_token
 				};
-			} catch (err) {
-				const options = { path: '/' };
-				event.cookies.delete('sb-module', options);
-				event.cookies.delete('sb-access-token', options);
-				event.cookies.delete('sb-refresh-token', options);
-				throw redirect(303, '/login');
+			} else {
+				const { data, error } = await supabase.auth.getUser(event.locals.auth.access_token);
+				if (error || !data.user) {
+					throw error ?? new Error('Sesión inválida');
+				}
 			}
+		} catch (err) {
+			clearAuthCookies();
+			throw redirect(303, '/login');
 		}
 	}
 
