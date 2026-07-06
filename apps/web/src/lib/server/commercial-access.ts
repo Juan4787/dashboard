@@ -244,10 +244,12 @@ export const getBusinessAccessState = (
 
 export const commercialAccessMessage = (state: BusinessAccessState) => {
 	if (state.commercialStatus === 'archived') {
-		return 'La cuenta está archivada. Contactá soporte para reactivación o exportación.';
+		return state.archivedAt
+			? 'La cuenta está archivada. Contactá soporte para reactivación o exportación.'
+			: 'Tu acceso a Cita Suite venció. Tu agenda, pacientes y configuración siguen guardados.';
 	}
 	if (state.commercialStatus === 'restricted') {
-		return 'Suscripción pendiente de regularización. Para volver a operar el consultorio, regularizá la suscripción.';
+		return 'Tu acceso a Cita Suite venció. Activá tu suscripción para volver a usar la plataforma.';
 	}
 	return null;
 };

@@ -107,7 +107,7 @@ export const getHumanAppointmentErrorMessage = (error: unknown) => {
 	if (raw.includes('APPOINTMENT_CANNOT_RESCHEDULE')) return 'Ese turno no se puede reprogramar.';
 	if (raw.includes('APPOINTMENT_ACCESS_DENIED')) return 'No tenés permiso para modificar este turno.';
 	if (raw.includes('BUSINESS_ACCESS_RESTRICTED')) {
-		return 'Suscripción pendiente de regularización. Para volver a operar el consultorio, regularizá la suscripción.';
+		return 'Tu acceso a Cita Suite venció. Activá tu suscripción para volver a usar la plataforma.';
 	}
 	if (raw.includes('INVALID_PROFESSIONAL_STATUS')) return 'El profesional solo puede marcar asistencia o ausencia.';
 	if (raw.includes('PATIENT_NAME_ALREADY_EXISTS')) {

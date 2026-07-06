@@ -148,10 +148,11 @@ export const actions: Actions = {
 		if (context.access.isPermanent) {
 			return fail(400, { message: 'Tu cuenta es permanente: no necesita suscripción.' });
 		}
-		// Kill-switch manual o negocio archivado: un pago automático NO
+		// Kill-switch manual o archivado administrativo: un pago automático NO
 		// reactiva el acceso (lo manual gana), así que suscribirse solo
-		// generaría cobros sin servicio. Se frena y se deriva al administrador.
-		if (!context.access.commercialAccessEnabled || context.access.commercialStatus === 'archived') {
+		// generaría cobros sin servicio. Un "archived" calculado por vencimiento
+		// total tiene archivedAt null y sí es pagable.
+		if (!context.access.commercialAccessEnabled || context.access.archivedAt) {
 			return fail(409, {
 				message:
 					'Tu acceso está suspendido por el administrador del sistema. Un pago no lo reactivaría automáticamente: escribí a soporte antes de suscribirte.'
@@ -168,7 +169,7 @@ export const actions: Actions = {
 		}
 
 		const amount = getSubscriptionAmountArs();
-		const backUrl = `${getPublicSiteUrl()}/odonto/configuracion/suscripcion?mp=retorno`;
+		const backUrl = `${getPublicSiteUrl()}/odonto/pago/procesando?mp=retorno`;
 
 		// El cliente admin se crea ANTES de tocar Mercado Pago: si falta el
 		// service role acá, mejor fallar sin haber creado un preapproval

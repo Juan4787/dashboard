@@ -13,6 +13,7 @@ import {
 	roleParticipatesInFollowUps,
 	type FollowUpNotice
 } from '$lib/server/follow-ups';
+import { getSubscriptionAmountArs } from '$lib/server/mercadopago';
 import { redirect } from '@sveltejs/kit';
 import type { LayoutServerLoad } from './$types';
 import { env } from '$env/dynamic/private';
@@ -72,6 +73,7 @@ export const load: LayoutServerLoad = async ({ locals, fetch, cookies }) => {
 		activeBusiness,
 		businessError,
 		followUps,
-		followUpsTodayISO
+		followUpsTodayISO,
+		mpAmount: getSubscriptionAmountArs()
 	};
 };

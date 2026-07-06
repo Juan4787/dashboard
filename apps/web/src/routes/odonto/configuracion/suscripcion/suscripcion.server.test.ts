@@ -35,6 +35,7 @@ const ownerContext = (
 		role: string;
 		commercialStatus: string;
 		commercialAccessEnabled: boolean;
+		archivedAt: string | null;
 	}>
 ) => ({
 	business: { id: BUSINESS_ID, name: 'Consultorio Test', email: 'negocio@mail.com' },
@@ -44,7 +45,8 @@ const ownerContext = (
 	access: {
 		isPermanent: overrides?.isPermanent ?? false,
 		commercialStatus: overrides?.commercialStatus ?? 'active',
-		commercialAccessEnabled: overrides?.commercialAccessEnabled ?? true
+		commercialAccessEnabled: overrides?.commercialAccessEnabled ?? true,
+		archivedAt: overrides?.archivedAt ?? null
 	}
 });
 
@@ -171,7 +173,7 @@ describe('action subscribe', () => {
 			reason: 'Cita Suite — Suscripción mensual',
 			external_reference: BUSINESS_ID,
 			payer_email: 'duena@mail.com',
-			back_url: 'https://app.test/odonto/configuracion/suscripcion?mp=retorno',
+			back_url: 'https://app.test/odonto/pago/procesando?mp=retorno',
 			status: 'pending',
 			auto_recurring: {
 				frequency: 1,
@@ -269,6 +271,52 @@ describe('action subscribe', () => {
 		mocks.createSupabaseServerClient.mockResolvedValue(server.client);
 		mocks.resolveActiveBusiness.mockResolvedValue(
 			ownerContext({ commercialAccessEnabled: false })
+		);
+		const { fetchMock, requests } = createMpFetch([]);
+
+		const result = (await actions.subscribe(makeEvent({ fetchMock }) as never)) as {
+			status: number;
+		};
+		expect(result.status).toBe(409);
+		expect(requests).toHaveLength(0);
+	});
+
+	it('permite activar cuando el estado archived es solo vencimiento total', async () => {
+		const server = createDbMock();
+		const admin = createDbMock({
+			mp_subscriptions: [{ data: [], error: null }, { error: null }]
+		});
+		mocks.createSupabaseServerClient.mockResolvedValue(server.client);
+		mocks.createSupabaseAdminClient.mockResolvedValue(admin.client);
+		mocks.resolveActiveBusiness.mockResolvedValue(
+			ownerContext({ commercialStatus: 'archived', commercialAccessEnabled: true, archivedAt: null })
+		);
+		const { fetchMock, requests } = createMpFetch([
+			[
+				'/preapproval',
+				{
+					status: 201,
+					body: { id: 'pre-vencida', status: 'pending', init_point: 'https://mp.test/init' }
+				}
+			]
+		]);
+
+		await expect(actions.subscribe(makeEvent({ fetchMock }) as never)).rejects.toMatchObject({
+			status: 303,
+			location: 'https://mp.test/init'
+		});
+		expect(requests).toHaveLength(1);
+	});
+
+	it('rechaza activar una cuenta archivada administrativamente', async () => {
+		const server = createDbMock();
+		mocks.createSupabaseServerClient.mockResolvedValue(server.client);
+		mocks.resolveActiveBusiness.mockResolvedValue(
+			ownerContext({
+				commercialStatus: 'archived',
+				commercialAccessEnabled: true,
+				archivedAt: '2026-07-01T10:00:00.000Z'
+			})
 		);
 		const { fetchMock, requests } = createMpFetch([]);
 

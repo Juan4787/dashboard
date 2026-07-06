@@ -34,7 +34,7 @@ const normalizeFilename = (value?: string | null) => {
 const ENTRIES_PAGE_SIZE = 30;
 const RADIOGRAPHS_PAGE_SIZE = 24;
 const COMMERCIAL_RESTRICTED_MESSAGE =
-	'Suscripción pendiente de regularización. Para volver a operar el consultorio, regularizá la suscripción.';
+	'Tu acceso a Cita Suite venció. Activá tu suscripción para volver a usar la plataforma.';
 const PROFESSIONAL_DELETE_PATIENT_MESSAGE =
 	'Para eliminar un paciente, consultá al dueño del consultorio.';
 

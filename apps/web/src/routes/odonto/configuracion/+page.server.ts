@@ -72,7 +72,7 @@ export const actions: Actions = {
 		});
 		if (!context?.access.allowedCapabilities.canLinkExternalFiles) {
 			return fail(403, {
-				message: 'Suscripción pendiente de regularización. Para volver a operar el consultorio, regularizá la suscripción.'
+				message: 'Tu acceso a Cita Suite venció. Activá tu suscripción para volver a usar la plataforma.'
 			});
 		}
 		const { error } = await supabase
@@ -115,7 +115,7 @@ export const actions: Actions = {
 		}
 		if (!context.access.allowedCapabilities.canLinkExternalFiles) {
 			return fail(403, {
-				message: 'Suscripción pendiente de regularización. Para volver a operar el consultorio, regularizá la suscripción.'
+				message: 'Tu acceso a Cita Suite venció. Activá tu suscripción para volver a usar la plataforma.'
 			});
 		}
 		const { error } = await supabase.from('drive_connections').delete().eq('owner_id', ownerId);

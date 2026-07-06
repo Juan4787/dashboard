@@ -87,25 +87,59 @@
 	];
 
 	const activeBusiness = $derived(data?.activeBusiness);
-	const commercialLockActive = $derived.by(() => {
+	const money = (value?: number | string | null) => {
+		if (value === null || value === undefined || value === '') return 'ARS 0';
+		const parsed = Number(value);
+		if (!Number.isFinite(parsed)) return String(value);
+		return parsed.toLocaleString('es-AR', {
+			style: 'currency',
+			currency: 'ARS',
+			maximumFractionDigits: 0
+		});
+	};
+	const commercialAccessRestricted = $derived.by(() => {
 		const access = activeBusiness?.access;
 		if (!access) return false;
 		if ($page.url.pathname.startsWith('/odonto/maestro')) return false;
-		// La página de suscripción queda fuera del bloqueo: es el camino de
-		// autoservicio para regularizar con Mercado Pago (su propio server
-		// redirige a los roles sin permiso).
-		if ($page.url.pathname.startsWith('/odonto/configuracion/suscripcion')) return false;
-		// 'archived' incluye el archivado por vencimiento total (restricted_until
-		// pasado con acceso habilitado): sin esto, el bloqueo desaparecía justo
-		// en el estado más vencido y la UI quedaba navegable pero rota por RLS.
 		return (
 			!access.commercialAccessEnabled ||
 			access.commercialStatus === 'restricted' ||
 			access.commercialStatus === 'archived'
 		);
 	});
+	const routeAllowsCommercialBypass = $derived.by(() => {
+		if ($page.url.pathname.startsWith('/odonto/maestro')) return true;
+		// La página de suscripción queda fuera del bloqueo: es el camino de
+		// autoservicio para activar o volver a pagar con Mercado Pago.
+		if ($page.url.pathname.startsWith('/odonto/configuracion/suscripcion')) return true;
+		if ($page.url.pathname.startsWith('/odonto/pago/procesando')) return true;
+		return false;
+	});
+	const commercialLockActive = $derived(commercialAccessRestricted && !routeAllowsCommercialBypass);
+	const canSelfServiceActivation = $derived.by(() => {
+		const access = activeBusiness?.access;
+		const role = activeBusiness?.role;
+		return Boolean(
+			access &&
+				(role === 'owner' || role === 'admin') &&
+				!access.isPermanent &&
+				access.commercialAccessEnabled &&
+				!access.archivedAt
+		);
+	});
+	const isInitialActivation = $derived.by(() => {
+		const access = activeBusiness?.access;
+		const subscription = access?.subscription;
+		return Boolean(
+			access &&
+				!access.isPermanent &&
+				!access.paidUntil &&
+				!subscription?.last_payment_at &&
+				(access.commercialStatus === 'restricted' || access.commercialStatus === 'archived')
+		);
+	});
 	const visibleNav = $derived.by(() => {
-		if (commercialLockActive) return [];
+		if (commercialAccessRestricted) return [];
 		if (activeBusiness?.role === 'professional') {
 			return professionalNav;
 		}
@@ -119,7 +153,7 @@
 	});
 
 	const canShowConfigMenu = $derived(
-		!commercialLockActive &&
+		!commercialAccessRestricted &&
 			(activeBusiness?.role === 'owner' || activeBusiness?.role === 'admin')
 	);
 	const primaryMobileNav = $derived.by(() =>
@@ -143,7 +177,7 @@
 		if (access.visualStatus === 'permanent') return 'Permanente';
 		if (access.visualStatus === 'expiring') return 'Vence mañana';
 		if (access.commercialStatus === 'grace') return 'Vencido';
-		if (access.commercialStatus === 'restricted') return 'Regularizar';
+		if (access.commercialStatus === 'restricted') return 'Activar';
 		if (access.commercialStatus === 'archived') return 'Archivado';
 		return null;
 	});
@@ -171,10 +205,14 @@
 		if (!access || !canSeeCommercialNotice) return null;
 		if (!access.commercialAccessEnabled) return 'La cuenta no está disponible. Contactá soporte.';
 		if (access.commercialStatus === 'archived') {
-			return 'La cuenta está archivada. Contactá soporte para solicitar reactivación o exportación.';
+			return access.archivedAt
+				? 'La cuenta está archivada. Contactá soporte para solicitar reactivación o exportación.'
+				: 'Tu acceso a Cita Suite venció. Activá tu suscripción para volver a usar la plataforma.';
 		}
 		if (access.commercialStatus === 'restricted') {
-			return 'Suscripción pendiente de regularización. Para volver a operar el consultorio, regularizá la suscripción.';
+			return isInitialActivation
+				? 'Tu cuenta ya está creada. Activá tu suscripción para comenzar a usar Cita Suite.'
+				: 'Tu acceso a Cita Suite venció. Activá tu suscripción para volver a usar la plataforma.';
 		}
 		if (access.commercialStatus === 'grace') {
 			return access.graceUntil
@@ -707,7 +745,7 @@
 				{data.businessError}
 			</div>
 		{/if}
-		{#if commercialNotice && !commercialLockActive}
+		{#if commercialNotice && !commercialAccessRestricted}
 			<div
 				class={`mb-4 rounded-2xl border px-4 py-3 text-sm font-bold ${
 					accessTone === 'danger'
@@ -718,31 +756,39 @@
 				{commercialNotice}
 			</div>
 		{/if}
-		{#if !commercialLockActive && data?.followUps?.count > 0}
+		{#if !commercialAccessRestricted && data?.followUps?.count > 0}
 			<FollowUpsNotice notice={data.followUps} todayISO={data.followUpsTodayISO} />
 		{/if}
 		{#if commercialLockActive}
 			<section class="mx-auto mt-8 max-w-2xl rounded-3xl border border-amber-300/40 bg-amber-400/12 p-8 text-center shadow-2xl shadow-amber-950/10 dark:border-amber-400/25 dark:bg-amber-400/10">
 				<p class="mx-auto inline-flex rounded-full bg-amber-400/15 px-3 py-1 text-xs font-black uppercase tracking-wide text-amber-900 dark:text-amber-100">
-					Regularización
+					Cita Suite
 				</p>
 				<h1 class="mt-5 text-3xl font-black text-neutral-950 dark:text-white">
-					Suscripción pendiente de regularización
+					{isInitialActivation ? 'Activá tu suscripción' : 'Tu acceso a Cita Suite venció'}
 				</h1>
 				<p class="mx-auto mt-3 max-w-lg text-base font-semibold text-neutral-700 dark:text-amber-50/80">
-					Para volver a operar el consultorio, regularizá la suscripción.
+					{#if isInitialActivation}
+						Tu cuenta ya está creada. Activá tu suscripción para comenzar a gestionar turnos, pacientes y tu agenda.
+					{:else}
+						Tu agenda, pacientes y configuración siguen guardados. Activá tu suscripción para volver a usar Cita Suite.
+					{/if}
 				</p>
-				{#if (activeBusiness?.role === 'owner' || activeBusiness?.role === 'admin') && activeBusiness?.access?.commercialAccessEnabled}
-					<!-- Bloqueo por vencimiento: el pago SÍ reactiva solo. -->
+				{#if canSelfServiceActivation}
+					<div class="mx-auto mt-6 max-w-sm rounded-2xl border border-amber-300/30 bg-white/70 p-4 text-left shadow-sm dark:bg-[#13243d]/70">
+						<p class="text-sm font-black text-amber-950 dark:text-amber-100">Cita Suite</p>
+						<p class="mt-1 text-2xl font-black text-neutral-950 dark:text-white">{money(data?.mpAmount)} por mes</p>
+						<p class="mt-2 text-sm font-semibold text-neutral-700 dark:text-amber-50/75">
+							Serás redirigido a Mercado Pago para completar el pago de forma segura.
+						</p>
+					</div>
+					<!-- Vencimiento o activación inicial pagable: Mercado Pago sí puede reactivar. -->
 					<a
 						href="/odonto/configuracion/suscripcion"
 						class="mt-6 inline-flex items-center justify-center rounded-2xl bg-amber-400 px-6 py-3 text-sm font-black text-amber-950 shadow-lg transition hover:bg-amber-300"
 					>
-						Regularizar con Mercado Pago
+						Activar suscripción con Mercado Pago
 					</a>
-					<p class="mt-3 text-sm font-semibold text-neutral-600 dark:text-amber-50/70">
-						Suscribite y tu acceso se reactiva al instante.
-					</p>
 				{:else if activeBusiness?.role === 'owner' || activeBusiness?.role === 'admin'}
 					<!-- Kill-switch del administrador: un pago NO reactiva (lo manual
 					     gana); prometer autoservicio acá sería cobrar sin servicio. -->
@@ -755,6 +801,9 @@
 						Contactá al responsable del consultorio.
 					</p>
 				{/if}
+				<p class="mt-5 text-sm font-semibold text-neutral-600 dark:text-amber-50/70">
+					¿Necesitás ayuda? Contactar soporte
+				</p>
 			</section>
 		{:else if showSkeleton}
 			<OdontoRouteSkeleton kind={skeletonKind} />
@@ -794,7 +843,7 @@
 		</svg>
 	{/snippet}
 
-	{#if !commercialLockActive && primaryMobileNav.length > 0}
+	{#if !commercialAccessRestricted && primaryMobileNav.length > 0}
 		<nav
 			class="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-[#0b1d32]/95 backdrop-blur md:hidden"
 			style="padding-bottom: env(safe-area-inset-bottom);"

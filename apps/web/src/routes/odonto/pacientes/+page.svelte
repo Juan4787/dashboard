@@ -460,7 +460,7 @@ const canCreatePatient = $derived(data.canCreatePatient !== false);
 <form method="post" action="?/create_patient" use:enhance class="space-y-4" onkeydown={preventEnterSubmit}>
 		{#if !canCreatePatient}
 			<div class="rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
-				Suscripción pendiente de regularización. Para volver a operar el consultorio, regularizá la suscripción.
+				Tu acceso a Cita Suite venció. Activá tu suscripción para volver a usar la plataforma.
 			</div>
 		{/if}
 		<div class="space-y-2">

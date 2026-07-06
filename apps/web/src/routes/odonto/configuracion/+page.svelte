@@ -69,7 +69,7 @@
 			return;
 		}
 		if (!canLinkExternalFiles) {
-			errorMessage = 'Suscripción pendiente de regularización. Para volver a operar el consultorio, regularizá la suscripción.';
+			errorMessage = 'Tu acceso a Cita Suite venció. Activá tu suscripción para volver a usar la plataforma.';
 			return;
 		}
 		busy = true;
@@ -115,7 +115,7 @@
 		successMessage = '';
 		infoMessage = '';
 		if (!canLinkExternalFiles) {
-			errorMessage = 'Suscripción pendiente de regularización. Para volver a operar el consultorio, regularizá la suscripción.';
+			errorMessage = 'Tu acceso a Cita Suite venció. Activá tu suscripción para volver a usar la plataforma.';
 			return;
 		}
 		busy = true;
@@ -197,7 +197,7 @@
 			<p class="ux-alert mt-4">Falta configurar Google Drive.</p>
 		{/if}
 		{#if !canLinkExternalFiles}
-			<p class="ux-alert mt-4">Suscripción pendiente de regularización. Para volver a operar el consultorio, regularizá la suscripción.</p>
+			<p class="ux-alert mt-4">Tu acceso a Cita Suite venció. Activá tu suscripción para volver a usar la plataforma.</p>
 		{/if}
 		{#if errorMessage}
 			<p class="ux-alert mt-4">{errorMessage}</p>

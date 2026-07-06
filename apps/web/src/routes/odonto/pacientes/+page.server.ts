@@ -603,7 +603,7 @@ const handleCreatePatient = async ({
 		}
 		if (!context.access.allowedCapabilities.canCreatePatient) {
 			return fail(403, {
-				message: 'Suscripción pendiente de regularización. Para volver a operar el consultorio, regularizá la suscripción.',
+				message: 'Tu acceso a Cita Suite venció. Activá tu suscripción para volver a usar la plataforma.',
 				full_name,
 				dni,
 				phone

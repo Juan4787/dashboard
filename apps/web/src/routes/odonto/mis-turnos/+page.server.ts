@@ -96,7 +96,7 @@ export const actions: Actions = {
 		}
 		if (!business.access.allowedCapabilities.canEditAppointment) {
 			return fail(403, {
-				message: 'Suscripción pendiente de regularización. Para volver a operar el consultorio, regularizá la suscripción.'
+				message: 'Tu acceso a Cita Suite venció. Activá tu suscripción para volver a usar la plataforma.'
 			});
 		}
 

@@ -18,6 +18,36 @@
 					(mpReturn.subscriptionStatus === 'authorized' && access.commercialStatus === 'active'))
 		)
 	);
+	const isManualBlock = $derived(!access.commercialAccessEnabled || Boolean(access.archivedAt));
+	const canActivateWithMp = $derived(
+		!access.isPermanent && access.commercialAccessEnabled && !access.archivedAt
+	);
+	const isInitialActivation = $derived(
+		!access.isPermanent &&
+			!access.paidUntil &&
+			!subscription.last_payment_at &&
+			(access.commercialStatus === 'restricted' || access.commercialStatus === 'archived')
+	);
+	const mainTitle = $derived.by(() => {
+		if (isInitialActivation) return 'Activá tu suscripción';
+		if (access.commercialStatus === 'active' || access.commercialStatus === 'grace') {
+			return 'Suscripción de Cita Suite';
+		}
+		if (isManualBlock) return 'Tu cuenta requiere soporte';
+		return 'Tu acceso a Cita Suite venció';
+	});
+	const mainDescription = $derived.by(() => {
+		if (isInitialActivation) {
+			return 'Tu cuenta ya está creada. Activá tu suscripción para comenzar a gestionar turnos, pacientes y tu agenda.';
+		}
+		if (access.commercialStatus === 'active' || access.commercialStatus === 'grace') {
+			return 'Gestioná el acceso del consultorio y la suscripción mensual.';
+		}
+		if (isManualBlock) {
+			return 'El acceso fue suspendido por el administrador del sistema. Contactá soporte; un pago no lo reactiva automáticamente.';
+		}
+		return 'Tu agenda, pacientes y configuración siguen guardados. Activá tu suscripción para volver a usar Cita Suite.';
+	});
 
 	const formatDateTime = (value?: string | null, empty = 'No vence') =>
 		value ? new Date(value).toLocaleString('es-AR') : empty;
@@ -55,10 +85,12 @@
 
 <section class="ux-page">
 	<div class="ux-hero">
-		<BackLink href="/odonto/configuracion" label="Volver" class="mb-5" />
-		<p class="ux-badge">Configuración / Suscripción</p>
-		<h1 class="ux-title mt-4">Estado comercial</h1>
-		<p class="ux-subtitle">Acceso del consultorio y movimientos registrados.</p>
+		{#if access.canUseBusiness}
+			<BackLink href="/odonto/configuracion" label="Volver" class="mb-5" />
+		{/if}
+		<p class="ux-badge">Cita Suite</p>
+		<h1 class="ux-title mt-4">{mainTitle}</h1>
+		<p class="ux-subtitle">{mainDescription}</p>
 	</div>
 
 	<div class="ux-card">
@@ -96,9 +128,9 @@
 				<p class="mt-2 font-bold text-white">{formatDateTime(subscription.updated_at, 'Sin registrar')}</p>
 			</div>
 			<div class="ux-soft-card p-4">
-				<p class="text-sm font-bold text-white/45">Cómo regularizar</p>
+				<p class="text-sm font-bold text-white/45">Cómo continuar</p>
 				<p class="mt-2 font-bold text-white">
-					{access.isPermanent ? 'Contactá soporte del sistema.' : 'Suscribite con Mercado Pago más abajo.'}
+					{access.isPermanent ? 'Contactá soporte del sistema.' : isManualBlock ? 'Contactá soporte.' : 'Activá la suscripción con Mercado Pago más abajo.'}
 				</p>
 			</div>
 		</div>
@@ -112,9 +144,9 @@
 		<div class="ux-card">
 			<h2 class="ux-section-title">Suscripción con Mercado Pago</h2>
 			<p class="mt-2 text-sm text-white/55">
-				Débito automático mensual de <span class="font-bold text-white">{money(data.mpAmount)}</span>.
-				Autorizás una vez en Mercado Pago y el acceso se renueva solo. Los medios de pago
-				disponibles los muestra Mercado Pago al momento de autorizar.
+				Plan Cita Suite: <span class="font-bold text-white">{money(data.mpAmount)}</span> por mes.
+				Serás redirigido a Mercado Pago para completar el pago de forma segura. Los medios
+				de pago disponibles los muestra Mercado Pago al momento de autorizar.
 			</p>
 
 			{#if form?.message && !form?.success}
@@ -157,7 +189,13 @@
 				</p>
 			{/if}
 
-			{#if mpSub?.status === 'authorized' || mpSub?.status === 'paused'}
+			{#if isManualBlock}
+				<p class="ux-alert ux-alert-warning mt-5">
+					El acceso fue suspendido por el administrador del sistema. No inicies un pago desde
+					acá: contactá soporte para regularizar la cuenta.
+				</p>
+				<p class="mt-4 text-sm font-semibold text-white/55">¿Necesitás ayuda? Contactar soporte</p>
+			{:else if mpSub?.status === 'authorized' || mpSub?.status === 'paused'}
 				<div class="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
 					<div class="ux-soft-card p-4">
 						<p class="text-sm font-bold text-white/45">Estado</p>
@@ -193,7 +231,7 @@
 						vencimiento.
 					</p>
 				</form>
-			{:else}
+			{:else if canActivateWithMp}
 				{#if mpSub?.status === 'pending'}
 					<p class="mt-4 text-sm text-white/55">
 						Hay una autorización pendiente sin completar. Podés retomarla iniciando la
@@ -206,7 +244,7 @@
 				{/if}
 				<form method="POST" action="?/subscribe" class="mt-5" onsubmit={() => (mpSubmitting = true)}>
 					<button type="submit" disabled={mpSubmitting} class="ux-btn-primary">
-						{mpSubmitting ? 'Redirigiendo a Mercado Pago…' : 'Suscribirme con Mercado Pago'}
+						{mpSubmitting ? 'Redirigiendo a Mercado Pago…' : 'Activar suscripción con Mercado Pago'}
 					</button>
 					<p class="mt-2 text-sm text-white/45">
 						Te redirigimos a Mercado Pago para autorizar el débito mensual de forma segura.

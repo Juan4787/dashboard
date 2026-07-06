@@ -1,4 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('./supabase', async () => {
+	const actual = await vi.importActual<typeof import('./supabase')>('./supabase');
+	return {
+		...actual,
+		createSupabaseAdminClient: vi.fn(async () => {
+			throw new Error('admin no disponible en test unitario');
+		})
+	};
+});
+
 import { resolveActiveBusiness } from './business';
 
 const accessTokenFor = (userId: string) => {
@@ -60,6 +71,57 @@ const queryReturning = (result: unknown) => {
 };
 
 describe('resolveActiveBusiness', () => {
+	it('loads the auto-created owner business after allowed-email bootstrap', async () => {
+		const userId = 'user-allowed';
+		const firstMembershipRead = queryReturning({ data: [], error: null });
+		const recoveredMembershipRead = queryReturning({
+			data: [{ role: 'owner', business: businessRow }],
+			error: null
+		});
+		const subscriptionsRead = queryReturning({
+			data: [
+				{
+					...subscriptionRow,
+					commercial_access_enabled: true,
+					is_permanent: false,
+					subscription_status: 'restricted',
+					paid_until: null,
+					grace_until: null,
+					restricted_until: '2099-07-30T00:00:00.000Z',
+					access_note: 'Cuenta pendiente de activación de suscripción.'
+				}
+			],
+			error: null
+		});
+
+		const supabase = {
+			from: vi.fn((table: string) => {
+				if (table === 'business_users') {
+					const count = supabase.from.mock.calls.filter(([name]: [string]) => name === 'business_users').length;
+					return count === 1 ? firstMembershipRead : recoveredMembershipRead;
+				}
+				if (table === 'business_subscriptions') return subscriptionsRead;
+				throw new Error(`Unexpected table ${table}`);
+			}),
+			rpc: vi.fn(() => Promise.resolve({ data: [{ business_id: 'business-1', role: 'owner' }], error: null }))
+		} as any;
+
+		const context = await resolveActiveBusiness({
+			supabase,
+			accessToken: accessTokenFor(userId)
+		});
+
+		expect(context?.business.id).toBe('business-1');
+		expect(context?.role).toBe('owner');
+		expect(context?.access.commercialAccessEnabled).toBe(true);
+		expect(context?.access.commercialStatus).toBe('restricted');
+		expect(context?.access.canUseBusiness).toBe(false);
+		expect(supabase.rpc).toHaveBeenCalledWith('ensure_user_default_business', {
+			p_name: 'Consultorio',
+			p_industry: 'odontology'
+		});
+	});
+
 	it('recovers an accepted invite membership after bootstrap race', async () => {
 		const userId = 'user-1';
 		const firstMembershipRead = queryReturning({ data: [], error: null });

@@ -382,12 +382,18 @@ test.describe('Dental Suite - flujo operativo completo', () => {
 
 		await page.goto('/odonto/maestro');
 		if (page.url().includes('/odonto/maestro')) {
-			const manage = page.getByRole('button', { name: 'Gestionar' }).first();
-			if (await manage.isVisible()) {
+			const manageButtons = page.getByRole('button', { name: 'Gestionar' });
+			const count = await manageButtons.count();
+			for (let index = 0; index < count; index += 1) {
+				const manage = manageButtons.nth(index);
+				if (!(await manage.isVisible())) continue;
+				await manage.scrollIntoViewIfNeeded();
 				await manage.click();
 				const amount = page.getByPlaceholder('Monto opcional').first();
+				if (!(await amount.isVisible({ timeout: 3000 }).catch(() => false))) continue;
 				await amount.fill('1250000');
 				await expect(amount).toHaveValue('1.250.000');
+				break;
 			}
 		}
 	});

@@ -184,6 +184,6 @@ export const actions: Actions = {
 		cookies.set('sb-access-token', data.session.access_token, cookieOptions);
 		cookies.set('sb-refresh-token', data.session.refresh_token, cookieOptions);
 
-		throw redirect(303, getModuleEntryRoute('odonto'));
+		throw redirect(303, '/odonto/configuracion/suscripcion?inicio=1');
 	}
 };
