@@ -201,6 +201,11 @@ const mpSend = async <T>(
 
 export const MP_SUBSCRIPTION_REASON = 'Cita Suite — Suscripción mensual';
 
+export const getMercadoPagoApiConfigIssue = (): string | null => {
+	if (!env.MP_ACCESS_TOKEN?.trim()) return 'MP_ACCESS_TOKEN';
+	return null;
+};
+
 // Precio global de la suscripción; configurable por env, con el valor acordado
 // como respaldo para que un env faltante nunca genere un cobro en cero.
 export const getSubscriptionAmountArs = (): number => {

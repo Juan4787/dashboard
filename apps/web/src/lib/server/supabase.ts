@@ -1,4 +1,6 @@
 import { env } from '$env/dynamic/private';
+import { dev } from '$app/environment';
+import type { Cookies } from '@sveltejs/kit';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import WebSocket from 'ws';
 
@@ -101,6 +103,70 @@ export const createSupabaseServerClient = async (
 	});
 
 	return supabase;
+};
+
+const OAUTH_CODE_VERIFIER_COOKIE = 'sb-oauth-code-verifier';
+
+export const clearSupabaseOAuthCookies = (cookies: Cookies) => {
+	cookies.delete(OAUTH_CODE_VERIFIER_COOKIE, { path: '/' });
+};
+
+export const createSupabaseOAuthClient = async (
+	module: Module,
+	cookies: Cookies,
+	fetchImpl?: typeof fetch
+): Promise<SupabaseClient> => {
+	if (env.DEMO_MODE === 'true') {
+		throw new Error('Demo mode: OAuth deshabilitado');
+	}
+	const config = moduleConfig[module];
+	if (!config.url || !config.key) {
+		throw new Error(`Faltan variables de entorno de Supabase para el módulo ${module}`);
+	}
+	try {
+		new URL(config.url);
+	} catch {
+		const label = module === 'odonto' ? 'ODONTO_SUPABASE_URL' : 'ADMIN_SUPABASE_URL';
+		throw new Error(`URL inválida en ${label}`);
+	}
+
+	const cookieOptions = {
+		path: '/',
+		httpOnly: true,
+		secure: !dev,
+		sameSite: 'lax' as const,
+		maxAge: 10 * 60
+	};
+
+	return createClient(config.url, config.key, {
+		auth: {
+			persistSession: true,
+			autoRefreshToken: false,
+			detectSessionInUrl: false,
+			flowType: 'pkce',
+			storage: {
+				getItem: (key: string) =>
+					key.includes('code-verifier') ? (cookies.get(OAUTH_CODE_VERIFIER_COOKIE) ?? null) : null,
+				setItem: (key: string, value: string) => {
+					if (key.includes('code-verifier')) {
+						cookies.set(OAUTH_CODE_VERIFIER_COOKIE, value, cookieOptions);
+					}
+				},
+				removeItem: (key: string) => {
+					if (key.includes('code-verifier')) {
+						cookies.delete(OAUTH_CODE_VERIFIER_COOKIE, { path: '/' });
+					}
+				}
+			}
+		},
+		realtime: {
+			transport: WebSocketTransport
+		},
+		global: {
+			headers: { 'X-App-Module': module, 'X-Auth-Flow': 'oauth' },
+			fetch: fetchImpl ?? fetch
+		}
+	});
 };
 
 export const createSupabaseAdminClient = async (

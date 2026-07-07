@@ -26,7 +26,8 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 
 	let mpReturn: MpReturnSummary | null = null;
 	let mpReturnFailed = false;
-	if (url.searchParams.get('mp') === 'retorno') {
+	const mpReturnRequested = url.searchParams.get('mp') === 'retorno';
+	if (mpReturnRequested) {
 		try {
 			const admin = await createSupabaseAdminClient('odonto', fetch);
 			mpReturn = await confirmMpSubscriptionForBusiness(admin, fetch, context.business.id);
@@ -50,6 +51,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 		mpAmount: getSubscriptionAmountArs(),
 		mpReturn,
 		mpReturnFailed,
+		mpReturnRequested,
 		activated,
 		manualBlock
 	};

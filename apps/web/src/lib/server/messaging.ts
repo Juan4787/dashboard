@@ -130,6 +130,20 @@ export const getPublicSiteUrl = () => {
 	return raw.replace(/\/$/, '');
 };
 
+export const getExternalCallbackSiteUrl = () => {
+	const raw = getPublicSiteUrl();
+	try {
+		const url = new URL(raw);
+		const hostname = url.hostname.toLowerCase();
+		if (url.protocol !== 'https:' || hostname === 'localhost' || hostname === '127.0.0.1') {
+			return PUBLIC_SITE_URL_FALLBACK;
+		}
+		return raw;
+	} catch {
+		return PUBLIC_SITE_URL_FALLBACK;
+	}
+};
+
 export const publicAppointmentUrl = (token: string) => `${getPublicSiteUrl()}/turno/${token}`;
 
 // Enlace privado que muestra SOLO el aviso de reprogramación (no la página completa

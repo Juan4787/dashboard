@@ -220,13 +220,19 @@ const loadMemberships = async (
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const isDefaultBusinessCreationDisabled = (error: unknown) => {
-	const message =
-		typeof error === 'object' && error !== null && 'message' in error
-			? String((error as { message?: unknown }).message ?? '')
-			: String(error ?? '');
-	return message.includes('DEFAULT_BUSINESS_CREATION_DISABLED');
-};
+const errorMessage = (error: unknown) =>
+	typeof error === 'object' && error !== null && 'message' in error
+		? String((error as { message?: unknown }).message ?? '')
+		: String(error ?? '');
+
+export const isDefaultBusinessCreationDisabledError = (error: unknown) =>
+	errorMessage(error).includes('DEFAULT_BUSINESS_CREATION_DISABLED');
+
+export const isDefaultBusinessPendingManualSetupError = (error: unknown) =>
+	errorMessage(error).includes('DEFAULT_BUSINESS_PENDING_MANUAL_SETUP');
+
+const isDefaultBusinessBootstrapBlocked = (error: unknown) =>
+	isDefaultBusinessCreationDisabledError(error) || isDefaultBusinessPendingManualSetupError(error);
 
 const reloadMembershipsAfterBootstrap = async (
 	supabase: SupabaseClient,
@@ -260,7 +266,7 @@ export const resolveActiveBusiness = async ({
 		});
 		if (error) {
 			memberships = await reloadMembershipsAfterBootstrap(supabase, userId);
-			if (memberships.length === 0 || !isDefaultBusinessCreationDisabled(error)) {
+			if (memberships.length === 0 || !isDefaultBusinessBootstrapBlocked(error)) {
 				throw error;
 			}
 		} else {

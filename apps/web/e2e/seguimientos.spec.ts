@@ -83,7 +83,7 @@ const login = async (page: Page) => {
 	await page.waitForLoadState('networkidle');
 	await page.getByLabel('Correo electrónico').fill(email ?? '');
 	await page.getByLabel('Contraseña').fill(password ?? '');
-	await page.locator('form').getByRole('button', { name: 'Ingresar' }).click();
+	await page.locator('form').getByRole('button', { name: 'Ingresar', exact: true }).click();
 	await expect(
 		page.getByRole('link', { name: 'Agenda' }).or(page.getByRole('link', { name: 'Mis turnos' }))
 	).toBeVisible({ timeout: 15_000 });

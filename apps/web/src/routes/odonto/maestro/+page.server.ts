@@ -34,6 +34,12 @@ const ensureMaster = (accessToken?: string | null) => {
 };
 
 const EMAIL_FORMAT_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const ONBOARDING_MODES = ['manual', 'self_service'] as const;
+type OnboardingMode = (typeof ONBOARDING_MODES)[number];
+
+const isOnboardingMode = (value: string): value is OnboardingMode =>
+	(ONBOARDING_MODES as readonly string[]).includes(value);
+
 const DURATION_SECONDS: Record<string, { seconds: number | null; unit: string; label: string }> = {
 	hour_1: { seconds: 60 * 60, unit: 'hour', label: '1 hora' },
 	day_1: { seconds: 24 * 60 * 60, unit: 'day', label: '1 día' },
@@ -110,6 +116,24 @@ const listAuthEmailsById = async (admin: Awaited<ReturnType<typeof createSupabas
 	return result;
 };
 
+const findAuthUserIdByEmail = async (
+	admin: Awaited<ReturnType<typeof createSupabaseAdminClient>>,
+	email: string
+) => {
+	const normalizedEmail = email.trim().toLowerCase();
+	const perPage = 200;
+	let page = 1;
+	while (true) {
+		const { data, error } = await admin.auth.admin.listUsers({ page, perPage });
+		if (error) throw error;
+		const users = data?.users ?? [];
+		const match = users.find((user) => (user.email ?? '').toLowerCase() === normalizedEmail);
+		if (match?.id) return match.id;
+		if (users.length < perPage) return null;
+		page += 1;
+	}
+};
+
 const businessHasMasterOwner = async (
 	admin: Awaited<ReturnType<typeof createSupabaseAdminClient>>,
 	businessId: string,
@@ -141,7 +165,7 @@ const buildMasterData = async (
 ) => {
 	const emailsRes = await admin
 		.from('allowed_emails')
-		.select('id, email, enabled, note, disabled_at, disabled_reason, created_at, updated_at')
+		.select('id, email, enabled, note, onboarding_mode, disabled_at, disabled_reason, created_at, updated_at')
 		.order('email', { ascending: true });
 	const businessesRes = await admin
 		.from('businesses')
@@ -324,25 +348,45 @@ export const actions: Actions = {
 
 		const admin = await createSupabaseAdminClient('odonto', fetch);
 		let ownerUserId: string | null = null;
-		const perPage = 200;
-		let page = 1;
-		while (!ownerUserId) {
-			const { data, error } = await admin.auth.admin.listUsers({ page, perPage });
-			if (error) {
-				console.error('Error buscando usuario owner', error);
-				return fail(500, { message: 'No pudimos validar el usuario owner.' });
-			}
-			const users = data?.users ?? [];
-			const match = users.find((user) => (user.email ?? '').toLowerCase() === ownerEmail);
-			if (match?.id) ownerUserId = match.id;
-			if (users.length < perPage) break;
-			page += 1;
+		try {
+			ownerUserId = await findAuthUserIdByEmail(admin, ownerEmail);
+		} catch (error) {
+			console.error('Error buscando usuario owner', error);
+			return fail(500, { message: 'No pudimos validar el usuario owner.' });
 		}
 
-		if (!ownerUserId) {
-			return fail(400, {
+		if (ownerUserId) {
+			const { data: existingMemberships, error: existingMembershipsError } = await admin
+				.from('business_users')
+				.select('business_id, role')
+				.eq('user_id', ownerUserId)
+				.limit(1);
+			if (existingMembershipsError) {
+				console.error('Error validando membresías existentes del owner', existingMembershipsError);
+				return fail(500, { message: 'No pudimos validar si el owner ya tiene consultorio.' });
+			}
+			if ((existingMemberships ?? []).length > 0) {
+				return fail(409, {
+					message:
+						'Ese owner ya está vinculado a un consultorio. Evitá crear otro hasta que exista selector de negocios.'
+				});
+			}
+		}
+
+		const { data: existingInvites, error: existingInvitesError } = await admin
+			.from('business_user_invites')
+			.select('id, business_id, role')
+			.eq('email', ownerEmail)
+			.eq('status', 'pending')
+			.limit(1);
+		if (existingInvitesError) {
+			console.error('Error validando invitaciones existentes del owner', existingInvitesError);
+			return fail(500, { message: 'No pudimos validar si el owner ya tiene invitación pendiente.' });
+		}
+		if ((existingInvites ?? []).length > 0) {
+			return fail(409, {
 				message:
-					'El owner todavía no tiene cuenta creada. Primero habilitá el email y pedile que se registre; después creá el consultorio.'
+					'Ese owner ya tiene una invitación pendiente. Cancelala o usá ese consultorio antes de crear otro.'
 			});
 		}
 
@@ -361,6 +405,7 @@ export const actions: Actions = {
 					.from('allowed_emails')
 					.update({
 						enabled: true,
+						onboarding_mode: 'manual',
 						disabled_at: null,
 						disabled_reason: null,
 						updated_by: master.userId,
@@ -370,6 +415,7 @@ export const actions: Actions = {
 			: await admin.from('allowed_emails').insert({
 					email: ownerEmail,
 					enabled: true,
+					onboarding_mode: 'manual',
 					note: note ?? 'Owner de consultorio creado desde panel maestro.',
 					updated_by: master.userId,
 					created_by: master.userId
@@ -396,16 +442,32 @@ export const actions: Actions = {
 			return fail(500, { message: 'No pudimos crear el consultorio.' });
 		}
 
-		const { error: membershipError } = await admin.from('business_users').insert({
-			business_id: business.id,
-			user_id: ownerUserId,
-			role: 'owner'
-		});
+		if (ownerUserId) {
+			const { error: membershipError } = await admin.from('business_users').insert({
+				business_id: business.id,
+				user_id: ownerUserId,
+				role: 'owner'
+			});
 
-		if (membershipError) {
-			console.error('Error vinculando owner al consultorio', membershipError);
-			await admin.from('businesses').delete().eq('id', business.id);
-			return fail(500, { message: 'No pudimos vincular el owner al consultorio.' });
+			if (membershipError) {
+				console.error('Error vinculando owner al consultorio', membershipError);
+				await admin.from('businesses').delete().eq('id', business.id);
+				return fail(500, { message: 'No pudimos vincular el owner al consultorio.' });
+			}
+		} else {
+			const { error: inviteError } = await admin.from('business_user_invites').insert({
+				business_id: business.id,
+				email: ownerEmail,
+				role: 'owner',
+				status: 'pending',
+				invited_by: master.userId
+			});
+
+			if (inviteError) {
+				console.error('Error creando invitación owner del consultorio', inviteError);
+				await admin.from('businesses').delete().eq('id', business.id);
+				return fail(500, { message: 'No pudimos dejar invitado al owner del consultorio.' });
+			}
 		}
 
 		const operation = durationKey === 'permanent' ? 'set_permanent' : 'grant_access';
@@ -428,13 +490,20 @@ export const actions: Actions = {
 			return fail(500, { message: 'No pudimos asignar el acceso inicial del consultorio.' });
 		}
 
-		return { success: true, message: 'Consultorio creado, owner vinculado y acceso inicial configurado.' };
+		return {
+			success: true,
+			message: ownerUserId
+				? 'Consultorio creado, owner vinculado y acceso inicial configurado.'
+				: 'Consultorio creado con owner pendiente. Cuando el owner cree o ingrese a su cuenta, se vinculará automáticamente.'
+		};
 	},
 	add_email: async ({ request, locals, fetch }) => {
 		if (!locals.auth) throw redirect(303, '/login');
 		const master = ensureMaster(locals.auth.access_token);
 		const form = await request.formData();
 		const email = normalizeEmail(form.get('email'));
+		const onboardingModeRaw = String(form.get('onboarding_mode') ?? 'manual').trim();
+		const onboardingMode = isOnboardingMode(onboardingModeRaw) ? onboardingModeRaw : null;
 		const note = String(form.get('note') ?? '').trim() || null;
 
 		if (!EMAIL_FORMAT_REGEX.test(email)) {
@@ -442,6 +511,9 @@ export const actions: Actions = {
 		}
 		if (isMasterEmail(email)) {
 			return fail(403, { message: 'El email maestro no se gestiona desde este panel.' });
+		}
+		if (!onboardingMode) {
+			return fail(400, { message: 'Elegí si el alta es manual o con autopago.', email });
 		}
 
 		const admin = await createSupabaseAdminClient('odonto', fetch);
@@ -461,6 +533,7 @@ export const actions: Actions = {
 					.from('allowed_emails')
 					.update({
 						enabled: true,
+						onboarding_mode: onboardingMode,
 						note,
 						disabled_at: null,
 						disabled_reason: null,
@@ -470,6 +543,7 @@ export const actions: Actions = {
 			: await admin.from('allowed_emails').insert({
 					email,
 					enabled: true,
+					onboarding_mode: onboardingMode,
 					note,
 					disabled_at: null,
 					disabled_reason: null,
@@ -482,7 +556,13 @@ export const actions: Actions = {
 			return fail(500, { message: 'No pudimos guardar el correo electrónico.', email });
 		}
 
-		return { success: true, message: 'Correo habilitado.' };
+		return {
+			success: true,
+			message:
+				onboardingMode === 'self_service'
+					? 'Correo habilitado para autopago.'
+					: 'Correo habilitado en modo manual.'
+		};
 	},
 	toggle_email: async ({ request, locals, fetch }) => {
 		if (!locals.auth) throw redirect(303, '/login');

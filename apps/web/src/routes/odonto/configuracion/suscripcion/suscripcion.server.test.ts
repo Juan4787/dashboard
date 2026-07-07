@@ -21,7 +21,7 @@ vi.mock('$lib/server/business', () => ({
 	demoBusinessContext: mocks.demoBusinessContext
 }));
 vi.mock('$lib/server/messaging', () => ({
-	getPublicSiteUrl: () => 'https://app.test'
+	getExternalCallbackSiteUrl: () => 'https://app.test'
 }));
 
 const { load, actions } = await import('./+page.server');
@@ -230,6 +230,24 @@ describe('action subscribe', () => {
 			status: number;
 		};
 		expect(result.status).toBe(502);
+	});
+
+	it('devuelve error operativo claro y no llama a MP si falta MP_ACCESS_TOKEN', async () => {
+		delete envState.privateEnv.MP_ACCESS_TOKEN;
+		const server = createDbMock();
+		mocks.createSupabaseServerClient.mockResolvedValue(server.client);
+		mocks.resolveActiveBusiness.mockResolvedValue(ownerContext());
+		const { fetchMock, requests } = createMpFetch([]);
+
+		const result = (await actions.subscribe(makeEvent({ fetchMock }) as never)) as {
+			status: number;
+			data: { message?: string };
+		};
+
+		expect(result.status).toBe(500);
+		expect(result.data.message).toContain('Mercado Pago no está configurado');
+		expect(mocks.createSupabaseAdminClient).not.toHaveBeenCalled();
+		expect(requests).toHaveLength(0);
 	});
 
 	it('bloquea una segunda suscripción cuando ya hay una activa o pausada (anti doble débito)', async () => {

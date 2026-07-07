@@ -11,6 +11,7 @@
 	let configMenuOpen = $state(false);
 	let userMenuOpen = $state(false);
 	let showSkeleton = $state(false);
+	let mpSubmitting = $state(false);
 	let shownAt = $state<number | null>(null);
 	type SkeletonKind =
 		| 'agenda'
@@ -87,6 +88,7 @@
 	];
 
 	const activeBusiness = $derived(data?.activeBusiness);
+	const accountPendingManualSetup = $derived(Boolean(data?.pendingManualSetup && !activeBusiness));
 	const money = (value?: number | string | null) => {
 		if (value === null || value === undefined || value === '') return 'ARS 0';
 		const parsed = Number(value);
@@ -109,6 +111,7 @@
 	});
 	const routeAllowsCommercialBypass = $derived.by(() => {
 		if ($page.url.pathname.startsWith('/odonto/maestro')) return true;
+		if ($page.url.pathname.startsWith('/odonto/pendiente')) return true;
 		// La página de suscripción queda fuera del bloqueo: es el camino de
 		// autoservicio para activar o volver a pagar con Mercado Pago.
 		if ($page.url.pathname.startsWith('/odonto/configuracion/suscripcion')) return true;
@@ -139,6 +142,7 @@
 		);
 	});
 	const visibleNav = $derived.by(() => {
+		if (!activeBusiness || accountPendingManualSetup) return [];
 		if (commercialAccessRestricted) return [];
 		if (activeBusiness?.role === 'professional') {
 			return professionalNav;
@@ -782,13 +786,21 @@
 							Serás redirigido a Mercado Pago para completar el pago de forma segura.
 						</p>
 					</div>
-					<!-- Vencimiento o activación inicial pagable: Mercado Pago sí puede reactivar. -->
-					<a
-						href="/odonto/configuracion/suscripcion"
-						class="mt-6 inline-flex items-center justify-center rounded-2xl bg-amber-400 px-6 py-3 text-sm font-black text-amber-950 shadow-lg transition hover:bg-amber-300"
+					<!-- Vencimiento o activación inicial pagable: el CTA inicia Mercado Pago, no una página intermedia. -->
+					<form
+						method="POST"
+						action="/odonto/configuracion/suscripcion?/subscribe"
+						class="mt-6"
+						onsubmit={() => (mpSubmitting = true)}
 					>
-						Activar suscripción con Mercado Pago
-					</a>
+						<button
+							type="submit"
+							disabled={mpSubmitting}
+							class="inline-flex items-center justify-center rounded-2xl bg-amber-400 px-6 py-3 text-sm font-black text-amber-950 shadow-lg transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-70"
+						>
+							{mpSubmitting ? 'Redirigiendo a Mercado Pago…' : 'Activar suscripción con Mercado Pago'}
+						</button>
+					</form>
 				{:else if activeBusiness?.role === 'owner' || activeBusiness?.role === 'admin'}
 					<!-- Kill-switch del administrador: un pago NO reactiva (lo manual
 					     gana); prometer autoservicio acá sería cobrar sin servicio. -->
@@ -802,6 +814,29 @@
 					</p>
 				{/if}
 				<p class="mt-5 text-sm font-semibold text-neutral-600 dark:text-amber-50/70">
+					¿Necesitás ayuda? Contactar soporte
+				</p>
+			</section>
+		{:else if accountPendingManualSetup}
+			<section class="mx-auto mt-8 max-w-2xl rounded-3xl border border-sky-300/35 bg-sky-400/10 p-8 text-center shadow-2xl shadow-sky-950/10 dark:border-sky-300/25">
+				<p class="mx-auto inline-flex rounded-full bg-sky-300/15 px-3 py-1 text-xs font-black uppercase tracking-wide text-sky-900 dark:text-sky-100">
+					Cita Suite
+				</p>
+				<h1 class="mt-5 text-3xl font-black text-neutral-950 dark:text-white">
+					Estamos configurando tu consultorio
+				</h1>
+				<p class="mx-auto mt-3 max-w-lg text-base font-semibold text-neutral-700 dark:text-sky-50/80">
+					Tu cuenta ya está creada y tu email está habilitado. Falta que soporte cree o vincule
+					el consultorio que vas a usar.
+				</p>
+				<div class="mx-auto mt-6 max-w-sm rounded-2xl border border-sky-300/30 bg-white/70 p-4 text-left shadow-sm dark:bg-[#13243d]/70">
+					<p class="text-sm font-black text-sky-950 dark:text-sky-100">Sin pago pendiente</p>
+					<p class="mt-2 text-sm font-semibold text-neutral-700 dark:text-sky-50/75">
+						Esta alta está en modo manual. No te vamos a enviar a Mercado Pago hasta que el
+						consultorio exista y el flujo comercial corresponda.
+					</p>
+				</div>
+				<p class="mt-5 text-sm font-semibold text-neutral-600 dark:text-sky-50/70">
 					¿Necesitás ayuda? Contactar soporte
 				</p>
 			</section>

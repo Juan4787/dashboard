@@ -5,6 +5,7 @@ import {
 	MockMessagingProvider,
 	buildBotReplyText,
 	formatReminderDateTime,
+	getExternalCallbackSiteUrl,
 	humanMessagingError,
 	isHumanRequest,
 	renderTemplateBody,
@@ -90,6 +91,12 @@ describe('messaging helpers', () => {
 		expect(humanMessagingError(new Error('PATIENT_PHONE_MISSING'))).toBe(
 			'El paciente no tiene un teléfono válido.'
 		);
+	});
+
+	it('usa una URL HTTPS pública para callbacks externos aunque el entorno local sea localhost', () => {
+		expect(getExternalCallbackSiteUrl()).toMatch(/^https:\/\//);
+		expect(getExternalCallbackSiteUrl()).not.toContain('localhost');
+		expect(getExternalCallbackSiteUrl()).not.toContain('127.0.0.1');
 	});
 });
 

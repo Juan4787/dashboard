@@ -1,4 +1,8 @@
-import { demoBusinessContext, resolveActiveBusiness } from '$lib/server/business';
+import {
+	demoBusinessContext,
+	isDefaultBusinessPendingManualSetupError,
+	resolveActiveBusiness
+} from '$lib/server/business';
 import {
 	createSupabaseAdminClient,
 	createSupabaseServerClient,
@@ -29,6 +33,7 @@ export const load: LayoutServerLoad = async ({ locals, fetch, cookies }) => {
 	const email = getEmailFromAccessToken(locals.auth.access_token);
 	let activeBusiness = null;
 	let businessError: string | null = null;
+	let pendingManualSetup = false;
 	// Aviso interno de seguimientos ejecutándose (centro-arriba). Scopeado por rol.
 	let followUps: FollowUpNotice = { count: 0, single: null };
 	let followUpsTodayISO = '';
@@ -61,17 +66,23 @@ export const load: LayoutServerLoad = async ({ locals, fetch, cookies }) => {
 				}
 			}
 		} catch (err) {
-			console.error('Error resolviendo negocio activo', err);
-			businessError =
-				'No se pudo cargar el negocio activo. Revisá que la migración multi-tenant esté aplicada.';
+			if (isDefaultBusinessPendingManualSetupError(err)) {
+				pendingManualSetup = true;
+			} else {
+				console.error('Error resolviendo negocio activo', err);
+				businessError =
+					'No se pudo cargar el negocio activo. Revisá que la migración multi-tenant esté aplicada.';
+			}
 		}
 	}
 
 	return {
 		module: 'odonto' as const,
 		isMaster: isMasterEmail(email),
+		email,
 		activeBusiness,
 		businessError,
+		pendingManualSetup,
 		followUps,
 		followUpsTodayISO,
 		mpAmount: getSubscriptionAmountArs()

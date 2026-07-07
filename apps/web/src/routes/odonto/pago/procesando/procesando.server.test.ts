@@ -77,6 +77,7 @@ describe('/odonto/pago/procesando', () => {
 			manualBlock: boolean;
 			mpReturn: { creditedNow: boolean; subscriptionStatus: string };
 			mpAmount: number;
+			mpReturnRequested: boolean;
 		};
 
 		expect(mocks.confirmMpSubscriptionForBusiness).toHaveBeenCalledTimes(1);
@@ -85,6 +86,7 @@ describe('/odonto/pago/procesando', () => {
 		expect(data.manualBlock).toBe(false);
 		expect(data.mpReturn).toMatchObject({ creditedNow: true, subscriptionStatus: 'authorized' });
 		expect(data.mpAmount).toBe(50000);
+		expect(data.mpReturnRequested).toBe(true);
 	});
 
 	it('marca bloqueo manual cuando un pago no reactivaria la cuenta', async () => {

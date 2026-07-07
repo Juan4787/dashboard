@@ -244,7 +244,7 @@ const login = async (page: Page, fixture: Fixture) => {
 	await page.goto('/login');
 	await page.getByLabel('Correo electrónico').fill(fixture.ownerEmail);
 	await page.getByLabel('Contraseña').fill(password);
-	await page.locator('form').getByRole('button', { name: 'Ingresar' }).click();
+	await page.locator('form').getByRole('button', { name: 'Ingresar', exact: true }).click();
 	await expect(page.getByRole('link', { name: 'Agenda' })).toBeVisible();
 };
 

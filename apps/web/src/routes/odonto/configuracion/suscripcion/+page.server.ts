@@ -4,12 +4,13 @@ import {
 	cancelPreapproval,
 	confirmMpSubscriptionForBusiness,
 	createPreapproval,
+	getMercadoPagoApiConfigIssue,
 	getSubscriptionAmountArs,
 	pickRelevantMpSubscription,
 	settleApprovedChargesForPreapproval,
 	type MpReturnSummary
 } from '$lib/server/mercadopago';
-import { getPublicSiteUrl } from '$lib/server/messaging';
+import { getExternalCallbackSiteUrl } from '$lib/server/messaging';
 import { createSupabaseAdminClient, createSupabaseServerClient } from '$lib/server/supabase';
 import { error as kitError, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
@@ -169,7 +170,17 @@ export const actions: Actions = {
 		}
 
 		const amount = getSubscriptionAmountArs();
-		const backUrl = `${getPublicSiteUrl()}/odonto/pago/procesando?mp=retorno`;
+		const backUrl = `${getExternalCallbackSiteUrl()}/odonto/pago/procesando?mp=retorno`;
+		const mpConfigIssue = getMercadoPagoApiConfigIssue();
+		if (mpConfigIssue) {
+			console.error('Mercado Pago no está configurado para crear suscripciones', {
+				missing: mpConfigIssue
+			});
+			return fail(500, {
+				message:
+					'Mercado Pago no está configurado para activar suscripciones. Contactá soporte para completar la activación.'
+			});
+		}
 
 		// El cliente admin se crea ANTES de tocar Mercado Pago: si falta el
 		// service role acá, mejor fallar sin haber creado un preapproval
@@ -297,6 +308,15 @@ export const actions: Actions = {
 		}
 		if (!owned) {
 			return fail(404, { message: 'La suscripción no corresponde a este negocio.' });
+		}
+		const mpConfigIssue = getMercadoPagoApiConfigIssue();
+		if (mpConfigIssue) {
+			console.error('Mercado Pago no está configurado para cancelar suscripciones', {
+				missing: mpConfigIssue
+			});
+			return fail(500, {
+				message: 'Mercado Pago no está configurado para cancelar suscripciones. Contactá soporte.'
+			});
 		}
 
 		// Antes de cancelar se asienta cualquier cobro ya aprobado sin registrar:

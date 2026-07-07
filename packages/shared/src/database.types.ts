@@ -40,18 +40,21 @@ export type Database = {
           email: string
           enabled: boolean
           id: string
+          onboarding_mode: string
         }
         Insert: {
           created_at?: string
           email: string
           enabled?: boolean
           id?: string
+          onboarding_mode?: string
         }
         Update: {
           created_at?: string
           email?: string
           enabled?: boolean
           id?: string
+          onboarding_mode?: string
         }
         Relationships: []
       }

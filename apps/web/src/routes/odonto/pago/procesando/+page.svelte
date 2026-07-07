@@ -19,6 +19,9 @@
 					(data.mpReturn.subscriptionStatus === 'authorized' && data.activated))
 		)
 	);
+	const refreshHref = $derived(
+		data.mpReturnRequested ? '/odonto/pago/procesando?mp=retorno' : '/odonto/pago/procesando'
+	);
 </script>
 
 <section class="ux-page">
@@ -81,7 +84,7 @@
 				{/if}
 
 				<div class="mt-7 flex flex-col justify-center gap-3 sm:flex-row">
-					<a href="/odonto/pago/procesando" class="ux-btn-secondary text-center">Actualizar estado</a>
+					<a href={refreshHref} class="ux-btn-secondary text-center">Actualizar estado</a>
 					<a href="/odonto/configuracion/suscripcion" class="ux-btn-primary text-center">
 						Volver a activación
 					</a>

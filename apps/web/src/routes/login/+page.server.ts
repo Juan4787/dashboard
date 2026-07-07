@@ -1,5 +1,7 @@
 import { env } from '$env/dynamic/private';
 import {
+	clearSupabaseOAuthCookies,
+	createSupabaseOAuthClient,
 	createSupabaseServerClient,
 	getModuleEntryRoute,
 	isMasterEmail,
@@ -9,14 +11,65 @@ import { dev } from '$app/environment';
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
-export const load: PageServerLoad = ({ locals }) => {
+const authErrorMessage = (value?: string | null) => {
+	if (value === 'google_not_enabled') {
+		return 'Este correo de Google no está habilitado. Pedile acceso al administrador.';
+	}
+	if (value === 'google_callback') {
+		return 'No pudimos completar el ingreso con Google. Probá otra vez.';
+	}
+	if (value === 'google_missing_email') {
+		return 'Google no devolvió un email válido para esta cuenta.';
+	}
+	return null;
+};
+
+export const load: PageServerLoad = ({ locals, url }) => {
 	if (locals.auth) {
 		throw redirect(302, getModuleEntryRoute(locals.auth.module));
 	}
-	return {};
+	return {
+		message: authErrorMessage(url.searchParams.get('auth_error'))
+	};
 };
 
 export const actions: Actions = {
+	google: async ({ request, cookies, fetch, url }) => {
+		if (env.DEMO_MODE === 'true') {
+			return fail(400, { message: 'Ingreso con Google no disponible en modo demo' });
+		}
+		const form = await request.formData();
+		const mode = String(form.get('mode') ?? 'login');
+		const acceptedTerms = form.get('accepted_terms') === 'true';
+		if (mode === 'register' && !acceptedTerms) {
+			return fail(400, {
+				message: 'Para crear la cuenta con Google tenés que aceptar los términos y condiciones.'
+			});
+		}
+
+		clearSupabaseOAuthCookies(cookies);
+		const supabase = await createSupabaseOAuthClient('odonto', cookies, fetch);
+		const redirectTo = `${url.origin}/auth/callback`;
+		const { data, error } = await supabase.auth.signInWithOAuth({
+			provider: 'google',
+			options: {
+				redirectTo,
+				scopes: 'openid email profile',
+				queryParams: {
+					prompt: 'select_account'
+				}
+			}
+		});
+
+		if (error || !data.url) {
+			console.error('Error iniciando OAuth con Google', error);
+			return fail(500, {
+				message: 'No pudimos iniciar el ingreso con Google. Probá de nuevo en unos minutos.'
+			});
+		}
+
+		throw redirect(303, data.url);
+	},
 	login: async ({ request, cookies, fetch }) => {
 		const form = await request.formData();
 		const email = String(form.get('email') ?? '').trim().toLowerCase();
@@ -184,6 +237,6 @@ export const actions: Actions = {
 		cookies.set('sb-access-token', data.session.access_token, cookieOptions);
 		cookies.set('sb-refresh-token', data.session.refresh_token, cookieOptions);
 
-		throw redirect(303, '/odonto/configuracion/suscripcion?inicio=1');
+		throw redirect(303, getModuleEntryRoute('odonto'));
 	}
 };

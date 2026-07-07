@@ -21,6 +21,11 @@ export const POST: RequestHandler = async ({ params, locals, fetch, cookies }) =
 	const { business, userId } = await getOdontoContext({ locals, fetch, cookies });
 	if (!roleParticipatesInFollowUps(business.role))
 		return json({ message: 'No tenés permiso para esta acción.' }, { status: 403 });
+	if (!business.access.canUseBusiness)
+		return json(
+			{ message: 'Tu acceso a Cita Suite venció. Activá tu suscripción para volver a operar.' },
+			{ status: 403 }
+		);
 
 	const admin = await createSupabaseAdminClient('odonto', fetch);
 	const scope = await buildFollowUpScope(admin, business, userId);

@@ -26,6 +26,11 @@ export const POST: RequestHandler = async ({ params, request, locals, fetch, coo
 	const { business, userId } = await getOdontoContext({ locals, fetch, cookies });
 	if (!roleParticipatesInFollowUps(business.role))
 		return json({ message: 'No tenés permiso para esta acción.' }, { status: 403 });
+	if (!business.access.canUseBusiness)
+		return json(
+			{ message: 'Tu acceso a Cita Suite venció. Activá tu suscripción para volver a operar.' },
+			{ status: 403 }
+		);
 
 	let body: Record<string, unknown>;
 	try {

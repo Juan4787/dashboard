@@ -46,6 +46,7 @@
 		id: string;
 		email: string;
 		enabled: boolean;
+		onboarding_mode?: 'manual' | 'self_service' | null;
 		note?: string | null;
 		disabled_at?: string | null;
 		disabled_reason?: string | null;
@@ -391,7 +392,8 @@
 			<div class="ux-card lg:w-[30rem]">
 				<h2 class="ux-section-title">Nuevo consultorio</h2>
 				<p class="mt-2 text-sm text-white/55">
-					El owner debe tener cuenta creada. Elegí el acceso inicial antes de crear el negocio.
+					Podés crearlo antes de que el owner tenga cuenta. Si todavía no existe, queda invitado
+					y se vincula automáticamente al registrarse o ingresar.
 				</p>
 				<form method="post" action="?/create_business" class="mt-5 space-y-3">
 					<input name="name" required class="ux-input" placeholder="Nombre del consultorio" />
@@ -413,6 +415,10 @@
 				<h2 class="ux-section-title">Emails habilitados</h2>
 				<form method="post" action="?/add_email" class="mt-5 space-y-3">
 					<input name="email" type="email" required class="ux-input" placeholder="email@consultorio.com" />
+					<select name="onboarding_mode" required class="ux-select">
+						<option value="manual" selected>Manual: crear consultorio desde maestro</option>
+						<option value="self_service">Autopago: crear consultorio y pagar con Mercado Pago</option>
+					</select>
 					<input name="note" class="ux-input" placeholder="Nota interna opcional" />
 					<button class="ux-btn-primary w-full">Habilitar email</button>
 				</form>
@@ -424,6 +430,9 @@
 									<p class="truncate text-sm font-bold text-white">{item.email}</p>
 									<span class={item.enabled ? 'ux-badge ux-badge-success mt-2' : 'ux-badge ux-badge-danger mt-2'}>
 										{item.enabled ? 'Habilitado' : 'Deshabilitado'}
+									</span>
+									<span class={item.onboarding_mode === 'self_service' ? 'ux-badge ux-badge-warning mt-2' : 'ux-badge mt-2'}>
+										{item.onboarding_mode === 'self_service' ? 'Autopago' : 'Manual'}
 									</span>
 								</div>
 								{#if item.enabled}
@@ -471,10 +480,15 @@
 							<div class="flex flex-wrap items-center gap-2">
 								<p class="font-black text-white">{item.email}</p>
 								<span class="ux-badge ux-badge-success">Habilitado</span>
+								<span class={item.onboarding_mode === 'self_service' ? 'ux-badge ux-badge-warning' : 'ux-badge'}>
+									{item.onboarding_mode === 'self_service' ? 'Autopago' : 'Manual'}
+								</span>
 								<span class="ux-badge">Sin consultorio</span>
 							</div>
 							<p class="mt-2 text-sm text-white/55">
-								No aparece como permanente porque la permanencia se asigna al consultorio, no al email.
+								{item.onboarding_mode === 'self_service'
+									? 'Si entra ahora, puede crear un consultorio automático restringido y pagar con Mercado Pago.'
+									: 'Si entra ahora, verá una pantalla pendiente hasta que crees o vincules su consultorio.'}
 							</p>
 							{#if item.note}
 								<p class="mt-2 text-sm text-white/70">{item.note}</p>

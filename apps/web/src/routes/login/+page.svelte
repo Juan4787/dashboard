@@ -1,8 +1,9 @@
 <script lang="ts">
-	let { form } = $props();
+	let { data, form } = $props();
 	let showPassword = $state(false);
 	let mode = $state<'login' | 'register'>('login');
 	const formEmail = $derived(form?.email ?? '');
+	const message = $derived(form?.message ?? data?.message ?? '');
 	let email = $state('');
 	let password = $state('');
 	let acceptedTerms = $state(false);
@@ -83,12 +84,12 @@
 				</div>
 			</label>
 
-			{#if form?.message}
+			{#if message}
 				<p class="ux-alert flex items-center gap-2">
 					<svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 						<path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M4.93 19h14.14a1 1 0 0 0 .9-1.45L12.9 4.55a1 1 0 0 0-1.8 0L4.03 17.55A1 1 0 0 0 4.93 19Z" />
 					</svg>
-					{form.message}
+					{message}
 				</p>
 			{/if}
 
@@ -126,6 +127,30 @@
 					</button>
 				</div>
 			{/if}
+		</form>
+
+		<div class="my-6 flex items-center gap-3 text-xs font-bold uppercase tracking-wide text-white/35">
+			<div class="h-px flex-1 bg-white/10"></div>
+			<span>o</span>
+			<div class="h-px flex-1 bg-white/10"></div>
+		</div>
+
+		<form method="post" action="?/google" class="space-y-3">
+			<input type="hidden" name="mode" value={mode} />
+			<input type="hidden" name="accepted_terms" value={acceptedTerms ? 'true' : 'false'} />
+			<button
+				type="submit"
+				class="flex w-full items-center justify-center gap-3 rounded-2xl border border-white/15 bg-white px-4 py-3 text-sm font-black text-neutral-950 shadow-lg transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
+				disabled={mode === 'register' && !acceptedTerms}
+			>
+				<span class="flex h-5 w-5 items-center justify-center rounded-full bg-white text-base font-black text-blue-600">G</span>
+				{mode === 'register' ? 'Crear cuenta con Google' : 'Ingresar con Google'}
+			</button>
+			<p class="text-center text-xs font-semibold text-white/45">
+				{mode === 'register'
+					? 'Para crear cuenta con Google, aceptá primero los términos y condiciones.'
+					: 'Al continuar con Google aceptás los términos y condiciones vigentes.'}
+			</p>
 		</form>
 	</div>
 </div>

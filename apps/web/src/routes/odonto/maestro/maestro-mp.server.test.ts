@@ -25,8 +25,15 @@ const BUSINESS_ID = '44444444-4444-4444-8444-444444444444';
 
 type QueuedResult = { data?: unknown; error?: { message: string } | null };
 
-const createDbMock = (queues: Record<string, QueuedResult[]> = {}) => {
+const createDbMock = (
+	queues: Record<string, QueuedResult[]> = {},
+	opts?: {
+		authUsers?: Array<{ id: string; email: string }>;
+		rpcResult?: QueuedResult;
+	}
+) => {
 	const calls: Array<{ table: string; method: string; args: unknown[] }> = [];
+	const rpcCalls: Array<{ fn: string; args: Record<string, unknown> }> = [];
 	const tableQueues: Record<string, QueuedResult[]> = {};
 	for (const [table, queue] of Object.entries(queues)) tableQueues[table] = [...queue];
 	const client = {
@@ -39,18 +46,31 @@ const createDbMock = (queues: Record<string, QueuedResult[]> = {}) => {
 					calls.push({ table, method, args });
 					return q;
 				};
-			for (const method of ['select', 'eq', 'in', 'order', 'limit', 'upsert', 'update', 'insert']) {
+			for (const method of ['select', 'eq', 'in', 'order', 'limit', 'upsert', 'update', 'insert', 'delete']) {
 				q[method] = vi.fn(chain(method));
 			}
 			q.maybeSingle = vi.fn(async () => result);
+			q.single = vi.fn(async () => result);
 			(q as { then?: unknown }).then = (
 				resolve: (value: unknown) => unknown,
 				reject: (reason: unknown) => unknown
 			) => Promise.resolve(result).then(resolve, reject);
 			return q;
-		})
+		}),
+		rpc: vi.fn(async (fn: string, args: Record<string, unknown>) => {
+			rpcCalls.push({ fn, args });
+			return opts?.rpcResult ?? { data: [{ applied: true }], error: null };
+		}),
+		auth: {
+			admin: {
+				listUsers: vi.fn(async () => ({
+					data: { users: opts?.authUsers ?? [] },
+					error: null
+				}))
+			}
+		}
 	};
-	return { client, calls };
+	return { client, calls, rpcCalls };
 };
 
 const createMpFetch = (routes: Array<[string, { status?: number; body?: unknown }]>) => {
@@ -80,7 +100,7 @@ beforeEach(() => {
 	envState.privateEnv.MP_ACCESS_TOKEN = 'token-de-prueba';
 	mocks.getEmailFromAccessToken.mockReturnValue('master@mail.com');
 	mocks.getUserIdFromAccessToken.mockReturnValue('master-user-id');
-	mocks.isMasterEmail.mockReturnValue(true);
+	mocks.isMasterEmail.mockImplementation((email?: string | null) => email === 'master@mail.com');
 });
 
 describe('action mp_cancel_subscription (maestro)', () => {
@@ -167,5 +187,61 @@ describe('action mp_reconcile_now (maestro)', () => {
 
 		expect(result.success).toBe(true);
 		expect(result.message).toContain('0 suscripciones revisadas');
+	});
+});
+
+describe('action create_business (maestro)', () => {
+	it('crea consultorio manual con owner pendiente si el usuario Auth todavía no existe', async () => {
+		const admin = createDbMock(
+			{
+				allowed_emails: [{ data: null, error: null }, { error: null }],
+				businesses: [{ data: null, error: null }, { data: { id: BUSINESS_ID }, error: null }],
+				business_user_invites: [{ data: [], error: null }, { error: null }]
+			},
+			{ authUsers: [] }
+		);
+		mocks.createSupabaseAdminClient.mockResolvedValue(admin.client);
+		const { fetchMock } = createMpFetch([]);
+
+		const result = (await actions.create_business(
+			makeEvent({
+				fetchMock,
+				formEntries: {
+					name: 'Consultorio Nuevo',
+					owner_email: 'cliente@example.com',
+					duration: 'month_1',
+					note: 'Alta guiada'
+				}
+			}) as never
+		)) as { success?: boolean; message?: string };
+
+		expect(result.success).toBe(true);
+		expect(result.message).toContain('owner pendiente');
+		expect(admin.client.auth.admin.listUsers).toHaveBeenCalled();
+		const allowedInsert = admin.calls.find(
+			(c) => c.table === 'allowed_emails' && c.method === 'insert'
+		);
+		expect(allowedInsert?.args[0]).toMatchObject({
+			email: 'cliente@example.com',
+			enabled: true,
+			onboarding_mode: 'manual'
+		});
+		const inviteInsert = admin.calls.find(
+			(c) => c.table === 'business_user_invites' && c.method === 'insert'
+		);
+		expect(inviteInsert?.args[0]).toMatchObject({
+			business_id: BUSINESS_ID,
+			email: 'cliente@example.com',
+			role: 'owner',
+			status: 'pending'
+		});
+		expect(admin.rpcCalls[0]).toMatchObject({
+			fn: 'grant_business_access',
+			args: {
+				p_business_id: BUSINESS_ID,
+				p_operation: 'grant_access',
+				p_source: 'internal'
+			}
+		});
 	});
 });
