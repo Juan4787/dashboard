@@ -242,13 +242,19 @@
 						Tu suscripción anterior fue cancelada. Podés suscribirte de nuevo cuando quieras.
 					</p>
 				{/if}
-				<form method="POST" action="?/subscribe" class="mt-5" onsubmit={() => (mpSubmitting = true)}>
+				<form method="POST" action="?/subscribe" class="mt-5" onsubmit={() => (mpSubmitting = true)} aria-busy={mpSubmitting}>
 					<button type="submit" disabled={mpSubmitting} class="ux-btn-primary">
-						{mpSubmitting ? 'Redirigiendo a Mercado Pago…' : 'Activar suscripción con Mercado Pago'}
+						{mpSubmitting ? 'Creando enlace seguro en Mercado Pago…' : 'Activar suscripción con Mercado Pago'}
 					</button>
-					<p class="mt-2 text-sm text-white/45">
-						Te redirigimos a Mercado Pago para autorizar el débito mensual de forma segura.
-					</p>
+					{#if mpSubmitting}
+						<p class="mt-2 text-sm font-semibold text-white/60">
+							Esto puede tardar unos segundos. No cierres esta ventana ni vuelvas a tocar el botón.
+						</p>
+					{:else}
+						<p class="mt-2 text-sm text-white/45">
+							Te redirigimos a Mercado Pago para autorizar el débito mensual de forma segura.
+						</p>
+					{/if}
 				</form>
 			{/if}
 		</div>

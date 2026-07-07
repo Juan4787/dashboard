@@ -1,7 +1,5 @@
 import { env } from '$env/dynamic/private';
 import {
-	clearSupabaseOAuthCookies,
-	createSupabaseOAuthClient,
 	createSupabaseServerClient,
 	getModuleEntryRoute,
 	isMasterEmail,
@@ -21,6 +19,15 @@ const authErrorMessage = (value?: string | null) => {
 	if (value === 'google_missing_email') {
 		return 'Google no devolvió un email válido para esta cuenta.';
 	}
+	if (value === 'google_terms') {
+		return 'Para crear la cuenta con Google tenés que aceptar los términos y condiciones.';
+	}
+	if (value === 'google_start') {
+		return 'No pudimos iniciar el ingreso con Google. Probá de nuevo en unos minutos.';
+	}
+	if (value === 'google_demo') {
+		return 'Ingreso con Google no disponible en modo demo.';
+	}
 	return null;
 };
 
@@ -34,42 +41,6 @@ export const load: PageServerLoad = ({ locals, url }) => {
 };
 
 export const actions: Actions = {
-	google: async ({ request, cookies, fetch, url }) => {
-		if (env.DEMO_MODE === 'true') {
-			return fail(400, { message: 'Ingreso con Google no disponible en modo demo' });
-		}
-		const form = await request.formData();
-		const mode = String(form.get('mode') ?? 'login');
-		const acceptedTerms = form.get('accepted_terms') === 'true';
-		if (mode === 'register' && !acceptedTerms) {
-			return fail(400, {
-				message: 'Para crear la cuenta con Google tenés que aceptar los términos y condiciones.'
-			});
-		}
-
-		clearSupabaseOAuthCookies(cookies);
-		const supabase = await createSupabaseOAuthClient('odonto', cookies, fetch);
-		const redirectTo = `${url.origin}/auth/callback`;
-		const { data, error } = await supabase.auth.signInWithOAuth({
-			provider: 'google',
-			options: {
-				redirectTo,
-				scopes: 'openid email profile',
-				queryParams: {
-					prompt: 'select_account'
-				}
-			}
-		});
-
-		if (error || !data.url) {
-			console.error('Error iniciando OAuth con Google', error);
-			return fail(500, {
-				message: 'No pudimos iniciar el ingreso con Google. Probá de nuevo en unos minutos.'
-			});
-		}
-
-		throw redirect(303, data.url);
-	},
 	login: async ({ request, cookies, fetch }) => {
 		const form = await request.formData();
 		const email = String(form.get('email') ?? '').trim().toLowerCase();

@@ -792,14 +792,20 @@
 						action="/odonto/configuracion/suscripcion?/subscribe"
 						class="mt-6"
 						onsubmit={() => (mpSubmitting = true)}
+						aria-busy={mpSubmitting}
 					>
 						<button
 							type="submit"
 							disabled={mpSubmitting}
 							class="inline-flex items-center justify-center rounded-2xl bg-amber-400 px-6 py-3 text-sm font-black text-amber-950 shadow-lg transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-70"
 						>
-							{mpSubmitting ? 'Redirigiendo a Mercado Pago…' : 'Activar suscripción con Mercado Pago'}
+							{mpSubmitting ? 'Creando enlace seguro en Mercado Pago…' : 'Activar suscripción con Mercado Pago'}
 						</button>
+						{#if mpSubmitting}
+							<p class="mt-3 text-sm font-semibold text-neutral-700 dark:text-amber-50/80">
+								Esto puede tardar unos segundos. No cierres esta ventana ni vuelvas a tocar el botón.
+							</p>
+						{/if}
 					</form>
 				{:else if activeBusiness?.role === 'owner' || activeBusiness?.role === 'admin'}
 					<!-- Kill-switch del administrador: un pago NO reactiva (lo manual

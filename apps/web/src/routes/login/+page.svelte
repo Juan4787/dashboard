@@ -7,6 +7,7 @@
 	let email = $state('');
 	let password = $state('');
 	let acceptedTerms = $state(false);
+	let googleSubmitting = $state(false);
 
 	$effect(() => {
 		if (formEmail) {
@@ -135,16 +136,21 @@
 			<div class="h-px flex-1 bg-white/10"></div>
 		</div>
 
-		<form method="post" action="?/google" class="space-y-3">
+		<form method="GET" action="/auth/google" class="space-y-3" onsubmit={() => (googleSubmitting = true)}>
 			<input type="hidden" name="mode" value={mode} />
 			<input type="hidden" name="accepted_terms" value={acceptedTerms ? 'true' : 'false'} />
 			<button
 				type="submit"
 				class="flex w-full items-center justify-center gap-3 rounded-2xl border border-white/15 bg-white px-4 py-3 text-sm font-black text-neutral-950 shadow-lg transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
-				disabled={mode === 'register' && !acceptedTerms}
+				disabled={googleSubmitting || (mode === 'register' && !acceptedTerms)}
+				aria-busy={googleSubmitting}
 			>
-				<span class="flex h-5 w-5 items-center justify-center rounded-full bg-white text-base font-black text-blue-600">G</span>
-				{mode === 'register' ? 'Crear cuenta con Google' : 'Ingresar con Google'}
+				<img src="/logo-google.webp" alt="" class="h-5 w-5 object-contain" width="20" height="20" decoding="async" />
+				{#if googleSubmitting}
+					Redirigiendo a Google…
+				{:else}
+					{mode === 'register' ? 'Crear cuenta con Google' : 'Ingresar con Google'}
+				{/if}
 			</button>
 			<p class="text-center text-xs font-semibold text-white/45">
 				{mode === 'register'
