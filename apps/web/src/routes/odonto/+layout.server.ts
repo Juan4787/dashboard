@@ -10,6 +10,7 @@ import {
 	getEmailFromAccessToken,
 	isMasterEmail
 } from '$lib/server/supabase';
+import { RateLimitExceededError } from '$lib/server/rate-limits';
 import {
 	buildFollowUpScope,
 	businessTodayISO,
@@ -22,7 +23,7 @@ import { redirect } from '@sveltejs/kit';
 import type { LayoutServerLoad } from './$types';
 import { env } from '$env/dynamic/private';
 
-export const load: LayoutServerLoad = async ({ locals, fetch, cookies }) => {
+export const load: LayoutServerLoad = async ({ locals, fetch, cookies, getClientAddress }) => {
 	if (!locals.auth) {
 		throw redirect(303, '/login');
 	}
@@ -46,7 +47,9 @@ export const load: LayoutServerLoad = async ({ locals, fetch, cookies }) => {
 			activeBusiness = await resolveActiveBusiness({
 				supabase,
 				accessToken: locals.auth.access_token,
-				cookies
+				cookies,
+				defaultBusinessCreationIp: getClientAddress(),
+				fetch
 			});
 
 			// Lectura no participa. Profesional/Dueño/Admin/Recepción sí (con scope).
@@ -68,6 +71,8 @@ export const load: LayoutServerLoad = async ({ locals, fetch, cookies }) => {
 		} catch (err) {
 			if (isDefaultBusinessPendingManualSetupError(err)) {
 				pendingManualSetup = true;
+			} else if (err instanceof RateLimitExceededError) {
+				businessError = err.userMessage;
 			} else {
 				console.error('Error resolviendo negocio activo', err);
 				businessError =

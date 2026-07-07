@@ -854,6 +854,27 @@ export type Database = {
           },
         ]
       }
+      server_rate_limit_events: {
+        Row: {
+          action: string
+          created_at: string
+          id: string
+          subject_hash: string
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          id?: string
+          subject_hash: string
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          id?: string
+          subject_hash?: string
+        }
+        Relationships: []
+      }
       services: {
         Row: {
           buffer_after_minutes: number
@@ -922,6 +943,31 @@ export type Database = {
           target_role: string
         }
         Returns: string
+      }
+      consume_server_rate_limit: {
+        Args: {
+          p_action: string
+          p_subject_hash: string
+          p_limit: number
+          p_window_seconds: number
+        }
+        Returns: {
+          allowed: boolean
+          used: number
+          retry_after_seconds: number
+        }[]
+      }
+      consume_server_rate_limits: {
+        Args: {
+          p_action: string
+          p_subject_hash: string
+          p_windows: Json
+        }
+        Returns: {
+          allowed: boolean
+          used: number
+          retry_after_seconds: number
+        }[]
       }
       ensure_user_default_business: {
         Args: { p_name?: string; p_industry?: string }

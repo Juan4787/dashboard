@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
 	clearSupabaseOAuthCookies: vi.fn(),
 	createSupabaseOAuthClient: vi.fn(),
-	createSupabaseServerClient: vi.fn(),
 	getModuleEntryRoute: vi.fn(() => '/odonto'),
 	isMasterEmail: vi.fn()
 }));
@@ -12,7 +11,6 @@ vi.mock('$app/environment', () => ({ dev: false }));
 vi.mock('$lib/server/supabase', () => ({
 	clearSupabaseOAuthCookies: mocks.clearSupabaseOAuthCookies,
 	createSupabaseOAuthClient: mocks.createSupabaseOAuthClient,
-	createSupabaseServerClient: mocks.createSupabaseServerClient,
 	getModuleEntryRoute: mocks.getModuleEntryRoute,
 	isMasterEmail: mocks.isMasterEmail
 }));
@@ -53,27 +51,24 @@ beforeEach(() => {
 });
 
 describe('/auth/callback Google OAuth', () => {
-	it('rechaza usuarios Google cuyo email no está habilitado', async () => {
-		mocks.createSupabaseServerClient.mockResolvedValue({
-			rpc: vi.fn(async () => ({ data: false, error: null }))
-		});
+	it('setea cookies de app aunque el email no esté prehabilitado', async () => {
 		const { cookies, calls } = createCookies();
 
 		await expect(
 			GET(makeEvent('https://app.test/auth/callback?code=ok', cookies) as never)
-		).rejects.toMatchObject({
-			status: 303,
-			location: 'https://app.test/login?auth_error=google_not_enabled'
-		});
+		).rejects.toMatchObject({ status: 303, location: '/odonto' });
 
 		expect(mocks.clearSupabaseOAuthCookies).toHaveBeenCalledWith(cookies);
-		expect(calls.some((call) => call.name === 'sb-access-token')).toBe(false);
+		expect(calls).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ name: 'sb-module', value: 'odonto' }),
+				expect.objectContaining({ name: 'sb-access-token', value: 'access' }),
+				expect.objectContaining({ name: 'sb-refresh-token', value: 'refresh' })
+			])
+		);
 	});
 
 	it('setea las cookies propias de la app cuando el email está habilitado', async () => {
-		mocks.createSupabaseServerClient.mockResolvedValue({
-			rpc: vi.fn(async () => ({ data: true, error: null }))
-		});
 		const { cookies, calls } = createCookies();
 
 		await expect(

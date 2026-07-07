@@ -5,14 +5,17 @@ import {
 	isMasterEmail,
 	MASTER_EMAIL
 } from '$lib/server/supabase';
+import {
+	enforceRateLimits,
+	loginPasswordRateLimitRules,
+	rateLimitFail,
+	signupEmailRateLimitRules
+} from '$lib/server/rate-limits';
 import { dev } from '$app/environment';
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
 const authErrorMessage = (value?: string | null) => {
-	if (value === 'google_not_enabled') {
-		return 'Este correo de Google no está habilitado. Pedile acceso al administrador.';
-	}
 	if (value === 'google_callback') {
 		return 'No pudimos completar el ingreso con Google. Probá otra vez.';
 	}
@@ -28,6 +31,9 @@ const authErrorMessage = (value?: string | null) => {
 	if (value === 'google_demo') {
 		return 'Ingreso con Google no disponible en modo demo.';
 	}
+	if (value === 'google_rate_limited') {
+		return 'Hay demasiados intentos con Google desde esta conexión. Probá de nuevo más tarde.';
+	}
 	return null;
 };
 
@@ -41,7 +47,7 @@ export const load: PageServerLoad = ({ locals, url }) => {
 };
 
 export const actions: Actions = {
-	login: async ({ request, cookies, fetch }) => {
+	login: async ({ request, cookies, fetch, getClientAddress }) => {
 		const form = await request.formData();
 		const email = String(form.get('email') ?? '').trim().toLowerCase();
 		const password = String(form.get('password') ?? '');
@@ -66,27 +72,14 @@ export const actions: Actions = {
 			throw redirect(303, getModuleEntryRoute('odonto'));
 		}
 
-		const supabase = await createSupabaseServerClient('odonto', null, fetch);
-
-		if (!isMaster) {
-			const { data: allowed, error: allowedError } = await supabase.rpc('is_email_enabled', {
-				p_email: email
-			});
-			if (allowedError) {
-				console.error('Error validando email habilitado', allowedError);
-				return fail(500, {
-					message: 'Falta configurar el control de correos habilitados.',
-					email
-				});
-			}
-			if (!allowed) {
-				return fail(403, {
-					message:
-						'Este correo electrónico no está habilitado. Pedile acceso al administrador.',
-					email
-				});
-			}
+		try {
+			await enforceRateLimits(loginPasswordRateLimitRules(email, getClientAddress()), fetch);
+		} catch (error) {
+			const result = rateLimitFail(error, 'Error validando rate limit de login');
+			return fail(result.status, { message: result.message, email });
 		}
+
+		const supabase = await createSupabaseServerClient('odonto', null, fetch);
 
 		const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
@@ -131,7 +124,7 @@ export const actions: Actions = {
 
 		throw redirect(303, getModuleEntryRoute('odonto'));
 	},
-	register: async ({ request, cookies, fetch }) => {
+	register: async ({ request, cookies, fetch, getClientAddress }) => {
 		if (env.DEMO_MODE === 'true') {
 			return fail(400, { message: 'Registro no disponible en modo demo' });
 		}
@@ -139,10 +132,14 @@ export const actions: Actions = {
 		const form = await request.formData();
 		const email = String(form.get('email') ?? '').trim().toLowerCase();
 		const password = String(form.get('password') ?? '');
+		const confirmPassword = String(form.get('confirm_password') ?? '');
 		const acceptedTerms = form.get('accepted_terms') === 'true';
 
 		if (!email || !password) {
 			return fail(400, { message: 'Completá correo electrónico y contraseña.', email });
+		}
+		if (password !== confirmPassword) {
+			return fail(400, { message: 'Las contraseñas no coinciden.', email });
 		}
 		if (!acceptedTerms) {
 			return fail(400, {
@@ -158,26 +155,14 @@ export const actions: Actions = {
 			return fail(400, { message: `El correo maestro (${MASTER_EMAIL}) no se registra acá.`, email });
 		}
 
+		try {
+			await enforceRateLimits(signupEmailRateLimitRules(email, getClientAddress()), fetch);
+		} catch (error) {
+			const result = rateLimitFail(error, 'Error validando rate limit de registro');
+			return fail(result.status, { message: result.message, email });
+		}
+
 		const supabase = await createSupabaseServerClient('odonto', null, fetch);
-		const { data: allowed, error: allowedError } = await supabase.rpc('is_email_enabled', {
-			p_email: email
-		});
-
-		if (allowedError) {
-			console.error('Error validando email habilitado', allowedError);
-			return fail(500, {
-				message: 'Falta configurar el control de correos habilitados.',
-				email
-			});
-		}
-
-		if (!allowed) {
-			return fail(403, {
-				message: 'Este correo electrónico no está habilitado para registrarse.',
-				email
-			});
-		}
-
 		const { data, error } = await supabase.auth.signUp({ email, password });
 		if (error) {
 			console.error('Error registro Supabase', { email, error });

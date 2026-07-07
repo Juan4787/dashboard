@@ -11,6 +11,11 @@ import {
 	type MpReturnSummary
 } from '$lib/server/mercadopago';
 import { getExternalCallbackSiteUrl } from '$lib/server/messaging';
+import {
+	enforceRateLimits,
+	mpSubscriptionRateLimitRules,
+	rateLimitFail
+} from '$lib/server/rate-limits';
 import { createSupabaseAdminClient, createSupabaseServerClient } from '$lib/server/supabase';
 import { error as kitError, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
@@ -213,6 +218,13 @@ export const actions: Actions = {
 				message:
 					'Ya hay una suscripción activa o pausada para este negocio. Actualizá la página para ver su estado.'
 			});
+		}
+
+		try {
+			await enforceRateLimits(mpSubscriptionRateLimitRules(context.business.id), fetch);
+		} catch (error) {
+			const result = rateLimitFail(error, 'Error validando rate limit de suscripción MP');
+			return fail(result.status, { message: result.message });
 		}
 
 		let created;

@@ -84,6 +84,9 @@ const createDbMock = (
 		}),
 		rpc: vi.fn(async (fn: string, args: Record<string, unknown>) => {
 			rpcCalls.push({ fn, args });
+			if (fn === 'consume_server_rate_limits') {
+				return { data: [{ allowed: true, used: 1, retry_after_seconds: 0 }], error: null };
+			}
 			return (
 				opts?.rpcResult ?? {
 					data: [{ applied: true, grant_id: 'grant-1', status_after: 'active' }],
@@ -269,6 +272,36 @@ describe('action subscribe', () => {
 		expect(result.status).toBe(400);
 		// Nunca se llegó a crear un preapproval en MP.
 		expect(requests).toHaveLength(0);
+	});
+
+	it('aplica rate limit antes de crear una suscripción en Mercado Pago', async () => {
+		const server = createDbMock();
+		const admin = createDbMock({
+			mp_subscriptions: [{ data: [], error: null }]
+		});
+		admin.client.rpc = vi.fn(async (fn: string, args: Record<string, unknown>) => {
+			admin.rpcCalls.push({ fn, args });
+			if (fn === 'consume_server_rate_limits') {
+				return { data: [{ allowed: false, used: 3, retry_after_seconds: 600 }], error: null };
+			}
+			return { data: [{ applied: true, grant_id: 'grant-1', status_after: 'active' }], error: null };
+		});
+		mocks.createSupabaseServerClient.mockResolvedValue(server.client);
+		mocks.createSupabaseAdminClient.mockResolvedValue(admin.client);
+		mocks.resolveActiveBusiness.mockResolvedValue(ownerContext());
+		const { fetchMock, requests } = createMpFetch([]);
+
+		const result = (await actions.subscribe(makeEvent({ fetchMock }) as never)) as {
+			status: number;
+			data: { message?: string };
+		};
+
+		expect(result.status).toBe(429);
+		expect(result.data.message).toContain('Hay demasiados intentos de activar la suscripción');
+		expect(requests).toHaveLength(0);
+		expect(admin.rpcCalls.find((call) => call.fn === 'consume_server_rate_limits')?.args).toMatchObject({
+			p_action: 'mp_subscription_create_by_business'
+		});
 	});
 
 	it('rechaza la suscripción para cuentas permanentes', async () => {

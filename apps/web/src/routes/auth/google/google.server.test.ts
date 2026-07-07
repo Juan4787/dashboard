@@ -3,13 +3,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
 	env: {} as Record<string, string | undefined>,
 	clearSupabaseOAuthCookies: vi.fn(),
-	createSupabaseOAuthClient: vi.fn()
+	createSupabaseOAuthClient: vi.fn(),
+	enforceRateLimits: vi.fn(),
+	googleAuthRateLimitRules: vi.fn((ip: string) => [{ action: 'signup_google_by_ip', subject: ip }])
 }));
 
 vi.mock('$env/dynamic/private', () => ({ env: mocks.env }));
 vi.mock('$lib/server/supabase', () => ({
 	clearSupabaseOAuthCookies: mocks.clearSupabaseOAuthCookies,
 	createSupabaseOAuthClient: mocks.createSupabaseOAuthClient
+}));
+vi.mock('$lib/server/rate-limits', () => ({
+	enforceRateLimits: mocks.enforceRateLimits,
+	googleAuthRateLimitRules: mocks.googleAuthRateLimitRules,
+	RateLimitExceededError: class RateLimitExceededError extends Error {}
 }));
 
 const { GET } = await import('./+server');
@@ -20,12 +27,14 @@ const makeEvent = (url: string) => ({
 		set: vi.fn(),
 		delete: vi.fn()
 	},
-	fetch: vi.fn()
+	fetch: vi.fn(),
+	getClientAddress: vi.fn(() => '203.0.113.10')
 });
 
 beforeEach(() => {
 	vi.clearAllMocks();
 	mocks.env.DEMO_MODE = undefined;
+	mocks.enforceRateLimits.mockResolvedValue(undefined);
 	mocks.createSupabaseOAuthClient.mockResolvedValue({
 		auth: {
 			signInWithOAuth: vi.fn(async () => ({
@@ -48,6 +57,10 @@ describe('/auth/google OAuth start', () => {
 		);
 
 		expect(mocks.clearSupabaseOAuthCookies).toHaveBeenCalledWith(event.cookies);
+		expect(mocks.enforceRateLimits).toHaveBeenCalledWith(
+			[{ action: 'signup_google_by_ip', subject: '203.0.113.10' }],
+			event.fetch
+		);
 		const client = await mocks.createSupabaseOAuthClient.mock.results[0].value;
 		expect(client.auth.signInWithOAuth).toHaveBeenCalledWith({
 			provider: 'google',

@@ -7,6 +7,7 @@ import {
 	type BusinessAccessState,
 	type BusinessSubscriptionRow
 } from './commercial-access';
+import { enforceRateLimits, pendingBusinessIpRateLimitRules } from './rate-limits';
 
 export const BUSINESS_ROLES = ['owner', 'admin', 'reception', 'professional', 'readonly'] as const;
 export type BusinessRole = (typeof BUSINESS_ROLES)[number];
@@ -134,6 +135,8 @@ type ResolveBusinessOptions = {
 	accessToken?: string | null;
 	cookies?: Cookies;
 	ensureDefault?: boolean;
+	defaultBusinessCreationIp?: string | null;
+	fetch?: typeof fetch;
 };
 
 const mapMembership = (row: any): BusinessContext | null => {
@@ -250,7 +253,9 @@ export const resolveActiveBusiness = async ({
 	supabase,
 	accessToken,
 	cookies,
-	ensureDefault = true
+	ensureDefault = true,
+	defaultBusinessCreationIp,
+	fetch
 }: ResolveBusinessOptions): Promise<BusinessContext | null> => {
 	if (env.DEMO_MODE === 'true') return demoBusinessContext();
 
@@ -260,6 +265,9 @@ export const resolveActiveBusiness = async ({
 	let memberships = await loadMemberships(supabase, userId);
 
 	if (memberships.length === 0 && ensureDefault) {
+		if (defaultBusinessCreationIp) {
+			await enforceRateLimits(pendingBusinessIpRateLimitRules(defaultBusinessCreationIp), fetch);
+		}
 		const { error } = await supabase.rpc('ensure_user_default_business', {
 			p_name: 'Consultorio',
 			p_industry: 'odontology'

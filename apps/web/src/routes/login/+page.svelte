@@ -6,6 +6,7 @@
 	const message = $derived(form?.message ?? data?.message ?? '');
 	let email = $state('');
 	let password = $state('');
+	let confirmPassword = $state('');
 	let acceptedTerms = $state(false);
 	let googleSubmitting = $state(false);
 
@@ -84,6 +85,22 @@
 					</button>
 				</div>
 			</label>
+
+			{#if mode === 'register'}
+				<label class="block">
+					<span class="ux-label">Confirmar contraseña</span>
+					<input
+						id="confirm_password"
+						name="confirm_password"
+						type={showPassword ? 'text' : 'password'}
+						class="ux-input"
+						placeholder="Repetí la misma contraseña"
+						required
+						bind:value={confirmPassword}
+						autocomplete="new-password"
+					/>
+				</label>
+			{/if}
 
 			{#if message}
 				<p class="ux-alert flex items-center gap-2">

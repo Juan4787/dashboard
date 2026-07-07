@@ -367,6 +367,7 @@ test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 		await expect(pendingPage.locator('form').getByRole('button', { name: 'Crear cuenta' })).toBeVisible();
 		await pendingPage.getByLabel('Correo electrónico').fill(pendingProfessionalEmail);
 		await pendingPage.getByLabel('Contraseña').fill(password);
+		await pendingPage.getByLabel('Confirmar contraseña').fill(password);
 		await pendingPage.getByLabel(/Leí y acepto/).check();
 		await pendingPage.locator('form').getByRole('button', { name: 'Crear cuenta' }).click();
 		await expect(pendingPage).toHaveURL(/\/odonto\/mis-turnos/);

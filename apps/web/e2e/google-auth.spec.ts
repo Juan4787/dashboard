@@ -12,7 +12,8 @@ test.describe('Google Auth', () => {
 
 	test('crear cuenta con Google inicia OAuth si aceptó términos', async ({ page }) => {
 		await page.goto('/login');
-		await page.getByRole('button', { name: 'Crear cuenta' }).click();
+		await page.waitForLoadState('networkidle');
+		await page.locator('.ux-pill-nav').getByRole('button', { name: 'Crear cuenta' }).click();
 		await expect(page.getByRole('button', { name: 'Crear cuenta con Google' })).toBeDisabled();
 		await page.getByRole('checkbox', { name: /Leí y acepto/i }).check();
 		await page.getByRole('button', { name: 'Crear cuenta con Google' }).click();

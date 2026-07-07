@@ -412,15 +412,18 @@
 
 		{#if showEmailPanel}
 			<div class="ux-card lg:w-[28rem]">
-				<h2 class="ux-section-title">Emails habilitados</h2>
+				<h2 class="ux-section-title">Emails manuales</h2>
+				<p class="mt-2 text-sm text-white/55">
+					Registro libre: este listado ya no habilita crear cuenta. Usalo sólo como referencia
+					para pagos manuales, transferencias o invitaciones legacy.
+				</p>
 				<form method="post" action="?/add_email" class="mt-5 space-y-3">
 					<input name="email" type="email" required class="ux-input" placeholder="email@consultorio.com" />
 					<select name="onboarding_mode" required class="ux-select">
-						<option value="manual" selected>Manual: crear consultorio desde maestro</option>
-						<option value="self_service">Autopago: crear consultorio y pagar con Mercado Pago</option>
+						<option value="manual" selected>Manual: pago directo o invitación</option>
 					</select>
 					<input name="note" class="ux-input" placeholder="Nota interna opcional" />
-					<button class="ux-btn-primary w-full">Habilitar email</button>
+					<button class="ux-btn-primary w-full">Guardar email manual</button>
 				</form>
 				<div class="mt-5 max-h-80 space-y-2 overflow-auto pr-1">
 					{#each emails as item}
@@ -432,7 +435,7 @@
 										{item.enabled ? 'Habilitado' : 'Deshabilitado'}
 									</span>
 									<span class={item.onboarding_mode === 'self_service' ? 'ux-badge ux-badge-warning mt-2' : 'ux-badge mt-2'}>
-										{item.onboarding_mode === 'self_service' ? 'Autopago' : 'Manual'}
+										{item.onboarding_mode === 'self_service' ? 'Autopago histórico' : 'Manual'}
 									</span>
 								</div>
 								{#if item.enabled}
@@ -466,12 +469,13 @@
 			<section class="ux-card">
 				<div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
 					<div>
-						<h2 class="ux-section-title">Emails habilitados sin consultorio</h2>
+						<h2 class="ux-section-title">Emails manuales sin consultorio</h2>
 						<p class="mt-2 text-sm text-white/55">
-							Estos correos pueden entrar a la app, pero todavía no tienen un consultorio vinculado.
+							Estos correos quedaron como referencia operativa. La cuenta se puede crear igual;
+							si corresponde pago manual, vinculá o activá el consultorio desde este panel.
 						</p>
 					</div>
-					<span class="ux-badge ux-badge-success">Habilitados</span>
+					<span class="ux-badge ux-badge-success">Referencia manual</span>
 				</div>
 
 				<div class="mt-5 grid gap-3 md:grid-cols-2">
@@ -481,14 +485,14 @@
 								<p class="font-black text-white">{item.email}</p>
 								<span class="ux-badge ux-badge-success">Habilitado</span>
 								<span class={item.onboarding_mode === 'self_service' ? 'ux-badge ux-badge-warning' : 'ux-badge'}>
-									{item.onboarding_mode === 'self_service' ? 'Autopago' : 'Manual'}
+									{item.onboarding_mode === 'self_service' ? 'Autopago histórico' : 'Manual'}
 								</span>
 								<span class="ux-badge">Sin consultorio</span>
 							</div>
 							<p class="mt-2 text-sm text-white/55">
 								{item.onboarding_mode === 'self_service'
-									? 'Si entra ahora, puede crear un consultorio automático restringido y pagar con Mercado Pago.'
-									: 'Si entra ahora, verá una pantalla pendiente hasta que crees o vincules su consultorio.'}
+									? 'Referencia histórica de autopago. Hoy el registro es libre y el acceso se activa por Mercado Pago o por ajuste manual.'
+									: 'Usalo para ubicar pagos directos o invitaciones pendientes; ya no bloquea ni habilita el registro.'}
 							</p>
 							{#if item.note}
 								<p class="mt-2 text-sm text-white/70">{item.note}</p>

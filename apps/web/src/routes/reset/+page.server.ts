@@ -1,6 +1,6 @@
 import { env } from '$env/dynamic/private';
 import { PUBLIC_SITE_URL_FALLBACK } from '$lib/constants';
-import { createSupabaseServerClient, isMasterEmail } from '$lib/server/supabase';
+import { createSupabaseServerClient } from '$lib/server/supabase';
 import { fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -19,26 +19,6 @@ export const actions: Actions = {
 
 		if (!email) {
 			return fail(400, { message: 'Ingresá un correo electrónico válido.', email });
-		}
-
-		if (!isMasterEmail(email)) {
-			const supabaseCheck = await createSupabaseServerClient('odonto', null, fetch);
-			const { data: allowed, error: allowedError } = await supabaseCheck.rpc('is_email_enabled', {
-				p_email: email
-			});
-			if (allowedError) {
-				console.error('Error validando email habilitado', allowedError);
-				return fail(500, {
-					message: 'Falta configurar el control de correos habilitados.',
-					email
-				});
-			}
-			if (!allowed) {
-				return fail(400, {
-					message: 'Ese correo electrónico no está habilitado para recuperar contraseña.',
-					email
-				});
-			}
 		}
 
 		const supabase = await createSupabaseServerClient('odonto', null, fetch);

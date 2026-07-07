@@ -560,8 +560,8 @@ export const actions: Actions = {
 			success: true,
 			message:
 				onboardingMode === 'self_service'
-					? 'Correo habilitado para autopago.'
-					: 'Correo habilitado en modo manual.'
+					? 'Correo guardado como referencia histórica de autopago.'
+					: 'Correo guardado como referencia manual.'
 		};
 	},
 	toggle_email: async ({ request, locals, fetch }) => {

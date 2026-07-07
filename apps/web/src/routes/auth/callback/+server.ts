@@ -2,7 +2,6 @@ import { dev } from '$app/environment';
 import {
 	clearSupabaseOAuthCookies,
 	createSupabaseOAuthClient,
-	createSupabaseServerClient,
 	getModuleEntryRoute,
 	isMasterEmail
 } from '$lib/server/supabase';
@@ -14,7 +13,7 @@ const loginWithError = (url: URL, code: string): never => {
 	throw redirect(303, target.toString());
 };
 
-export const GET: RequestHandler = async ({ url, cookies, fetch }) => {
+export const GET: RequestHandler = async ({ url, cookies }) => {
 	const providerError = url.searchParams.get('error');
 	if (providerError) {
 		loginWithError(url, 'google_callback');
@@ -42,23 +41,6 @@ export const GET: RequestHandler = async ({ url, cookies, fetch }) => {
 	}
 
 	const isMaster = isMasterEmail(email);
-	if (!isMaster) {
-		const supabase = await createSupabaseServerClient(
-			'odonto',
-			{ access_token: session.access_token, refresh_token: session.refresh_token },
-			fetch
-		);
-		const { data: allowed, error: allowedError } = await supabase.rpc('is_email_enabled', {
-			p_email: email
-		});
-		if (allowedError) {
-			console.error('Error validando email habilitado para Google Auth', allowedError);
-			loginWithError(url, 'google_callback');
-		}
-		if (!allowed) {
-			loginWithError(url, 'google_not_enabled');
-		}
-	}
 
 	const cookieOptions = {
 		path: '/',

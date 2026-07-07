@@ -1,4 +1,9 @@
 import { env } from '$env/dynamic/private';
+import {
+	enforceRateLimits,
+	googleAuthRateLimitRules,
+	RateLimitExceededError
+} from '$lib/server/rate-limits';
 import { clearSupabaseOAuthCookies, createSupabaseOAuthClient } from '$lib/server/supabase';
 import type { RequestHandler } from '@sveltejs/kit';
 
@@ -14,7 +19,7 @@ const redirectResponse = (location: string): Response =>
 		headers: { location }
 	});
 
-export const GET: RequestHandler = async ({ url, cookies, fetch }) => {
+export const GET: RequestHandler = async ({ url, cookies, fetch, getClientAddress }) => {
 	if (env.DEMO_MODE === 'true') {
 		return loginWithError(url, 'google_demo');
 	}
@@ -23,6 +28,16 @@ export const GET: RequestHandler = async ({ url, cookies, fetch }) => {
 	const acceptedTerms = url.searchParams.get('accepted_terms') === 'true';
 	if (mode === 'register' && !acceptedTerms) {
 		return loginWithError(url, 'google_terms');
+	}
+
+	try {
+		await enforceRateLimits(googleAuthRateLimitRules(getClientAddress()), fetch);
+	} catch (error) {
+		if (!(error instanceof RateLimitExceededError)) {
+			console.error('Error validando rate limit de Google Auth', error);
+			return loginWithError(url, 'google_start');
+		}
+		return loginWithError(url, 'google_rate_limited');
 	}
 
 	clearSupabaseOAuthCookies(cookies);
