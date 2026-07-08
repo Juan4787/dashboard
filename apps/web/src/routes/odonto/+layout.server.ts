@@ -18,6 +18,7 @@ import {
 	roleParticipatesInFollowUps,
 	type FollowUpNotice
 } from '$lib/server/follow-ups';
+import { loadAccountAssistanceView, type AccountAssistanceView } from '$lib/server/account-assistance';
 import { getSubscriptionAmountArs } from '$lib/server/mercadopago';
 import { redirect } from '@sveltejs/kit';
 import type { LayoutServerLoad } from './$types';
@@ -38,6 +39,7 @@ export const load: LayoutServerLoad = async ({ locals, fetch, cookies, getClient
 	// Aviso interno de seguimientos ejecutándose (centro-arriba). Scopeado por rol.
 	let followUps: FollowUpNotice = { count: 0, single: null };
 	let followUpsTodayISO = '';
+	let accountAssistance: AccountAssistanceView | null = null;
 
 	if (env.DEMO_MODE === 'true') {
 		activeBusiness = demoBusinessContext();
@@ -51,6 +53,21 @@ export const load: LayoutServerLoad = async ({ locals, fetch, cookies, getClient
 				defaultBusinessCreationIp: getClientAddress(),
 				fetch
 			});
+
+			if (
+				activeBusiness &&
+				(activeBusiness.role === 'owner' || activeBusiness.assistance) &&
+				activeBusiness.access.canUseBusiness
+			) {
+				accountAssistance = await loadAccountAssistanceView({
+					supabase,
+					businessId: activeBusiness.business.id,
+					role: activeBusiness.role,
+					timeZone: activeBusiness.business.timezone,
+					canUseBusiness: activeBusiness.access.canUseBusiness,
+					isAssisting: Boolean(activeBusiness.assistance)
+				});
+			}
 
 			// Lectura no participa. Profesional/Dueño/Admin/Recepción sí (con scope).
 			if (activeBusiness && roleParticipatesInFollowUps(activeBusiness.role)) {
@@ -88,6 +105,7 @@ export const load: LayoutServerLoad = async ({ locals, fetch, cookies, getClient
 		activeBusiness,
 		businessError,
 		pendingManualSetup,
+		accountAssistance,
 		followUps,
 		followUpsTodayISO,
 		mpAmount: getSubscriptionAmountArs()

@@ -64,6 +64,8 @@ const queryReturning = (result: unknown) => {
 	const query = {
 		select: vi.fn(() => query),
 		eq: vi.fn(() => query),
+		is: vi.fn(() => query),
+		gt: vi.fn(() => query),
 		order: vi.fn(() => Promise.resolve(result)),
 		in: vi.fn(() => Promise.resolve(result))
 	};
@@ -100,6 +102,7 @@ describe('resolveActiveBusiness', () => {
 					const count = supabase.from.mock.calls.filter(([name]: [string]) => name === 'business_users').length;
 					return count === 1 ? firstMembershipRead : recoveredMembershipRead;
 				}
+				if (table === 'account_assistance_grants') return queryReturning({ data: [], error: null });
 				if (table === 'business_subscriptions') return subscriptionsRead;
 				throw new Error(`Unexpected table ${table}`);
 			}),
@@ -137,6 +140,7 @@ describe('resolveActiveBusiness', () => {
 					const count = supabase.from.mock.calls.filter(([name]: [string]) => name === 'business_users').length;
 					return count === 1 ? firstMembershipRead : recoveredMembershipRead;
 				}
+				if (table === 'account_assistance_grants') return queryReturning({ data: [], error: null });
 				if (table === 'business_subscriptions') return subscriptionsRead;
 				throw new Error(`Unexpected table ${table}`);
 			}),
@@ -161,4 +165,103 @@ describe('resolveActiveBusiness', () => {
 			p_industry: 'odontology'
 		});
 	});
-});
+
+		it('resolves an active account assistance grant as an admin context for support', async () => {
+		const userId = 'master-user';
+		const membershipsRead = queryReturning({ data: [], error: null });
+		const assistanceRead = queryReturning({
+			data: [
+				{
+					id: 'assist-1',
+					business_id: 'business-1',
+					requested_by_user_id: 'owner-1',
+					support_user_id: userId,
+					status: 'active',
+					starts_at: '2026-07-08T20:45:00.000Z',
+					expires_at: '2026-07-08T21:45:00.000Z',
+					business: businessRow
+				}
+			],
+			error: null
+		});
+		const subscriptionsRead = queryReturning({ data: [subscriptionRow], error: null });
+
+			const supabase = {
+				from: vi.fn((table: string) => {
+					if (table === 'business_users') return membershipsRead;
+					if (table === 'account_assistance_grants') return assistanceRead;
+					if (table === 'business_subscriptions') return subscriptionsRead;
+					throw new Error(`Unexpected table ${table}`);
+				}),
+				rpc: vi.fn((name: string) => {
+					if (name === 'user_has_active_account_assistance') {
+						return Promise.resolve({ data: true, error: null });
+					}
+					return Promise.resolve({ data: null, error: null });
+				})
+			} as any;
+
+		const context = await resolveActiveBusiness({
+			supabase,
+			accessToken: accessTokenFor(userId)
+		});
+
+		expect(context?.business.id).toBe('business-1');
+		expect(context?.role).toBe('admin');
+		expect(context?.canManage).toBe(true);
+		expect(context?.assistance).toMatchObject({
+			grantId: 'assist-1',
+			requestedByUserId: 'owner-1',
+			supportUserId: userId
+		});
+			expect(supabase.rpc).toHaveBeenCalledWith('user_has_active_account_assistance', {
+				target_business_id: 'business-1'
+			});
+		});
+
+		it('does not grant admin context when the SQL active-assistance check denies it', async () => {
+			const userId = 'master-user';
+			const membershipsRead = queryReturning({ data: [], error: null });
+			const assistanceRead = queryReturning({
+				data: [
+					{
+						id: 'assist-1',
+						business_id: 'business-1',
+						requested_by_user_id: 'owner-1',
+						support_user_id: userId,
+						status: 'active',
+						starts_at: '2026-07-08T20:45:00.000Z',
+						expires_at: '2026-07-08T21:45:00.000Z',
+						business: businessRow
+					}
+				],
+				error: null
+			});
+
+			const supabase = {
+				from: vi.fn((table: string) => {
+					if (table === 'business_users') return membershipsRead;
+					if (table === 'account_assistance_grants') return assistanceRead;
+					throw new Error(`Unexpected table ${table}`);
+				}),
+				rpc: vi.fn((name: string) => {
+					if (name === 'user_has_active_account_assistance') {
+						return Promise.resolve({ data: false, error: null });
+					}
+					return Promise.resolve({ data: null, error: null });
+				})
+			} as any;
+
+			const context = await resolveActiveBusiness({
+				supabase,
+				accessToken: accessTokenFor(userId),
+				ensureDefault: false
+			});
+
+			expect(context).toBeNull();
+			expect(supabase.from).not.toHaveBeenCalledWith('business_subscriptions');
+			expect(supabase.rpc).toHaveBeenCalledWith('user_has_active_account_assistance', {
+				target_business_id: 'business-1'
+			});
+		});
+	});

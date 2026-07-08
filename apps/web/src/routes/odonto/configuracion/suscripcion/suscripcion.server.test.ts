@@ -50,6 +50,17 @@ const ownerContext = (
 	}
 });
 
+const assistedContext = () => ({
+	...ownerContext({ role: 'admin' }),
+	assistance: {
+		grantId: 'assist-1',
+		requestedByUserId: 'owner-1',
+		supportUserId: 'master-1',
+		startsAt: '2026-07-08T20:45:00.000Z',
+		expiresAt: '2026-07-08T21:45:00.000Z'
+	}
+});
+
 type QueuedResult = { data?: unknown; error?: { message: string } | null };
 
 // Builder encadenable: cualquier cadena select/eq/order/limit/upsert/update se
@@ -390,6 +401,19 @@ describe('action subscribe', () => {
 		expect(result.status).toBe(403);
 		expect(requests).toHaveLength(0);
 	});
+
+	it('rechaza crear pagos desde una sesión de ayuda', async () => {
+		const server = createDbMock();
+		mocks.createSupabaseServerClient.mockResolvedValue(server.client);
+		mocks.resolveActiveBusiness.mockResolvedValue(assistedContext());
+		const { fetchMock, requests } = createMpFetch([]);
+
+		const result = (await actions.subscribe(makeEvent({ fetchMock }) as never)) as {
+			status: number;
+		};
+		expect(result.status).toBe(403);
+		expect(requests).toHaveLength(0);
+	});
 });
 
 describe('action cancel', () => {
@@ -422,6 +446,20 @@ describe('action cancel', () => {
 		);
 		expect(update).toBeDefined();
 		expect(update!.args[0]).toMatchObject({ status: 'cancelled' });
+	});
+
+	it('rechaza cancelar pagos desde una sesión de ayuda', async () => {
+		const server = createDbMock();
+		mocks.createSupabaseServerClient.mockResolvedValue(server.client);
+		mocks.resolveActiveBusiness.mockResolvedValue(assistedContext());
+		const { fetchMock, requests } = createMpFetch([]);
+
+		const result = (await actions.cancel(
+			makeEvent({ fetchMock, formEntries: { preapproval_id: 'pre-9' } }) as never
+		)) as { status: number };
+
+		expect(result.status).toBe(403);
+		expect(requests).toHaveLength(0);
 	});
 
 	it('acredita el cobro final pendiente antes de cancelar (no pierde el último mes)', async () => {
@@ -669,6 +707,18 @@ describe('load', () => {
 		await expect(load(makeEvent({ fetchMock }) as never)).rejects.toMatchObject({
 			status: 303,
 			location: '/odonto/mis-turnos'
+		});
+	});
+
+	it('redirige una sesión de ayuda fuera de suscripción', async () => {
+		const server = createDbMock();
+		mocks.createSupabaseServerClient.mockResolvedValue(server.client);
+		mocks.resolveActiveBusiness.mockResolvedValue(assistedContext());
+		const { fetchMock } = createMpFetch([]);
+
+		await expect(load(makeEvent({ fetchMock }) as never)).rejects.toMatchObject({
+			status: 303,
+			location: '/odonto/configuracion/ayuda'
 		});
 	});
 });

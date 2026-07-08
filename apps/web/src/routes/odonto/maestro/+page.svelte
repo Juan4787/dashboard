@@ -54,6 +54,16 @@
 		updated_at?: string | null;
 	};
 
+	type AssistanceRow = {
+		id: string;
+		businessId: string;
+		businessName: string;
+		businessSlug: string;
+		requestedByEmail: string | null;
+		startsAt: string;
+		expiresAt: string;
+	};
+
 	const durationOptions = [
 		{ value: 'hour_1', label: '1 hora' },
 		{ value: 'day_1', label: '1 día' },
@@ -107,6 +117,7 @@
 	const emails = $derived(
 		((data.emails ?? []) as EmailRow[]).filter((item) => !isMasterEmailRow(item.email))
 	);
+	const assistance = $derived((data.assistance ?? []) as AssistanceRow[]);
 
 	const linkedEmails = $derived.by(() => {
 		const linked = new Set<string>();
@@ -333,6 +344,46 @@
 							<time class="text-sm text-white/50">{formatDateTime(event.received_at)}</time>
 						</div>
 						<p class="mt-2 text-sm text-white/70">{event.processing_detail}</p>
+					</div>
+				{/each}
+			</div>
+		{/if}
+	</div>
+
+	<div class="ux-card">
+		<div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+			<div>
+				<h2 class="ux-section-title">Ayuda para configurar</h2>
+				<p class="mt-1 text-sm text-white/55">
+					Cuentas que pidieron ayuda y siguen dentro de la hora activa.
+				</p>
+			</div>
+			<span class="ux-badge ux-badge-success">{assistance.length} activas</span>
+		</div>
+		{#if assistance.length === 0}
+			<p class="ux-empty mt-4">No hay cuentas esperando ayuda ahora.</p>
+		{:else}
+			<div class="mt-4 grid gap-3 lg:grid-cols-2">
+				{#each assistance as item}
+					<div class="ux-soft-card p-4">
+						<div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+							<div class="min-w-0">
+								<p class="truncate font-black text-white">{item.businessName}</p>
+								<p class="mt-1 text-sm text-white/50">/{item.businessSlug}</p>
+								<p class="mt-2 text-sm text-white/65">
+									Pidió: <span class="font-bold text-white">{item.requestedByEmail ?? 'Dueño'}</span>
+								</p>
+								<p class="mt-1 inline-flex items-center gap-2 text-sm font-bold text-emerald-100">
+									<span class="h-[0.85em] w-[0.85em] rounded-full bg-emerald-400 shadow-[0_0_0.75rem_rgba(52,211,153,0.85)]"></span>
+									Hasta {formatDateTime(item.expiresAt)}
+								</p>
+							</div>
+							<form method="post" action="?/enter_assisted_business" class="shrink-0">
+								<input type="hidden" name="grant_id" value={item.id} />
+								<input type="hidden" name="business_id" value={item.businessId} />
+								<button class="ux-btn-primary">Abrir configuración</button>
+							</form>
+						</div>
 					</div>
 				{/each}
 			</div>

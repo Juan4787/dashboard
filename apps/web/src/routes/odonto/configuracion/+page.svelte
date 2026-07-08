@@ -140,7 +140,7 @@
 		<BackLink href={returnTarget || '/odonto/pacientes'} label="Volver" class="mb-5" />
 		<p class="ux-badge">Configuración</p>
 		<h1 class="ux-title mt-4">Ajustes del consultorio</h1>
-		<p class="ux-subtitle">Datos, permisos y almacenamiento.</p>
+		<p class="ux-subtitle">Datos, equipo y almacenamiento.</p>
 	</div>
 
 	<div class="grid gap-4 lg:grid-cols-2">
@@ -163,6 +163,11 @@
 			<span class="ux-badge">Comunicación</span>
 			<h2 class="mt-4 text-2xl font-bold text-white">Respuesta automática</h2>
 			<p class="mt-2 text-sm text-white/55">Link de reserva y mensaje que recibe el paciente por WhatsApp.</p>
+		</a>
+		<a href="/odonto/configuracion/ayuda" class="ux-choice p-6">
+			<span class="ux-badge">Ayuda</span>
+			<h2 class="mt-4 text-2xl font-bold text-white">Ayuda para configurar</h2>
+			<p class="mt-2 text-sm text-white/55">Pedí ayuda por 1 hora para completar la configuración inicial.</p>
 		</a>
 	</div>
 

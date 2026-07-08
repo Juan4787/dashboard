@@ -71,6 +71,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 
 	if (context.role === 'professional') throw redirect(303, '/odonto/mis-turnos');
 	if (context.role !== 'owner' && context.role !== 'admin') throw redirect(303, '/odonto/agenda');
+	if (context.assistance) throw redirect(303, '/odonto/configuracion/ayuda');
 
 	// Sin cliente admin la página degrada (no muestra el estado MP) pero no se
 	// cae: el estado comercial sale del cliente del usuario igual que antes.
@@ -150,6 +151,9 @@ export const actions: Actions = {
 		}
 		if (context.role !== 'owner' && context.role !== 'admin') {
 			return fail(403, { message: 'No tenés permisos para gestionar la suscripción.' });
+		}
+		if (context.assistance) {
+			return fail(403, { message: 'La suscripción la gestiona el consultorio.' });
 		}
 		if (context.access.isPermanent) {
 			return fail(400, { message: 'Tu cuenta es permanente: no necesita suscripción.' });
@@ -289,6 +293,9 @@ export const actions: Actions = {
 		}
 		if (context.role !== 'owner' && context.role !== 'admin') {
 			return fail(403, { message: 'No tenés permisos para gestionar la suscripción.' });
+		}
+		if (context.assistance) {
+			return fail(403, { message: 'La suscripción la gestiona el consultorio.' });
 		}
 
 		const form = await request.formData();

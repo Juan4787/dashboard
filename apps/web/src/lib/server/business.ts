@@ -51,9 +51,18 @@ export type BusinessContext = {
 	canManage: boolean;
 	canOperate: boolean;
 	access: BusinessAccessState;
+	assistance?: BusinessAssistanceContext | null;
 };
 
-const ACTIVE_BUSINESS_COOKIE = 'active-business-id';
+export type BusinessAssistanceContext = {
+	grantId: string;
+	requestedByUserId: string;
+	supportUserId: string;
+	startsAt: string;
+	expiresAt: string;
+};
+
+export const ACTIVE_BUSINESS_COOKIE = 'active-business-id';
 
 const businessSelect = `
 	id,
@@ -149,7 +158,28 @@ const mapMembership = (row: any): BusinessContext | null => {
 		role,
 		canManage: canManageRole(role) && access.canUseBusiness,
 		canOperate: canOperateRole(role) && access.canUseBusiness,
-		access
+		access,
+		assistance: null
+	};
+};
+
+const mapAssistanceMembership = (row: any): BusinessContext | null => {
+	const business = row?.business;
+	if (!business || !row?.id || !row?.support_user_id || !row?.requested_by_user_id) return null;
+	const access = getBusinessAccessState(null, { businessCreatedAt: business.created_at });
+	return {
+		business: business as Business,
+		role: 'admin',
+		canManage: access.canUseBusiness,
+		canOperate: access.canUseBusiness,
+		access,
+		assistance: {
+			grantId: String(row.id),
+			requestedByUserId: String(row.requested_by_user_id),
+			supportUserId: String(row.support_user_id),
+			startsAt: String(row.starts_at ?? ''),
+			expiresAt: String(row.expires_at ?? '')
+		}
 	};
 };
 
@@ -170,6 +200,70 @@ const applySubscription = (
 	};
 };
 
+const isMissingAssistanceSchemaError = (error: unknown) => {
+	const message = errorMessage(error).toLowerCase();
+	const code =
+		typeof error === 'object' && error !== null && 'code' in error
+			? String((error as { code?: unknown }).code ?? '')
+			: '';
+	return (
+		code === '42P01' ||
+		code === 'PGRST205' ||
+		message.includes('account_assistance_grants') ||
+		message.includes('could not find the table')
+	);
+};
+
+const loadAssistanceMemberships = async (
+	supabase: SupabaseClient,
+	userId: string,
+	directBusinessIds: Set<string>
+): Promise<BusinessContext[]> => {
+	try {
+		const { data, error } = await supabase
+			.from('account_assistance_grants')
+			.select(
+				`id, business_id, requested_by_user_id, support_user_id, status, starts_at, expires_at, business:businesses!inner(${businessSelect})`
+			)
+			.eq('support_user_id', userId)
+			.eq('status', 'active')
+			.is('revoked_at', null)
+			.gt('expires_at', new Date().toISOString())
+			.order('expires_at', { ascending: false });
+
+		if (error) {
+			if (!isMissingAssistanceSchemaError(error)) {
+				console.error('Error cargando ayuda para configurar', error);
+			}
+			return [];
+		}
+
+			const activeRows = [];
+			for (const row of data ?? []) {
+				const businessId = String(row?.business_id ?? '');
+				if (!businessId || directBusinessIds.has(businessId)) continue;
+				const { data: hasActiveGrant, error: activeGrantError } = await supabase.rpc(
+					'user_has_active_account_assistance',
+					{ target_business_id: businessId }
+				);
+				if (activeGrantError) {
+					console.error('Error validando ayuda para configurar', activeGrantError);
+					continue;
+				}
+				if (hasActiveGrant === true) activeRows.push(row);
+			}
+
+			return activeRows
+				.map(mapAssistanceMembership)
+				.filter((item): item is BusinessContext => Boolean(item));
+	} catch (error) {
+		if (!isMissingAssistanceSchemaError(error)) {
+			console.error('Error cargando ayuda para configurar', error);
+		}
+		return [];
+	}
+};
+
 const loadMemberships = async (
 	supabase: SupabaseClient,
 	userId: string
@@ -178,13 +272,22 @@ const loadMemberships = async (
 		.from('business_users')
 		.select(`role, business:businesses!inner(${businessSelect})`)
 		.eq('user_id', userId)
+		.eq('status', 'active')
 		.order('created_at', { ascending: true });
 
 	if (error) {
 		throw error;
 	}
 
-	const memberships = (data ?? []).map(mapMembership).filter((item): item is BusinessContext => Boolean(item));
+	const directMemberships = (data ?? [])
+		.map(mapMembership)
+		.filter((item): item is BusinessContext => Boolean(item));
+	const assistanceMemberships = await loadAssistanceMemberships(
+		supabase,
+		userId,
+		new Set(directMemberships.map((membership) => membership.business.id))
+	);
+	const memberships = [...directMemberships, ...assistanceMemberships];
 	if (memberships.length === 0) return [];
 
 	const businessIds = memberships.map((membership) => membership.business.id);

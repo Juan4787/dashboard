@@ -72,6 +72,7 @@
 	const services = $derived(data.services as Service[]);
 	const customServices = $derived(services.filter((service) => !service.is_default));
 	const canManage = $derived(data.context.canManage && !data.demo);
+	const isAssisting = $derived(Boolean(data.context.assistance));
 
 	// ----- Configurar atendible (dueño/admin que también atiende pacientes) -----
 	let showAttendingForm = $state(false);
@@ -79,7 +80,7 @@
 	let attendingName = $state('');
 	let attendingError = $state('');
 	const attendingEligible = $derived(
-		members.filter((m) => m.status === 'active' && (m.role === 'owner' || m.role === 'admin'))
+		isAssisting ? [] : members.filter((m) => m.status === 'active' && (m.role === 'owner' || m.role === 'admin'))
 	);
 	const attendingPending = $derived(attendingEligible.filter((m) => !m.professional_id && m.user_id));
 	const attendingActive = $derived(attendingEligible.filter((m) => m.professional_id));
@@ -106,6 +107,10 @@
 
 	const memberRoleOptions = (member: RoleAccess) =>
 		roles.includes(member.role) ? roles : [...roles, member.role];
+	const canEditMemberRole = (member: RoleAccess) =>
+		member.status === 'active' && member.role !== 'owner' && !(isAssisting && member.role === 'admin');
+	const canRemoveMember = (member: RoleAccess) =>
+		member.role !== 'owner' && !(isAssisting && member.role === 'admin');
 
 	const formatDate = (value: string) =>
 		value
@@ -1007,7 +1012,7 @@
 												Ver profesional
 											</a>
 										{/if}
-										{#if member.status === 'active' && member.role !== 'owner'}
+										{#if canEditMemberRole(member)}
 											<form
 												method="POST"
 												action="?/update_role"
@@ -1031,7 +1036,7 @@
 												</button>
 											</form>
 										{/if}
-										{#if member.role !== 'owner'}
+										{#if canRemoveMember(member)}
 											<form
 												method="POST"
 												action="?/remove_user"

@@ -80,15 +80,24 @@
 		{ label: 'Pacientes', href: '/odonto/pacientes', activePrefixes: ['/odonto/pacientes'] }
 	];
 
-	const configNav: NavItem[] = [
+	const baseConfigNav: NavItem[] = [
 		{ label: 'Negocio', href: '/odonto/configuracion/negocio' },
 		{ label: 'Equipo', href: '/odonto/configuracion/usuarios' },
 		{ label: 'Suscripción', href: '/odonto/configuracion/suscripcion' },
-		{ label: 'Comunicación', href: '/odonto/configuracion/comunicacion' }
+		{ label: 'Comunicación', href: '/odonto/configuracion/comunicacion' },
+		{ label: 'Ayuda', href: '/odonto/configuracion/ayuda' }
 	];
 
 	const activeBusiness = $derived(data?.activeBusiness);
+	const accountAssistance = $derived(data?.accountAssistance);
 	const accountPendingManualSetup = $derived(Boolean(data?.pendingManualSetup && !activeBusiness));
+	const isAssistingAccount = $derived(Boolean(activeBusiness?.assistance));
+	const assistanceReturnTo = $derived(`${$page.url.pathname}${$page.url.search}`);
+	const configNav = $derived.by(() =>
+		isAssistingAccount
+			? baseConfigNav.filter((item) => item.href !== '/odonto/configuracion/suscripcion')
+			: baseConfigNav
+	);
 	const money = (value?: number | string | null) => {
 		if (value === null || value === undefined || value === '') return 'ARS 0';
 		const parsed = Number(value);
@@ -264,6 +273,7 @@
 		if (path.startsWith('/odonto/agenda')) return 'Agenda';
 		if (path.startsWith('/odonto/pacientes')) return 'Pacientes';
 		if (path.startsWith('/odonto/configuracion/usuarios')) return 'Equipo';
+		if (path.startsWith('/odonto/configuracion/ayuda')) return 'Ayuda';
 		if (path.startsWith('/odonto/profesionales')) return 'Equipo';
 		if (path.startsWith('/odonto/servicios')) return 'Equipo';
 		if (path.startsWith('/odonto/disponibilidad')) return 'Equipo';
@@ -779,6 +789,87 @@
 			>
 				{commercialNotice}
 			</div>
+		{/if}
+		{#if !commercialAccessRestricted && !accountPendingManualSetup && accountAssistance && (accountAssistance.showBanner || isAssistingAccount)}
+			<section class="mb-4 rounded-2xl border border-white/10 bg-[#102842]/95 px-4 py-3 shadow-xl shadow-black/15">
+				<div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+					<div class="min-w-0">
+						{#if isAssistingAccount}
+							<p class="inline-flex items-center gap-2 text-sm font-black text-emerald-100">
+								<span class="h-[0.85em] w-[0.85em] rounded-full bg-emerald-400 shadow-[0_0_0.75rem_rgba(52,211,153,0.85)]"></span>
+								Configurando esta cuenta
+							</p>
+							<p class="mt-1 text-sm font-semibold text-white/60">
+								La ayuda termina a las {accountAssistance.endsAtLabel ?? 'hora indicada'}.
+							</p>
+						{:else if accountAssistance.status === 'active'}
+							<p class="inline-flex items-center gap-2 text-sm font-black text-emerald-100">
+								<span class="h-[0.85em] w-[0.85em] rounded-full bg-emerald-400 shadow-[0_0_0.75rem_rgba(52,211,153,0.85)]"></span>
+								Ayuda de Cita Suite activa
+							</p>
+							<p class="mt-1 text-sm font-semibold text-white/60">
+								Podemos configurar esta cuenta hasta las {accountAssistance.endsAtLabel ?? 'hora indicada'}.
+							</p>
+						{:else if accountAssistance.status === 'expired'}
+							<p class="text-sm font-black text-white">La ayuda de Cita Suite finalizó</p>
+							<p class="mt-1 text-sm font-semibold text-white/60">
+								Ya no podemos hacer cambios en esta cuenta. Podés activarla otra vez si todavía necesitás ayuda.
+							</p>
+						{:else if accountAssistance.status === 'revoked'}
+							<p class="text-sm font-black text-white">Ayuda detenida</p>
+							<p class="mt-1 text-sm font-semibold text-white/60">
+								Cita Suite ya no puede hacer cambios en esta cuenta.
+							</p>
+						{:else}
+							<p class="text-sm font-black text-white">¿Querés que te ayudemos a configurar tu cuenta?</p>
+							<p class="mt-1 text-sm font-semibold text-white/60">
+								Podemos ayudarte a cargar profesionales, servicios y horarios iniciales.
+							</p>
+						{/if}
+					</div>
+
+					{#if !isAssistingAccount}
+						<div class="flex shrink-0 flex-wrap gap-2">
+							{#if accountAssistance.status === 'active'}
+								<form method="post" action="/odonto/configuracion/ayuda?/revoke">
+									<input type="hidden" name="return_to" value={assistanceReturnTo} />
+									<button class="ux-btn-secondary px-4 py-2 text-sm">Detener ayuda</button>
+								</form>
+							{:else if accountAssistance.status === 'expired'}
+								<form method="post" action="/odonto/configuracion/ayuda?/activate">
+									<input type="hidden" name="return_to" value={assistanceReturnTo} />
+									<button class="ux-btn-primary px-4 py-2 text-sm">Volver a activar</button>
+								</form>
+								{#if accountAssistance.canDismiss && accountAssistance.grantId}
+									<form method="post" action="/odonto/configuracion/ayuda?/dismiss">
+										<input type="hidden" name="return_to" value={assistanceReturnTo} />
+										<input type="hidden" name="grant_id" value={accountAssistance.grantId} />
+										<button class="ux-btn-secondary px-4 py-2 text-sm" aria-label="Cerrar aviso">Cerrar</button>
+									</form>
+								{/if}
+							{:else if accountAssistance.status === 'revoked'}
+								<form method="post" action="/odonto/configuracion/ayuda?/activate">
+									<input type="hidden" name="return_to" value={assistanceReturnTo} />
+									<button class="ux-btn-secondary px-4 py-2 text-sm">Activar nuevamente</button>
+								</form>
+								{#if accountAssistance.canDismiss && accountAssistance.grantId}
+									<form method="post" action="/odonto/configuracion/ayuda?/dismiss">
+										<input type="hidden" name="return_to" value={assistanceReturnTo} />
+										<input type="hidden" name="grant_id" value={accountAssistance.grantId} />
+										<button class="ux-btn-secondary px-4 py-2 text-sm" aria-label="Cerrar aviso">Cerrar</button>
+									</form>
+								{/if}
+							{:else}
+								<form method="post" action="/odonto/configuracion/ayuda?/activate">
+									<input type="hidden" name="return_to" value={assistanceReturnTo} />
+									<button class="ux-btn-primary px-4 py-2 text-sm">Quiero ayuda por 1 hora</button>
+								</form>
+							{/if}
+							<a href="/odonto/configuracion/ayuda" class="ux-btn-secondary px-4 py-2 text-sm">Ver detalle</a>
+						</div>
+					{/if}
+				</div>
+			</section>
 		{/if}
 		{#if !commercialAccessRestricted && data?.followUps?.count > 0}
 			<FollowUpsNotice notice={data.followUps} todayISO={data.followUpsTodayISO} />

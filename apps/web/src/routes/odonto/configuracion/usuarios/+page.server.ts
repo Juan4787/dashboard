@@ -527,7 +527,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 		context,
 		members,
 		services,
-		roles: TEAM_ROLES,
+		roles: context.assistance ? TEAM_ROLES.filter((role) => role !== 'owner' && role !== 'admin') : TEAM_ROLES,
 		defaultServiceNames: DEFAULT_SERVICE_NAMES,
 		currentUserId,
 		demo: false
@@ -554,11 +554,17 @@ export const actions: Actions = {
 		}
 
 		const { supabase, context, currentUserId } = await getUsersPageContext({ locals, fetch, cookies });
-		if (!context.canManage) {
-			return fail(403, { message: 'No tenés permisos para administrar el equipo.', values });
-		}
+			if (!context.canManage) {
+				return fail(403, { message: 'No tenés permisos para administrar el equipo.', values });
+			}
+			if (context.assistance && (role === 'owner' || role === 'admin')) {
+				return fail(403, {
+					message: 'El dueño y los administradores se configuran desde el consultorio.',
+					values
+				});
+			}
 
-		const currentAccess = await listRoleAccess(supabase, context.business.id);
+			const currentAccess = await listRoleAccess(supabase, context.business.id);
 		const existing = currentAccess.find((item) => item.email.toLowerCase() === email);
 		if (existing?.role === role) {
 			return fail(400, {
@@ -807,6 +813,11 @@ export const actions: Actions = {
 		if (!context.canManage) {
 			return fail(403, { message: 'No tenés permisos para administrar el equipo.' });
 		}
+		if (context.assistance) {
+			return fail(403, {
+				message: 'El dueño y los administradores se configuran desde el consultorio.'
+			});
+		}
 		if (!targetUserId) return fail(400, { message: 'Elegí a la persona del equipo.' });
 		if (!professionalName) return fail(400, { message: 'El nombre profesional es obligatorio.' });
 
@@ -905,14 +916,19 @@ export const actions: Actions = {
 			return fail(403, { message: 'No tenés permisos para administrar el equipo.' });
 		}
 
-		const members = await listRoleAccess(supabase, context.business.id);
-		const target = members.find((member) => member.id === membershipId && member.status === 'active');
-		if (!target) {
-			return fail(404, { message: 'Rol no encontrado en este consultorio.' });
-		}
-		if (target.role === 'owner' && role !== 'owner' && countOwners(members) <= 1) {
-			return fail(400, { message: 'El consultorio debe conservar al menos un dueño.' });
-		}
+			const members = await listRoleAccess(supabase, context.business.id);
+			const target = members.find((member) => member.id === membershipId && member.status === 'active');
+			if (!target) {
+				return fail(404, { message: 'Rol no encontrado en este consultorio.' });
+			}
+			if (context.assistance && (target.role === 'owner' || target.role === 'admin' || role === 'owner' || role === 'admin')) {
+				return fail(403, {
+					message: 'El dueño y los administradores se configuran desde el consultorio.'
+				});
+			}
+			if (target.role === 'owner' && role !== 'owner' && countOwners(members) <= 1) {
+				return fail(400, { message: 'El consultorio debe conservar al menos un dueño.' });
+			}
 		if (role === 'professional' && !target.professional_id) {
 			return fail(400, { message: 'Para asignar rol profesional, usá Agregar integrante con rol Profesional.' });
 		}
@@ -943,29 +959,35 @@ export const actions: Actions = {
 		}
 
 		const { supabase, context, currentUserId } = await getUsersPageContext({ locals, fetch, cookies });
-		if (!context.canManage) {
-			return fail(403, { message: 'No tenés permisos para administrar el equipo.' });
-		}
+			if (!context.canManage) {
+				return fail(403, { message: 'No tenés permisos para administrar el equipo.' });
+			}
 
-		if (status === 'pending') {
-			const { error } = await supabase.rpc('cancel_business_role_invite', {
-				target_invite_id: accessId
+			const members = await listRoleAccess(supabase, context.business.id);
+			const target = members.find((member) => member.id === accessId && member.status === status);
+			if (!target) {
+				return fail(404, { message: 'Rol no encontrado en este consultorio.' });
+			}
+			if (context.assistance && (target.role === 'owner' || target.role === 'admin')) {
+				return fail(403, {
+					message: 'El dueño y los administradores se configuran desde el consultorio.'
+				});
+			}
+
+			if (status === 'pending') {
+				const { error } = await supabase.rpc('cancel_business_role_invite', {
+					target_invite_id: accessId
 			});
 			if (error) {
 				console.error('Error cancelando invitación', error);
 				return fail(500, { message: 'No se pudo quitar el rol pendiente.' });
+				}
+				return { success: true, message: 'Rol pendiente quitado.' };
 			}
-			return { success: true, message: 'Rol pendiente quitado.' };
-		}
 
-		const members = await listRoleAccess(supabase, context.business.id);
-		const target = members.find((member) => member.id === accessId && member.status === 'active');
-		if (!target) {
-			return fail(404, { message: 'Rol no encontrado en este consultorio.' });
-		}
-		if (target.user_id === currentUserId) {
-			return fail(400, { message: 'No podés quitar tu propio acceso desde esta pantalla.' });
-		}
+			if (target.user_id === currentUserId) {
+				return fail(400, { message: 'No podés quitar tu propio acceso desde esta pantalla.' });
+			}
 		if (target.role === 'owner' && countOwners(members) <= 1) {
 			return fail(400, { message: 'El consultorio debe conservar al menos un dueño.' });
 		}

@@ -10,7 +10,7 @@ import {
 	settleApprovedChargesForPreapproval,
 	type MpSubscriptionRow
 } from '$lib/server/mercadopago';
-import { normalizeSlug } from '$lib/server/business';
+import { ACTIVE_BUSINESS_COOKIE, normalizeSlug } from '$lib/server/business';
 import {
 	createSupabaseAdminClient,
 	getEmailFromAccessToken,
@@ -194,6 +194,13 @@ const buildMasterData = async (
 		.eq('requires_attention', true)
 		.order('received_at', { ascending: false })
 		.limit(20);
+	const assistanceRes = await admin
+		.from('account_assistance_grants')
+		.select('id, business_id, requested_by_user_id, support_user_id, status, starts_at, expires_at, revoked_at, business:businesses(id, name, slug)')
+		.eq('status', 'active')
+		.is('revoked_at', null)
+		.gt('expires_at', new Date().toISOString())
+		.order('expires_at', { ascending: true });
 
 	if (emailsRes.error) throw emailsRes.error;
 	if (businessesRes.error) throw businessesRes.error;
@@ -211,6 +218,9 @@ const buildMasterData = async (
 	}
 	if (mpAttentionRes.error) {
 		console.error('Error cargando eventos MP con atención', mpAttentionRes.error);
+	}
+	if (assistanceRes.error) {
+		console.error('Error cargando ayuda para configurar', assistanceRes.error);
 	}
 
 	const emailsByUserId = await listAuthEmailsById(admin);
@@ -281,6 +291,21 @@ const buildMasterData = async (
 	const businessNameById = new Map(
 		businesses.map((business: any) => [String(business.id), String(business.name ?? '')])
 	);
+	const assistance = ((assistanceRes.error ? [] : assistanceRes.data ?? []) as any[])
+		.filter((grant) => businessNameById.has(String(grant.business_id)))
+		.map((grant) => {
+			const business = Array.isArray(grant.business) ? grant.business[0] : grant.business;
+			return {
+				id: String(grant.id),
+				businessId: String(grant.business_id),
+				businessName: String(business?.name ?? businessNameById.get(String(grant.business_id)) ?? 'Consultorio'),
+				businessSlug: String(business?.slug ?? ''),
+				requestedByEmail: emailsByUserId.get(String(grant.requested_by_user_id)) ?? null,
+				supportUserId: String(grant.support_user_id),
+				startsAt: String(grant.starts_at ?? ''),
+				expiresAt: String(grant.expires_at ?? '')
+			};
+		});
 	// Solo eventos de negocios visibles en el panel (o globales, sin negocio):
 	// los negocios filtrados por protección no deben filtrarse por acá.
 	const mpAttention = ((mpAttentionRes.data ?? []) as any[])
@@ -296,6 +321,7 @@ const buildMasterData = async (
 		emails: (emailsRes.data ?? []).filter((item: any) => !isProtectedEmail(String(item.email ?? ''))),
 		businesses,
 		statuses: COMMERCIAL_STATUSES,
+		assistance,
 		mpAttention
 	};
 };
@@ -317,6 +343,7 @@ export const load: PageServerLoad = async ({ locals, fetch }) => {
 			emails: [],
 			businesses: [],
 			statuses: COMMERCIAL_STATUSES,
+			assistance: [],
 			mpAttention: [],
 			masterEmail: master.email,
 			loadError: 'No se pudo cargar el panel maestro. Revisá la conexión y las migraciones.'
@@ -325,6 +352,62 @@ export const load: PageServerLoad = async ({ locals, fetch }) => {
 };
 
 export const actions: Actions = {
+	enter_assisted_business: async ({ request, locals, fetch, cookies }) => {
+		if (!locals.auth) throw redirect(303, '/login');
+		const master = ensureMaster(locals.auth.access_token);
+		const form = await request.formData();
+		const grantId = String(form.get('grant_id') ?? '').trim();
+		const businessId = String(form.get('business_id') ?? '').trim();
+		if (!grantId || !businessId) {
+			return fail(400, { message: 'Faltan datos para abrir el consultorio.' });
+		}
+
+		const admin = await createSupabaseAdminClient('odonto', fetch);
+		const masterUserId = master.userId ?? (await findAuthUserIdByEmail(admin, master.email));
+		if (!masterUserId) {
+			return fail(403, { message: 'No pudimos validar el usuario maestro.' });
+		}
+
+		const { data: grant, error } = await admin
+			.from('account_assistance_grants')
+			.select('id, business_id, support_user_id, status, expires_at, revoked_at')
+			.eq('id', grantId)
+			.eq('business_id', businessId)
+			.maybeSingle();
+		if (error) {
+			console.error('Error validando ayuda para configurar desde panel maestro', error);
+			return fail(500, { message: 'No pudimos validar la ayuda.' });
+		}
+		if (
+			!grant ||
+			String(grant.support_user_id) !== masterUserId ||
+			String(grant.status) !== 'active' ||
+			grant.revoked_at ||
+			new Date(String(grant.expires_at)).getTime() <= Date.now()
+		) {
+			return fail(403, { message: 'Esta ayuda ya no está activa.' });
+		}
+
+		const { data: canUseRows, error: canUseError } = await admin.rpc('business_allows_operation', {
+			target_business_id: businessId
+		});
+		if (canUseError) {
+			console.error('Error validando estado del consultorio para ayuda', canUseError);
+			return fail(500, { message: 'No pudimos validar el estado del consultorio.' });
+		}
+		if (canUseRows !== true) {
+			return fail(409, { message: 'La cuenta debe estar activa para abrir su configuración.' });
+		}
+
+		cookies.set(ACTIVE_BUSINESS_COOKIE, businessId, {
+			path: '/',
+			httpOnly: true,
+			sameSite: 'lax',
+			maxAge: 60 * 60
+		});
+
+		throw redirect(303, '/odonto/configuracion/usuarios');
+	},
 	create_business: async ({ request, locals, fetch }) => {
 		if (!locals.auth) throw redirect(303, '/login');
 		const master = ensureMaster(locals.auth.access_token);
