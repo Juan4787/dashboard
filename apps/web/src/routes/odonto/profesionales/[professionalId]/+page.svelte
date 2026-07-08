@@ -6,11 +6,18 @@
 	import { formatDateTime } from '$lib/utils/format';
 	import { formatPriceLabel } from '$lib/utils/money-input';
 	import {
-		formatTimeRanges,
 		normalizeTimeRangesForCommit,
 		normalizeTimeRangesInput,
 		parseTimeRanges
 	} from '$lib/utils/time-ranges';
+	import {
+		canonicalScheduleBlocks,
+		createEmptyScheduleBlock,
+		scheduleBlocksFromRules,
+		serializeScheduleBlocks,
+		validateScheduleBlocks,
+		type ScheduleBlockDraft
+	} from '$lib/utils/schedule-blocks';
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { onMount } from 'svelte';
 	import Modal from '$lib/components/Modal.svelte';
@@ -56,9 +63,7 @@
 		isAvailable: boolean;
 		serviceIds: string[];
 		schedule: {
-			weekdays: number[];
-			timeRanges: string;
-			slotInterval: string;
+			blocks: ScheduleBlockDraft[];
 		};
 		exception: {
 			appliesTo: 'professional' | 'business';
@@ -116,8 +121,6 @@
 	const uniqueSortedStrings = (items: string[]) => [...new Set(items)].sort((a, b) => a.localeCompare(b));
 	const sameStringList = (left: string[], right: string[]) =>
 		uniqueSortedStrings(left).join('|') === uniqueSortedStrings(right).join('|');
-	const sameNumberList = (left: number[], right: number[]) =>
-		uniqueSortedNumbers(left).join('|') === uniqueSortedNumbers(right).join('|');
 
 	const emptyExceptionDraft = (): ProfessionalDraft['exception'] => ({
 		appliesTo: 'professional',
@@ -127,36 +130,9 @@
 		reason: ''
 	});
 
-	const scheduleFromRules = (rules: Rule[]): ProfessionalDraft['schedule'] => {
-		if (rules.length === 0) {
-			return { weekdays: [1, 2, 3, 4, 5], timeRanges: '', slotInterval: '15' };
-		}
-
-		const latestCreatedAt = rules.reduce((latest, rule) => {
-			if (!rule.created_at) return latest;
-			return !latest || rule.created_at > latest ? rule.created_at : latest;
-		}, '');
-		const latestRules = latestCreatedAt ? rules.filter((rule) => rule.created_at === latestCreatedAt) : rules;
-		const ranges = [
-			...new Map(
-				latestRules.map((rule) => [
-					`${rule.start_time.slice(0, 5)}-${rule.end_time.slice(0, 5)}`,
-					{ start: rule.start_time.slice(0, 5), end: rule.end_time.slice(0, 5) }
-				])
-			).values()
-		];
-		const intervalCounts = new Map<number, number>();
-		for (const rule of latestRules) {
-			intervalCounts.set(rule.slot_interval_minutes, (intervalCounts.get(rule.slot_interval_minutes) ?? 0) + 1);
-		}
-		const [mostUsedInterval] = [...intervalCounts.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0] ?? [15];
-
-		return {
-			weekdays: uniqueSortedNumbers(latestRules.map((rule) => rule.weekday)),
-			timeRanges: formatTimeRanges(ranges),
-			slotInterval: String(mostUsedInterval)
-		};
-	};
+	const scheduleFromRules = (rules: Rule[]): ProfessionalDraft['schedule'] => ({
+		blocks: scheduleBlocksFromRules(rules, 'saved-block')
+	});
 
 	const buildServerDraft = (source: PageData): ProfessionalDraft => ({
 		name: source.professional?.name ?? '',
@@ -169,6 +145,39 @@
 		exception: emptyExceptionDraft()
 	});
 
+	const sanitizeSchedule = (
+		value: Partial<ProfessionalDraft> | null,
+		fallback: ProfessionalDraft
+	): ProfessionalDraft['schedule'] => {
+		if (Array.isArray(value?.schedule?.blocks)) {
+			const blocks = value.schedule.blocks.map((block, index) => ({
+				id: typeof block?.id === 'string' ? block.id : `restored-block-${index + 1}`,
+				weekdays: Array.isArray(block?.weekdays)
+					? block.weekdays.map(Number).filter((item) => Number.isInteger(item) && item >= 0 && item <= 6)
+					: [],
+				timeRanges: typeof block?.timeRanges === 'string' ? block.timeRanges : '',
+				slotInterval: typeof block?.slotInterval === 'string' ? block.slotInterval : '15'
+			}));
+			return { blocks: blocks.length > 0 ? blocks : cloneDraft(fallback).schedule.blocks };
+		}
+		const legacySchedule = value?.schedule as any;
+		if (legacySchedule && Array.isArray(legacySchedule.weekdays)) {
+			return {
+				blocks: [
+					{
+						id: 'restored-block-1',
+						weekdays: legacySchedule.weekdays
+							.map(Number)
+							.filter((item: number) => Number.isInteger(item) && item >= 0 && item <= 6),
+						timeRanges: typeof legacySchedule.timeRanges === 'string' ? legacySchedule.timeRanges : '',
+						slotInterval: typeof legacySchedule.slotInterval === 'string' ? legacySchedule.slotInterval : '15'
+					}
+				]
+			};
+		}
+		return cloneDraft(fallback).schedule;
+	};
+
 	const sanitizeDraft = (value: Partial<ProfessionalDraft> | null, fallback: ProfessionalDraft): ProfessionalDraft => ({
 		name: typeof value?.name === 'string' ? value.name : fallback.name,
 		specialty: typeof value?.specialty === 'string' ? value.specialty : fallback.specialty,
@@ -176,13 +185,7 @@
 		email: typeof value?.email === 'string' ? value.email : fallback.email,
 		isAvailable: typeof value?.isAvailable === 'boolean' ? value.isAvailable : fallback.isAvailable,
 		serviceIds: Array.isArray(value?.serviceIds) ? value.serviceIds.map(String) : fallback.serviceIds,
-		schedule: {
-			weekdays: Array.isArray(value?.schedule?.weekdays)
-				? value.schedule.weekdays.map(Number).filter((item) => Number.isInteger(item) && item >= 0 && item <= 6)
-				: fallback.schedule.weekdays,
-			timeRanges: typeof value?.schedule?.timeRanges === 'string' ? value.schedule.timeRanges : fallback.schedule.timeRanges,
-			slotInterval: typeof value?.schedule?.slotInterval === 'string' ? value.schedule.slotInterval : fallback.schedule.slotInterval
-		},
+		schedule: sanitizeSchedule(value, fallback),
 		exception: {
 			appliesTo: value?.exception?.appliesTo === 'business' ? 'business' : 'professional',
 			type: value?.exception?.type === 'extra_available' ? 'extra_available' : 'blocked',
@@ -192,21 +195,8 @@
 		}
 	});
 
-	const canonicalTimeRanges = (value: string) => {
-		const parsed = parseTimeRanges(value);
-		return parsed ? formatTimeRanges(parsed) : normalizedText(value);
-	};
-
 	const hasValidSchedule = (schedule: ProfessionalDraft['schedule']) => {
-		const interval = Number(schedule.slotInterval);
-		const parsedRanges = parseTimeRanges(schedule.timeRanges);
-		return (
-			uniqueSortedNumbers(schedule.weekdays).length > 0 &&
-			Boolean(parsedRanges && parsedRanges.length > 0) &&
-			Number.isInteger(interval) &&
-			interval >= 5 &&
-			interval <= 120
-		);
+		return validateScheduleBlocks(schedule.blocks).ok;
 	};
 
 	const hasExceptionDraft = (exception: ProfessionalDraft['exception']) =>
@@ -235,14 +225,15 @@
 	let activeTab = $state<TabId>(tabs.some((tab) => tab.id === data.tab) ? (data.tab as TabId) : 'perfil');
 	let showNewService = $state(false);
 	let saving = $state<'profile' | 'services' | 'schedule' | 'exception' | 'all' | 'service-create' | null>(null);
+	let archiveSubmitting = $state(false);
+	let restoreSubmitting = $state(false);
+	let deleteSubmitting = $state(false);
 	let showExitGuard = $state(false);
 	let pendingNavigationHref = $state<string | null>(null);
 	let guardError = $state('');
 	let saveAllForm = $state<HTMLFormElement | null>(null);
-	let scheduleTimeRangeInput = $state<HTMLInputElement | null>(null);
-	let scheduleTimeRangeFocused = $state(false);
-	let scheduleTimeRangeError = $state('');
-	let scheduleTimeRangeErrorValue = $state('');
+	let scheduleError = $state('');
+	let scheduleBlockSeq = 100;
 	let allowNavigation = false;
 
 	$effect(() => {
@@ -259,10 +250,7 @@
 			email: normalizedText(current.email).toLowerCase() !== normalizedText(saved.email).toLowerCase(),
 			profilePublic: current.isAvailable !== saved.isAvailable,
 			services: !sameStringList(editableCurrentServices, editableSavedServices),
-			schedule:
-				!sameNumberList(current.schedule.weekdays, saved.schedule.weekdays) ||
-				canonicalTimeRanges(current.schedule.timeRanges) !== canonicalTimeRanges(saved.schedule.timeRanges) ||
-				String(Number(current.schedule.slotInterval || 15)) !== String(Number(saved.schedule.slotInterval || 15)),
+			schedule: canonicalScheduleBlocks(current.schedule.blocks) !== canonicalScheduleBlocks(saved.schedule.blocks),
 			exception: hasExceptionDraft(current.exception)
 		};
 	};
@@ -320,21 +308,79 @@
 	const serviceChangeSummary = $derived.by(() =>
 		serviceDelta.count === 1 ? '1 cambio sin guardar' : `${serviceDelta.count} cambios sin guardar`
 	);
-	const weeklyPreview = $derived(parseTimeRanges(draft.schedule.timeRanges) ?? []);
-	const scheduleTimeRangeFeedback = $derived.by(() => {
-		if (scheduleTimeRangeError && scheduleTimeRangeErrorValue === draft.schedule.timeRanges) {
-			return { message: scheduleTimeRangeError, className: 'ux-alert mt-3' };
-		}
-		if (scheduleTimeRangeFocused && draft.schedule.timeRanges.trim() && !parseTimeRanges(draft.schedule.timeRanges)) {
-			return { message: 'Horario incompleto', className: 'ux-alert ux-alert-warning mt-3' };
-		}
-		return null;
-	});
 	const guardTitle = $derived.by(() => {
 		if (hasUnsavedChanges && hasMissingMinimum) return 'Tenés cambios sin guardar y datos pendientes';
 		if (hasUnsavedChanges) return 'Tenés cambios sin guardar';
 		return 'Faltan datos para recibir turnos';
 	});
+	const scheduleBlocksJson = $derived(serializeScheduleBlocks(draft.schedule.blocks));
+	const scheduleHasAnyDay = $derived(draft.schedule.blocks.some((block) => block.weekdays.length > 0));
+	const scheduleCanSave = $derived(validateScheduleBlocks(draft.schedule.blocks).ok);
+	const schedulePreview = (block: ScheduleBlockDraft) => parseTimeRanges(block.timeRanges) ?? [];
+	const sameNumberList = (left: number[], right: number[]) =>
+		uniqueSortedNumbers(left).join('|') === uniqueSortedNumbers(right).join('|');
+
+	const baselineBlockFor = (block: ScheduleBlockDraft) =>
+		baseline.schedule.blocks.find((saved) => saved.id === block.id) ?? null;
+
+	const canonicalTimeRanges = (value: string) => {
+		const parsed = parseTimeRanges(value);
+		return parsed ? parsed.map((range) => `${range.start}-${range.end}`).join(',') : normalizedText(value);
+	};
+
+	const scheduleBlockDaysDirty = (block: ScheduleBlockDraft) => {
+		const saved = baselineBlockFor(block);
+		if (!saved) return block.weekdays.length > 0;
+		return !sameNumberList(block.weekdays, saved.weekdays);
+	};
+
+	const scheduleBlockTimeDirty = (block: ScheduleBlockDraft) => {
+		const saved = baselineBlockFor(block);
+		if (!saved) return normalizedText(block.timeRanges).length > 0;
+		return canonicalTimeRanges(block.timeRanges) !== canonicalTimeRanges(saved.timeRanges);
+	};
+
+	const scheduleBlockIntervalDirty = (block: ScheduleBlockDraft) => {
+		const saved = baselineBlockFor(block);
+		if (!saved) return Number(block.slotInterval || 15) !== 15;
+		return String(Number(block.slotInterval || 15)) !== String(Number(saved.slotInterval || 15));
+	};
+
+	const scheduleBlockTimeStatus = (block: ScheduleBlockDraft) => {
+		const parsed = parseTimeRanges(block.timeRanges);
+		if (!parsed || parsed.length === 0) {
+			return normalizedText(block.timeRanges) ? 'Horario inválido' : 'Necesario para recibir turnos';
+		}
+		return scheduleBlockTimeDirty(block) ? 'Sin guardar' : '';
+	};
+
+	const scheduleBlockIntervalStatus = (block: ScheduleBlockDraft) => {
+		const interval = Number(block.slotInterval || 15);
+		if (!Number.isInteger(interval) || interval < 5 || interval > 120) return 'Entre 5 y 120 minutos';
+		return scheduleBlockIntervalDirty(block) ? 'Sin guardar' : '';
+	};
+
+	const scheduleBlockDaysStatus = (block: ScheduleBlockDraft) => {
+		if (block.weekdays.length === 0) return 'Elegí días';
+		return scheduleBlockDaysDirty(block) ? 'Sin guardar' : '';
+	};
+
+	const scheduleBlockCardClass = (block: ScheduleBlockDraft) => {
+		const hasProblem =
+			block.weekdays.length === 0 ||
+			!parseTimeRanges(block.timeRanges) ||
+			Boolean(scheduleBlockIntervalStatus(block) && scheduleBlockIntervalStatus(block) !== 'Sin guardar');
+		if (hasProblem) return 'border-red-400/35';
+		if (
+			scheduleBlockDaysDirty(block) ||
+			scheduleBlockTimeDirty(block) ||
+			scheduleBlockIntervalDirty(block) ||
+			!baselineBlockFor(block)
+		) {
+			return 'border-amber-300/35';
+		}
+		return '';
+	};
 
 	const toggleService = (serviceId: string) => {
 		draft.serviceIds = draft.serviceIds.includes(serviceId)
@@ -342,14 +388,60 @@
 			: [...draft.serviceIds, serviceId];
 	};
 
-	const toggleWeekday = (weekday: number) => {
-		draft.schedule.weekdays = draft.schedule.weekdays.includes(weekday)
-			? draft.schedule.weekdays.filter((item) => item !== weekday)
-			: [...draft.schedule.weekdays, weekday].sort((a, b) => a - b);
+	const usedWeekdays = (exceptBlockId = '') =>
+		new Set(
+			draft.schedule.blocks
+				.filter((block) => block.id !== exceptBlockId)
+				.flatMap((block) => block.weekdays)
+		);
+
+	const updateScheduleBlock = (blockId: string | undefined, patch: Partial<ScheduleBlockDraft>) => {
+		draft.schedule.blocks = draft.schedule.blocks.map((block) =>
+			block.id === blockId ? { ...block, ...patch } : block
+		);
+		scheduleError = '';
 	};
 
-	const setWeekdays = (items: number[]) => {
-		draft.schedule.weekdays = items;
+	const toggleBlockWeekday = (blockId: string | undefined, weekday: number) => {
+		const target = draft.schedule.blocks.find((block) => block.id === blockId);
+		if (!target) return;
+		const adding = !target.weekdays.includes(weekday);
+		draft.schedule.blocks = draft.schedule.blocks.map((block) => {
+			if (block.id === blockId) {
+				return {
+					...block,
+					weekdays: adding
+						? [...block.weekdays, weekday].sort((a, b) => a - b)
+						: block.weekdays.filter((item) => item !== weekday)
+				};
+			}
+			return adding ? { ...block, weekdays: block.weekdays.filter((item) => item !== weekday) } : block;
+		});
+		scheduleError = '';
+	};
+
+	const setBlockWeekdays = (blockId: string | undefined, items: number[]) => {
+		const normalized = uniqueSortedNumbers(items);
+		draft.schedule.blocks = draft.schedule.blocks.map((block) => {
+			if (block.id === blockId) return { ...block, weekdays: normalized };
+			return { ...block, weekdays: block.weekdays.filter((weekday) => !normalized.includes(weekday)) };
+		});
+		scheduleError = '';
+	};
+
+	const addScheduleBlock = () => {
+		const next = createEmptyScheduleBlock(`new-block-${scheduleBlockSeq++}`);
+		draft.schedule.blocks = [...draft.schedule.blocks, next];
+		scheduleError = '';
+	};
+
+	const removeScheduleBlock = (blockId: string | undefined) => {
+		if (draft.schedule.blocks.length <= 1) {
+			draft.schedule.blocks = [{ ...draft.schedule.blocks[0], weekdays: [], timeRanges: '', slotInterval: '15' }];
+		} else {
+			draft.schedule.blocks = draft.schedule.blocks.filter((block) => block.id !== blockId);
+		}
+		scheduleError = '';
 	};
 
 	const rulesByWeekday = $derived.by(() =>
@@ -369,40 +461,39 @@
 		input.value = formatPriceLabel(input.value);
 	};
 
-	const commitScheduleTimeRanges = () => {
-		const result = normalizeTimeRangesForCommit(draft.schedule.timeRanges);
+	const commitScheduleBlockTimeRanges = (blockId: string | undefined) => {
+		const block = draft.schedule.blocks.find((item) => item.id === blockId);
+		if (!block) return false;
+		const result = normalizeTimeRangesForCommit(block.timeRanges);
 		if (!result.ok) {
-			scheduleTimeRangeError = 'Horario inválido';
-			scheduleTimeRangeErrorValue = draft.schedule.timeRanges;
+			scheduleError = 'Horario inválido.';
 			return false;
 		}
-		draft.schedule.timeRanges = result.value;
-		scheduleTimeRangeError = '';
-		scheduleTimeRangeErrorValue = '';
+		updateScheduleBlock(block.id, { timeRanges: result.value });
 		return true;
 	};
 
-	const handleScheduleFocus = () => {
-		scheduleTimeRangeFocused = true;
-	};
-
-	const handleScheduleBlur = () => {
-		scheduleTimeRangeFocused = false;
-		commitScheduleTimeRanges();
-	};
-
-	const normalizeScheduleBeforeSubmit = (event: SubmitEvent) => {
-		if (!commitScheduleTimeRanges()) {
-			event.preventDefault();
-			scheduleTimeRangeInput?.focus();
-			return;
+	const normalizeScheduleBeforeSubmit = (event?: SubmitEvent) => {
+		for (const block of draft.schedule.blocks) {
+			if (!commitScheduleBlockTimeRanges(block.id)) {
+				event?.preventDefault();
+				return false;
+			}
 		}
+		const result = validateScheduleBlocks(draft.schedule.blocks);
+		if (!result.ok) {
+			scheduleError = result.message;
+			event?.preventDefault();
+			return false;
+		}
+		scheduleError = '';
+		if (!event) return true;
 		const form = event.currentTarget as HTMLFormElement;
-		const input = form.elements.namedItem('time_ranges') as HTMLInputElement | null;
+		const input = form.elements.namedItem('schedule_blocks') as HTMLInputElement | null;
 		if (input) {
-			input.value = draft.schedule.timeRanges;
-			draft.schedule.timeRanges = input.value;
+			input.value = serializeScheduleBlocks(draft.schedule.blocks);
 		}
+		return true;
 	};
 
 	const normalizeExceptionDate = (event: Event) => {
@@ -538,9 +629,8 @@
 	};
 
 	const requestSaveAll = () => {
-		if (dirtyFields.schedule && !commitScheduleTimeRanges()) {
+		if (dirtyFields.schedule && !normalizeScheduleBeforeSubmit()) {
 			activeTab = 'horarios';
-			scheduleTimeRangeInput?.focus();
 			return;
 		}
 		draft.exception.timeRange = normalizeTimeRangesInput(draft.exception.timeRange);
@@ -568,7 +658,7 @@
 
 	$effect(() => {
 		// A shorthand like 09:00-20 is equivalent to 09:00-20:00, but must stay raw while editing.
-		if (!draftReady || hasUnsavedChanges || scheduleTimeRangeFocused) return;
+		if (!draftReady || hasUnsavedChanges) return;
 		const serverDraft = buildServerDraft(data);
 		baseline = cloneDraft(serverDraft);
 		draft = cloneDraft(serverDraft);
@@ -641,11 +731,7 @@
 			{#each draft.serviceIds.filter((id) => !defaultServiceIdSet.has(id)) as serviceId}
 				<input type="hidden" name="service_id" value={serviceId} />
 			{/each}
-			{#each draft.schedule.weekdays as weekday}
-				<input type="hidden" name="weekdays" value={weekday} />
-			{/each}
-			<input type="hidden" name="time_ranges" value={draft.schedule.timeRanges} />
-			<input type="hidden" name="slot_interval_minutes" value={draft.schedule.slotInterval} />
+			<input type="hidden" name="schedule_blocks" value={scheduleBlocksJson} />
 			<input type="hidden" name="applies_to" value={draft.exception.appliesTo} />
 			<input type="hidden" name="type" value={draft.exception.type} />
 			<input type="hidden" name="date" value={draft.exception.date} />
@@ -752,12 +838,44 @@
 				</div>
 				<div class="flex shrink-0 flex-wrap items-center gap-2">
 					{#if professional?.is_active}
-						<form method="POST" action="?/archive_professional" use:enhance>
-							<button type="submit" class="ux-btn-secondary">Archivar</button>
+						<form
+							method="POST"
+							action="?/archive_professional"
+							use:enhance={() => {
+								archiveSubmitting = true;
+								return async ({ result, update }) => {
+									if (result.type === 'redirect') {
+										window.location.assign(result.location);
+										return;
+									}
+									archiveSubmitting = false;
+									await update({ reset: false, invalidateAll: true });
+								};
+							}}
+						>
+							<button type="submit" disabled={archiveSubmitting} class="ux-btn-secondary">
+								{archiveSubmitting ? 'Archivando...' : 'Archivar'}
+							</button>
 						</form>
 					{:else}
-						<form method="POST" action="?/restore_professional" use:enhance>
-							<button type="submit" class="ux-btn-primary">Restaurar</button>
+						<form
+							method="POST"
+							action="?/restore_professional"
+							use:enhance={() => {
+								restoreSubmitting = true;
+								return async ({ result, update }) => {
+									if (result.type === 'redirect') {
+										window.location.assign(result.location);
+										return;
+									}
+									restoreSubmitting = false;
+									await update({ reset: false, invalidateAll: true });
+								};
+							}}
+						>
+							<button type="submit" disabled={restoreSubmitting} class="ux-btn-primary">
+								{restoreSubmitting ? 'Restaurando...' : 'Restaurar'}
+							</button>
 						</form>
 					{/if}
 					<button type="button" class="ux-btn-danger" onclick={() => (showDeleteConfirm = true)}>Eliminar</button>
@@ -775,13 +893,21 @@
 							method="POST"
 							action="?/delete_professional"
 							use:enhance={() => {
-								return async ({ update }) => {
+								deleteSubmitting = true;
+								return async ({ result, update }) => {
+									if (result.type === 'redirect') {
+										window.location.assign(result.location);
+										return;
+									}
+									deleteSubmitting = false;
 									showDeleteConfirm = false;
-									await update();
+									await update({ reset: false, invalidateAll: true });
 								};
 							}}
 						>
-							<button type="submit" class="ux-btn-danger">Eliminar profesional</button>
+							<button type="submit" disabled={deleteSubmitting} class="ux-btn-danger">
+								{deleteSubmitting ? 'Eliminando...' : 'Eliminar profesional'}
+							</button>
 						</form>
 					</div>
 				{:else}
@@ -860,7 +986,7 @@
 							<input name="name" required disabled={!canOperate} class="ux-input" />
 						</label>
 						<label>
-							<span class="ux-label">Duración</span>
+							<span class="ux-label">Duración en minutos</span>
 							<input name="duration_minutes" type="number" min="5" max="480" step="5" value="30" disabled={!canOperate} class="ux-input" />
 						</label>
 						<label>
@@ -888,91 +1014,127 @@
 						<p class="ux-section-meta ux-section-meta-warning">Cambios sin guardar</p>
 					{/if}
 				</div>
-				{#each draft.schedule.weekdays as weekday}
-					<input type="hidden" name="weekdays" value={weekday} />
-				{/each}
-
-				<div class="mt-6">
-					<span class="ux-label flex flex-wrap items-center gap-2">
-						Días
-					</span>
-					<div class="mt-3 grid grid-cols-[repeat(auto-fit,minmax(112px,1fr))] gap-2">
-						{#each weekdays as day, index}
-							<button
-								type="button"
-								disabled={!canOperate}
-								class={`min-h-14 min-w-0 rounded-2xl border px-3 py-3 text-center text-sm font-black leading-tight whitespace-normal transition disabled:cursor-not-allowed disabled:opacity-50 ${
-									draft.schedule.weekdays.includes(index)
-										? 'border-[#8b5cf6] bg-[#7c3aed] text-white shadow-lg shadow-[#7c3aed]/20'
-										: 'border-white/10 bg-white/[0.03] text-white/65 hover:border-[#8b5cf6]/60 hover:bg-white/[0.06]'
-								}`}
-								onclick={() => toggleWeekday(index)}
-							>
-								{day}
-							</button>
-						{/each}
-					</div>
-					<div class="mt-3 flex flex-wrap gap-2">
-						<button type="button" class="rounded-full border border-white/10 px-4 py-2 text-xs font-bold text-white/65 hover:bg-white/[0.06]" onclick={() => setWeekdays([1, 2, 3, 4, 5])}>Lunes a viernes</button>
-						<button type="button" class="rounded-full border border-white/10 px-4 py-2 text-xs font-bold text-white/65 hover:bg-white/[0.06]" onclick={() => setWeekdays([1, 2, 3, 4, 5, 6])}>Lunes a sábado</button>
-						<button type="button" class="rounded-full border border-white/10 px-4 py-2 text-xs font-bold text-white/65 hover:bg-white/[0.06]" onclick={() => setWeekdays([])}>Limpiar</button>
-					</div>
-				</div>
-
-				<div class="mt-6 grid gap-4 lg:grid-cols-[1fr_180px]">
-					<label>
-						<span class="ux-label flex flex-wrap items-center gap-2">
-							Horarios
-							{#if missingItems.includes('Horarios de atención')}
-								<span class="ux-inline-status ux-inline-status-danger">Necesario para recibir turnos</span>
-							{:else if dirtyFields.schedule}
-								<span class="ux-inline-status ux-inline-status-warning">Sin guardar</span>
-							{/if}
-						</span>
-						<input
-							name="time_ranges"
-							type="text"
-							placeholder="9 a 13, 15 a 19"
-							bind:this={scheduleTimeRangeInput}
-							bind:value={draft.schedule.timeRanges}
-							disabled={!canOperate}
-							aria-invalid={Boolean(
-								(scheduleTimeRangeError && scheduleTimeRangeErrorValue === draft.schedule.timeRanges) ||
-									missingItems.includes('Horarios de atención')
-							)}
-							aria-describedby={scheduleTimeRangeFeedback ? 'schedule-time-ranges-feedback' : undefined}
-							class={`ux-input text-lg font-bold ${fieldStateClass(
-								dirtyFields.schedule,
-								Boolean(scheduleTimeRangeError && scheduleTimeRangeErrorValue === draft.schedule.timeRanges) ||
-									missingItems.includes('Horarios de atención')
-							)}`}
-							onfocus={handleScheduleFocus}
-							onblur={handleScheduleBlur}
-						/>
-						{#if scheduleTimeRangeFeedback}
-							<p id="schedule-time-ranges-feedback" class={scheduleTimeRangeFeedback.className}>
-								{scheduleTimeRangeFeedback.message}
-							</p>
-						{/if}
-						{#if weeklyPreview.length > 0}
-							<div class="mt-3 flex flex-wrap gap-2">
-								{#each weeklyPreview as range}
-									<span class="rounded-full border border-emerald-300/25 bg-emerald-400/10 px-3 py-2 text-xs font-bold text-emerald-100">
-										{range.start} - {range.end}
-									</span>
-								{/each}
+				<input type="hidden" name="schedule_blocks" value={scheduleBlocksJson} />
+				<div class="mt-6 grid gap-4">
+					{#each draft.schedule.blocks as block, blockIndex (block.id)}
+						{@const assignedByOtherBlock = usedWeekdays(block.id)}
+						{@const preview = schedulePreview(block)}
+						{@const daysStatus = scheduleBlockDaysStatus(block)}
+						{@const timeStatus = scheduleBlockTimeStatus(block)}
+						{@const intervalStatus = scheduleBlockIntervalStatus(block)}
+						<div class={`ux-soft-card p-4 ${scheduleBlockCardClass(block)}`}>
+							<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+								<div>
+									<h3 class="text-base font-black text-white">Bloque {blockIndex + 1}</h3>
+									<p class="mt-1 text-sm text-white/55">Días que comparten la misma franja habitual.</p>
+								</div>
+								<button type="button" class="ux-btn-secondary text-sm" disabled={!canOperate} onclick={() => removeScheduleBlock(block.id)}>
+									Quitar bloque
+								</button>
 							</div>
-						{/if}
-					</label>
-					<label>
-						<span class="ux-label flex flex-wrap items-center gap-2">
-							Descanso entre consultas
-							{#if dirtyFields.schedule}<span class="ux-inline-status ux-inline-status-warning">Sin guardar</span>{/if}
-						</span>
-						<input name="slot_interval_minutes" type="number" inputmode="numeric" min="5" max="120" step="5" bind:value={draft.schedule.slotInterval} disabled={!canOperate} class={`ux-input text-lg font-bold ${fieldStateClass(dirtyFields.schedule)}`} />
-					</label>
+
+							<div class="mt-5">
+								<span class="ux-label flex flex-wrap items-center gap-2">
+									Días
+									{#if daysStatus === 'Elegí días'}
+										<span class="ux-inline-status ux-inline-status-danger">{daysStatus}</span>
+									{:else if daysStatus}
+										<span class="ux-inline-status ux-inline-status-warning">{daysStatus}</span>
+									{/if}
+								</span>
+								<div class="mt-3 grid grid-cols-[repeat(auto-fit,minmax(112px,1fr))] gap-2">
+									{#each weekdays as day, index}
+										<button
+											type="button"
+											disabled={!canOperate}
+											class={`min-h-14 min-w-0 rounded-2xl border px-3 py-3 text-center text-sm font-black leading-tight whitespace-normal transition disabled:cursor-not-allowed disabled:opacity-50 ${
+												block.weekdays.includes(index)
+													? 'border-[#8b5cf6] bg-[#7c3aed] text-white shadow-lg shadow-[#7c3aed]/20'
+													: assignedByOtherBlock.has(index)
+														? 'border-white/5 bg-white/[0.015] text-white/30'
+														: 'border-white/10 bg-white/[0.03] text-white/65 hover:border-[#8b5cf6]/60 hover:bg-white/[0.06]'
+											}`}
+											onclick={() => toggleBlockWeekday(block.id, index)}
+										>
+											{day}
+										</button>
+									{/each}
+								</div>
+								<div class="mt-3 flex flex-wrap gap-2">
+									<button type="button" class="rounded-full border border-white/10 px-4 py-2 text-xs font-bold text-white/65 hover:bg-white/[0.06]" onclick={() => setBlockWeekdays(block.id, [1, 2, 3, 4, 5])}>Lunes a viernes</button>
+									<button type="button" class="rounded-full border border-white/10 px-4 py-2 text-xs font-bold text-white/65 hover:bg-white/[0.06]" onclick={() => setBlockWeekdays(block.id, [6])}>Sólo sábado</button>
+									<button type="button" class="rounded-full border border-white/10 px-4 py-2 text-xs font-bold text-white/65 hover:bg-white/[0.06]" onclick={() => setBlockWeekdays(block.id, [])}>Limpiar</button>
+								</div>
+							</div>
+
+							<div class="mt-5 grid gap-4 lg:grid-cols-[1fr_180px]">
+								<label>
+									<span class="ux-label flex flex-wrap items-center gap-2">
+										Horarios
+										{#if timeStatus === 'Necesario para recibir turnos' || timeStatus === 'Horario inválido'}
+											<span class="ux-inline-status ux-inline-status-danger">{timeStatus}</span>
+										{:else if timeStatus}
+											<span class="ux-inline-status ux-inline-status-warning">{timeStatus}</span>
+										{/if}
+									</span>
+									<input
+										type="text"
+										placeholder="9 a 13, 15 a 19"
+										value={block.timeRanges}
+										disabled={!canOperate}
+										aria-invalid={timeStatus === 'Necesario para recibir turnos' || timeStatus === 'Horario inválido'}
+										class={`ux-input text-lg font-bold ${fieldStateClass(
+											timeStatus === 'Sin guardar',
+											timeStatus === 'Necesario para recibir turnos' || timeStatus === 'Horario inválido'
+										)}`}
+										oninput={(event) => updateScheduleBlock(block.id, { timeRanges: (event.currentTarget as HTMLInputElement).value })}
+										onblur={() => commitScheduleBlockTimeRanges(block.id)}
+									/>
+									{#if preview.length > 0}
+										<div class="mt-3 flex flex-wrap gap-2">
+											{#each preview as range}
+												<span class="rounded-full border border-emerald-300/25 bg-emerald-400/10 px-3 py-2 text-xs font-bold text-emerald-100">
+													{range.start} - {range.end}
+												</span>
+											{/each}
+										</div>
+									{/if}
+								</label>
+								<label>
+									<span class="ux-label flex flex-wrap items-center gap-2">
+										Descanso entre consultas
+										{#if intervalStatus === 'Entre 5 y 120 minutos'}
+											<span class="ux-inline-status ux-inline-status-danger">{intervalStatus}</span>
+										{:else if intervalStatus}
+											<span class="ux-inline-status ux-inline-status-warning">{intervalStatus}</span>
+										{/if}
+									</span>
+									<input
+										type="number"
+										inputmode="numeric"
+										min="5"
+										max="120"
+										step="5"
+										value={block.slotInterval}
+										disabled={!canOperate}
+										class={`ux-input text-lg font-bold ${fieldStateClass(
+											intervalStatus === 'Sin guardar',
+											intervalStatus === 'Entre 5 y 120 minutos'
+										)}`}
+										oninput={(event) => updateScheduleBlock(block.id, { slotInterval: (event.currentTarget as HTMLInputElement).value })}
+									/>
+								</label>
+							</div>
+						</div>
+					{/each}
 				</div>
-				<button type="submit" disabled={!canOperate || draft.schedule.weekdays.length === 0 || saving === 'schedule' || !dirtyFields.schedule} class="ux-btn-secondary mt-6 w-full">
+				{#if scheduleError}
+					<p class="ux-alert mt-4">{scheduleError}</p>
+				{/if}
+				<button type="button" disabled={!canOperate} class="ux-btn-secondary mt-4 w-full" onclick={addScheduleBlock}>
+					Agregar otro bloque
+				</button>
+				<button type="submit" disabled={!canOperate || !scheduleHasAnyDay || !scheduleCanSave || saving === 'schedule' || !dirtyFields.schedule} class="ux-btn-secondary mt-3 w-full">
 					{saving === 'schedule' ? 'Guardando...' : 'Guardar sólo horarios'}
 				</button>
 			</form>

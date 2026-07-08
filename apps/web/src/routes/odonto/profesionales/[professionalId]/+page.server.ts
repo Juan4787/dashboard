@@ -7,12 +7,7 @@ import { createSupabaseAdminClient } from '$lib/server/supabase';
 import { professionalHasFollowUps } from '$lib/server/follow-ups';
 import { idsFromForm, setProfessionalServices } from '$lib/server/professional-services';
 import { ensureDefaultServices, ensureDefaultServicesAssigned } from '$lib/server/default-services';
-import {
-	MAX_SLOT_INTERVAL_MINUTES,
-	MIN_SLOT_INTERVAL_MINUTES,
-	replaceProfessionalWeeklyRules,
-	timeRangesOverlap
-} from '$lib/server/availability-rules';
+import { replaceProfessionalScheduleBlocks } from '$lib/server/availability-rules';
 import {
 	findProfessionalByEmail,
 	humanProfessionalEmailConflict,
@@ -20,6 +15,12 @@ import {
 } from '$lib/server/professionals';
 import { formatPriceLabel } from '$lib/utils/money-input';
 import { parseTimeRanges } from '$lib/utils/time-ranges';
+import {
+	parseScheduleBlocksJson,
+	validateScheduleBlocks,
+	type NormalizedScheduleBlock,
+	type ScheduleBlockDraft
+} from '$lib/utils/schedule-blocks';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { error as kitError, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
@@ -48,6 +49,34 @@ const parseLocalDateTime = (date: string, time: string, timeZone: string) => {
 	if (!normalizedDate) return null;
 	const value = zonedDateTimeToUtc(normalizedDate, time, timeZone);
 	return Number.isNaN(value.getTime()) ? null : value;
+};
+
+const scheduleBlocksFromForm = (
+	form: FormData
+):
+	| { ok: true; blocks: NormalizedScheduleBlock[] }
+	| { ok: false; status: 400; message: string } => {
+	const rawBlocks = String(form.get('schedule_blocks') ?? '').trim();
+	let draftBlocks: ScheduleBlockDraft[] | null = rawBlocks ? parseScheduleBlocksJson(rawBlocks) : null;
+	if (rawBlocks && !draftBlocks) {
+		return { ok: false, status: 400, message: 'Los bloques horarios no son válidos.' };
+	}
+	if (!draftBlocks) {
+		draftBlocks = [
+			{
+				weekdays: form
+					.getAll('weekdays')
+					.map((value) => Number(value))
+					.filter((value) => Number.isInteger(value) && value >= 0 && value <= 6),
+				timeRanges: String(form.get('time_ranges') ?? ''),
+				slotInterval: String(form.get('slot_interval_minutes') ?? 15)
+			}
+		];
+	}
+
+	const result = validateScheduleBlocks(draftBlocks);
+	if (!result.ok) return { ok: false, status: 400, message: result.message };
+	return { ok: true, blocks: result.blocks };
 };
 
 const redirectToProfessional = (professionalId: string, tab = 'perfil') => {
@@ -143,40 +172,22 @@ const saveProfessionalWeeklyRules = async (
 	businessId: string,
 	professionalId: string,
 	form: FormData
-): Promise<SaveResult<{ weekdays: number[]; ranges: NonNullable<ReturnType<typeof parseTimeRanges>>; slotInterval: number }>> => {
-	const weekdays = form
-		.getAll('weekdays')
-		.map((value) => Number(value))
-		.filter((value) => Number.isInteger(value) && value >= 0 && value <= 6);
-	const uniqueWeekdays = [...new Set(weekdays)];
-	const interval = Number(form.get('slot_interval_minutes') ?? 15);
-	const parsedRanges = parseTimeRanges(String(form.get('time_ranges') ?? ''));
-	if (uniqueWeekdays.length === 0) return { ok: false, status: 400, message: 'Elegí al menos un día.' };
-	if (!parsedRanges || parsedRanges.length === 0) {
-		return { ok: false, status: 400, message: 'Horario inválido.' };
-	}
-	const ranges = parsedRanges;
-	if (timeRangesOverlap(ranges)) {
-		return { ok: false, status: 400, message: 'Los horarios no pueden superponerse.' };
-	}
-	if (!Number.isInteger(interval) || interval < MIN_SLOT_INTERVAL_MINUTES || interval > MAX_SLOT_INTERVAL_MINUTES) {
-		return { ok: false, status: 400, message: 'El descanso entre consultas debe estar entre 5 y 120 minutos.' };
-	}
+): Promise<SaveResult<{ blocks: NormalizedScheduleBlock[] }>> => {
+	const scheduleBlocks = scheduleBlocksFromForm(form);
+	if (!scheduleBlocks.ok) return scheduleBlocks;
 
 	try {
-		await replaceProfessionalWeeklyRules(supabase, {
+		await replaceProfessionalScheduleBlocks(supabase, {
 			businessId,
 			professionalId,
-			weekdays: uniqueWeekdays,
-			ranges,
-			slotIntervalMinutes: interval
+			blocks: scheduleBlocks.blocks
 		});
 	} catch (replaceError) {
 		console.error('Error guardando horarios', replaceError);
 		return { ok: false, status: 500, message: 'No se pudieron guardar los horarios.' };
 	}
 
-	return { ok: true, data: { weekdays: uniqueWeekdays, ranges, slotInterval: interval } };
+	return { ok: true, data: { blocks: scheduleBlocks.blocks } };
 };
 
 const createAvailabilityException = async (
@@ -437,11 +448,7 @@ export const actions: Actions = {
 			action: 'availability_rules.replaced',
 			entityType: 'professional',
 			entityId: params.professionalId,
-			metadata: {
-				weekdays: scheduleResult.data?.weekdays ?? [],
-				ranges: scheduleResult.data?.ranges ?? [],
-				slot_interval_minutes: scheduleResult.data?.slotInterval ?? null
-			}
+			metadata: { schedule_blocks: scheduleResult.data?.blocks ?? [] }
 		});
 
 		return { success: true, message: 'Horarios guardados.' };
@@ -589,9 +596,7 @@ export const actions: Actions = {
 				entityId: params.professionalId,
 				metadata: {
 					via: 'save_all',
-					weekdays: scheduleResult.data?.weekdays ?? [],
-					ranges: scheduleResult.data?.ranges ?? [],
-					slot_interval_minutes: scheduleResult.data?.slotInterval ?? null
+					schedule_blocks: scheduleResult.data?.blocks ?? []
 				}
 			});
 			savedSections.push('horarios');

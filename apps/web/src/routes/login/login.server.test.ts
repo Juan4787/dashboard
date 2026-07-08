@@ -93,10 +93,13 @@ describe('login/register server actions', () => {
 				confirm_password: 'otro123',
 				accepted_terms: 'true'
 			}) as never
-		)) as { status: number; data: { message?: string } };
+		)) as { status: number; data: { mode?: string; message?: string; email?: string; acceptedTerms?: boolean } };
 
 		expect(result.status).toBe(400);
+		expect(result.data.mode).toBe('register');
 		expect(result.data.message).toBe('Las contraseñas no coinciden.');
+		expect(result.data.email).toBe('nuevo@example.com');
+		expect(result.data.acceptedTerms).toBe(true);
 		expect(mocks.enforceRateLimits).not.toHaveBeenCalled();
 		expect(auth.signUp).not.toHaveBeenCalled();
 	});

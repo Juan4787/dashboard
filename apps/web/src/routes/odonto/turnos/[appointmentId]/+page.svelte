@@ -119,11 +119,6 @@
 		return canProfessionalClose && (status === 'attended' || status === 'no_show');
 	};
 
-	const mainActions = [
-		{ status: 'attended', label: 'Marcar asistió', tone: 'text-sky-100', mark: '✓' },
-		{ status: 'no_show', label: 'Marcar no asistió', tone: 'text-red-100', mark: '!' }
-	];
-
 	// --- Reprogramar: calendario inline + chips de horario ---
 	const parseIso = (iso: string) => {
 		const [y, m, d] = iso.split('-').map(Number);
@@ -371,21 +366,8 @@
 				{/if}
 			</div>
 
-			<div class="mt-7 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-				{#each mainActions as action}
-					<form method="POST" action="?/update_status">
-						<button
-							name="status"
-							value={action.status}
-							disabled={!canUseStatusAction(action.status)}
-							class="flex w-full items-center justify-center gap-3 rounded-2xl border border-white/10 bg-white/[0.035] px-5 py-5 text-lg font-bold text-white transition hover:border-[#8b5cf6]/60 hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-35"
-						>
-							<span class={`grid h-9 w-9 place-items-center rounded-full bg-white/10 text-sm ${action.tone}`}>{action.mark}</span>
-							{action.label}
-						</button>
-					</form>
-				{/each}
-				<details class="rounded-2xl border border-red-400/20 bg-red-500/10 md:col-span-2 xl:col-span-3">
+			<div class="mt-7">
+				<details class="rounded-2xl border border-red-400/20 bg-red-500/10">
 					<summary class="cursor-pointer list-none px-5 py-5 text-lg font-bold text-red-100">Cancelar turno</summary>
 					<form method="POST" action="?/update_status" class="border-t border-red-400/20 p-5">
 						<input type="hidden" name="status" value="cancelled" />

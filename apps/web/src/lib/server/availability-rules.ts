@@ -1,13 +1,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { TimeRange } from '$lib/utils/time-ranges';
+import { timeRangesOverlap, type NormalizedScheduleBlock } from '$lib/utils/schedule-blocks';
 
 export const MIN_SLOT_INTERVAL_MINUTES = 5;
 export const MAX_SLOT_INTERVAL_MINUTES = 120;
 
-export const timeRangesOverlap = (ranges: TimeRange[]) => {
-	const sorted = [...ranges].sort((a, b) => a.start.localeCompare(b.start));
-	return sorted.some((range, index) => index > 0 && range.start < sorted[index - 1].end);
-};
+export { timeRangesOverlap };
 
 const isMissingAvailabilityRpc = (error: { code?: string; message?: string } | null | undefined) =>
 	error?.code === 'PGRST202' ||
@@ -57,6 +55,41 @@ export const replaceProfessionalWeeklyRules = async (
 			is_active: true
 		}))
 	);
+	const { error: insertError } = await supabase.from('availability_rules').insert(rows);
+	if (insertError) throw insertError;
+};
+
+export const replaceProfessionalScheduleBlocks = async (
+	supabase: SupabaseClient,
+	input: {
+		businessId: string;
+		professionalId: string;
+		blocks: NormalizedScheduleBlock[];
+	}
+) => {
+	const { businessId, professionalId, blocks } = input;
+	const { error: deleteError } = await supabase
+		.from('availability_rules')
+		.delete()
+		.eq('business_id', businessId)
+		.eq('professional_id', professionalId);
+	if (deleteError) throw deleteError;
+
+	const rows = blocks.flatMap((block) =>
+		block.weekdays.flatMap((weekday) =>
+			block.ranges.map((range) => ({
+				business_id: businessId,
+				professional_id: professionalId,
+				weekday,
+				start_time: range.start,
+				end_time: range.end,
+				slot_interval_minutes: block.slotIntervalMinutes,
+				is_active: true
+			}))
+		)
+	);
+
+	if (rows.length === 0) return;
 	const { error: insertError } = await supabase.from('availability_rules').insert(rows);
 	if (insertError) throw insertError;
 };

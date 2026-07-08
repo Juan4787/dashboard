@@ -1,18 +1,50 @@
 <script lang="ts">
 	let { data, form } = $props();
+	type AuthMode = 'login' | 'register';
 	let showPassword = $state(false);
-	let mode = $state<'login' | 'register'>('login');
+	let showConfirmPassword = $state(false);
+	let mode = $state<AuthMode>('login');
 	const formEmail = $derived(form?.email ?? '');
-	const message = $derived(form?.message ?? data?.message ?? '');
+	const formMode = $derived(form?.mode as AuthMode | undefined);
+	const serverMessage = $derived(form?.message ?? data?.message ?? '');
 	let email = $state('');
 	let password = $state('');
 	let confirmPassword = $state('');
 	let acceptedTerms = $state(false);
 	let googleSubmitting = $state(false);
+	let localMessage = $state('');
+	const message = $derived(localMessage || serverMessage);
+
+	const setMode = (nextMode: AuthMode) => {
+		mode = nextMode;
+		localMessage = '';
+	};
+
+	const clearLocalMessage = () => {
+		if (localMessage) localMessage = '';
+	};
+
+	const handleCredentialsSubmit = (event: SubmitEvent) => {
+		localMessage = '';
+		if (mode !== 'register') return;
+		if (password !== confirmPassword) {
+			event.preventDefault();
+			localMessage = 'Las contraseñas no coinciden.';
+		}
+	};
 
 	$effect(() => {
 		if (formEmail) {
 			email = formEmail;
+		}
+	});
+
+	$effect(() => {
+		if (formMode === 'login' || formMode === 'register') {
+			mode = formMode;
+		}
+		if (form?.acceptedTerms === true) {
+			acceptedTerms = true;
 		}
 	});
 </script>
@@ -34,21 +66,21 @@
 				<button
 					type="button"
 					class={`rounded-full px-5 py-2 transition ${mode === 'login' ? 'bg-[#7c3aed] text-white' : 'hover:text-white'}`}
-					onclick={() => (mode = 'login')}
+					onclick={() => setMode('login')}
 				>
 					Ingresar
 				</button>
 				<button
 					type="button"
 					class={`rounded-full px-5 py-2 transition ${mode === 'register' ? 'bg-[#7c3aed] text-white' : 'hover:text-white'}`}
-					onclick={() => (mode = 'register')}
+					onclick={() => setMode('register')}
 				>
 					Crear cuenta
 				</button>
 			</div>
 		</div>
 
-		<form method="post" action={mode === 'register' ? '?/register' : '?/login'} class="space-y-5">
+		<form method="post" action={mode === 'register' ? '?/register' : '?/login'} class="space-y-5" onsubmit={handleCredentialsSubmit}>
 			<label class="block">
 				<span class="ux-label">Correo electrónico</span>
 				<input
@@ -59,6 +91,7 @@
 					placeholder="tu@correo.com"
 					required
 					bind:value={email}
+					oninput={clearLocalMessage}
 					autocomplete="email"
 				/>
 			</label>
@@ -74,6 +107,7 @@
 						placeholder={mode === 'register' ? 'Creá una contraseña segura' : 'Ingresá tu contraseña'}
 						required
 						bind:value={password}
+						oninput={clearLocalMessage}
 						autocomplete={mode === 'register' ? 'new-password' : 'current-password'}
 					/>
 					<button
@@ -89,16 +123,26 @@
 			{#if mode === 'register'}
 				<label class="block">
 					<span class="ux-label">Confirmar contraseña</span>
-					<input
-						id="confirm_password"
-						name="confirm_password"
-						type={showPassword ? 'text' : 'password'}
-						class="ux-input"
-						placeholder="Repetí la misma contraseña"
-						required
-						bind:value={confirmPassword}
-						autocomplete="new-password"
-					/>
+					<div class="relative">
+						<input
+							id="confirm_password"
+							name="confirm_password"
+							type={showConfirmPassword ? 'text' : 'password'}
+							class="ux-input pr-16"
+							placeholder="Repetí la misma contraseña"
+							required
+							bind:value={confirmPassword}
+							oninput={clearLocalMessage}
+							autocomplete="new-password"
+						/>
+						<button
+							type="button"
+							class="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg px-3 py-2 text-xs font-semibold text-white/70 transition hover:bg-white/10"
+							onclick={() => (showConfirmPassword = !showConfirmPassword)}
+						>
+							{showConfirmPassword ? 'Ocultar' : 'Ver'}
+						</button>
+					</div>
 				</label>
 			{/if}
 
@@ -140,7 +184,7 @@
 				</div>
 			{:else}
 				<div class="text-center text-sm text-white/55">
-					<button type="button" class="font-semibold text-[#c4b5fd] hover:underline" onclick={() => (mode = 'login')}>
+					<button type="button" class="font-semibold text-[#c4b5fd] hover:underline" onclick={() => setMode('login')}>
 						¿Ya tenés cuenta? Ingresá
 					</button>
 				</div>

@@ -37,6 +37,16 @@ const authErrorMessage = (value?: string | null) => {
 	return null;
 };
 
+const loginFail = (status: number, message: string, email: string) =>
+	fail(status, { mode: 'login' as const, message, email });
+
+const registerFail = (
+	status: number,
+	message: string,
+	email: string,
+	acceptedTerms = false
+) => fail(status, { mode: 'register' as const, message, email, acceptedTerms });
+
 export const load: PageServerLoad = ({ locals, url }) => {
 	if (locals.auth) {
 		throw redirect(302, getModuleEntryRoute(locals.auth.module));
@@ -53,7 +63,7 @@ export const actions: Actions = {
 		const password = String(form.get('password') ?? '');
 
 		if (!email || !password) {
-			return fail(400, { message: 'Completá correo electrónico y contraseña.', email });
+			return loginFail(400, 'Completá correo electrónico y contraseña.', email);
 		}
 
 		const isMaster = isMasterEmail(email);
@@ -76,7 +86,7 @@ export const actions: Actions = {
 			await enforceRateLimits(loginPasswordRateLimitRules(email, getClientAddress()), fetch);
 		} catch (error) {
 			const result = rateLimitFail(error, 'Error validando rate limit de login');
-			return fail(result.status, { message: result.message, email });
+			return loginFail(result.status, result.message, email);
 		}
 
 		const supabase = await createSupabaseServerClient('odonto', null, fetch);
@@ -87,22 +97,23 @@ export const actions: Actions = {
 			console.error('Error login Supabase', { email, error });
 			const msg = error?.message?.toLowerCase() ?? '';
 			if ((error as any)?.code === 'email_provider_disabled' || msg.includes('email logins are disabled')) {
-				return fail(400, {
-					message:
-						'El ingreso con correo electrónico está desactivado en la configuración de acceso.',
+				return loginFail(
+					400,
+					'El ingreso con correo electrónico está desactivado en la configuración de acceso.',
 					email
-				});
+				);
 			}
 			if (msg.includes('email not confirmed')) {
-				return fail(400, {
-					message: 'Tu correo electrónico todavía no está confirmado.',
-					email
-				});
+				return loginFail(400, 'Tu correo electrónico todavía no está confirmado.', email);
 			}
 			if (msg.includes('invalid api key') || msg.includes('invalid jwt') || msg.includes('jwt')) {
-				return fail(400, { message: 'La conexión con la base de datos no está configurada correctamente.', email });
+				return loginFail(
+					400,
+					'La conexión con la base de datos no está configurada correctamente.',
+					email
+				);
 			}
-			return fail(400, { message: 'Credenciales inválidas', email });
+			return loginFail(400, 'Credenciales inválidas', email);
 		}
 
 		const session = data.session;
@@ -126,7 +137,7 @@ export const actions: Actions = {
 	},
 	register: async ({ request, cookies, fetch, getClientAddress }) => {
 		if (env.DEMO_MODE === 'true') {
-			return fail(400, { message: 'Registro no disponible en modo demo' });
+			return registerFail(400, 'Registro no disponible en modo demo', '');
 		}
 
 		const form = await request.formData();
@@ -136,30 +147,42 @@ export const actions: Actions = {
 		const acceptedTerms = form.get('accepted_terms') === 'true';
 
 		if (!email || !password) {
-			return fail(400, { message: 'Completá correo electrónico y contraseña.', email });
+			return registerFail(400, 'Completá correo electrónico y contraseña.', email, acceptedTerms);
 		}
 		if (password !== confirmPassword) {
-			return fail(400, { message: 'Las contraseñas no coinciden.', email });
+			return registerFail(400, 'Las contraseñas no coinciden.', email, acceptedTerms);
 		}
 		if (!acceptedTerms) {
-			return fail(400, {
-				message: 'Para crear la cuenta tenés que aceptar los términos y condiciones.',
-				email
-			});
+			return registerFail(
+				400,
+				'Para crear la cuenta tenés que aceptar los términos y condiciones.',
+				email,
+				acceptedTerms
+			);
 		}
 		if (password.length < 6) {
-			return fail(400, { message: 'La contraseña debe tener al menos 6 caracteres', email });
+			return registerFail(
+				400,
+				'La contraseña debe tener al menos 6 caracteres',
+				email,
+				acceptedTerms
+			);
 		}
 
 		if (isMasterEmail(email)) {
-			return fail(400, { message: `El correo maestro (${MASTER_EMAIL}) no se registra acá.`, email });
+			return registerFail(
+				400,
+				`El correo maestro (${MASTER_EMAIL}) no se registra acá.`,
+				email,
+				acceptedTerms
+			);
 		}
 
 		try {
 			await enforceRateLimits(signupEmailRateLimitRules(email, getClientAddress()), fetch);
 		} catch (error) {
 			const result = rateLimitFail(error, 'Error validando rate limit de registro');
-			return fail(result.status, { message: result.message, email });
+			return registerFail(result.status, result.message, email, acceptedTerms);
 		}
 
 		const supabase = await createSupabaseServerClient('odonto', null, fetch);
@@ -168,17 +191,28 @@ export const actions: Actions = {
 			console.error('Error registro Supabase', { email, error });
 			const msg = error?.message?.toLowerCase() ?? '';
 			if (msg.includes('user already registered') || msg.includes('already registered')) {
-				return fail(400, { message: 'Ese correo electrónico ya está registrado. Ingresá con tu contraseña.', email });
+				return registerFail(
+					400,
+					'Ese correo electrónico ya está registrado. Ingresá con tu contraseña.',
+					email,
+					acceptedTerms
+				);
 			}
-			return fail(400, { message: 'No pudimos crear la cuenta. Revisá los datos e intentá de nuevo.', email });
+			return registerFail(
+				400,
+				'No pudimos crear la cuenta. Revisá los datos e intentá de nuevo.',
+				email,
+				acceptedTerms
+			);
 		}
 
 		if (!data.session) {
-			return fail(400, {
-				message:
-					'La cuenta se creó pero falta confirmar el correo electrónico.',
-				email
-			});
+			return registerFail(
+				400,
+				'La cuenta se creó pero falta confirmar el correo electrónico.',
+				email,
+				acceptedTerms
+			);
 		}
 
 		const cookieOptions = {

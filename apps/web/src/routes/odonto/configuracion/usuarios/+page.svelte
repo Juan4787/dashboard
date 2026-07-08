@@ -2,7 +2,14 @@
 	import type { BusinessContext, BusinessRole } from '$lib/server/business';
 	import { formatPriceLabel } from '$lib/utils/money-input';
 	import { normalizeTimeRangesForCommit, normalizeTimeRangesInput, parseTimeRanges } from '$lib/utils/time-ranges';
+	import {
+		createEmptyScheduleBlock,
+		serializeScheduleBlocks,
+		validateScheduleBlocks,
+		type ScheduleBlockDraft
+	} from '$lib/utils/schedule-blocks';
 	import { enhance } from '$app/forms';
+	import type { SubmitFunction } from '@sveltejs/kit';
 
 	type RoleAccess = {
 		id: string;
@@ -119,9 +126,8 @@
 	let newServiceName = $state('');
 	let newServiceDuration = $state('30');
 	let newServicePrice = $state('');
-	let selectedWeekdays = $state<number[]>([]);
-	let weeklyTimeRanges = $state('');
-	let slotInterval = $state('15');
+	let scheduleBlocks = $state<ScheduleBlockDraft[]>([{ ...createEmptyScheduleBlock('wizard-block-1') }]);
+	let scheduleBlockSeq = 20;
 	let exceptionAppliesTo = $state<'professional' | 'business'>('professional');
 	let exceptionType = $state<'blocked' | 'extra_available'>('blocked');
 	let exceptionDate = $state('');
@@ -131,12 +137,11 @@
 	let emailError = $state('');
 	let nameError = $state('');
 	let newServiceError = $state('');
-	let daysError = $state('');
-	let timeError = $state('');
-	let intervalError = $state('');
+	let scheduleError = $state('');
 	let exceptionError = $state('');
-	let weeklyTimeRangeFocused = $state(false);
-	let weeklyTimeRangeErrorValue = $state('');
+	let wizardSubmitting = $state(false);
+	let attendingSubmitting = $state(false);
+	let teamActionBusy = $state('');
 
 	const steps = $derived(
 		role === 'professional'
@@ -154,13 +159,34 @@
 		}
 		if (form.values.professional_name) professionalName = String(form.values.professional_name);
 		if (form.values.professional_specialty) professionalSpecialty = String(form.values.professional_specialty);
-		if (form.values.time_ranges) weeklyTimeRanges = String(form.values.time_ranges);
-		if (form.values.slot_interval_minutes) slotInterval = String(form.values.slot_interval_minutes);
-		if (form.values.weekdays_csv) {
-			selectedWeekdays = String(form.values.weekdays_csv)
-				.split(',')
-				.map((value) => Number(value))
-				.filter((value) => Number.isInteger(value) && value >= 0 && value <= 6);
+		if (form.values.schedule_blocks) {
+			try {
+				const parsed = JSON.parse(String(form.values.schedule_blocks));
+				if (Array.isArray(parsed)) {
+					scheduleBlocks = parsed.map((item: any, index) => ({
+						id: `restored-wizard-block-${index + 1}`,
+						weekdays: Array.isArray(item?.weekdays)
+							? item.weekdays.map(Number).filter((value: number) => Number.isInteger(value) && value >= 0 && value <= 6)
+							: [],
+						timeRanges: String(item?.timeRanges ?? item?.time_ranges ?? ''),
+						slotInterval: String(item?.slotInterval ?? item?.slot_interval_minutes ?? '15')
+					}));
+				}
+			} catch {
+				scheduleBlocks = [{ ...createEmptyScheduleBlock('wizard-block-1') }];
+			}
+		} else if (form.values.time_ranges || form.values.weekdays_csv) {
+			scheduleBlocks = [
+				{
+					id: 'restored-wizard-block-1',
+					weekdays: String(form.values.weekdays_csv ?? '')
+						.split(',')
+						.map((value) => Number(value))
+						.filter((value) => Number.isInteger(value) && value >= 0 && value <= 6),
+					timeRanges: String(form.values.time_ranges ?? ''),
+					slotInterval: String(form.values.slot_interval_minutes ?? '15')
+				}
+			];
 		}
 		if (form.values.service_ids_csv) {
 			selectedServiceIds = String(form.values.service_ids_csv).split(',').filter(Boolean);
@@ -195,9 +221,7 @@
 		newServiceName = '';
 		newServiceDuration = '30';
 		newServicePrice = '';
-		selectedWeekdays = [];
-		weeklyTimeRanges = '';
-		slotInterval = '15';
+		scheduleBlocks = [{ ...createEmptyScheduleBlock(`wizard-block-${scheduleBlockSeq++}`) }];
 		exceptionAppliesTo = 'professional';
 		exceptionType = 'blocked';
 		exceptionDate = '';
@@ -206,24 +230,31 @@
 		emailError = '';
 		nameError = '';
 		newServiceError = '';
-		daysError = '';
-		timeError = '';
-		intervalError = '';
+		scheduleError = '';
 		exceptionError = '';
-		weeklyTimeRangeFocused = false;
-		weeklyTimeRangeErrorValue = '';
 	};
 
-	const commitWeeklyTimeRanges = () => {
-		const result = normalizeTimeRangesForCommit(weeklyTimeRanges);
+	const usedWeekdays = (exceptBlockId = '') =>
+		new Set(
+			scheduleBlocks
+				.filter((block) => block.id !== exceptBlockId)
+				.flatMap((block) => block.weekdays)
+		);
+
+	const updateScheduleBlock = (blockId: string | undefined, patch: Partial<ScheduleBlockDraft>) => {
+		scheduleBlocks = scheduleBlocks.map((block) => (block.id === blockId ? { ...block, ...patch } : block));
+		scheduleError = '';
+	};
+
+	const commitScheduleBlockTimeRanges = (blockId: string | undefined) => {
+		const block = scheduleBlocks.find((item) => item.id === blockId);
+		if (!block) return false;
+		const result = normalizeTimeRangesForCommit(block.timeRanges);
 		if (!result.ok) {
-			timeError = 'Horario inválido';
-			weeklyTimeRangeErrorValue = weeklyTimeRanges;
+			scheduleError = 'Horario inválido.';
 			return false;
 		}
-		weeklyTimeRanges = result.value;
-		timeError = '';
-		weeklyTimeRangeErrorValue = '';
+		updateScheduleBlock(block.id, { timeRanges: result.value });
 		return true;
 	};
 
@@ -255,21 +286,15 @@
 		}
 		if (currentStep === 'horarios') {
 			let valid = true;
-			if (selectedWeekdays.length === 0) {
-				daysError = 'Seleccioná al menos un día.';
+			for (const block of scheduleBlocks) {
+				if (!commitScheduleBlockTimeRanges(block.id)) valid = false;
+			}
+			const scheduleResult = validateScheduleBlocks(scheduleBlocks);
+			if (!scheduleResult.ok) {
+				scheduleError = scheduleResult.message;
 				valid = false;
 			} else {
-				daysError = '';
-			}
-			if (!commitWeeklyTimeRanges()) {
-				valid = false;
-			}
-			const interval = Number(slotInterval);
-			if (!Number.isInteger(interval) || interval < 5 || interval > 120) {
-				intervalError = 'Completá el descanso entre consultas: entre 5 y 120 minutos.';
-				valid = false;
-			} else {
-				intervalError = '';
+				scheduleError = '';
 			}
 			const hasPartialException =
 				(exceptionDate.trim() && !exceptionTimeRange.trim()) ||
@@ -322,29 +347,52 @@
 		newServices = newServices.filter((_, itemIndex) => itemIndex !== index);
 	};
 
-	const toggleWeekday = (weekday: number) => {
-		selectedWeekdays = selectedWeekdays.includes(weekday)
-			? selectedWeekdays.filter((item) => item !== weekday)
-			: [...selectedWeekdays, weekday].sort((a, b) => a - b);
+	const toggleBlockWeekday = (blockId: string | undefined, weekday: number) => {
+		const target = scheduleBlocks.find((block) => block.id === blockId);
+		if (!target) return;
+		const adding = !target.weekdays.includes(weekday);
+		scheduleBlocks = scheduleBlocks.map((block) => {
+			if (block.id === blockId) {
+				return {
+					...block,
+					weekdays: adding
+						? [...block.weekdays, weekday].sort((a, b) => a - b)
+						: block.weekdays.filter((item) => item !== weekday)
+				};
+			}
+			return adding ? { ...block, weekdays: block.weekdays.filter((item) => item !== weekday) } : block;
+		});
+		scheduleError = '';
 	};
 
-	const setWeekdays = (items: number[]) => {
-		selectedWeekdays = items;
+	const setBlockWeekdays = (blockId: string | undefined, items: number[]) => {
+		const normalized = [...new Set(items)].sort((a, b) => a - b);
+		scheduleBlocks = scheduleBlocks.map((block) => {
+			if (block.id === blockId) return { ...block, weekdays: normalized };
+			return { ...block, weekdays: block.weekdays.filter((weekday) => !normalized.includes(weekday)) };
+		});
+		scheduleError = '';
+	};
+
+	const addScheduleBlock = () => {
+		const next = createEmptyScheduleBlock(`wizard-block-${scheduleBlockSeq++}`);
+		scheduleBlocks = [...scheduleBlocks, next];
+		scheduleError = '';
+	};
+
+	const removeScheduleBlock = (blockId: string | undefined) => {
+		if (scheduleBlocks.length <= 1) {
+			scheduleBlocks = [{ ...scheduleBlocks[0], weekdays: [], timeRanges: '', slotInterval: '15' }];
+		} else {
+			scheduleBlocks = scheduleBlocks.filter((block) => block.id !== blockId);
+		}
+		scheduleError = '';
 	};
 
 	const handlePriceInput = (event: Event) => {
 		const input = event.currentTarget as HTMLInputElement;
 		input.value = formatPriceLabel(input.value);
 		newServicePrice = input.value;
-	};
-
-	const handleWeeklyTimeRangeFocus = () => {
-		weeklyTimeRangeFocused = true;
-	};
-
-	const handleWeeklyTimeRangeBlur = () => {
-		weeklyTimeRangeFocused = false;
-		commitWeeklyTimeRanges();
 	};
 
 	const normalizeExceptionDate = (event: Event) => {
@@ -363,24 +411,22 @@
 		exceptionTimeRange = normalizeTimeRangesInput(input.value);
 	};
 
-	const weeklyPreview = $derived(parseTimeRanges(weeklyTimeRanges) ?? []);
-	const weeklyTimeRangeFeedback = $derived.by(() => {
-		if (timeError && weeklyTimeRangeErrorValue === weeklyTimeRanges) {
-			return { message: timeError, className: 'ux-alert mt-3' };
-		}
-		if (weeklyTimeRangeFocused && weeklyTimeRanges.trim() && !parseTimeRanges(weeklyTimeRanges)) {
-			return { message: 'Horario incompleto', className: 'ux-alert ux-alert-warning mt-3' };
-		}
-		return null;
-	});
+	const schedulePreview = (block: ScheduleBlockDraft) => parseTimeRanges(block.timeRanges) ?? [];
 	const selectedCustomServices = $derived(customServices.filter((service) => selectedServiceIds.includes(service.id)));
 	const summaryAdditionalServices = $derived([
 		...selectedCustomServices.map((service) => service.name),
 		...newServices.map((service) => service.name)
 	]);
-	const summaryDays = $derived(selectedWeekdays.map((weekday) => weekdayNames[weekday]).join(', '));
+	const summaryScheduleBlocks = $derived(
+		scheduleBlocks.map((block) => ({
+			days: block.weekdays.map((weekday) => weekdayNames[weekday]).join(', '),
+			ranges: schedulePreview(block).map((range) => `${range.start} a ${range.end}`).join(', '),
+			slotInterval: block.slotInterval || '15'
+		}))
+	);
 	const hasExceptionLoaded = $derived(Boolean(exceptionDate.trim() && exceptionTimeRange.trim()));
 	const newServicesJson = $derived(JSON.stringify(newServices));
+	const scheduleBlocksJson = $derived(serializeScheduleBlocks(scheduleBlocks));
 
 	const defaultServiceRows = $derived(
 		(data.defaultServiceNames as readonly string[]).map((name) => {
@@ -397,9 +443,28 @@
 
 	const handleWizardSubmit = (event: SubmitEvent) => {
 		if (role !== 'professional') return;
-		if (commitWeeklyTimeRanges()) return;
+		if (validateCurrentStep()) return;
 		event.preventDefault();
 		stepIndex = steps.indexOf('horarios');
+	};
+
+	const wizardEnhance: SubmitFunction = ({ cancel }) => {
+		if (role === 'professional' && !validateCurrentStep()) {
+			stepIndex = steps.indexOf('horarios');
+			cancel();
+			return;
+		}
+		wizardSubmitting = true;
+		return async ({ result, update }) => {
+			wizardSubmitting = false;
+			if (result.type === 'success') {
+				showWizard = false;
+				resetWizard();
+				await update({ reset: false, invalidateAll: true });
+				return;
+			}
+			await update({ reset: false, invalidateAll: true });
+		};
 	};
 </script>
 
@@ -424,7 +489,14 @@
 	{/if}
 
 	{#if showWizard}
-		<form method="POST" action="?/add_user" class="ux-card scroll-mt-5" onsubmit={handleWizardSubmit}>
+		<form
+			method="POST"
+			action="?/add_user"
+			class="ux-card scroll-mt-5"
+			onsubmit={handleWizardSubmit}
+			use:enhance={wizardEnhance}
+			aria-busy={wizardSubmitting}
+		>
 			<div class="flex items-center justify-between gap-4">
 				<h2 class="ux-section-title">Agregar integrante</h2>
 				<div class="flex gap-2">
@@ -445,12 +517,7 @@
 			{/each}
 			<input type="hidden" name="service_ids_csv" value={selectedServiceIds.join(',')} />
 			<input type="hidden" name="new_services" value={newServicesJson} />
-			{#each selectedWeekdays as weekday}
-				<input type="hidden" name="weekdays" value={weekday} />
-			{/each}
-			<input type="hidden" name="weekdays_csv" value={selectedWeekdays.join(',')} />
-			<input type="hidden" name="time_ranges" value={weeklyTimeRanges} />
-			<input type="hidden" name="slot_interval_minutes" value={slotInterval} />
+			<input type="hidden" name="schedule_blocks" value={scheduleBlocksJson} />
 			<input type="hidden" name="exception_applies_to" value={exceptionAppliesTo} />
 			<input type="hidden" name="exception_type" value={exceptionType} />
 			<input type="hidden" name="exception_date" value={exceptionDate} />
@@ -587,7 +654,7 @@
 								<input disabled={!canManage} class="ux-input" bind:value={newServiceName} />
 							</label>
 							<label>
-								<span class="ux-label">Duración</span>
+								<span class="ux-label">Duración en minutos</span>
 								<input type="number" min="5" max="480" step="5" disabled={!canManage} class="ux-input" bind:value={newServiceDuration} />
 							</label>
 							<label>
@@ -610,84 +677,95 @@
 				</div>
 			{:else if currentStep === 'horarios'}
 				<div class="mt-5 grid gap-5 xl:grid-cols-[1fr_0.78fr]">
-					<div class={`ux-soft-card p-5 ${daysError || timeError || intervalError ? 'border border-red-400/40' : ''}`}>
+					<div class={`ux-soft-card p-5 ${scheduleError ? 'border border-red-400/40' : ''}`}>
 						<h3 class="ux-section-title">Horarios de atención</h3>
-						<p class="mt-1 text-sm text-white/55">Marcá los días y escribí los bloques horarios.</p>
+						<p class="mt-1 text-sm text-white/55">Cada bloque tiene sus propios días, horarios y descanso.</p>
 
-						<div class="mt-5">
-							<span class="ux-label">Días</span>
-							<div class="mt-3 grid grid-cols-[repeat(auto-fit,minmax(112px,1fr))] gap-2">
-								{#each weekdayNames as day, index}
-									<button
-										type="button"
-										disabled={!canManage}
-										class={`min-h-14 min-w-0 rounded-2xl border px-3 py-3 text-center text-sm font-black leading-tight whitespace-normal transition disabled:cursor-not-allowed disabled:opacity-50 ${
-											selectedWeekdays.includes(index)
-												? 'border-[#8b5cf6] bg-[#7c3aed] text-white shadow-lg shadow-[#7c3aed]/20'
-												: 'border-white/10 bg-white/[0.03] text-white/65 hover:border-[#8b5cf6]/60 hover:bg-white/[0.06]'
-										}`}
-										onclick={() => toggleWeekday(index)}
-									>
-										{day}
-									</button>
-								{/each}
-							</div>
-							<div class="mt-3 flex flex-wrap gap-2">
-								<button type="button" class="rounded-full border border-white/10 px-4 py-2 text-xs font-bold text-white/65 hover:bg-white/[0.06]" onclick={() => setWeekdays([1, 2, 3, 4, 5])}>Lunes a viernes</button>
-								<button type="button" class="rounded-full border border-white/10 px-4 py-2 text-xs font-bold text-white/65 hover:bg-white/[0.06]" onclick={() => setWeekdays([1, 2, 3, 4, 5, 6])}>Lunes a sábado</button>
-								<button type="button" class="rounded-full border border-white/10 px-4 py-2 text-xs font-bold text-white/65 hover:bg-white/[0.06]" onclick={() => setWeekdays([])}>Limpiar</button>
-							</div>
-							{#if daysError}
-								<p class="ux-alert mt-3">{daysError}</p>
-							{/if}
-						</div>
-
-						<div class="mt-6 grid gap-4 lg:grid-cols-[1fr_180px]">
-							<label>
-								<span class="ux-label">Horarios</span>
-								<input
-									type="text"
-									placeholder="9 a 13, 15 a 19"
-									bind:value={weeklyTimeRanges}
-									disabled={!canManage}
-									aria-invalid={Boolean(timeError && weeklyTimeRangeErrorValue === weeklyTimeRanges)}
-									aria-describedby={weeklyTimeRangeFeedback ? 'weekly-time-ranges-feedback' : undefined}
-									class={`ux-input text-lg font-bold ${timeError && weeklyTimeRangeErrorValue === weeklyTimeRanges ? 'border-red-400/60' : ''}`}
-									onfocus={handleWeeklyTimeRangeFocus}
-									onblur={handleWeeklyTimeRangeBlur}
-								/>
-								{#if weeklyTimeRangeFeedback}
-									<p id="weekly-time-ranges-feedback" class={weeklyTimeRangeFeedback.className}>
-										{weeklyTimeRangeFeedback.message}
-									</p>
-								{/if}
-								{#if weeklyPreview.length > 0}
-									<div class="mt-3 flex flex-wrap gap-2">
-										{#each weeklyPreview as range}
-											<span class="rounded-full border border-emerald-300/25 bg-emerald-400/10 px-3 py-2 text-xs font-bold text-emerald-100">
-												{range.start} - {range.end}
-											</span>
-										{/each}
+						<div class="mt-5 grid gap-4">
+							{#each scheduleBlocks as block, blockIndex (block.id)}
+								{@const assignedByOtherBlock = usedWeekdays(block.id)}
+								{@const preview = schedulePreview(block)}
+								<div class="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+									<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+										<h4 class="font-black text-white">Bloque {blockIndex + 1}</h4>
+										<button type="button" class="ux-btn-secondary text-sm" disabled={!canManage} onclick={() => removeScheduleBlock(block.id)}>
+											Quitar bloque
+										</button>
 									</div>
-								{/if}
-							</label>
-							<label>
-								<span class="ux-label">Descanso entre consultas</span>
-								<input
-									type="number"
-									inputmode="numeric"
-									min="5"
-									max="120"
-									step="5"
-									disabled={!canManage}
-									class={`ux-input text-lg font-bold ${intervalError ? 'border-red-400/60' : ''}`}
-									bind:value={slotInterval}
-								/>
-							</label>
+									<div class="mt-4">
+										<span class="ux-label">Días</span>
+										<div class="mt-3 grid grid-cols-[repeat(auto-fit,minmax(112px,1fr))] gap-2">
+											{#each weekdayNames as day, index}
+												<button
+													type="button"
+													disabled={!canManage}
+													class={`min-h-14 min-w-0 rounded-2xl border px-3 py-3 text-center text-sm font-black leading-tight whitespace-normal transition disabled:cursor-not-allowed disabled:opacity-50 ${
+														block.weekdays.includes(index)
+															? 'border-[#8b5cf6] bg-[#7c3aed] text-white shadow-lg shadow-[#7c3aed]/20'
+															: assignedByOtherBlock.has(index)
+																? 'border-white/5 bg-white/[0.015] text-white/30'
+																: 'border-white/10 bg-white/[0.03] text-white/65 hover:border-[#8b5cf6]/60 hover:bg-white/[0.06]'
+													}`}
+													onclick={() => toggleBlockWeekday(block.id, index)}
+												>
+													{day}
+												</button>
+											{/each}
+										</div>
+										<div class="mt-3 flex flex-wrap gap-2">
+											<button type="button" class="rounded-full border border-white/10 px-4 py-2 text-xs font-bold text-white/65 hover:bg-white/[0.06]" onclick={() => setBlockWeekdays(block.id, [1, 2, 3, 4, 5])}>Lunes a viernes</button>
+											<button type="button" class="rounded-full border border-white/10 px-4 py-2 text-xs font-bold text-white/65 hover:bg-white/[0.06]" onclick={() => setBlockWeekdays(block.id, [6])}>Sólo sábado</button>
+											<button type="button" class="rounded-full border border-white/10 px-4 py-2 text-xs font-bold text-white/65 hover:bg-white/[0.06]" onclick={() => setBlockWeekdays(block.id, [])}>Limpiar</button>
+										</div>
+									</div>
+
+									<div class="mt-5 grid gap-4 lg:grid-cols-[1fr_180px]">
+										<label>
+											<span class="ux-label">Horarios</span>
+											<input
+												type="text"
+												placeholder="9 a 13, 15 a 19"
+												value={block.timeRanges}
+												disabled={!canManage}
+												aria-invalid={Boolean(scheduleError)}
+												class={`ux-input text-lg font-bold ${scheduleError ? 'border-red-400/60' : ''}`}
+												oninput={(event) => updateScheduleBlock(block.id, { timeRanges: (event.currentTarget as HTMLInputElement).value })}
+												onblur={() => commitScheduleBlockTimeRanges(block.id)}
+											/>
+											{#if preview.length > 0}
+												<div class="mt-3 flex flex-wrap gap-2">
+													{#each preview as range}
+														<span class="rounded-full border border-emerald-300/25 bg-emerald-400/10 px-3 py-2 text-xs font-bold text-emerald-100">
+															{range.start} - {range.end}
+														</span>
+													{/each}
+												</div>
+											{/if}
+										</label>
+										<label>
+											<span class="ux-label">Descanso entre consultas</span>
+											<input
+												type="number"
+												inputmode="numeric"
+												min="5"
+												max="120"
+												step="5"
+												disabled={!canManage}
+												class={`ux-input text-lg font-bold ${scheduleError ? 'border-red-400/60' : ''}`}
+												value={block.slotInterval}
+												oninput={(event) => updateScheduleBlock(block.id, { slotInterval: (event.currentTarget as HTMLInputElement).value })}
+											/>
+										</label>
+									</div>
+								</div>
+							{/each}
 						</div>
-						{#if intervalError}
-							<p class="ux-alert mt-3">{intervalError}</p>
+						{#if scheduleError}
+							<p class="ux-alert mt-4">{scheduleError}</p>
 						{/if}
+						<button type="button" disabled={!canManage} class="ux-btn-secondary mt-4 w-full" onclick={addScheduleBlock}>
+							Agregar otro bloque
+						</button>
 					</div>
 
 					<div class="ux-soft-card p-5">
@@ -761,14 +839,18 @@
 							<p class="mt-4 text-sm font-bold text-white/45">Servicios adicionales</p>
 							<p class="mt-1 text-xl font-black text-white">{summaryAdditionalServices.join(', ')}</p>
 						{/if}
-						<p class="mt-4 text-sm font-bold text-white/45">Días de atención</p>
-						<p class="mt-1 text-xl font-black text-white">{summaryDays}</p>
-						<p class="mt-4 text-sm font-bold text-white/45">Horarios</p>
-						<p class="mt-1 text-xl font-black text-white">
-							{weeklyPreview.map((range) => `${range.start} a ${range.end}`).join(', ')}
-						</p>
-						<p class="mt-4 text-sm font-bold text-white/45">Descanso entre consultas</p>
-						<p class="mt-1 text-xl font-black text-white">{slotInterval} minutos</p>
+						<p class="mt-4 text-sm font-bold text-white/45">Horarios habituales</p>
+						<div class="mt-2 grid gap-2">
+							{#each summaryScheduleBlocks as block, index}
+								<div class="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
+									<p class="text-sm font-bold text-white/45">Bloque {index + 1}</p>
+									<p class="mt-1 text-lg font-black text-white">{block.days || 'Sin días'}</p>
+									<p class="mt-1 text-sm font-bold text-white/65">
+										{block.ranges || 'Sin horario'} · descanso {block.slotInterval} minutos
+									</p>
+								</div>
+							{/each}
+						</div>
 						{#if hasExceptionLoaded}
 							<p class="mt-4 text-sm font-bold text-white/45">Cambio puntual</p>
 							<p class="mt-1 text-xl font-black text-white">
@@ -781,7 +863,9 @@
 				</div>
 				<div class="mt-4 flex gap-3">
 					<button type="button" class="ux-btn-secondary" onclick={previousStep}>Atrás</button>
-					<button type="submit" disabled={!canManage} class="ux-btn-primary flex-1">Guardar rol</button>
+					<button type="submit" disabled={!canManage || wizardSubmitting} class="ux-btn-primary flex-1">
+						{wizardSubmitting ? 'Guardando...' : 'Guardar rol'}
+					</button>
 				</div>
 			{/if}
 		</form>
@@ -825,11 +909,13 @@
 						class="mt-4 grid gap-3"
 						use:enhance={() => {
 							attendingError = '';
+							attendingSubmitting = true;
 							return async ({ result }) => {
 								if (result.type === 'redirect') {
 									window.location.assign(result.location);
 									return;
 								}
+								attendingSubmitting = false;
 								if (result.type === 'failure') {
 									attendingError = (result.data?.message as string) ?? 'No se pudo configurar.';
 									return;
@@ -856,8 +942,8 @@
 						{#if attendingError}<p class="ux-alert">{attendingError}</p>{/if}
 						<div class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
 							<button type="button" onclick={() => (showAttendingForm = false)} class="ux-btn-secondary">Cancelar</button>
-							<button type="submit" disabled={!canManage} class="ux-btn-primary disabled:opacity-50">
-								Crear perfil profesional
+							<button type="submit" disabled={!canManage || attendingSubmitting} class="ux-btn-primary disabled:opacity-50">
+								{attendingSubmitting ? 'Creando...' : 'Crear perfil profesional'}
 							</button>
 						</div>
 					</form>
@@ -922,22 +1008,45 @@
 											</a>
 										{/if}
 										{#if member.status === 'active' && member.role !== 'owner'}
-											<form method="POST" action="?/update_role" class="flex gap-2">
+											<form
+												method="POST"
+												action="?/update_role"
+												class="flex gap-2"
+												use:enhance={() => {
+													teamActionBusy = `update-${member.id}`;
+													return async ({ update }) => {
+														teamActionBusy = '';
+														await update({ reset: false, invalidateAll: true });
+													};
+												}}
+											>
 												<input type="hidden" name="membership_id" value={member.id} />
 												<select name="role" disabled={!canManage} class="ux-select min-w-44">
 													{#each memberRoleOptions(member) as option}
 														<option value={option} selected={member.role === option}>{roleLabels[option]}</option>
 													{/each}
 												</select>
-												<button type="submit" disabled={!canManage} class="ux-btn-secondary">Guardar</button>
+												<button type="submit" disabled={!canManage || teamActionBusy === `update-${member.id}`} class="ux-btn-secondary">
+													{teamActionBusy === `update-${member.id}` ? 'Guardando...' : 'Guardar'}
+												</button>
 											</form>
 										{/if}
 										{#if member.role !== 'owner'}
-											<form method="POST" action="?/remove_user">
+											<form
+												method="POST"
+												action="?/remove_user"
+												use:enhance={() => {
+													teamActionBusy = `remove-${member.id}`;
+													return async ({ update }) => {
+														teamActionBusy = '';
+														await update({ reset: false, invalidateAll: true });
+													};
+												}}
+											>
 												<input type="hidden" name="access_id" value={member.id} />
 												<input type="hidden" name="status" value={member.status} />
-												<button type="submit" disabled={!canManage || member.user_id === data.currentUserId} class="ux-btn-danger">
-													Quitar
+												<button type="submit" disabled={!canManage || member.user_id === data.currentUserId || teamActionBusy === `remove-${member.id}`} class="ux-btn-danger">
+													{teamActionBusy === `remove-${member.id}` ? 'Quitando...' : 'Quitar'}
 												</button>
 											</form>
 										{/if}

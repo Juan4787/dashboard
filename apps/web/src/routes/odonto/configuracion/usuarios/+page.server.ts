@@ -16,10 +16,7 @@ import {
 	isDefaultServiceName
 } from '$lib/server/default-services';
 import {
-	MAX_SLOT_INTERVAL_MINUTES,
-	MIN_SLOT_INTERVAL_MINUTES,
-	replaceProfessionalWeeklyRules,
-	timeRangesOverlap
+	replaceProfessionalScheduleBlocks
 } from '$lib/server/availability-rules';
 import { setProfessionalServices } from '$lib/server/professional-services';
 import { writeAuditLog } from '$lib/server/audit';
@@ -31,6 +28,12 @@ import {
 } from '$lib/server/supabase';
 import { formatPriceLabel } from '$lib/utils/money-input';
 import { parseTimeRanges } from '$lib/utils/time-ranges';
+import {
+	parseScheduleBlocksJson,
+	validateScheduleBlocks,
+	type NormalizedScheduleBlock,
+	type ScheduleBlockDraft
+} from '$lib/utils/schedule-blocks';
 import { env } from '$env/dynamic/private';
 import { error as kitError, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
@@ -470,6 +473,33 @@ const parseLocalDateTime = (date: string, time: string, timeZone: string) => {
 	return Number.isNaN(value.getTime()) ? null : value;
 };
 
+const scheduleBlocksFromForm = (
+	form: FormData
+):
+	| { ok: true; blocks: NormalizedScheduleBlock[] }
+	| { ok: false; message: string } => {
+	const rawBlocks = String(form.get('schedule_blocks') ?? '').trim();
+	let draftBlocks: ScheduleBlockDraft[] | null = rawBlocks ? parseScheduleBlocksJson(rawBlocks) : null;
+	if (rawBlocks && !draftBlocks) {
+		return { ok: false, message: 'Los bloques horarios no son válidos.' };
+	}
+	if (!draftBlocks) {
+		draftBlocks = [
+			{
+				weekdays: form
+					.getAll('weekdays')
+					.map((value) => Number(value))
+					.filter((value) => Number.isInteger(value) && value >= 0 && value <= 6),
+				timeRanges: String(form.get('time_ranges') ?? ''),
+				slotInterval: String(form.get('slot_interval_minutes') ?? 15)
+			}
+		];
+	}
+	const result = validateScheduleBlocks(draftBlocks);
+	if (!result.ok) return { ok: false, message: result.message };
+	return { ok: true, blocks: result.blocks };
+};
+
 export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 	if (!locals.auth) throw redirect(303, '/login');
 
@@ -568,29 +598,10 @@ export const actions: Actions = {
 				return fail(400, { message: 'Los servicios cargados no son válidos.', values });
 			}
 
-			// Horarios de atención: obligatorios.
-			const weekdays = form
-				.getAll('weekdays')
-				.map((value) => Number(value))
-				.filter((value) => Number.isInteger(value) && value >= 0 && value <= 6);
-			const uniqueWeekdays = [...new Set(weekdays)];
-			const interval = Number(form.get('slot_interval_minutes') ?? 15);
-			const parsedRanges = parseTimeRanges(String(form.get('time_ranges') ?? ''));
-			if (uniqueWeekdays.length === 0) {
-				return fail(400, { message: 'Seleccioná al menos un día de atención.', values });
-			}
-			if (!parsedRanges || parsedRanges.length === 0) {
-				return fail(400, { message: 'Horario inválido.', values });
-			}
-			if (timeRangesOverlap(parsedRanges)) {
-				return fail(400, { message: 'Los horarios no pueden superponerse.', values });
-			}
-			if (
-				!Number.isInteger(interval) ||
-				interval < MIN_SLOT_INTERVAL_MINUTES ||
-				interval > MAX_SLOT_INTERVAL_MINUTES
-			) {
-				return fail(400, { message: 'Completá el descanso entre consultas: entre 5 y 120 minutos.', values });
+			// Horarios de atención: obligatorios y separados por bloques de días.
+			const scheduleBlocks = scheduleBlocksFromForm(form);
+			if (!scheduleBlocks.ok) {
+				return fail(400, { message: scheduleBlocks.message, values });
 			}
 
 			// Cambio puntual: opcional, pero si se carga debe ser válido.
@@ -686,12 +697,10 @@ export const actions: Actions = {
 					...createdServiceIds
 				]);
 
-				await replaceProfessionalWeeklyRules(supabase, {
+				await replaceProfessionalScheduleBlocks(supabase, {
 					businessId,
 					professionalId,
-					weekdays: uniqueWeekdays,
-					ranges: parsedRanges,
-					slotIntervalMinutes: interval
+					blocks: scheduleBlocks.blocks
 				});
 
 				if (hasException && exceptionStartsAt && exceptionEndsAt) {
@@ -726,9 +735,7 @@ export const actions: Actions = {
 					metadata: {
 						name: professionalName,
 						email,
-						weekdays: uniqueWeekdays,
-						ranges: parsedRanges,
-						slot_interval_minutes: interval,
+						schedule_blocks: scheduleBlocks.blocks,
 						service_ids: [...defaultServiceIds, ...selectedServiceIds, ...createdServiceIds]
 					}
 				});

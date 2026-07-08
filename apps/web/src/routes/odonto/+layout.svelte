@@ -383,8 +383,8 @@
 </script>
 
 <div class="min-h-screen bg-neutral-50 text-neutral-900 dark:bg-[#0b1626] dark:text-[#eaf1ff]">
-	<header class="sticky top-0 z-20 border-b border-neutral-100 bg-white/80 backdrop-blur dark:border-[#1f2b45] dark:bg-[#0f1f36]/90">
-		<div class="flex h-14 items-center gap-3 px-4 md:hidden">
+	<header class="sticky top-0 z-40 border-b border-neutral-100 bg-white/95 dark:border-[#1f2b45] dark:bg-[#0f1f36]/95">
+		<div class="flex h-14 items-center gap-2 px-3 md:hidden">
 			{#if showBack}
 				<a
 					href={mobileBackHref}
@@ -407,19 +407,33 @@
 					</svg>
 				</button>
 			{/if}
-			<h1 class="max-w-[60vw] truncate text-base font-semibold text-neutral-900 dark:text-white">
+			<h1 class="min-w-0 flex-1 truncate text-base font-semibold text-neutral-900 dark:text-white">
 				{mobileTitle}
 			</h1>
+			{#if showBack}
+				<button
+					type="button"
+					class="flex h-11 w-11 items-center justify-center rounded-full text-neutral-700 transition hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-[#13243d]"
+					aria-label="Abrir menú"
+					onclick={() => (mobileMenuOpen = true)}
+				>
+					<svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M4 7h16M4 12h16M4 17h16" />
+					</svg>
+				</button>
+			{:else}
+				<span class="h-11 w-11 shrink-0" aria-hidden="true"></span>
+			{/if}
 		</div>
 		{#if mobileMenuOpen}
-			<div class="fixed inset-0 z-40 flex items-start justify-center bg-black/60 px-4 py-6 md:hidden">
+			<div class="fixed inset-0 z-50 flex items-stretch justify-center bg-black/60 px-3 py-3 md:hidden">
 				<div
-					class="relative z-10 w-full max-w-sm rounded-2xl border border-neutral-100 bg-white p-4 text-neutral-900 shadow-2xl dark:border-white/10 dark:bg-[#0f1f36] dark:text-white"
+					class="relative z-10 flex max-h-[calc(100dvh-1.5rem)] w-full max-w-sm flex-col overflow-hidden rounded-2xl border border-neutral-100 bg-white text-neutral-900 shadow-2xl dark:border-white/10 dark:bg-[#0f1f36] dark:text-white"
 					role="dialog"
 					aria-modal="true"
 					aria-label="Menú de navegación"
 				>
-					<div class="flex items-center justify-between">
+					<div class="flex items-center justify-between px-4 pt-4">
 						<p class="text-sm font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">Menú</p>
 						<button
 							type="button"
@@ -433,7 +447,7 @@
 							<span aria-hidden="true">×</span>
 						</button>
 					</div>
-					<nav class="mt-4 flex flex-col gap-2">
+					<nav class="mt-4 min-h-0 flex-1 overflow-y-auto px-4 pb-3">
 						{#if activeBusiness?.business}
 							<div class="rounded-xl border border-neutral-200 px-4 py-3 text-sm dark:border-white/10">
 								<p class="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
@@ -444,25 +458,28 @@
 								</p>
 							</div>
 						{/if}
-						<p class="mt-2 px-1 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
-							Trabajo diario
-						</p>
-						{#each primaryMobileNav as item}
-							<a
-								href={item.href}
-								class={`rounded-xl px-4 py-3 text-sm font-semibold transition ${
-									isNavItemActive(item)
-										? 'bg-[#7c3aed] text-white'
-										: 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-white/10'
-								}`}
-								onclick={() => {
-									mobileMenuOpen = false;
-									closeMenus();
-								}}
-							>
-								{item.label}
-							</a>
-						{/each}
+						<div class="flex flex-col gap-2">
+							{#if primaryMobileNav.length > 0}
+								<p class="mt-2 px-1 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
+									Trabajo diario
+								</p>
+								{#each primaryMobileNav as item}
+									<a
+										href={item.href}
+										class={`rounded-xl px-4 py-3 text-sm font-semibold transition ${
+											isNavItemActive(item)
+												? 'bg-[#7c3aed] text-white'
+												: 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-white/10'
+										}`}
+										onclick={() => {
+											mobileMenuOpen = false;
+											closeMenus();
+										}}
+									>
+										{item.label}
+									</a>
+								{/each}
+							{/if}
 						{#if canShowConfigMenu}
 							<p class="mt-4 px-1 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
 								Configuración
@@ -519,30 +536,33 @@
 								Panel maestro
 							</a>
 						{/if}
-					</nav>
-					<button
-						type="button"
-						class="mt-4 w-full rounded-xl border border-neutral-200 px-4 py-3 text-sm font-semibold text-neutral-700 transition hover:bg-neutral-100 dark:border-white/10 dark:text-neutral-200 dark:hover:bg-white/10"
-						onclick={() => (showReportHelp = !showReportHelp)}
-					>
-						Reportar problema
-					</button>
-					{#if showReportHelp}
-						<div class="mt-3 rounded-xl border border-red-400/30 bg-[#430a0a] p-3 text-xs text-white">
-							<p class="font-semibold">Soporte</p>
-							<p>
-								Para reportar errores, escribí a
-								<span class="font-semibold">juanpabloaltamira@protonmail.com</span>.
-							</p>
 						</div>
-					{/if}
-					<a
-						href="/logout"
-						class="mt-4 block w-full rounded-xl bg-neutral-900 px-4 py-3 text-center text-sm font-semibold text-white dark:bg-white dark:text-neutral-900"
-						onclick={() => (mobileMenuOpen = false)}
-					>
-						Salir
-					</a>
+					</nav>
+					<div class="border-t border-neutral-200 p-4 dark:border-white/10">
+						<button
+							type="button"
+							class="w-full rounded-xl border border-neutral-200 px-4 py-3 text-sm font-semibold text-neutral-700 transition hover:bg-neutral-100 dark:border-white/10 dark:text-neutral-200 dark:hover:bg-white/10"
+							onclick={() => (showReportHelp = !showReportHelp)}
+						>
+							Reportar problema
+						</button>
+						{#if showReportHelp}
+							<div class="mt-3 rounded-xl border border-red-400/30 bg-[#430a0a] p-3 text-xs text-white">
+								<p class="font-semibold">Soporte</p>
+								<p>
+									Para reportar errores, escribí a
+									<span class="font-semibold">juanpabloaltamira@protonmail.com</span>.
+								</p>
+							</div>
+						{/if}
+						<a
+							href="/logout"
+							class="mt-3 block w-full rounded-xl bg-neutral-900 px-4 py-3 text-center text-sm font-semibold text-white dark:bg-white dark:text-neutral-900"
+							onclick={() => (mobileMenuOpen = false)}
+						>
+							Salir
+						</a>
+					</div>
 				</div>
 				<button
 					type="button"
@@ -895,29 +915,31 @@
 					<a
 						href={item.href}
 						aria-current={isNavItemActive(item) ? 'page' : undefined}
-						class={`flex flex-1 flex-col items-center gap-1 py-2 text-[11px] font-bold transition ${
-							isNavItemActive(item) ? 'text-white' : 'text-white/50'
+						aria-label={item.label}
+						class={`flex min-w-0 flex-1 flex-col items-center gap-1 px-1 py-2 text-[11px] font-bold transition ${
+							isNavItemActive(item) ? 'text-white' : 'text-white/70'
 						}`}
 					>
 						<span
 							class={`flex h-8 w-14 items-center justify-center rounded-full transition ${
-								isNavItemActive(item) ? 'bg-[#7c3aed] text-white shadow-lg shadow-[#7c3aed]/30' : ''
+								isNavItemActive(item) ? 'bg-[#7c3aed] text-white shadow-lg shadow-[#7c3aed]/30' : 'bg-white/5'
 							}`}
 						>
 							{@render navIcon(item.label)}
 						</span>
-						{item.shortLabel ?? item.label}
+						<span class="max-w-full truncate">{item.shortLabel ?? item.label}</span>
 					</a>
 				{/each}
 				<button
 					type="button"
 					onclick={() => (mobileMenuOpen = true)}
-					class="flex flex-1 flex-col items-center gap-1 py-2 text-[11px] font-bold text-white/50 transition"
+					class="flex min-w-0 flex-1 flex-col items-center gap-1 px-1 py-2 text-[11px] font-bold text-white/70 transition"
+					aria-label="Abrir menú"
 				>
-					<span class="flex h-8 w-14 items-center justify-center rounded-full">
+					<span class="flex h-8 w-14 items-center justify-center rounded-full bg-white/5">
 						{@render navIcon('mas')}
 					</span>
-					Más
+					<span>Más</span>
 				</button>
 			</div>
 		</nav>
