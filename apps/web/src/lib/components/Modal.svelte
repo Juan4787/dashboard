@@ -10,28 +10,28 @@ const close = () => dispatch('close');
 
 {#if open}
 	<div
-	class="fixed inset-0 z-30 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-10 backdrop-blur-sm dark:bg-black/60"
-	role="button"
-	tabindex="0"
-	aria-label="Cerrar modal"
-	onclick={(event) => {
-		if (dismissible && event.target === event.currentTarget) {
-			close();
-		}
-	}}
-	onkeydown={(event: KeyboardEvent) => {
-		if (event.key === 'Escape') {
-			if (dismissible) close();
-		}
-	}}
->
-	<div class="w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-card dark:border dark:border-[#1f3554] dark:bg-[#0f1f36]">
-			<div class="flex items-center justify-between border-b border-neutral-100 px-6 py-4 dark:border-[#1f3554]">
-				<h3 class="text-lg font-semibold text-neutral-900 dark:text-white">{title}</h3>
+		class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 px-3 pt-4 pb-32 backdrop-blur-sm dark:bg-black/60 sm:px-4 sm:py-10"
+		role="button"
+		tabindex="0"
+		aria-label="Cerrar modal"
+		onclick={(event) => {
+			if (dismissible && event.target === event.currentTarget) {
+				close();
+			}
+		}}
+		onkeydown={(event: KeyboardEvent) => {
+			if (event.key === 'Escape') {
+				if (dismissible) close();
+			}
+		}}
+	>
+		<div class="flex max-h-[calc(100dvh-8rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-card dark:border dark:border-[#1f3554] dark:bg-[#0f1f36] sm:max-h-[calc(100dvh-5rem)]">
+			<div class="flex shrink-0 items-center justify-between gap-3 border-b border-neutral-100 px-4 py-3 dark:border-[#1f3554] sm:px-6 sm:py-4">
+				<h3 class="min-w-0 truncate text-lg font-semibold text-neutral-900 dark:text-white">{title}</h3>
 				{#if dismissible || closable}
 					<button
 						type="button"
-						class="grid h-9 w-9 place-items-center rounded-full text-neutral-500 transition hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-[#13243d]"
+						class="grid h-9 w-9 shrink-0 place-items-center rounded-full text-neutral-500 transition hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-[#13243d]"
 						onclick={close}
 						aria-label="Cerrar"
 					>
@@ -39,7 +39,7 @@ const close = () => dispatch('close');
 					</button>
 				{/if}
 			</div>
-			<div class="px-6 py-5">
+			<div class="min-h-0 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
 				{@render children?.()}
 			</div>
 		</div>

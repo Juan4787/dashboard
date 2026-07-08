@@ -11,124 +11,117 @@
 	const returnTo = '/odonto/configuracion/ayuda';
 </script>
 
-<section class="ux-page">
-	<div class="ux-hero">
-		<BackLink href="/odonto/configuracion" label="Volver" class="mb-5" />
-		<p class="ux-badge">Configuración</p>
-		<h1 class="ux-title mt-4">Ayuda para configurar</h1>
-		<p class="ux-subtitle">
-			Una forma simple de recibir ayuda inicial sin compartir tu contraseña.
-		</p>
-	</div>
-
-	{#if form?.message}
-		<p class="ux-alert">{form.message}</p>
-	{/if}
-
+<section class="ux-page mx-auto w-full max-w-4xl">
 	<div class="ux-card">
+		<BackLink href="/odonto/configuracion" label="Volver" class="mb-5" />
+
+		{#if form?.message}
+			<p class="ux-alert mb-5">{form.message}</p>
+		{/if}
+
 		{#if isAssisting}
-			<div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-				<div>
-					<p class="ux-badge ux-badge-success">Cita Suite</p>
-					<h2 class="ux-section-title mt-4">Estás configurando esta cuenta</h2>
-					<p class="mt-2 max-w-2xl text-sm leading-6 text-white/60">
-						Esta ayuda termina a las {assistance.endsAtLabel ?? 'hora indicada'}. Los cambios de
-						suscripción, dueños y administradores quedan fuera de este flujo.
-					</p>
-				</div>
-				<span class="inline-flex items-center gap-2 rounded-full border border-emerald-300/25 bg-emerald-400/10 px-3 py-2 text-sm font-black text-emerald-100">
-					<span class="h-[0.85em] w-[0.85em] rounded-full bg-emerald-400 shadow-[0_0_0.8rem_rgba(52,211,153,0.85)]"></span>
-					Activa
-				</span>
-			</div>
-		{:else if !canUseBusiness}
-			<h2 class="ux-section-title">La cuenta debe estar activa</h2>
-			<p class="mt-2 max-w-2xl text-sm leading-6 text-white/60">
-				Primero regularizá la suscripción. Después vas a poder pedir ayuda para completar la configuración.
-			</p>
-		{:else if assistance.status === 'active'}
-			<div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-				<div>
-					<span class="inline-flex items-center gap-2 rounded-full border border-emerald-300/25 bg-emerald-400/10 px-3 py-1.5 text-xs font-black uppercase tracking-wide text-emerald-100">
+			<div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+				<div class="min-w-0">
+					<p class="inline-flex items-center gap-2 text-sm font-black text-emerald-100">
 						<span class="h-[0.85em] w-[0.85em] rounded-full bg-emerald-400 shadow-[0_0_0.8rem_rgba(52,211,153,0.85)]"></span>
 						Activa
-					</span>
-					<h2 class="ux-section-title mt-4">Ayuda de Cita Suite activa</h2>
-					<p class="mt-2 max-w-2xl text-sm leading-6 text-white/60">
+					</p>
+					<h1 class="ux-title mt-3">Configurando esta cuenta</h1>
+					<p class="mt-3 max-w-2xl text-sm leading-6 text-white/60">
+						Termina a las {assistance.endsAtLabel ?? 'hora indicada'}.
+					</p>
+				</div>
+			</div>
+		{:else if !canUseBusiness}
+			<div class="max-w-2xl">
+				<p class="ux-badge ux-badge-warning">Cuenta inactiva</p>
+				<h1 class="ux-title mt-3">Ayuda para configurar</h1>
+				<p class="mt-3 text-sm leading-6 text-white/60">
+					Primero activá la cuenta. Después podemos ayudarte a completar la configuración inicial.
+				</p>
+			</div>
+		{:else if assistance.status === 'active'}
+			<div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+				<div class="min-w-0">
+					<p class="inline-flex items-center gap-2 text-sm font-black text-emerald-100">
+						<span class="h-[0.85em] w-[0.85em] rounded-full bg-emerald-400 shadow-[0_0_0.8rem_rgba(52,211,153,0.85)]"></span>
+						Ayuda activa
+					</p>
+					<h1 class="ux-title mt-3">Ayuda de Cita Suite activa</h1>
+					<p class="mt-3 max-w-2xl text-sm leading-6 text-white/60">
 						Podemos configurar esta cuenta hasta las {assistance.endsAtLabel ?? 'hora indicada'}.
-						Podés detener la ayuda cuando quieras.
 					</p>
 				</div>
 				{#if isOwner}
-					<form method="post" action="?/revoke">
+					<form method="post" action="?/revoke" class="w-full sm:w-auto">
 						<input type="hidden" name="return_to" value={returnTo} />
-						<button class="ux-btn-secondary">Detener ayuda</button>
+						<button class="ux-btn-secondary w-full sm:w-auto">Detener ayuda</button>
 					</form>
 				{/if}
 			</div>
 		{:else if assistance.status === 'expired'}
-			<div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-				<div>
+			<div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+				<div class="min-w-0">
 					<p class="ux-badge ux-badge-warning">Finalizada</p>
-					<h2 class="ux-section-title mt-4">La ayuda de Cita Suite finalizó</h2>
-					<p class="mt-2 max-w-2xl text-sm leading-6 text-white/60">
-						Ya no podemos hacer cambios en esta cuenta. Si todavía necesitás ayuda, podés activarla otra vez.
+					<h1 class="ux-title mt-3">La ayuda de Cita Suite finalizó</h1>
+					<p class="mt-3 max-w-2xl text-sm leading-6 text-white/60">
+						Si todavía necesitás ayuda, podés activarla otra vez.
 					</p>
 				</div>
 				{#if isOwner}
-					<div class="flex flex-wrap gap-2">
-						<form method="post" action="?/activate">
+					<div class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+						<form method="post" action="?/activate" class="w-full sm:w-auto">
 							<input type="hidden" name="return_to" value={returnTo} />
-							<button class="ux-btn-primary">Volver a activar</button>
+							<button class="ux-btn-primary w-full sm:w-auto">Volver a activar</button>
 						</form>
 						{#if assistance.canDismiss && assistance.grantId}
-							<form method="post" action="?/dismiss">
+							<form method="post" action="?/dismiss" class="w-full sm:w-auto">
 								<input type="hidden" name="return_to" value={returnTo} />
 								<input type="hidden" name="grant_id" value={assistance.grantId} />
-								<button class="ux-btn-secondary">Cerrar aviso</button>
+								<button class="ux-btn-secondary w-full sm:w-auto">Cerrar aviso</button>
 							</form>
 						{/if}
 					</div>
 				{/if}
 			</div>
 		{:else if assistance.status === 'revoked'}
-			<div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-				<div>
+			<div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+				<div class="min-w-0">
 					<p class="ux-badge">Detenida</p>
-					<h2 class="ux-section-title mt-4">Ayuda detenida</h2>
-					<p class="mt-2 max-w-2xl text-sm leading-6 text-white/60">
+					<h1 class="ux-title mt-3">Ayuda detenida</h1>
+					<p class="mt-3 max-w-2xl text-sm leading-6 text-white/60">
 						Cita Suite ya no puede hacer cambios en esta cuenta.
 					</p>
 				</div>
 				{#if isOwner}
-					<div class="flex flex-wrap gap-2">
-						<form method="post" action="?/activate">
+					<div class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+						<form method="post" action="?/activate" class="w-full sm:w-auto">
 							<input type="hidden" name="return_to" value={returnTo} />
-							<button class="ux-btn-secondary">Activar nuevamente</button>
+							<button class="ux-btn-secondary w-full sm:w-auto">Activar nuevamente</button>
 						</form>
 						{#if assistance.canDismiss && assistance.grantId}
-							<form method="post" action="?/dismiss">
+							<form method="post" action="?/dismiss" class="w-full sm:w-auto">
 								<input type="hidden" name="return_to" value={returnTo} />
 								<input type="hidden" name="grant_id" value={assistance.grantId} />
-								<button class="ux-btn-secondary">Cerrar aviso</button>
+								<button class="ux-btn-secondary w-full sm:w-auto">Cerrar aviso</button>
 							</form>
 						{/if}
 					</div>
 				{/if}
 			</div>
 		{:else}
-			<div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-				<div>
-					<h2 class="ux-section-title">¿Querés que te ayudemos a configurar tu cuenta?</h2>
-					<p class="mt-2 max-w-2xl text-sm leading-6 text-white/60">
-						Podemos ayudarte a cargar profesionales, servicios y horarios iniciales. Se activa por
-						1 hora y podés detenerlo cuando quieras.
+			<div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+				<div class="min-w-0">
+					<p class="ux-badge">Configuración</p>
+					<h1 class="ux-title mt-3">¿Querés que te ayudemos a configurar tu cuenta?</h1>
+					<p class="mt-3 max-w-2xl text-sm leading-6 text-white/60">
+						Podemos cargar profesionales, servicios y horarios iniciales durante 1 hora.
 					</p>
 				</div>
 				{#if isOwner}
-					<form method="post" action="?/activate">
+					<form method="post" action="?/activate" class="w-full sm:w-auto">
 						<input type="hidden" name="return_to" value={returnTo} />
-						<button class="ux-btn-primary">Quiero ayuda por 1 hora</button>
+						<button class="ux-btn-primary w-full sm:w-auto">Quiero ayuda por 1 hora</button>
 					</form>
 				{:else}
 					<p class="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-white/65">
@@ -137,26 +130,11 @@
 				{/if}
 			</div>
 		{/if}
-	</div>
 
-	<div class="ux-card">
-		<h2 class="ux-section-title">Qué podemos configurar</h2>
-		<div class="mt-4 grid gap-3 md:grid-cols-3">
-			<div class="ux-soft-card p-4">
-				<p class="font-black text-white">Equipo</p>
-				<p class="mt-2 text-sm text-white/55">Profesionales, servicios y horarios habituales.</p>
-			</div>
-			<div class="ux-soft-card p-4">
-				<p class="font-black text-white">Consultorio</p>
-				<p class="mt-2 text-sm text-white/55">Datos visibles, reserva online y comunicación inicial.</p>
-			</div>
-			<div class="ux-soft-card p-4">
-				<p class="font-black text-white">Agenda</p>
-				<p class="mt-2 text-sm text-white/55">Reglas operativas para que puedas empezar a recibir turnos.</p>
-			</div>
+		<div class="mt-5 border-t border-white/10 pt-4">
+			<p class="text-sm leading-6 text-white/50">
+				Tu suscripción y tu equipo quedan siempre bajo tu control.
+			</p>
 		</div>
-		<p class="mt-4 text-sm text-white/45">
-			La suscripción, los dueños y los administradores se mantienen bajo control del consultorio.
-		</p>
 	</div>
 </section>

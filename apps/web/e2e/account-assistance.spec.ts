@@ -240,7 +240,9 @@ test.describe('Ayuda para configurar', () => {
 
 		await login(ownerPage, fixture.email, password);
 		await ownerPage.goto('/odonto/configuracion/ayuda');
-		await expect(ownerPage.getByRole('heading', { name: 'Ayuda para configurar' })).toBeVisible();
+		await expect(
+			ownerPage.getByRole('heading', { name: '¿Querés que te ayudemos a configurar tu cuenta?' })
+		).toBeVisible();
 		await ownerPage.getByRole('button', { name: 'Quiero ayuda por 1 hora' }).first().click();
 		await expect(ownerPage.getByText('Ayuda de Cita Suite activa').first()).toBeVisible();
 		await expect(ownerPage.getByText(/hasta las \d{2}:\d{2}/).first()).toBeVisible();
@@ -316,7 +318,9 @@ test.describe('Ayuda para configurar', () => {
 		await expect(masterPage.getByRole('heading', { name: 'Accesos a Cita Suite' })).toBeVisible();
 		await expect(masterPage.locator('.ux-soft-card').filter({ hasText: fixture.businessName })).toHaveCount(0);
 		await masterPage.goto(`/odonto/profesionales/${fixture.professionalId}?tab=servicios`);
-		await expect(masterPage).not.toHaveURL(/\/odonto\/profesionales\//);
+		await expect(masterPage.getByRole('heading', { name: 'Página no encontrada' })).toBeVisible();
+		await expect(masterPage.getByText('Profesional no encontrado')).toBeVisible();
+		await expect(masterPage.getByText('Configurando esta cuenta')).toHaveCount(0);
 		await masterContext.close();
 	});
 });
