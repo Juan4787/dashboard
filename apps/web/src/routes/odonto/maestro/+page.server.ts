@@ -169,7 +169,7 @@ const buildMasterData = async (
 		.order('email', { ascending: true });
 	const businessesRes = await admin
 		.from('businesses')
-		.select('id, name, slug, email, is_active, created_at, updated_at')
+		.select('id, name, slug, email, timezone, is_active, created_at, updated_at')
 		.order('created_at', { ascending: false });
 	const subscriptionsRes = await admin
 		.from('business_subscriptions')
@@ -573,12 +573,12 @@ export const actions: Actions = {
 			return fail(500, { message: 'No pudimos asignar el acceso inicial del consultorio.' });
 		}
 
-		return {
-			success: true,
-			message: ownerUserId
-				? 'Consultorio creado, owner vinculado y acceso inicial configurado.'
-				: 'Consultorio creado con owner pendiente. Cuando el owner cree o ingrese a su cuenta, se vinculará automáticamente.'
-		};
+			return {
+				success: true,
+				message: ownerUserId
+					? `Consultorio creado y owner vinculado. Acceso inicial: ${duration.label}.`
+					: `Consultorio creado con owner pendiente. Acceso inicial: ${duration.label}. Cuando el owner ingrese, se vinculará automáticamente.`
+			};
 	},
 	add_email: async ({ request, locals, fetch }) => {
 		if (!locals.auth) throw redirect(303, '/login');
@@ -687,7 +687,10 @@ export const actions: Actions = {
 			return fail(500, { message: 'No pudimos actualizar el correo electrónico.' });
 		}
 
-		return { success: true, message: enabled ? 'Correo habilitado.' : 'Correo deshabilitado.' };
+		return {
+			success: true,
+			message: enabled ? 'Referencia de email restaurada.' : 'Referencia de email desactivada.'
+		};
 	},
 	adjust_business_access: async ({ request, locals, fetch }) => {
 		if (!locals.auth) throw redirect(303, '/login');
@@ -745,7 +748,23 @@ export const actions: Actions = {
 			return fail(500, { message: 'No pudimos ajustar el acceso comercial.' });
 		}
 
-		return { success: true, message: 'Acceso comercial actualizado.' };
+		const successMessage = (() => {
+			if (operation === 'extend_access' || operation === 'grant_access') {
+				return `Listo: se sumó ${duration?.label ?? 'tiempo'} de acceso.`;
+			}
+			if (operation === 'reduce_access') {
+				return `Listo: se quitó ${duration?.label ?? 'tiempo'} del acceso.`;
+			}
+			if (operation === 'set_permanent') return 'Listo: el acceso ahora es permanente.';
+			if (operation === 'unset_permanent') return 'Listo: se quitó el acceso permanente.';
+			if (operation === 'disable_business_access') return 'Acceso pausado.';
+			if (operation === 'enable_business_access') return 'Acceso reanudado.';
+			if (operation === 'archive_business') return 'Consultorio archivado.';
+			if (operation === 'reactivate_business') return 'Consultorio reactivado.';
+			return 'Acceso comercial actualizado.';
+		})();
+
+		return { success: true, message: successMessage };
 	},
 	revoke_business_sessions: async ({ request, locals, fetch }) => {
 		if (!locals.auth) throw redirect(303, '/login');

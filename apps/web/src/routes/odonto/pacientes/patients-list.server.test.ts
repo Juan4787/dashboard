@@ -119,7 +119,7 @@ describe('patients create action', () => {
 			insert: vi.fn(async () => ({ error: null }))
 		});
 		const patientLookupBuilder = chain({
-			range: vi.fn(async () => ({ data: [], error: null }))
+			maybeSingle: vi.fn(async () => ({ data: null, error: null }))
 		});
 		mocks.admin.from.mockImplementation((table: string) => {
 			if (table === 'patients') return patientLookupBuilder;
@@ -151,19 +151,23 @@ describe('patients create action', () => {
 		});
 	});
 
-	it('does not create a second patient with the same name and returns the existing patient to open', async () => {
-		mocks.supabase.from.mockImplementation(() => {
-			throw new Error('Patient insert should not run for duplicates.');
-		});
-
-		const patientLookupBuilder = {
-			select: vi.fn(() => patientLookupBuilder),
-			eq: vi.fn(() => patientLookupBuilder),
-			range: vi.fn(async () => ({
-				data: [{ id: patientId, full_name: 'Paciente Profesional' }],
-				error: null
+	it('creates a different patient even when the full name is exactly the same', async () => {
+		const secondPatientId = '00000000-0000-4000-8000-000000000005';
+		const patientInsertBuilder = {
+			insert: vi.fn(() => ({
+				select: vi.fn(() => ({
+					single: vi.fn(async () => ({ data: { id: secondPatientId }, error: null }))
+				}))
 			}))
 		};
+		mocks.supabase.from.mockImplementation((table: string) => {
+			if (table === 'patients') return patientInsertBuilder;
+			throw new Error(`Unexpected table ${table}`);
+		});
+
+		const patientLookupBuilder = chain({
+			maybeSingle: vi.fn(async () => ({ data: null, error: null }))
+		});
 		const professionalUserBuilder = chain({
 			maybeSingle: vi.fn(async () => ({ data: { professional_id: professionalId }, error: null }))
 		});
@@ -179,15 +183,59 @@ describe('patients create action', () => {
 		});
 
 		const form = new FormData();
-		form.set('full_name', '  Paciente   Profesional ');
+		form.set('full_name', 'Juan Carlos Ramírez');
+		form.set('phone', '+54 9 11 4444-4444');
+
+		try {
+			await actions.create_patient!(makeEvent(form));
+			throw new Error('Expected redirect');
+		} catch (err) {
+			expect(err).toMatchObject({
+				status: 303,
+				location: `/odonto/pacientes/${secondPatientId}`
+			});
+		}
+
+		expect(patientInsertBuilder.insert).toHaveBeenCalledWith(
+			expect.objectContaining({ full_name: 'Juan Carlos Ramírez' })
+		);
+		expect(patientLookupBuilder.select).toHaveBeenCalledWith('id');
+		expect(patientLookupBuilder.range).not.toHaveBeenCalled();
+	});
+
+	it('identifies an existing patient by phone and says that exact cause', async () => {
+		mocks.supabase.from.mockImplementation(() => {
+			throw new Error('Patient insert should not run for duplicates.');
+		});
+
+		const patientLookupBuilder = chain({
+			maybeSingle: vi.fn(async () => ({ data: { id: patientId }, error: null }))
+		});
+		const professionalUserBuilder = chain({
+			maybeSingle: vi.fn(async () => ({ data: { professional_id: professionalId }, error: null }))
+		});
+		const professionalPatientLinkBuilder = chain({
+			maybeSingle: vi.fn(async () => ({ data: null, error: null })),
+			insert: vi.fn(async () => ({ error: null }))
+		});
+		mocks.admin.from.mockImplementation((table: string) => {
+			if (table === 'patients') return patientLookupBuilder;
+			if (table === 'professional_users') return professionalUserBuilder;
+			if (table === 'professional_patient_links') return professionalPatientLinkBuilder;
+			throw new Error(`Unexpected admin table ${table}`);
+		});
+
+		const form = new FormData();
+		form.set('full_name', 'Otra persona');
 		form.set('phone', '+54 9 11 5555-5555');
 
 		const result = (await actions.create_patient!(makeEvent(form))) as any;
 
 		expect(result).toMatchObject({
 			duplicate: true,
-			duplicateField: 'name',
-			message: 'Ya hay un paciente creado con ese nombre. Abrí su ficha para continuar.',
+			duplicateField: 'phone',
+			message:
+				'Ya hay una ficha asociada a este teléfono. Abrila para continuar o revisá el número si pertenece a otra persona.',
 			existingId: patientId
 		});
 		expect(professionalPatientLinkBuilder.insert).toHaveBeenCalledWith({

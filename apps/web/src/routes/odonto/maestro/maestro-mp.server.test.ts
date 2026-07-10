@@ -245,3 +245,37 @@ describe('action create_business (maestro)', () => {
 		});
 	});
 });
+
+describe('action adjust_business_access (maestro)', () => {
+	it('envía exactamente 3600 segundos y confirma 1 hora sin redondearla a un día', async () => {
+		const admin = createDbMock({
+			business_users: [{ data: [], error: null }]
+		});
+		mocks.createSupabaseAdminClient.mockResolvedValue(admin.client);
+		const { fetchMock } = createMpFetch([]);
+
+		const result = (await actions.adjust_business_access(
+			makeEvent({
+				fetchMock,
+				formEntries: {
+					business_id: BUSINESS_ID,
+					operation: 'extend_access',
+					duration: 'hour_1',
+					idempotency_key: 'grant-one-hour'
+				}
+			}) as never
+		)) as { success?: boolean; message?: string };
+
+		expect(result).toEqual({ success: true, message: 'Listo: se sumó 1 hora de acceso.' });
+		expect(admin.rpcCalls).toContainEqual({
+			fn: 'grant_business_access',
+			args: expect.objectContaining({
+				p_business_id: BUSINESS_ID,
+				p_operation: 'extend_access',
+				p_duration_seconds: 3600,
+				p_duration_unit: 'hour',
+				p_is_permanent: false
+			})
+		});
+	});
+});

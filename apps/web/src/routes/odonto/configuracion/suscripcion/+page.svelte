@@ -1,6 +1,7 @@
 <script lang="ts">
 	import BackLink from '$lib/components/BackLink.svelte';
 	import type { BusinessSubscriptionRow } from '$lib/server/commercial-access';
+	import { formatAccessRemaining } from '$lib/utils/format';
 
 	let { data, form } = $props();
 
@@ -62,7 +63,9 @@
 	const statusLabel = $derived.by(() => {
 		if (!access.commercialAccessEnabled) return 'Acceso pausado';
 		if (access.visualStatus === 'permanent') return 'Permanente';
-		if (access.visualStatus === 'expiring') return 'Vence mañana';
+		if (access.visualStatus === 'expiring') {
+			return formatAccessRemaining(access.paidUntil) ?? 'Vence pronto';
+		}
 		if (access.commercialStatus === 'active') return 'Activo';
 		if (access.commercialStatus === 'grace') return 'Vencido';
 		if (access.commercialStatus === 'restricted') return 'Pendiente';

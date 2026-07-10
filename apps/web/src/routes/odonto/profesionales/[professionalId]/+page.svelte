@@ -3,7 +3,7 @@
 	import { enhance } from '$app/forms';
 	import BackLink from '$lib/components/BackLink.svelte';
 	import { clearTtlDraft, loadTtlDraft, saveTtlDraft } from '$lib/client/ttl-draft';
-	import { formatDateTime } from '$lib/utils/format';
+	import { formatDate, formatDateTime, formatInTimeZone } from '$lib/utils/format';
 	import { formatPriceLabel } from '$lib/utils/money-input';
 	import {
 		normalizeTimeRangesForCommit,
@@ -68,7 +68,10 @@
 		exception: {
 			appliesTo: 'professional' | 'business';
 			type: 'blocked' | 'extra_available';
+			periodMode: 'single' | 'range';
 			date: string;
+			dateFrom: string;
+			dateTo: string;
 			timeRange: string;
 			reason: string;
 		};
@@ -85,7 +88,7 @@
 	};
 	type PageData = {
 		context: {
-			business: { id: string };
+			business: { id: string; timezone: string };
 			canOperate: boolean;
 			canManage: boolean;
 		};
@@ -125,7 +128,10 @@
 	const emptyExceptionDraft = (): ProfessionalDraft['exception'] => ({
 		appliesTo: 'professional',
 		type: 'blocked',
+		periodMode: 'single',
 		date: '',
+		dateFrom: '',
+		dateTo: '',
 		timeRange: '',
 		reason: ''
 	});
@@ -189,7 +195,10 @@
 		exception: {
 			appliesTo: value?.exception?.appliesTo === 'business' ? 'business' : 'professional',
 			type: value?.exception?.type === 'extra_available' ? 'extra_available' : 'blocked',
+			periodMode: value?.exception?.periodMode === 'range' ? 'range' : 'single',
 			date: typeof value?.exception?.date === 'string' ? value.exception.date : fallback.exception.date,
+			dateFrom: typeof value?.exception?.dateFrom === 'string' ? value.exception.dateFrom : fallback.exception.dateFrom,
+			dateTo: typeof value?.exception?.dateTo === 'string' ? value.exception.dateTo : fallback.exception.dateTo,
 			timeRange: typeof value?.exception?.timeRange === 'string' ? value.exception.timeRange : fallback.exception.timeRange,
 			reason: typeof value?.exception?.reason === 'string' ? value.exception.reason : fallback.exception.reason
 		}
@@ -200,7 +209,9 @@
 	};
 
 	const hasExceptionDraft = (exception: ProfessionalDraft['exception']) =>
-		Boolean(exception.date.trim() || exception.timeRange.trim() || exception.reason.trim());
+		exception.periodMode === 'range'
+			? Boolean(exception.dateFrom.trim() || exception.dateTo.trim() || exception.reason.trim())
+			: Boolean(exception.date.trim() || exception.timeRange.trim() || exception.reason.trim());
 
 	const canOperate = $derived(data.context.canOperate && !data.demo);
 	const canManage = $derived(data.context.canManage && !data.demo);
@@ -211,6 +222,7 @@
 	const canDelete = $derived(appointmentCount === 0 && clinicalEntryCount === 0);
 	let showDeleteConfirm = $state(false);
 	const businessId = $derived(data.context.business?.id ?? 'sin-consultorio');
+	const businessTimeZone = $derived(data.context.business?.timezone ?? 'America/Argentina/Buenos_Aires');
 	const userId = $derived(data.userId ?? 'sin-usuario');
 	const professionalId = $derived(data.professional?.id ?? 'nuevo');
 	const draftStorageKey = $derived(`cita-suite:draft:professional-profile:${businessId}:${userId}:${professionalId}`);
@@ -238,6 +250,12 @@
 
 	$effect(() => {
 		if (data.services.length === 0) showNewService = true;
+	});
+
+	$effect(() => {
+		if (draft.exception.type === 'extra_available' && draft.exception.periodMode === 'range') {
+			draft.exception.periodMode = 'single';
+		}
 	});
 
 	const calculateDirtyFields = (current: ProfessionalDraft, saved: ProfessionalDraft): DirtyFields => {
@@ -316,6 +334,25 @@
 	const scheduleBlocksJson = $derived(serializeScheduleBlocks(draft.schedule.blocks));
 	const scheduleHasAnyDay = $derived(draft.schedule.blocks.some((block) => block.weekdays.length > 0));
 	const scheduleCanSave = $derived(validateScheduleBlocks(draft.schedule.blocks).ok);
+	const exceptionErrorFor = (exception: ProfessionalDraft['exception']) => {
+		if (!hasExceptionDraft(exception)) return '';
+		if (exception.periodMode === 'range') {
+			if (!exception.dateFrom.trim() || !exception.dateTo.trim()) {
+				return 'Completá las fechas Desde y Hasta.';
+			}
+			if (exception.dateTo < exception.dateFrom) {
+				return 'La fecha Hasta no puede ser anterior a Desde.';
+			}
+			return '';
+		}
+		if (!exception.date.trim() || !exception.timeRange.trim()) {
+			return 'Completá la fecha y el horario.';
+		}
+		const ranges = parseTimeRanges(exception.timeRange);
+		return !ranges || ranges.length !== 1 ? 'Ingresá una sola franja horaria válida.' : '';
+	};
+	const exceptionValidationMessage = $derived(exceptionErrorFor(draft.exception));
+	const exceptionCanSave = $derived(dirtyFields.exception && !exceptionValidationMessage);
 	const schedulePreview = (block: ScheduleBlockDraft) => parseTimeRanges(block.timeRanges) ?? [];
 	const sameNumberList = (left: number[], right: number[]) =>
 		uniqueSortedNumbers(left).join('|') === uniqueSortedNumbers(right).join('|');
@@ -454,6 +491,21 @@
 
 	const exceptionTarget = (item: Exception) =>
 		item.professional_id ? professional?.name ?? 'Profesional' : 'Todo el consultorio';
+	const exceptionPeriodLabel = (item: Exception) => {
+		const starts = formatInTimeZone(item.starts_at, businessTimeZone);
+		const ends = formatInTimeZone(item.ends_at, businessTimeZone);
+		const isMidnight = (value: string) => value === '00:00' || value === '24:00';
+		const endMs = Date.parse(item.ends_at);
+		if (isMidnight(starts.timeLabel) && isMidnight(ends.timeLabel) && Number.isFinite(endMs)) {
+			const inclusiveEnd = new Date(endMs - 60_000);
+			const startLabel = formatDate(item.starts_at, businessTimeZone);
+			const endLabel = formatDate(inclusiveEnd.toISOString(), businessTimeZone);
+			return startLabel === endLabel
+				? `${startLabel} · Día completo`
+				: `Del ${startLabel} al ${endLabel} · Días completos`;
+		}
+		return `${formatDateTime(item.starts_at, businessTimeZone)} - ${formatDateTime(item.ends_at, businessTimeZone)}`;
+	};
 
 	const durationLabel = (minutes: number) => `${minutes} ${minutes === 1 ? 'minuto' : 'minutos'}`;
 	const handlePriceInput = (event: Event) => {
@@ -496,19 +548,19 @@
 		return true;
 	};
 
-	const normalizeExceptionDate = (event: Event) => {
-		const input = event.currentTarget as HTMLInputElement;
-		const value = input.value.trim();
-		const match = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-		if (match) {
-			draft.exception.date = `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`;
-			return;
-		}
-		draft.exception.date = value;
-	};
 	const normalizeExceptionTime = (event: Event) => {
 		const input = event.currentTarget as HTMLInputElement;
 		draft.exception.timeRange = normalizeTimeRangesInput(input.value);
+	};
+	const normalizeExceptionBeforeSubmit = (event?: SubmitEvent) => {
+		if (draft.exception.periodMode === 'single') {
+			draft.exception.timeRange = normalizeTimeRangesInput(draft.exception.timeRange);
+		}
+		if (exceptionErrorFor(draft.exception)) {
+			event?.preventDefault();
+			return false;
+		}
+		return true;
 	};
 
 	const fieldStateClass = (dirty: boolean, missing = false) =>
@@ -633,7 +685,10 @@
 			activeTab = 'horarios';
 			return;
 		}
-		draft.exception.timeRange = normalizeTimeRangesInput(draft.exception.timeRange);
+		if (dirtyFields.exception && !normalizeExceptionBeforeSubmit()) {
+			activeTab = 'horarios';
+			return;
+		}
 		saveAllForm?.requestSubmit();
 	};
 
@@ -734,7 +789,10 @@
 			<input type="hidden" name="schedule_blocks" value={scheduleBlocksJson} />
 			<input type="hidden" name="applies_to" value={draft.exception.appliesTo} />
 			<input type="hidden" name="type" value={draft.exception.type} />
+			<input type="hidden" name="period_mode" value={draft.exception.periodMode} />
 			<input type="hidden" name="date" value={draft.exception.date} />
+			<input type="hidden" name="date_from" value={draft.exception.dateFrom} />
+			<input type="hidden" name="date_to" value={draft.exception.dateTo} />
 			<input type="hidden" name="time_range" value={draft.exception.timeRange} />
 			<input type="hidden" name="reason" value={draft.exception.reason} />
 		</form>
@@ -1139,21 +1197,28 @@
 				</button>
 			</form>
 
-			<form method="POST" action="?/create_exception" class={`ux-card ${sectionStateClass(dirtyFields.exception)}`} use:enhance={sectionEnhance('exception')}>
-				<h2 class="ux-section-title">Cambio puntual</h2>
-				<p class="mt-2 text-sm text-white/55">Bloqueos, feriados u horarios extra.</p>
+			<form
+				method="POST"
+				action="?/create_exception"
+				class={`ux-card ${sectionStateClass(dirtyFields.exception)}`}
+				onsubmit={normalizeExceptionBeforeSubmit}
+				use:enhance={sectionEnhance('exception')}
+			>
+				<h2 class="ux-section-title">Ausencia o cambio de horario</h2>
+				<p class="mt-2 text-sm text-white/55">Bloqueá un horario puntual o varios días completos.</p>
 				{#if dirtyFields.exception}
 					<p class="ux-section-meta ux-section-meta-warning">Cambios sin guardar</p>
 				{/if}
+				<input type="hidden" name="period_mode" value={draft.exception.periodMode} />
 				<div class="mt-5 grid gap-4">
 					<div>
 						<span class="ux-label">Afecta a</span>
 						<div class="mt-3 grid gap-2 sm:grid-cols-2">
-							<label class="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-bold text-white/80">
+							<label class={`ux-choice px-4 py-3 text-sm font-bold ${draft.exception.appliesTo === 'professional' ? 'ux-choice-active' : ''}`}>
 								<input type="radio" name="applies_to" value="professional" bind:group={draft.exception.appliesTo} class="mr-2 accent-[#7c3aed]" />
 								{professional?.name ?? 'Profesional'}
 							</label>
-							<label class="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-bold text-white/80">
+							<label class={`ux-choice px-4 py-3 text-sm font-bold ${draft.exception.appliesTo === 'business' ? 'ux-choice-active' : ''}`}>
 								<input type="radio" name="applies_to" value="business" bind:group={draft.exception.appliesTo} class="mr-2 accent-[#7c3aed]" />
 								Todo el consultorio
 							</label>
@@ -1162,34 +1227,82 @@
 					<div>
 						<span class="ux-label">Tipo</span>
 						<div class="mt-3 grid gap-2 sm:grid-cols-2">
-							<label class="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-bold text-white/80">
+							<label class={`ux-choice px-4 py-3 text-sm font-bold ${draft.exception.type === 'blocked' ? 'ux-choice-active' : ''}`}>
 								<input type="radio" name="type" value="blocked" bind:group={draft.exception.type} class="mr-2 accent-[#7c3aed]" />
 								Bloquear
 							</label>
-							<label class="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-bold text-white/80">
+							<label class={`ux-choice px-4 py-3 text-sm font-bold ${draft.exception.type === 'extra_available' ? 'ux-choice-active' : ''}`}>
 								<input type="radio" name="type" value="extra_available" bind:group={draft.exception.type} class="mr-2 accent-[#7c3aed]" />
 								Sumar horario
 							</label>
 						</div>
 					</div>
-					<label>
-						<span class="ux-label flex flex-wrap items-center gap-2">
-							Fecha
-							{#if dirtyFields.exception}<span class="ux-inline-status ux-inline-status-warning">Sin guardar</span>{/if}
-						</span>
-						<input name="date" type="text" inputmode="numeric" placeholder="24/05/2026" bind:value={draft.exception.date} onblur={normalizeExceptionDate} required disabled={!canOperate} class={`ux-input ${fieldStateClass(dirtyFields.exception)}`} />
-					</label>
-					<label>
-						<span class="ux-label">Horario</span>
-						<input name="time_range" type="text" placeholder="10 a 12" bind:value={draft.exception.timeRange} onblur={normalizeExceptionTime} required disabled={!canOperate} class={`ux-input ${fieldStateClass(dirtyFields.exception)}`} />
-					</label>
+					{#if draft.exception.type === 'blocked'}
+						<div>
+							<span class="ux-label flex flex-wrap items-center gap-2">
+								Duración del bloqueo
+								{#if dirtyFields.exception}<span class="ux-inline-status ux-inline-status-warning">Sin guardar</span>{/if}
+							</span>
+							<div class="mt-3 grid gap-2 sm:grid-cols-2">
+								<button
+									type="button"
+									disabled={!canOperate}
+									aria-pressed={draft.exception.periodMode === 'single'}
+									class={`ux-choice p-4 text-left ${draft.exception.periodMode === 'single' ? 'ux-choice-active' : ''}`}
+									onclick={() => (draft.exception.periodMode = 'single')}
+								>
+									<span class="block font-black text-white">Un día</span>
+									<span class="mt-1 block text-xs text-white/50">Elegís fecha y horario.</span>
+								</button>
+								<button
+									type="button"
+									disabled={!canOperate}
+									aria-pressed={draft.exception.periodMode === 'range'}
+									class={`ux-choice p-4 text-left ${draft.exception.periodMode === 'range' ? 'ux-choice-active' : ''}`}
+									onclick={() => (draft.exception.periodMode = 'range')}
+								>
+									<span class="block font-black text-white">Rango de días</span>
+									<span class="mt-1 block text-xs text-white/50">Desde y hasta, días completos.</span>
+								</button>
+							</div>
+						</div>
+					{/if}
+					{#if draft.exception.periodMode === 'single'}
+						<div class="grid gap-4 sm:grid-cols-2">
+							<label>
+								<span class="ux-label">Fecha</span>
+								<input name="date" type="date" bind:value={draft.exception.date} required disabled={!canOperate} class={`ux-input ${fieldStateClass(dirtyFields.exception)}`} />
+							</label>
+							<label>
+								<span class="ux-label">Horario</span>
+								<input name="time_range" type="text" placeholder="10 a 12" bind:value={draft.exception.timeRange} onblur={normalizeExceptionTime} required disabled={!canOperate} class={`ux-input ${fieldStateClass(dirtyFields.exception)}`} />
+							</label>
+						</div>
+					{:else}
+						<div class="grid gap-4 sm:grid-cols-2">
+							<label>
+								<span class="ux-label">Desde</span>
+								<input name="date_from" type="date" bind:value={draft.exception.dateFrom} required disabled={!canOperate} class={`ux-input ${fieldStateClass(dirtyFields.exception)}`} />
+							</label>
+							<label>
+								<span class="ux-label">Hasta</span>
+								<input name="date_to" type="date" min={draft.exception.dateFrom} bind:value={draft.exception.dateTo} required disabled={!canOperate} class={`ux-input ${fieldStateClass(dirtyFields.exception)}`} />
+							</label>
+						</div>
+						<p class="rounded-2xl border border-violet-300/20 bg-violet-400/10 px-4 py-3 text-sm font-bold text-violet-100">
+							Incluye ambos días completos. Los turnos ya agendados no se cancelan.
+						</p>
+					{/if}
 					<label>
 						<span class="ux-label">Motivo (opcional)</span>
 						<input name="reason" placeholder="Vacaciones, feriado, trámite..." bind:value={draft.exception.reason} disabled={!canOperate} class={`ux-input ${fieldStateClass(dirtyFields.exception)}`} />
 					</label>
+					{#if exceptionValidationMessage}
+						<p class="ux-alert">{exceptionValidationMessage}</p>
+					{/if}
 				</div>
-				<button type="submit" disabled={!canOperate || saving === 'exception' || !dirtyFields.exception} class="ux-btn-secondary mt-5 w-full">
-					{saving === 'exception' ? 'Guardando...' : 'Guardar cambio'}
+				<button type="submit" disabled={!canOperate || saving === 'exception' || !exceptionCanSave} class="ux-btn-secondary mt-5 w-full">
+					{saving === 'exception' ? 'Guardando...' : draft.exception.periodMode === 'range' ? 'Guardar rango' : 'Guardar cambio'}
 				</button>
 			</form>
 		</div>
@@ -1236,7 +1349,7 @@
 							<div class="flex items-start justify-between gap-3">
 								<div class="text-sm">
 									<p class="font-bold text-white">{item.type === 'blocked' ? 'Bloqueo' : 'Horario extra'} · {exceptionTarget(item)}</p>
-									<p class="mt-1 text-white/55">{formatDateTime(item.starts_at)} - {formatDateTime(item.ends_at)}</p>
+									<p class="mt-1 text-white/55">{exceptionPeriodLabel(item)}</p>
 									{#if item.reason}<p class="mt-1 text-xs text-white/42">{item.reason}</p>{/if}
 								</div>
 								<button type="submit" disabled={!canOperate} class="text-sm font-bold text-red-200 disabled:opacity-50">Eliminar</button>

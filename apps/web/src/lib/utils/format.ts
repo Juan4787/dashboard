@@ -65,4 +65,40 @@ export const formatInTimeZone = (value: string | Date, timeZone: string): ZonedD
 	return { dateLabel, timeLabel, full: `${dateLabel} a las ${timeLabel}` };
 };
 
+const MINUTE_MS = 60 * 1000;
+const HOUR_MINUTES = 60;
+const DAY_MINUTES = 24 * HOUR_MINUTES;
+
+/**
+ * Human-readable remaining commercial access time.
+ *
+ * Short grants deliberately stay in minutes/hours. In particular, a one-hour
+ * grant must never be rounded up to "1 día" just because the legacy status
+ * model also exposes daysUntilExpiration.
+ */
+export const formatAccessRemaining = (
+	value?: string | null,
+	now: Date = new Date()
+): string | null => {
+	if (!value) return null;
+	const expiresAtMs = Date.parse(value);
+	if (!Number.isFinite(expiresAtMs)) return null;
+
+	const diffMs = expiresAtMs - now.getTime();
+	if (diffMs <= 0) return 'Vencido';
+
+	const minutes = Math.max(1, Math.ceil(diffMs / MINUTE_MS));
+	if (minutes < HOUR_MINUTES) {
+		return `${minutes} min ${minutes === 1 ? 'restante' : 'restantes'}`;
+	}
+	if (minutes === HOUR_MINUTES) return '1 hora restante';
+	if (minutes < DAY_MINUTES) {
+		const hours = Math.ceil(minutes / HOUR_MINUTES);
+		return `${hours} horas restantes`;
+	}
+
+	const days = Math.ceil(minutes / DAY_MINUTES);
+	return `${days} ${days === 1 ? 'día restante' : 'días restantes'}`;
+};
+
 export const normalizePhone = (phone: string) => phone.replace(/\D/g, '');

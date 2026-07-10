@@ -135,7 +135,10 @@
 	let scheduleBlockSeq = 20;
 	let exceptionAppliesTo = $state<'professional' | 'business'>('professional');
 	let exceptionType = $state<'blocked' | 'extra_available'>('blocked');
+	let exceptionPeriodMode = $state<'single' | 'range'>('single');
 	let exceptionDate = $state('');
+	let exceptionDateFrom = $state('');
+	let exceptionDateTo = $state('');
 	let exceptionTimeRange = $state('');
 	let exceptionReason = $state('');
 
@@ -210,9 +213,22 @@
 				newServices = [];
 			}
 		}
+		if (form.values.exception_applies_to === 'business') exceptionAppliesTo = 'business';
+		if (form.values.exception_type === 'extra_available') exceptionType = 'extra_available';
+		if (form.values.exception_period_mode === 'range' && exceptionType === 'blocked') {
+			exceptionPeriodMode = 'range';
+		}
 		if (form.values.exception_date) exceptionDate = String(form.values.exception_date);
+		if (form.values.exception_date_from) exceptionDateFrom = String(form.values.exception_date_from);
+		if (form.values.exception_date_to) exceptionDateTo = String(form.values.exception_date_to);
 		if (form.values.exception_time_range) exceptionTimeRange = String(form.values.exception_time_range);
 		if (form.values.exception_reason) exceptionReason = String(form.values.exception_reason);
+	});
+
+	$effect(() => {
+		if (exceptionType === 'extra_available' && exceptionPeriodMode === 'range') {
+			exceptionPeriodMode = 'single';
+		}
 	});
 
 	const resetWizard = () => {
@@ -229,7 +245,10 @@
 		scheduleBlocks = [{ ...createEmptyScheduleBlock(`wizard-block-${scheduleBlockSeq++}`) }];
 		exceptionAppliesTo = 'professional';
 		exceptionType = 'blocked';
+		exceptionPeriodMode = 'single';
 		exceptionDate = '';
+		exceptionDateFrom = '';
+		exceptionDateTo = '';
 		exceptionTimeRange = '';
 		exceptionReason = '';
 		emailError = '';
@@ -301,14 +320,31 @@
 			} else {
 				scheduleError = '';
 			}
-			const hasPartialException =
-				(exceptionDate.trim() && !exceptionTimeRange.trim()) ||
-				(!exceptionDate.trim() && exceptionTimeRange.trim());
-			if (hasPartialException) {
-				exceptionError = 'Para cargar el cambio puntual completá fecha y horario, o dejalo vacío.';
-				valid = false;
+			if (exceptionPeriodMode === 'single') {
+				const hasDate = Boolean(exceptionDate.trim());
+				const hasTime = Boolean(exceptionTimeRange.trim());
+				const ranges = hasTime ? parseTimeRanges(exceptionTimeRange) : null;
+				if (hasDate !== hasTime) {
+					exceptionError = 'Completá fecha y horario, o dejá ambos vacíos.';
+					valid = false;
+				} else if (hasTime && (!ranges || ranges.length !== 1)) {
+					exceptionError = 'Ingresá una sola franja horaria válida.';
+					valid = false;
+				} else {
+					exceptionError = '';
+				}
 			} else {
-				exceptionError = '';
+				const hasFrom = Boolean(exceptionDateFrom.trim());
+				const hasTo = Boolean(exceptionDateTo.trim());
+				if (hasFrom !== hasTo) {
+					exceptionError = 'Completá las fechas Desde y Hasta, o dejá ambas vacías.';
+					valid = false;
+				} else if (hasFrom && exceptionDateTo < exceptionDateFrom) {
+					exceptionError = 'La fecha Hasta no puede ser anterior a Desde.';
+					valid = false;
+				} else {
+					exceptionError = '';
+				}
 			}
 			return valid;
 		}
@@ -400,17 +436,6 @@
 		newServicePrice = input.value;
 	};
 
-	const normalizeExceptionDate = (event: Event) => {
-		const input = event.currentTarget as HTMLInputElement;
-		const value = input.value.trim();
-		const match = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-		if (match) {
-			exceptionDate = `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`;
-			return;
-		}
-		exceptionDate = value;
-	};
-
 	const normalizeExceptionTime = (event: Event) => {
 		const input = event.currentTarget as HTMLInputElement;
 		exceptionTimeRange = normalizeTimeRangesInput(input.value);
@@ -429,7 +454,15 @@
 			slotInterval: block.slotInterval || '15'
 		}))
 	);
-	const hasExceptionLoaded = $derived(Boolean(exceptionDate.trim() && exceptionTimeRange.trim()));
+	const hasExceptionLoaded = $derived(
+		exceptionPeriodMode === 'range'
+			? Boolean(exceptionDateFrom.trim() && exceptionDateTo.trim())
+			: Boolean(exceptionDate.trim() && exceptionTimeRange.trim())
+	);
+	const formatDateKey = (value: string) => {
+		const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+		return match ? `${match[3]}/${match[2]}/${match[1]}` : value;
+	};
 	const newServicesJson = $derived(JSON.stringify(newServices));
 	const scheduleBlocksJson = $derived(serializeScheduleBlocks(scheduleBlocks));
 
@@ -525,7 +558,10 @@
 			<input type="hidden" name="schedule_blocks" value={scheduleBlocksJson} />
 			<input type="hidden" name="exception_applies_to" value={exceptionAppliesTo} />
 			<input type="hidden" name="exception_type" value={exceptionType} />
+			<input type="hidden" name="exception_period_mode" value={exceptionPeriodMode} />
 			<input type="hidden" name="exception_date" value={exceptionDate} />
+			<input type="hidden" name="exception_date_from" value={exceptionDateFrom} />
+			<input type="hidden" name="exception_date_to" value={exceptionDateTo} />
 			<input type="hidden" name="exception_time_range" value={exceptionTimeRange} />
 			<input type="hidden" name="exception_reason" value={exceptionReason} />
 
@@ -774,17 +810,17 @@
 					</div>
 
 					<div class="ux-soft-card p-5">
-						<h3 class="ux-section-title">Cambio puntual (opcional)</h3>
-						<p class="mt-1 text-sm text-white/55">Bloqueos, feriados u horarios extra.</p>
+						<h3 class="ux-section-title">Ausencia o cambio de horario (opcional)</h3>
+						<p class="mt-1 text-sm text-white/55">Podés bloquear un horario puntual o varios días completos.</p>
 						<div class="mt-5 grid gap-4">
 							<div>
 								<span class="ux-label">Afecta a</span>
 								<div class="mt-3 grid gap-2 sm:grid-cols-2">
-									<label class="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-bold text-white/80">
+									<label class={`ux-choice px-4 py-3 text-sm font-bold ${exceptionAppliesTo === 'professional' ? 'ux-choice-active' : ''}`}>
 										<input type="radio" value="professional" bind:group={exceptionAppliesTo} class="mr-2 accent-[#7c3aed]" />
 										{professionalName.trim() || 'Profesional'}
 									</label>
-									<label class="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-bold text-white/80">
+									<label class={`ux-choice px-4 py-3 text-sm font-bold ${exceptionAppliesTo === 'business' ? 'ux-choice-active' : ''}`}>
 										<input type="radio" value="business" bind:group={exceptionAppliesTo} class="mr-2 accent-[#7c3aed]" />
 										Todo el consultorio
 									</label>
@@ -793,24 +829,69 @@
 							<div>
 								<span class="ux-label">Tipo</span>
 								<div class="mt-3 grid gap-2 sm:grid-cols-2">
-									<label class="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-bold text-white/80">
+									<label class={`ux-choice px-4 py-3 text-sm font-bold ${exceptionType === 'blocked' ? 'ux-choice-active' : ''}`}>
 										<input type="radio" value="blocked" bind:group={exceptionType} class="mr-2 accent-[#7c3aed]" />
 										Bloquear
 									</label>
-									<label class="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-bold text-white/80">
+									<label class={`ux-choice px-4 py-3 text-sm font-bold ${exceptionType === 'extra_available' ? 'ux-choice-active' : ''}`}>
 										<input type="radio" value="extra_available" bind:group={exceptionType} class="mr-2 accent-[#7c3aed]" />
 										Sumar horario
 									</label>
 								</div>
 							</div>
-							<label>
-								<span class="ux-label">Fecha</span>
-								<input type="text" inputmode="numeric" placeholder="24/05/2026" bind:value={exceptionDate} onblur={normalizeExceptionDate} disabled={!canManage} class="ux-input" />
-							</label>
-							<label>
-								<span class="ux-label">Horario</span>
-								<input type="text" placeholder="10 a 12" bind:value={exceptionTimeRange} onblur={normalizeExceptionTime} disabled={!canManage} class="ux-input" />
-							</label>
+							{#if exceptionType === 'blocked'}
+								<div>
+									<span class="ux-label">Duración del bloqueo</span>
+									<div class="mt-3 grid gap-2 sm:grid-cols-2">
+										<button
+											type="button"
+											disabled={!canManage}
+											aria-pressed={exceptionPeriodMode === 'single'}
+											class={`ux-choice p-4 text-left ${exceptionPeriodMode === 'single' ? 'ux-choice-active' : ''}`}
+											onclick={() => (exceptionPeriodMode = 'single')}
+										>
+											<span class="block font-black text-white">Un día</span>
+											<span class="mt-1 block text-xs text-white/50">Elegís fecha y horario.</span>
+										</button>
+										<button
+											type="button"
+											disabled={!canManage}
+											aria-pressed={exceptionPeriodMode === 'range'}
+											class={`ux-choice p-4 text-left ${exceptionPeriodMode === 'range' ? 'ux-choice-active' : ''}`}
+											onclick={() => (exceptionPeriodMode = 'range')}
+										>
+											<span class="block font-black text-white">Rango de días</span>
+											<span class="mt-1 block text-xs text-white/50">Desde y hasta, días completos.</span>
+										</button>
+									</div>
+								</div>
+							{/if}
+							{#if exceptionPeriodMode === 'single'}
+								<div class="grid gap-4 sm:grid-cols-2">
+									<label>
+										<span class="ux-label">Fecha</span>
+										<input type="date" bind:value={exceptionDate} disabled={!canManage} class="ux-input" />
+									</label>
+									<label>
+										<span class="ux-label">Horario</span>
+										<input type="text" placeholder="10 a 12" bind:value={exceptionTimeRange} onblur={normalizeExceptionTime} disabled={!canManage} class="ux-input" />
+									</label>
+								</div>
+							{:else}
+								<div class="grid gap-4 sm:grid-cols-2">
+									<label>
+										<span class="ux-label">Desde</span>
+										<input type="date" bind:value={exceptionDateFrom} disabled={!canManage} class="ux-input" />
+									</label>
+									<label>
+										<span class="ux-label">Hasta</span>
+										<input type="date" min={exceptionDateFrom} bind:value={exceptionDateTo} disabled={!canManage} class="ux-input" />
+									</label>
+								</div>
+								<p class="rounded-2xl border border-violet-300/20 bg-violet-400/10 px-4 py-3 text-sm font-bold text-violet-100">
+									Incluye ambos días completos. Los turnos ya agendados no se cancelan.
+								</p>
+							{/if}
 							<label>
 								<span class="ux-label">Motivo (opcional)</span>
 								<input placeholder="Vacaciones, feriado, trámite..." bind:value={exceptionReason} disabled={!canManage} class="ux-input" />
@@ -857,9 +938,13 @@
 							{/each}
 						</div>
 						{#if hasExceptionLoaded}
-							<p class="mt-4 text-sm font-bold text-white/45">Cambio puntual</p>
+							<p class="mt-4 text-sm font-bold text-white/45">Ausencia o cambio de horario</p>
 							<p class="mt-1 text-xl font-black text-white">
-								{exceptionType === 'blocked' ? 'Bloquear' : 'Sumar horario'} · {exceptionDate} · {exceptionTimeRange}
+								{#if exceptionPeriodMode === 'range'}
+									Bloquear del {formatDateKey(exceptionDateFrom)} al {formatDateKey(exceptionDateTo)} · Días completos
+								{:else}
+									{exceptionType === 'blocked' ? 'Bloquear' : 'Sumar horario'} · {formatDateKey(exceptionDate)} · {exceptionTimeRange}
+								{/if}
 								{exceptionAppliesTo === 'business' ? ' · Todo el consultorio' : ''}
 								{exceptionReason.trim() ? ` · ${exceptionReason}` : ''}
 							</p>

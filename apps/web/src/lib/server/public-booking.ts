@@ -2,10 +2,9 @@ import crypto from 'crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Business } from './business';
 import { getAvailabilitySlots, type AvailabilitySlot, addMinutes } from './availability';
-import { createManualAppointment, getHumanAppointmentErrorMessage } from './appointments';
+import { createManualAppointment } from './appointments';
 import {
 	getBusinessAccessState,
-	publicBusinessUnavailableMessage,
 	type BusinessSubscriptionRow
 } from './commercial-access';
 import { isLikelyPhoneE164, normalizePhoneE164, normalizePhoneRaw } from './phone';
@@ -76,6 +75,13 @@ type BookingAttemptInput = {
 
 export const PUBLIC_BUSINESS_SELECT =
 	'id, name, slug, phone, address, address_instructions, maps_url, logo_url, timezone, public_booking_enabled, is_active, created_at, min_booking_notice_minutes, max_booking_days_ahead, cancellation_policy';
+
+export const PUBLIC_ACTIVE_FUTURE_APPOINTMENT_LIMIT = 4;
+export const PUBLIC_ACTIVE_APPOINTMENT_STATUSES = [
+	'reserved',
+	'confirmed',
+	'reschedule_requested'
+] as const;
 
 const pad = (value: number) => String(value).padStart(2, '0');
 
@@ -630,7 +636,17 @@ const assertPublicBookingRateLimits = async (
 		since: addMinutes(now, -30)
 	});
 	if (phoneAttempts >= 5) throw new Error('PUBLIC_RATE_LIMIT_PHONE');
+};
 
+export const assertPublicBookingPatientPolicy = async (
+	supabase: SupabaseClient,
+	input: {
+		businessId: string;
+		phoneE164: string;
+		now?: Date;
+	}
+) => {
+	const now = input.now ?? new Date();
 	const { data: patient, error: patientError } = await supabase
 		.from('patients')
 		.select('id, blocked')
@@ -641,19 +657,20 @@ const assertPublicBookingRateLimits = async (
 	if (patient?.blocked) throw new Error('PUBLIC_BOOKING_BLOCKED_PATIENT');
 	if (!patient?.id) return;
 
-	// Anti-abuso: solo contamos turnos PENDIENTES Y FUTUROS (reserved/confirmed/reschedule_requested
-	// con starts_at >= ahora). Los pasados, cancelados, atendidos y no asistidos NO cuentan, así que
-	// un paciente puede seguir sacando turnos a lo largo de su tratamiento. Se restringe únicamente
-	// cuando ya tiene 2 o más turnos pendientes futuros sin resolver.
+	// Capacidad pública por paciente: sólo estados activos cuyo inicio todavía
+	// está en el futuro estricto. Un historial de cualquier tamaño, los turnos
+	// que ya empezaron y los estados terminales no consumen el cupo 4/4.
 	const { count, error } = await supabase
 		.from('appointments')
 		.select('id', { count: 'exact', head: true })
 		.eq('business_id', input.businessId)
 		.eq('patient_id', patient.id)
-		.in('status', ['reserved', 'confirmed', 'reschedule_requested'])
-		.gte('starts_at', now.toISOString());
+		.in('status', [...PUBLIC_ACTIVE_APPOINTMENT_STATUSES])
+		.gt('starts_at', now.toISOString());
 	if (error) throw error;
-	if ((count ?? 0) >= 2) throw new Error('PUBLIC_BOOKING_ACTIVE_LIMIT');
+	if ((count ?? 0) >= PUBLIC_ACTIVE_FUTURE_APPOINTMENT_LIMIT) {
+		throw new Error('PUBLIC_BOOKING_ACTIVE_LIMIT');
+	}
 };
 
 export const createPublicBooking = async (
@@ -691,6 +708,13 @@ export const createPublicBooking = async (
 		if (patientName.length < 3) throw new Error('PUBLIC_PATIENT_NAME_INVALID');
 		if (!phoneE164 || !isLikelyPhoneE164(phoneE164)) throw new Error('PUBLIC_PATIENT_PHONE_INVALID');
 
+		// La capacidad del paciente se evalúa antes que los límites temporales de
+		// intentos para no ocultar un 4/4 real detrás de un mensaje de rate limit.
+		await assertPublicBookingPatientPolicy(supabase, {
+			businessId: business.id,
+			phoneE164,
+			now
+		});
 		await assertPublicBookingRateLimits(supabase, {
 			businessId: business.id,
 			phoneE164,
@@ -742,14 +766,7 @@ export const createPublicBooking = async (
 			}
 		});
 
-		const { data: appointment, error } = await supabase
-			.from('appointments')
-			.select('id, confirmation_token, starts_at, ends_at, service_name_snapshot, professional_name_snapshot, patients(full_name, phone_e164)')
-			.eq('business_id', business.id)
-			.eq('id', created?.id)
-			.single();
-		if (error) throw error;
-		return { business, appointment };
+		return { business, appointment: created };
 	} catch (error) {
 		await recordPublicBookingAttempt(supabase, {
 			businessId: business?.id ?? null,
@@ -757,7 +774,7 @@ export const createPublicBooking = async (
 			ipHash: input.ipHash ?? null,
 			action: 'booking_create',
 			success: false,
-			errorCode: (error as Error)?.message ?? 'UNKNOWN',
+			errorCode: getPublicBookingErrorCode(error),
 			userAgent: input.userAgent,
 			metadata: {
 				slug: input.slug,
@@ -770,35 +787,82 @@ export const createPublicBooking = async (
 	}
 };
 
-export const getPublicBookingErrorMessage = (error: unknown) => {
-	const raw = `${(error as { message?: string; code?: string; details?: string })?.message ?? ''} ${(error as { details?: string })?.details ?? ''}`;
-	if (raw.includes('PUBLIC_BOOKING_UNAVAILABLE')) return 'La reserva online no está disponible en este momento.';
-	if (raw.includes('PUBLIC_BUSINESS_COMMERCIAL_UNAVAILABLE')) return publicBusinessUnavailableMessage;
-	if (raw.includes('PUBLIC_PATIENT_NAME_INVALID')) return 'Ingresá nombre y apellido.';
-	if (raw.includes('PUBLIC_PATIENT_PHONE_INVALID')) return 'Ingresá un teléfono válido.';
-	if (raw.includes('PUBLIC_SLOT_UNAVAILABLE')) return 'Ese horario ya fue reservado. Elegí otro horario disponible.';
-	if (raw.includes('PUBLIC_RATE_LIMIT_IP') || raw.includes('PUBLIC_RATE_LIMIT_PHONE')) {
-		return 'Hubo demasiados intentos de reserva. Probá nuevamente en unos minutos.';
+export const PUBLIC_BOOKING_ERROR_MESSAGES = {
+	PUBLIC_BOOKING_UNAVAILABLE:
+		'El consultorio desactivó las reservas online. Podés contactarlo para pedir el turno por otro medio.',
+	PUBLIC_BUSINESS_COMMERCIAL_UNAVAILABLE:
+		'El sistema de reservas online del consultorio está temporalmente suspendido. Mientras lo reactivan, pedí el turno por contacto directo.',
+	PUBLIC_PATIENT_NAME_INVALID: 'Ingresá tu nombre (al menos 3 caracteres).',
+	PUBLIC_PATIENT_PHONE_INVALID:
+		'El teléfono no tiene un formato válido. Revisalo e incluí el código de área.',
+	PUBLIC_SLOT_UNAVAILABLE:
+		'Ese horario acaba de ser ocupado. Elegí otro de los horarios disponibles.',
+	PUBLIC_RATE_LIMIT_IP:
+		'Se alcanzó el máximo de 3 intentos desde esta conexión en 10 minutos. Esperá unos minutos antes de volver a probar.',
+	PUBLIC_RATE_LIMIT_PHONE:
+		'Se alcanzó el máximo de 5 intentos para este teléfono en 30 minutos. Esperá unos minutos antes de volver a probar.',
+	PUBLIC_BOOKING_ACTIVE_LIMIT:
+		'Este teléfono ya alcanzó el máximo permitido: 4 turnos activos a futuro. Podés reservar otro cuando uno pase o sea cancelado.',
+	PUBLIC_BOOKING_BLOCKED_PATIENT:
+		'Las reservas online están deshabilitadas para esta ficha de paciente. Comunicate con el consultorio para que puedan ayudarte.',
+	PUBLIC_CAPTCHA_REQUIRED: 'Completá la verificación anti-spam para reservar el turno.',
+	PUBLIC_CAPTCHA_FAILED:
+		'La verificación anti-spam no pudo validarse. Volvé a completarla e intentá nuevamente.',
+	PATIENT_NAME_ALREADY_EXISTS:
+		'Encontramos otra ficha con exactamente el mismo nombre. El nombre no debería bloquear una reserva; avisale al consultorio para que pueda corregir esta validación.',
+	PATIENT_DNI_ALREADY_EXISTS:
+		'La ficha coincide con un DNI ya registrado. Para evitar mezclar personas, el consultorio debe revisar esa ficha antes de continuar.',
+	PATIENT_OWNER_REQUIRED:
+		'El consultorio todavía no configuró quién administra los pacientes. Avisales para que puedan corregirlo y darte el turno.',
+	SERVICE_NOT_FOUND:
+		'El servicio que elegiste dejó de estar disponible. Volvé al primer paso y elegí otro.',
+	PROFESSIONAL_NOT_FOUND:
+		'El profesional que elegiste dejó de estar disponible. Volvé al paso de profesionales y elegí otro.',
+	PROFESSIONAL_SERVICE_NOT_ASSIGNED:
+		'Ese profesional ya no atiende el servicio elegido. Elegí otro profesional o servicio.',
+	PUBLIC_BOOKING_UNEXPECTED:
+		'No pudimos confirmar si el turno quedó guardado por un problema interno. Antes de reintentar, comunicate con el consultorio para evitar una reserva duplicada.'
+} as const;
+
+export type PublicBookingErrorCode = keyof typeof PUBLIC_BOOKING_ERROR_MESSAGES;
+
+const publicBookingErrorTokenMap: ReadonlyArray<readonly [string, PublicBookingErrorCode]> = [
+	['PUBLIC_BOOKING_UNAVAILABLE', 'PUBLIC_BOOKING_UNAVAILABLE'],
+	['PUBLIC_BUSINESS_COMMERCIAL_UNAVAILABLE', 'PUBLIC_BUSINESS_COMMERCIAL_UNAVAILABLE'],
+	['BUSINESS_ACCESS_RESTRICTED', 'PUBLIC_BUSINESS_COMMERCIAL_UNAVAILABLE'],
+	['PUBLIC_PATIENT_NAME_INVALID', 'PUBLIC_PATIENT_NAME_INVALID'],
+	['PATIENT_NAME_REQUIRED', 'PUBLIC_PATIENT_NAME_INVALID'],
+	['PUBLIC_PATIENT_PHONE_INVALID', 'PUBLIC_PATIENT_PHONE_INVALID'],
+	['PUBLIC_SLOT_UNAVAILABLE', 'PUBLIC_SLOT_UNAVAILABLE'],
+	['PUBLIC_RATE_LIMIT_IP', 'PUBLIC_RATE_LIMIT_IP'],
+	['PUBLIC_RATE_LIMIT_PHONE', 'PUBLIC_RATE_LIMIT_PHONE'],
+	['PUBLIC_BOOKING_ACTIVE_LIMIT', 'PUBLIC_BOOKING_ACTIVE_LIMIT'],
+	['PUBLIC_BOOKING_BLOCKED_PATIENT', 'PUBLIC_BOOKING_BLOCKED_PATIENT'],
+	['PATIENT_BLOCKED', 'PUBLIC_BOOKING_BLOCKED_PATIENT'],
+	['PUBLIC_CAPTCHA_REQUIRED', 'PUBLIC_CAPTCHA_REQUIRED'],
+	['PUBLIC_CAPTCHA_FAILED', 'PUBLIC_CAPTCHA_FAILED'],
+	['PATIENT_NAME_ALREADY_EXISTS', 'PATIENT_NAME_ALREADY_EXISTS'],
+	['PATIENT_DNI_ALREADY_EXISTS', 'PATIENT_DNI_ALREADY_EXISTS'],
+	['PATIENT_OWNER_REQUIRED', 'PATIENT_OWNER_REQUIRED'],
+	['SERVICE_NOT_FOUND', 'SERVICE_NOT_FOUND'],
+	['PROFESSIONAL_NOT_FOUND', 'PROFESSIONAL_NOT_FOUND'],
+	['PROFESSIONAL_SERVICE_NOT_ASSIGNED', 'PROFESSIONAL_SERVICE_NOT_ASSIGNED']
+];
+
+const hasTechnicalErrorToken = (raw: string, token: string) =>
+	new RegExp(`(^|[^A-Z0-9_])${token}([^A-Z0-9_]|$)`).test(raw);
+
+export function getPublicBookingErrorCode(error: unknown): PublicBookingErrorCode {
+	const value = error as { message?: string; code?: string; details?: string; hint?: string };
+	const raw = [value?.message, value?.code, value?.details, value?.hint].filter(Boolean).join(' ');
+	if (value?.code === '23P01' || raw.includes('appointments_no_overlapping_active')) {
+		return 'PUBLIC_SLOT_UNAVAILABLE';
 	}
-	if (raw.includes('PUBLIC_BOOKING_ACTIVE_LIMIT')) {
-		return 'Ya tenés 2 turnos pendientes con ese teléfono. Esperá a que pase alguno o comunicate con el consultorio para coordinar otro.';
+	for (const [token, code] of publicBookingErrorTokenMap) {
+		if (hasTechnicalErrorToken(raw, token)) return code;
 	}
-	if (raw.includes('PUBLIC_BOOKING_BLOCKED_PATIENT') || raw.includes('PATIENT_BLOCKED')) {
-		return 'No se pudo completar la reserva online. Contactá al consultorio.';
-	}
-	if (raw.includes('PUBLIC_CAPTCHA_REQUIRED') || raw.includes('PUBLIC_CAPTCHA_FAILED')) {
-		return 'No pudimos validar la protección anti-spam. Intentá nuevamente.';
-	}
-	if (raw.includes('PATIENT_NAME_ALREADY_EXISTS')) {
-		return 'Ya figura un paciente con ese nombre en el consultorio. Si ya sos paciente, comunicate con ellos para coordinar tu turno.';
-	}
-	if (raw.includes('PATIENT_DNI_ALREADY_EXISTS')) {
-		return 'Ya figura un paciente con ese DNI en el consultorio. Comunicate con ellos para coordinar tu turno.';
-	}
-	const human = getHumanAppointmentErrorMessage(error);
-	if (human !== 'No se pudo completar la acción.') return human;
-	// Nunca exponer el motivo técnico al paciente: el error real queda en los logs
-	// del servidor (console.error en el action) y en public_booking_attempts (error_code).
-	// Acá sólo un mensaje amigable y genérico.
-	return 'No pudimos guardar tu reserva. Probá de nuevo en unos minutos o comunicate con el consultorio.';
-};
+	return 'PUBLIC_BOOKING_UNEXPECTED';
+}
+
+export const getPublicBookingErrorMessage = (error: unknown) =>
+	PUBLIC_BOOKING_ERROR_MESSAGES[getPublicBookingErrorCode(error)];

@@ -8,6 +8,12 @@ import {
 	getAuthUserId
 } from '$lib/server/supabase';
 import { normalizePhone } from '$lib/utils/format';
+import {
+	getPatientUniqueConflictField,
+	getPatientWriteConflictMessage,
+	PATIENT_UNIQUE_CONFLICT_MESSAGES,
+	type PatientUniqueField
+} from '$lib/server/patient-identity';
 import { parseMoneyInteger } from '$lib/utils/money-input';
 import { fail, redirect, error as kitError } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
@@ -38,19 +44,10 @@ const COMMERCIAL_RESTRICTED_MESSAGE =
 const PROFESSIONAL_DELETE_PATIENT_MESSAGE =
 	'Para eliminar un paciente, consultá al dueño del consultorio.';
 
-type DuplicatePatientField = 'dni' | 'name';
-
-const normalizePatientName = (value: string) => value.trim().replace(/\s+/g, ' ').toLowerCase();
-
 const cleanText = (value: unknown) => {
 	const text = String(value ?? '').trim();
 	return text ? text : null;
 };
-
-const duplicatePatientMessage = (field: DuplicatePatientField) =>
-	field === 'dni'
-		? 'Ya hay otro paciente creado con ese DNI. Abrí su ficha o corregí el dato.'
-		: 'Ya hay otro paciente creado con ese nombre. Abrí su ficha o corregí el dato.';
 
 const sentenceJoin = (items: string[]) => {
 	if (items.length <= 1) return items[0] ?? '';
@@ -160,18 +157,18 @@ const findPatientDuplicateForUpdate = async ({
 	admin,
 	businessId,
 	patientId,
-	fullName,
-	dni
+	dni,
+	phoneE164,
+	onlyField
 }: {
 	admin: Awaited<ReturnType<typeof createSupabaseAdminClient>>;
 	businessId: string;
 	patientId: string;
-	fullName: string;
 	dni: string;
-}): Promise<{ id: string; field: DuplicatePatientField } | null> => {
-	const normalizedName = normalizePatientName(fullName);
-
-	if (dni) {
+	phoneE164: string | null;
+	onlyField?: PatientUniqueField;
+}): Promise<{ id: string; field: PatientUniqueField } | null> => {
+	if (dni && (!onlyField || onlyField === 'dni')) {
 		const { data, error } = await admin
 			.from('patients')
 			.select('id')
@@ -184,25 +181,25 @@ const findPatientDuplicateForUpdate = async ({
 		if ((data as any)?.id) return { id: String((data as any).id), field: 'dni' };
 	}
 
-	const { data, error } = await admin
-		.from('patients')
-		.select('id, full_name')
-		.eq('business_id', businessId)
-		.neq('id', patientId)
-		.range(0, 9999);
-	if (error) throw error;
-
-	const existingByName = (data ?? []).find(
-		(patient: any) => normalizePatientName(String(patient.full_name ?? '')) === normalizedName
-	);
-	if (existingByName?.id) return { id: String(existingByName.id), field: 'name' };
+	if (phoneE164 && (!onlyField || onlyField === 'phone')) {
+		const { data, error } = await admin
+			.from('patients')
+			.select('id')
+			.eq('business_id', businessId)
+			.eq('phone_e164', phoneE164)
+			.neq('id', patientId)
+			.limit(1)
+			.maybeSingle();
+		if (error) throw error;
+		if ((data as any)?.id) return { id: String((data as any).id), field: 'phone' };
+	}
 
 	return null;
 };
 
-const duplicatePatientActionResult = (existing: { id: string; field: DuplicatePatientField }) =>
-	fail(400, {
-		message: duplicatePatientMessage(existing.field),
+const duplicatePatientActionResult = (existing: { id: string; field: PatientUniqueField }) =>
+	fail(409, {
+		message: PATIENT_UNIQUE_CONFLICT_MESSAGES[existing.field],
 		duplicate: true,
 		duplicateField: existing.field,
 		existingId: existing.id
@@ -213,33 +210,38 @@ const mapDuplicatePatientError = async ({
 	admin,
 	businessId,
 	patientId,
-	fullName,
-	dni
+	dni,
+	phoneE164
 }: {
-	error: { message?: string | null } | null | undefined;
+	error:
+		| { code?: string | null; message?: string | null; details?: string | null; hint?: string | null }
+		| null
+		| undefined;
 	admin: Awaited<ReturnType<typeof createSupabaseAdminClient>>;
 	businessId: string;
 	patientId: string;
-	fullName: string;
 	dni: string;
+	phoneE164: string | null;
 }) => {
-	const message = String(error?.message ?? '');
-	if (!message.includes('PATIENT_DNI_ALREADY_EXISTS') && !message.includes('PATIENT_NAME_ALREADY_EXISTS')) {
-		return null;
+	const conflictField = getPatientUniqueConflictField(error);
+	if (conflictField) {
+		try {
+			const duplicate = await findPatientDuplicateForUpdate({
+				admin,
+				businessId,
+				patientId,
+				dni,
+				phoneE164,
+				onlyField: conflictField
+			});
+			if (duplicate) return duplicatePatientActionResult(duplicate);
+		} catch (lookupError) {
+			console.error('Error recuperando ficha en conflicto al editar paciente', lookupError);
+		}
 	}
-	const duplicate = await findPatientDuplicateForUpdate({
-		admin,
-		businessId,
-		patientId,
-		fullName,
-		dni
-	});
-	if (duplicate) return duplicatePatientActionResult(duplicate);
-	return fail(400, {
-		message: message.includes('PATIENT_DNI_ALREADY_EXISTS')
-			? duplicatePatientMessage('dni')
-			: duplicatePatientMessage('name')
-	});
+
+	const conflictMessage = getPatientWriteConflictMessage(error);
+	return conflictMessage ? fail(409, { message: conflictMessage }) : null;
 };
 
 const getActorName = (role: BusinessActionSession['context']['role'], professionalName?: string | null) => {
@@ -1203,6 +1205,25 @@ export const actions: Actions = {
 		};
 
 		if (env.DEMO_MODE === 'true') {
+			const demoPatients = readDemoDb().patients;
+			const duplicateByDni = dni
+				? demoPatients.find((patient) => patient.id !== params.id && patient.dni === dni)
+				: null;
+			if (duplicateByDni) {
+				return duplicatePatientActionResult({ id: duplicateByDni.id, field: 'dni' });
+			}
+
+			const duplicateByPhone = updates.phone_e164
+				? demoPatients.find(
+						(patient) =>
+							patient.id !== params.id &&
+							normalizePhoneE164(patient.phone) === updates.phone_e164
+					)
+				: null;
+			if (duplicateByPhone) {
+				return duplicatePatientActionResult({ id: duplicateByPhone.id, field: 'phone' });
+			}
+
 			let updated = false;
 			updateDemoDb((db) => {
 				const patient = db.patients.find((p) => p.id === params.id);
@@ -1261,14 +1282,15 @@ export const actions: Actions = {
 				admin,
 				businessId: context.business.id,
 				patientId: params.id,
-				fullName: full_name,
-				dni
+				dni,
+				phoneE164: updates.phone_e164
 			});
 			if (duplicate) return duplicatePatientActionResult(duplicate);
 		} catch (duplicateError) {
 			console.error('Error verificando duplicados al editar paciente', duplicateError);
 			return fail(500, {
-				message: 'No se pudo verificar si ya existe otro paciente con esos datos. Intentá de nuevo.'
+				message:
+					'No pudimos comprobar si el DNI o el teléfono ya están asociados a otra ficha. Intentá de nuevo antes de guardar.'
 			});
 		}
 
@@ -1314,8 +1336,8 @@ export const actions: Actions = {
 				admin,
 				businessId: context.business.id,
 				patientId: params.id,
-				fullName: full_name,
-				dni
+				dni,
+				phoneE164: updates.phone_e164
 			});
 			if (duplicateResult) return duplicateResult;
 			return fail(500, { message: 'No se pudo actualizar la ficha.' });

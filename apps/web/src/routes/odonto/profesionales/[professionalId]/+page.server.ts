@@ -1,7 +1,7 @@
 import { env } from '$env/dynamic/private';
 import { demoBusinessContext } from '$lib/server/business';
 import { writeAuditLog } from '$lib/server/audit';
-import { zonedDateTimeToUtc } from '$lib/server/availability';
+import { parseAvailabilityExceptionInterval } from '$lib/server/availability-exceptions';
 import { getOdontoContext } from '$lib/server/odonto-context';
 import { createSupabaseAdminClient } from '$lib/server/supabase';
 import { professionalHasFollowUps } from '$lib/server/follow-ups';
@@ -14,7 +14,6 @@ import {
 	normalizeProfessionalEmail
 } from '$lib/server/professionals';
 import { formatPriceLabel } from '$lib/utils/money-input';
-import { parseTimeRanges } from '$lib/utils/time-ranges';
 import {
 	parseScheduleBlocksJson,
 	validateScheduleBlocks,
@@ -32,23 +31,6 @@ const MAX_SERVICE_DURATION_MINUTES = 480;
 const parsePositiveInt = (value: FormDataEntryValue | null, fallback = 0) => {
 	const parsed = Number(value ?? fallback);
 	return Number.isInteger(parsed) ? parsed : fallback;
-};
-
-const normalizeLocalDate = (date: string) => {
-	const trimmed = date.trim();
-	if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
-	const match = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-	if (!match) return '';
-	const [, rawDay, rawMonth, rawYear] = match;
-	return `${rawYear}-${rawMonth.padStart(2, '0')}-${rawDay.padStart(2, '0')}`;
-};
-
-const parseLocalDateTime = (date: string, time: string, timeZone: string) => {
-	if (!date || !time) return null;
-	const normalizedDate = normalizeLocalDate(date);
-	if (!normalizedDate) return null;
-	const value = zonedDateTimeToUtc(normalizedDate, time, timeZone);
-	return Number.isNaN(value.getTime()) ? null : value;
 };
 
 const scheduleBlocksFromForm = (
@@ -196,23 +178,29 @@ const createAvailabilityException = async (
 	professionalId: string,
 	timeZone: string,
 	form: FormData
-): Promise<SaveResult<{ id: string | null; professionalId: string | null; type: string }>> => {
+): Promise<
+	SaveResult<{
+		id: string | null;
+		professionalId: string | null;
+		type: string;
+		periodMode: 'single' | 'range';
+		startDate: string;
+		endDate: string;
+	}>
+> => {
 	const appliesTo = String(form.get('applies_to') ?? 'professional');
 	const targetProfessionalId = appliesTo === 'business' ? null : professionalId;
 	const type = String(form.get('type') ?? '').trim();
-	const date = String(form.get('date') ?? '').trim();
-	const timeRange = String(form.get('time_range') ?? '').trim();
-	const parsedRanges = timeRange ? parseTimeRanges(timeRange) : null;
-	if (parsedRanges && parsedRanges.length > 1) {
-		return { ok: false, status: 400, message: 'Para un cambio puntual cargá una sola franja horaria.' };
-	}
-	const parsedRange = parsedRanges?.[0] ?? null;
-	const startTime = parsedRange ? parsedRange.start : '';
-	const endTime = parsedRange ? parsedRange.end : '';
-	const startsAt = parseLocalDateTime(date, startTime, timeZone);
-	const endsAt = parseLocalDateTime(date, endTime, timeZone);
-	if (!startsAt || !endsAt || startsAt >= endsAt) return { ok: false, status: 400, message: 'La franja es inválida.' };
-	if (type !== 'blocked' && type !== 'extra_available') return { ok: false, status: 400, message: 'Tipo de cambio inválido.' };
+	const interval = parseAvailabilityExceptionInterval({
+		type,
+		periodMode: String(form.get('period_mode') ?? 'single').trim(),
+		date: String(form.get('date') ?? '').trim(),
+		dateFrom: String(form.get('date_from') ?? '').trim(),
+		dateTo: String(form.get('date_to') ?? '').trim(),
+		timeRange: String(form.get('time_range') ?? '').trim(),
+		timeZone
+	});
+	if (!interval.ok) return { ok: false, status: 400, message: interval.message };
 
 	const { data, error } = await supabase
 		.from('availability_exceptions')
@@ -220,8 +208,8 @@ const createAvailabilityException = async (
 			business_id: businessId,
 			professional_id: targetProfessionalId,
 			type,
-			starts_at: startsAt.toISOString(),
-			ends_at: endsAt.toISOString(),
+			starts_at: interval.startsAt.toISOString(),
+			ends_at: interval.endsAt.toISOString(),
 			reason: String(form.get('reason') ?? '').trim() || null
 		})
 		.select('id')
@@ -231,7 +219,17 @@ const createAvailabilityException = async (
 		return { ok: false, status: 500, message: 'No se pudo guardar el cambio puntual.' };
 	}
 
-	return { ok: true, data: { id: data?.id ?? null, professionalId: targetProfessionalId, type } };
+	return {
+		ok: true,
+		data: {
+			id: data?.id ?? null,
+			professionalId: targetProfessionalId,
+			type,
+			periodMode: interval.periodMode,
+			startDate: interval.startDate,
+			endDate: interval.endDate
+		}
+	};
 };
 
 export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url }) => {
@@ -510,11 +508,20 @@ export const actions: Actions = {
 			entityId: exceptionResult.data?.id ?? null,
 			metadata: {
 				professional_id: exceptionResult.data?.professionalId ?? null,
-				type: exceptionResult.data?.type
+				type: exceptionResult.data?.type,
+				period_mode: exceptionResult.data?.periodMode,
+				start_date: exceptionResult.data?.startDate,
+				end_date: exceptionResult.data?.endDate
 			}
 		});
 
-		return { success: true, message: 'Cambio puntual guardado.' };
+		return {
+			success: true,
+			message:
+				exceptionResult.data?.periodMode === 'range'
+					? 'Rango de bloqueo guardado.'
+					: 'Cambio puntual guardado.'
+		};
 	},
 
 	delete_exception: async ({ request, params, locals, fetch, cookies }) => {
@@ -620,7 +627,10 @@ export const actions: Actions = {
 				metadata: {
 					via: 'save_all',
 					professional_id: exceptionResult.data?.professionalId ?? null,
-					type: exceptionResult.data?.type
+					type: exceptionResult.data?.type,
+					period_mode: exceptionResult.data?.periodMode,
+					start_date: exceptionResult.data?.startDate,
+					end_date: exceptionResult.data?.endDate
 				}
 			});
 			savedSections.push('disponibilidad');

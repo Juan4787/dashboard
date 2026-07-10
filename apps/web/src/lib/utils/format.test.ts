@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatDate, formatDateTime, formatInTimeZone } from './format';
+import { formatAccessRemaining, formatDate, formatDateTime, formatInTimeZone } from './format';
 
 // Caso que rompía sin timezone: 21:30 ART = 00:30 UTC del día SIGUIENTE.
 // En SSR (Netlify corre en UTC) la fecha aparecía corrida un día.
@@ -30,5 +30,25 @@ describe('formatInTimeZone', () => {
 		expect(labels.dateLabel).toContain('15 de junio');
 		expect(labels.timeLabel).toBe('21:30');
 		expect(labels.full).toBe(`${labels.dateLabel} a las ${labels.timeLabel}`);
+	});
+});
+
+describe('formatAccessRemaining', () => {
+	const now = new Date('2026-07-10T12:00:00.000Z');
+
+	it('mantiene una habilitación de una hora expresada en horas, no en días', () => {
+		expect(formatAccessRemaining('2026-07-10T13:00:00.000Z', now)).toBe('1 hora restante');
+		expect(formatAccessRemaining('2026-07-10T12:59:59.000Z', now)).toBe('1 hora restante');
+	});
+
+	it('usa minutos para accesos cortos y días recién desde las 24 horas', () => {
+		expect(formatAccessRemaining('2026-07-10T12:35:00.000Z', now)).toBe('35 min restantes');
+		expect(formatAccessRemaining('2026-07-11T12:00:00.000Z', now)).toBe('1 día restante');
+	});
+
+	it('informa vencimiento y tolera valores vacíos o inválidos', () => {
+		expect(formatAccessRemaining('2026-07-10T11:59:59.000Z', now)).toBe('Vencido');
+		expect(formatAccessRemaining(null, now)).toBeNull();
+		expect(formatAccessRemaining('fecha-inválida', now)).toBeNull();
 	});
 });

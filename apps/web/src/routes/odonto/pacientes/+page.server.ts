@@ -9,11 +9,25 @@ import {
 	isJwtExpired
 } from '$lib/server/supabase';
 import { normalizePhone } from '$lib/utils/format';
+import {
+	getPatientUniqueConflictField,
+	getPatientWriteConflictMessage,
+	isLegacyPatientNameConflict,
+	PATIENT_UNIQUE_CONFLICT_MESSAGES,
+	type PatientUniqueField
+} from '$lib/server/patient-identity';
 import { fail, redirect, error as kitError } from '@sveltejs/kit';
 import { dev } from '$app/environment';
 import type { Actions, PageServerLoad } from './$types';
 
-const getCreatePatientErrorMessage = (error: { code?: string | null; message?: string | null }) => {
+type PatientDatabaseError = {
+	code?: string | null;
+	message?: string | null;
+	details?: string | null;
+	hint?: string | null;
+};
+
+const getCreatePatientErrorMessage = (error: PatientDatabaseError) => {
 	const message = (error?.message ?? '').toLowerCase();
 	if (error?.code === '42501' || message.includes('row-level security')) {
 		return 'No se pudo crear el paciente porque tu sesión no tiene permisos. Cerrá sesión y volvé a ingresar.';
@@ -21,9 +35,8 @@ const getCreatePatientErrorMessage = (error: { code?: string | null; message?: s
 	if (error?.code === 'PGRST303' || message.includes('jwt expired')) {
 		return 'Tu sesión expiró. Volvé a iniciar sesión.';
 	}
-	if (error?.code === '23505') {
-		return 'Ya existe un paciente con este DNI.';
-	}
+	const conflictMessage = getPatientWriteConflictMessage(error);
+	if (conflictMessage) return conflictMessage;
 	if (error?.code === '23502') {
 		return 'Faltan datos obligatorios para crear el paciente.';
 	}
@@ -33,11 +46,17 @@ const getCreatePatientErrorMessage = (error: { code?: string | null; message?: s
 	return 'No se pudo crear el paciente. Intentá de nuevo.';
 };
 
-const getCreatePatientStatus = (error: { code?: string | null; message?: string | null }) => {
+const getCreatePatientStatus = (error: PatientDatabaseError) => {
 	const message = (error?.message ?? '').toLowerCase();
 	if (error?.code === '42501' || message.includes('row-level security')) return 403;
 	if (error?.code === 'PGRST303' || message.includes('jwt expired')) return 401;
-	if (error?.code === '23505') return 409;
+	if (
+		error?.code === '23505' ||
+		getPatientUniqueConflictField(error) ||
+		isLegacyPatientNameConflict(error)
+	) {
+		return 409;
+	}
 	if (error?.code === '23502' || error?.code === '22P02') return 400;
 	return 500;
 };
@@ -49,15 +68,6 @@ const isJwtExpiredError = (error: { code?: string | null; message?: string | nul
 
 type CountsSource = 'rpc' | 'fallback_planned';
 
-type DuplicatePatientField = 'dni' | 'name';
-
-const normalizePatientName = (value: string) => value.trim().replace(/\s+/g, ' ').toLowerCase();
-
-const duplicatePatientMessage = (field: DuplicatePatientField) =>
-	field === 'dni'
-		? 'Ya hay un paciente creado con ese DNI. Abrí su ficha para continuar.'
-		: 'Ya hay un paciente creado con ese nombre. Abrí su ficha para continuar.';
-
 const duplicatePatientResult = ({
 	field,
 	existingId,
@@ -65,7 +75,7 @@ const duplicatePatientResult = ({
 	dni,
 	phone
 }: {
-	field: DuplicatePatientField;
+	field: PatientUniqueField;
 	existingId: string;
 	full_name: string;
 	dni: string;
@@ -73,7 +83,7 @@ const duplicatePatientResult = ({
 }) => ({
 	duplicate: true,
 	duplicateField: field,
-	message: duplicatePatientMessage(field),
+	message: PATIENT_UNIQUE_CONFLICT_MESSAGES[field],
 	existingId,
 	full_name,
 	dni,
@@ -83,17 +93,17 @@ const duplicatePatientResult = ({
 const findExistingPatientIdentity = async ({
 	admin,
 	businessId,
-	fullName,
-	dni
+	dni,
+	phoneE164,
+	onlyField
 }: {
 	admin: Awaited<ReturnType<typeof createSupabaseAdminClient>>;
 	businessId: string;
-	fullName: string;
 	dni: string;
-}): Promise<{ id: string; field: DuplicatePatientField } | null> => {
-	const normalizedName = normalizePatientName(fullName);
-
-	if (dni) {
+	phoneE164: string | null;
+	onlyField?: PatientUniqueField;
+}): Promise<{ id: string; field: PatientUniqueField } | null> => {
+	if (dni && (!onlyField || onlyField === 'dni')) {
 		const { data, error } = await admin
 			.from('patients')
 			.select('id')
@@ -105,17 +115,17 @@ const findExistingPatientIdentity = async ({
 		if (data?.id) return { id: String(data.id), field: 'dni' };
 	}
 
-	const { data, error } = await admin
-		.from('patients')
-		.select('id, full_name')
-		.eq('business_id', businessId)
-		.range(0, 9999);
-	if (error) throw error;
-
-	const existingByName = (data ?? []).find(
-		(patient: any) => normalizePatientName(String(patient.full_name ?? '')) === normalizedName
-	);
-	if (existingByName?.id) return { id: String(existingByName.id), field: 'name' };
+	if (phoneE164 && (!onlyField || onlyField === 'phone')) {
+		const { data, error } = await admin
+			.from('patients')
+			.select('id')
+			.eq('business_id', businessId)
+			.eq('phone_e164', phoneE164)
+			.limit(1)
+			.maybeSingle();
+		if (error) throw error;
+		if (data?.id) return { id: String(data.id), field: 'phone' };
+	}
 
 	return null;
 };
@@ -487,13 +497,13 @@ const handleCreatePatient = async ({
 				});
 			}
 
-			const existingByName = demoPatients.find(
-				(patient) => normalizePatientName(patient.full_name) === normalizePatientName(full_name)
-			);
-			if (existingByName) {
+			const existingByPhone = phone_e164
+				? demoPatients.find((patient) => normalizePhoneE164(patient.phone) === phone_e164)
+				: null;
+			if (existingByPhone) {
 				return duplicatePatientResult({
-					field: 'name',
-					existingId: existingByName.id,
+					field: 'phone',
+					existingId: existingByPhone.id,
 					full_name,
 					dni,
 					phone
@@ -611,7 +621,7 @@ const handleCreatePatient = async ({
 		}
 
 		let admin;
-		const returnDuplicatePatient = async (existingPatient: { id: string; field: DuplicatePatientField }) => {
+		const returnDuplicatePatient = async (existingPatient: { id: string; field: PatientUniqueField }) => {
 			if (context.role === 'professional') {
 				try {
 					await ensureProfessionalPatientLink({
@@ -623,7 +633,7 @@ const handleCreatePatient = async ({
 				} catch (linkError) {
 					console.error('Error vinculando paciente duplicado al profesional', linkError);
 					return fail(500, {
-						message: 'Ya hay un paciente creado con esos datos, pero no se pudo vincular al profesional. Intentá de nuevo.',
+						message: `${PATIENT_UNIQUE_CONFLICT_MESSAGES[existingPatient.field]} No pudimos mostrar esa ficha en tu lista profesional; intentá de nuevo.`,
 						existingId: existingPatient.id,
 						full_name,
 						dni,
@@ -646,8 +656,8 @@ const handleCreatePatient = async ({
 			const existingPatient = await findExistingPatientIdentity({
 				admin,
 				businessId: context.business.id,
-				fullName: full_name,
-				dni
+				dni,
+				phoneE164: phone_e164
 			});
 			if (existingPatient) {
 				return returnDuplicatePatient(existingPatient);
@@ -655,7 +665,8 @@ const handleCreatePatient = async ({
 		} catch (duplicateLookupError) {
 			console.error('Error verificando duplicados de paciente', duplicateLookupError);
 			return fail(500, {
-				message: 'No se pudo verificar si el paciente ya existe. Intentá de nuevo.',
+				message:
+					'No pudimos comprobar si el DNI o el teléfono ya están asociados a otra ficha. Intentá de nuevo antes de crear el paciente.',
 				full_name,
 				dni,
 				phone
@@ -698,16 +709,21 @@ const handleCreatePatient = async ({
 		}
 
 		if (error || !data) {
-			const message = String(error?.message ?? '');
-			if (message.includes('PATIENT_DNI_ALREADY_EXISTS') || message.includes('PATIENT_NAME_ALREADY_EXISTS')) {
-				const existingPatient = await findExistingPatientIdentity({
-					admin,
-					businessId: context.business.id,
-					fullName: full_name,
-					dni
-				});
-				if (existingPatient) {
-					return returnDuplicatePatient(existingPatient);
+			const conflictField = getPatientUniqueConflictField(error ?? {});
+			if (conflictField) {
+				try {
+					const existingPatient = await findExistingPatientIdentity({
+						admin,
+						businessId: context.business.id,
+						dni,
+						phoneE164: phone_e164,
+						onlyField: conflictField
+					});
+					if (existingPatient) {
+						return returnDuplicatePatient(existingPatient);
+					}
+				} catch (conflictLookupError) {
+					console.error('Error recuperando ficha en conflicto', conflictLookupError);
 				}
 			}
 			console.error('Error creando paciente:', error);

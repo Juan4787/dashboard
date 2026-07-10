@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	assertCanTransitionAppointment,
+	createOrFindPatientForAppointment,
 	getHumanAppointmentErrorMessage,
 	rescheduleAppointment
 } from './appointments';
@@ -118,6 +119,53 @@ describe('appointment error messages', () => {
 		expect(getHumanAppointmentErrorMessage(new Error('PATIENT_BLOCKED'))).toBe(
 			'Ese paciente está bloqueado.'
 		);
+	});
+});
+
+describe('patient identity during appointment creation', () => {
+	it('reutiliza la ficha creada por otra reserva simultánea con el mismo teléfono', async () => {
+		let lookups = 0;
+		let inserts = 0;
+		const supabase = {
+			from: (table: string) => {
+				if (table !== 'patients') throw new Error(`Tabla inesperada: ${table}`);
+				return {
+					select: () => {
+						const query: any = {
+							eq: () => query,
+							maybeSingle: async () => {
+								lookups += 1;
+								return lookups === 1
+									? { data: null, error: null }
+									: { data: { id: 'patient-concurrent', blocked: false }, error: null };
+							}
+						};
+						return query;
+					},
+					insert: async () => {
+						inserts += 1;
+						return {
+							error: {
+								code: '23505',
+								message:
+									'duplicate key value violates unique constraint "patients_business_phone_e164_uq"'
+							}
+						};
+					}
+				};
+			}
+		};
+
+		const patientId = await createOrFindPatientForAppointment(supabase as never, {
+			businessId: 'business-1',
+			ownerId: 'owner-1',
+			name: 'Juan Carlos',
+			phone: '351 555 0000'
+		});
+
+		expect(patientId).toBe('patient-concurrent');
+		expect(lookups).toBe(2);
+		expect(inserts).toBe(1);
 	});
 });
 

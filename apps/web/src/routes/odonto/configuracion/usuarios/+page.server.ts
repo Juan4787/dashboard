@@ -18,16 +18,15 @@ import {
 import {
 	replaceProfessionalScheduleBlocks
 } from '$lib/server/availability-rules';
+import { parseAvailabilityExceptionInterval } from '$lib/server/availability-exceptions';
 import { setProfessionalServices } from '$lib/server/professional-services';
 import { writeAuditLog } from '$lib/server/audit';
-import { zonedDateTimeToUtc } from '$lib/server/availability';
 import {
 	createSupabaseAdminClient,
 	createSupabaseServerClient,
 	getAuthUserId
 } from '$lib/server/supabase';
 import { formatPriceLabel } from '$lib/utils/money-input';
-import { parseTimeRanges } from '$lib/utils/time-ranges';
 import {
 	parseScheduleBlocksJson,
 	validateScheduleBlocks,
@@ -456,23 +455,6 @@ const parseNewServices = (raw: string): NewServiceInput[] => {
 	});
 };
 
-const normalizeLocalDate = (date: string) => {
-	const trimmed = date.trim();
-	if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
-	const match = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-	if (!match) return '';
-	const [, rawDay, rawMonth, rawYear] = match;
-	return `${rawYear}-${rawMonth.padStart(2, '0')}-${rawDay.padStart(2, '0')}`;
-};
-
-const parseLocalDateTime = (date: string, time: string, timeZone: string) => {
-	if (!date || !time) return null;
-	const normalizedDate = normalizeLocalDate(date);
-	if (!normalizedDate) return null;
-	const value = zonedDateTimeToUtc(normalizedDate, time, timeZone);
-	return Number.isNaN(value.getTime()) ? null : value;
-};
-
 const scheduleBlocksFromForm = (
 	form: FormData
 ):
@@ -611,27 +593,33 @@ export const actions: Actions = {
 			}
 
 			// Cambio puntual: opcional, pero si se carga debe ser válido.
+			const exceptionPeriodMode = String(form.get('exception_period_mode') ?? 'single').trim();
 			const exceptionDate = String(form.get('exception_date') ?? '').trim();
+			const exceptionDateFrom = String(form.get('exception_date_from') ?? '').trim();
+			const exceptionDateTo = String(form.get('exception_date_to') ?? '').trim();
 			const exceptionTimeRange = String(form.get('exception_time_range') ?? '').trim();
 			const exceptionAppliesTo = String(form.get('exception_applies_to') ?? 'professional').trim();
 			const exceptionType = String(form.get('exception_type') ?? 'blocked').trim();
 			const exceptionReason = String(form.get('exception_reason') ?? '').trim();
-			const hasException = Boolean(exceptionDate || exceptionTimeRange);
+			const hasException =
+				exceptionPeriodMode === 'range'
+					? Boolean(exceptionDateFrom || exceptionDateTo)
+					: Boolean(exceptionDate || exceptionTimeRange);
 			let exceptionStartsAt: Date | null = null;
 			let exceptionEndsAt: Date | null = null;
 			if (hasException) {
-				const exceptionRanges = exceptionTimeRange ? parseTimeRanges(exceptionTimeRange) : null;
-				if (!exceptionRanges || exceptionRanges.length !== 1) {
-					return fail(400, { message: 'Para el cambio puntual cargá una sola franja horaria válida.', values });
-				}
-				exceptionStartsAt = parseLocalDateTime(exceptionDate, exceptionRanges[0].start, context.business.timezone);
-				exceptionEndsAt = parseLocalDateTime(exceptionDate, exceptionRanges[0].end, context.business.timezone);
-				if (!exceptionStartsAt || !exceptionEndsAt || exceptionStartsAt >= exceptionEndsAt) {
-					return fail(400, { message: 'La franja del cambio puntual es inválida.', values });
-				}
-				if (exceptionType !== 'blocked' && exceptionType !== 'extra_available') {
-					return fail(400, { message: 'El tipo de cambio puntual es inválido.', values });
-				}
+				const interval = parseAvailabilityExceptionInterval({
+					type: exceptionType,
+					periodMode: exceptionPeriodMode,
+					date: exceptionDate,
+					dateFrom: exceptionDateFrom,
+					dateTo: exceptionDateTo,
+					timeRange: exceptionTimeRange,
+					timeZone: context.business.timezone
+				});
+				if (!interval.ok) return fail(400, { message: interval.message, values });
+				exceptionStartsAt = interval.startsAt;
+				exceptionEndsAt = interval.endsAt;
 			}
 
 			const existingProfessional = await findProfessionalByEmail(

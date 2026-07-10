@@ -2,6 +2,12 @@ import crypto from 'crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { writeAuditLog } from './audit';
 import { normalizePhoneE164, normalizePhoneRaw } from './phone';
+import {
+	getPatientUniqueConflictField,
+	isLegacyPatientNameConflict,
+	LEGACY_PATIENT_NAME_CONFLICT_MESSAGE,
+	PATIENT_UNIQUE_CONFLICT_MESSAGES
+} from './patient-identity';
 
 export const APPOINTMENT_STATUSES = [
 	'reserved',
@@ -87,6 +93,9 @@ export const getHumanAppointmentErrorMessage = (error: unknown) => {
 	if (anyError?.code === '23P01' || raw.includes('appointments_no_overlapping_active')) {
 		return 'Ese horario ya fue reservado. Elegí otro horario disponible.';
 	}
+	const patientConflictField = getPatientUniqueConflictField(anyError);
+	if (patientConflictField) return PATIENT_UNIQUE_CONFLICT_MESSAGES[patientConflictField];
+	if (isLegacyPatientNameConflict(anyError)) return LEGACY_PATIENT_NAME_CONFLICT_MESSAGE;
 	if (raw.includes('APPOINTMENT_NOT_FOUND')) return 'No se encontró el turno.';
 	if (raw.includes('PATIENT_NAME_REQUIRED')) return 'Cargá el nombre del paciente.';
 	if (raw.includes('PATIENT_OWNER_REQUIRED')) return 'No se encontró el responsable del consultorio.';
@@ -110,14 +119,28 @@ export const getHumanAppointmentErrorMessage = (error: unknown) => {
 		return 'Tu acceso a Cita Suite venció. Activá tu suscripción para volver a usar la plataforma.';
 	}
 	if (raw.includes('INVALID_PROFESSIONAL_STATUS')) return 'El profesional solo puede marcar asistencia o ausencia.';
-	if (raw.includes('PATIENT_NAME_ALREADY_EXISTS')) {
-		return 'Ya hay otro paciente con ese nombre. Abrí su ficha o usá un nombre distinto.';
-	}
-	if (raw.includes('PATIENT_DNI_ALREADY_EXISTS')) {
-		return 'Ya hay otro paciente con ese DNI. Abrí su ficha o corregí el dato.';
-	}
-
 	return 'No se pudo completar la acción.';
+};
+
+const isPatientPhoneIdentityConflict = (error: unknown) => {
+	return getPatientUniqueConflictField(
+		error as { code?: string; message?: string; details?: string }
+	) === 'phone';
+};
+
+const findPatientByPhone = async (
+	supabase: SupabaseClient,
+	businessId: string,
+	phoneE164: string
+) => {
+	const { data, error } = await supabase
+		.from('patients')
+		.select('id, blocked')
+		.eq('business_id', businessId)
+		.eq('phone_e164', phoneE164)
+		.maybeSingle();
+	if (error) throw error;
+	return data as { id?: string; blocked?: boolean } | null;
 };
 
 export const createOrFindPatientForAppointment = async (
@@ -154,13 +177,7 @@ export const createOrFindPatientForAppointment = async (
 	}
 
 	if (phoneE164) {
-		const { data: existing, error: existingError } = await supabase
-			.from('patients')
-			.select('id, blocked')
-			.eq('business_id', input.businessId)
-			.eq('phone_e164', phoneE164)
-			.maybeSingle();
-		if (existingError) throw existingError;
+		const existing = await findPatientByPhone(supabase, input.businessId, phoneE164);
 		if (existing?.blocked) throw new Error('PATIENT_BLOCKED');
 		if (existing?.id) return existing.id as string;
 	}
@@ -194,7 +211,17 @@ export const createOrFindPatientForAppointment = async (
 			email: email || null
 		});
 
-	if (error) throw error;
+	if (error) {
+		// Dos reservas simultáneas con un teléfono nuevo pueden intentar crear la
+		// misma ficha. La restricción única decide cuál gana; la otra petición
+		// vuelve a leer esa ficha en lugar de fallar con un error técnico.
+		if (phoneE164 && isPatientPhoneIdentityConflict(error)) {
+			const concurrentPatient = await findPatientByPhone(supabase, input.businessId, phoneE164);
+			if (concurrentPatient?.blocked) throw new Error('PATIENT_BLOCKED');
+			if (concurrentPatient?.id) return concurrentPatient.id;
+		}
+		throw error;
+	}
 	return newPatientId;
 };
 
@@ -257,7 +284,9 @@ export const createManualAppointment = async (
 			professional_name_snapshot: 'Pendiente',
 			duration_minutes_snapshot: Number(service.duration_minutes)
 		})
-		.select('id')
+		.select(
+			'id, confirmation_token, starts_at, ends_at, service_name_snapshot, professional_name_snapshot'
+		)
 		.single();
 
 	if (error) throw error;

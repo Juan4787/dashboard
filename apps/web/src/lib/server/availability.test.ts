@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { addMinutes, getAvailabilitySlots, overlaps, zonedDateTimeToUtc } from './availability';
 
 const business = {
@@ -127,5 +127,51 @@ describe('availability core', () => {
 		);
 
 		expect(slots).toEqual([]);
+	});
+
+	it('bloquea todos los días incluidos en una ausencia de varias fechas', async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date('2026-06-20T12:00:00.000Z'));
+		try {
+			const rules = [1, 2, 3, 4, 5].map((weekday) => ({
+				id: `rule-${weekday}`,
+				professional_id: 'pro-1',
+				weekday,
+				start_time: '09:00',
+				end_time: '10:00',
+				slot_interval_minutes: 30,
+				is_active: true
+			}));
+			const slots = await getAvailabilitySlots(
+				supabaseForAvailability({
+					professionalName: 'Dra. Uno',
+					rules,
+					exceptions: [
+						{
+							id: 'vacaciones-1',
+							professional_id: 'pro-1',
+							starts_at: '2026-06-22T03:00:00.000Z',
+							ends_at: '2026-06-25T03:00:00.000Z',
+							type: 'blocked'
+						}
+					]
+				}) as never,
+				{
+					business: business as never,
+					serviceId: 'svc-1',
+					fromDate: '2026-06-22',
+					toDate: '2026-06-26'
+				}
+			);
+
+			expect(slots.map((slot) => slot.date)).toEqual([
+				'2026-06-25',
+				'2026-06-25',
+				'2026-06-26',
+				'2026-06-26'
+			]);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });

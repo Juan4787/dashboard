@@ -1,9 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+	assertPublicBookingPatientPolicy,
 	addDaysToDateString,
 	clearPublicBookingScanCache,
+	getPublicBookingErrorCode,
 	getPublicBookingErrorMessage,
 	loadPublicBookingState,
+	PUBLIC_ACTIVE_APPOINTMENT_STATUSES,
+	PUBLIC_BOOKING_ERROR_MESSAGES,
 	summarizeSlotsByDate,
 	todayForBusiness
 } from './public-booking';
@@ -19,8 +23,37 @@ vi.mock('./availability', async (importOriginal) => {
 describe('public booking UX helpers', () => {
 	it('usa un mensaje claro cuando el horario público ya no está disponible', () => {
 		expect(getPublicBookingErrorMessage(new Error('PUBLIC_SLOT_UNAVAILABLE'))).toBe(
-			'Ese horario ya fue reservado. Elegí otro horario disponible.'
+			'Ese horario acaba de ser ocupado. Elegí otro de los horarios disponibles.'
 		);
+	});
+
+	it.each([
+		['PUBLIC_RATE_LIMIT_IP', 'PUBLIC_RATE_LIMIT_IP'],
+		['PUBLIC_RATE_LIMIT_PHONE', 'PUBLIC_RATE_LIMIT_PHONE'],
+		['PUBLIC_BOOKING_ACTIVE_LIMIT', 'PUBLIC_BOOKING_ACTIVE_LIMIT'],
+		['PUBLIC_BOOKING_BLOCKED_PATIENT', 'PUBLIC_BOOKING_BLOCKED_PATIENT'],
+		['PATIENT_BLOCKED', 'PUBLIC_BOOKING_BLOCKED_PATIENT'],
+		['PUBLIC_CAPTCHA_REQUIRED', 'PUBLIC_CAPTCHA_REQUIRED'],
+		['PUBLIC_CAPTCHA_FAILED', 'PUBLIC_CAPTCHA_FAILED'],
+		['PATIENT_NAME_ALREADY_EXISTS', 'PATIENT_NAME_ALREADY_EXISTS'],
+		['PATIENT_DNI_ALREADY_EXISTS', 'PATIENT_DNI_ALREADY_EXISTS'],
+		['SERVICE_NOT_FOUND', 'SERVICE_NOT_FOUND'],
+		['PROFESSIONAL_NOT_FOUND', 'PROFESSIONAL_NOT_FOUND'],
+		['PROFESSIONAL_SERVICE_NOT_ASSIGNED', 'PROFESSIONAL_SERVICE_NOT_ASSIGNED']
+	] as const)('no confunde la causa técnica %s con otro mensaje', (technicalCode, expectedCode) => {
+		const error = new Error(technicalCode);
+		expect(getPublicBookingErrorCode(error)).toBe(expectedCode);
+		expect(getPublicBookingErrorMessage(error)).toBe(PUBLIC_BOOKING_ERROR_MESSAGES[expectedCode]);
+	});
+
+	it('mantiene distintos y accionables todos los mensajes visibles', () => {
+		const messages = Object.values(PUBLIC_BOOKING_ERROR_MESSAGES);
+		expect(new Set(messages).size).toBe(messages.length);
+		for (const message of messages) {
+			expect(message).not.toMatch(/PUBLIC_|patient_id|appointments_|rate.?limit/i);
+		}
+		expect(PUBLIC_BOOKING_ERROR_MESSAGES.PUBLIC_BOOKING_ACTIVE_LIMIT).toContain('4 turnos');
+		expect(PUBLIC_BOOKING_ERROR_MESSAGES.PUBLIC_BOOKING_ACTIVE_LIMIT).toContain('a futuro');
 	});
 
 	it('resume días con nombres completos y sin repetir disponibilidad por cada día', () => {
@@ -61,6 +94,120 @@ describe('public booking UX helpers', () => {
 			'America/Argentina/Buenos_Aires'
 		);
 		expect(days.map((day) => day.date)).toEqual(['2026-06-03', '2026-06-10', '2026-06-20']);
+	});
+});
+
+const createPatientPolicyMock = (input: {
+	patient: { id: string; blocked: boolean } | null;
+	activeFutureCount?: number;
+}) => {
+	const calls: Array<{ table: string; method: string; column?: string; value?: unknown }> = [];
+	const supabase = {
+		from: (table: string) => ({
+			select: () => {
+				if (table === 'patients') {
+					const query = {
+						eq: (column: string, value: unknown) => {
+							calls.push({ table, method: 'eq', column, value });
+							return query;
+						},
+						maybeSingle: async () => ({ data: input.patient, error: null })
+					};
+					return query;
+				}
+				const query = {
+					eq: (column: string, value: unknown) => {
+						calls.push({ table, method: 'eq', column, value });
+						return query;
+					},
+					in: (column: string, value: unknown) => {
+						calls.push({ table, method: 'in', column, value });
+						return query;
+					},
+					gt: async (column: string, value: unknown) => {
+						calls.push({ table, method: 'gt', column, value });
+						return { count: input.activeFutureCount ?? 0, error: null };
+					}
+				};
+				return query;
+			}
+		})
+	};
+	return { supabase: supabase as never, calls };
+};
+
+describe('public booking patient capacity', () => {
+	const now = new Date('2026-07-10T15:00:00.000Z');
+
+	it('permite el cuarto turno activo futuro', async () => {
+		const { supabase } = createPatientPolicyMock({
+			patient: { id: 'patient-1', blocked: false },
+			activeFutureCount: 3
+		});
+
+		await expect(
+			assertPublicBookingPatientPolicy(supabase, {
+				businessId: 'business-1',
+				phoneE164: '+5493515550000',
+				now
+			})
+		).resolves.toBeUndefined();
+	});
+
+	it('rechaza inequívocamente el quinto turno activo futuro', async () => {
+		const { supabase } = createPatientPolicyMock({
+			patient: { id: 'patient-1', blocked: false },
+			activeFutureCount: 4
+		});
+
+		await expect(
+			assertPublicBookingPatientPolicy(supabase, {
+				businessId: 'business-1',
+				phoneE164: '+5493515550000',
+				now
+			})
+		).rejects.toThrow('PUBLIC_BOOKING_ACTIVE_LIMIT');
+	});
+
+	it('consulta sólo estados activos con inicio estrictamente posterior a ahora', async () => {
+		const { supabase, calls } = createPatientPolicyMock({
+			patient: { id: 'patient-1', blocked: false },
+			activeFutureCount: 0
+		});
+
+		await assertPublicBookingPatientPolicy(supabase, {
+			businessId: 'business-1',
+			phoneE164: '+5493515550000',
+			now
+		});
+
+		expect(calls).toContainEqual({
+			table: 'appointments',
+			method: 'in',
+			column: 'status',
+			value: [...PUBLIC_ACTIVE_APPOINTMENT_STATUSES]
+		});
+		expect(calls).toContainEqual({
+			table: 'appointments',
+			method: 'gt',
+			column: 'starts_at',
+			value: now.toISOString()
+		});
+		expect(calls.some((call) => call.method === 'gte')).toBe(false);
+	});
+
+	it('informa por separado cuando la ficha está bloqueada', async () => {
+		const { supabase } = createPatientPolicyMock({
+			patient: { id: 'patient-1', blocked: true }
+		});
+
+		await expect(
+			assertPublicBookingPatientPolicy(supabase, {
+				businessId: 'business-1',
+				phoneE164: '+5493515550000',
+				now
+			})
+		).rejects.toThrow('PUBLIC_BOOKING_BLOCKED_PATIENT');
 	});
 });
 

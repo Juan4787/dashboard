@@ -268,7 +268,7 @@ test.describe('Ayuda para configurar', () => {
 		expect(new Date(activeRows[0].expires_at).getTime()).toBeGreaterThan(Date.now() + 45 * 60 * 1000);
 
 		await login(masterPage, masterEmail, masterPassword);
-		await expect(masterPage.getByRole('heading', { name: 'Accesos a Cita Suite' })).toBeVisible();
+		await expect(masterPage.getByRole('heading', { name: 'Consultorios y accesos' })).toBeVisible();
 		const assistanceCard = masterPage.locator('.ux-soft-card').filter({ hasText: fixture.businessName });
 		await expect(assistanceCard.getByText(`/${fixture.businessSlug}`, { exact: true })).toBeVisible();
 		await assistanceCard.getByRole('button', { name: 'Abrir configuración' }).click();
@@ -315,7 +315,7 @@ test.describe('Ayuda para configurar', () => {
 		expect(revoked.revoked_at).toBeTruthy();
 
 		await masterPage.goto('/odonto/maestro');
-		await expect(masterPage.getByRole('heading', { name: 'Accesos a Cita Suite' })).toBeVisible();
+		await expect(masterPage.getByRole('heading', { name: 'Consultorios y accesos' })).toBeVisible();
 		await expect(masterPage.locator('.ux-soft-card').filter({ hasText: fixture.businessName })).toHaveCount(0);
 		await masterPage.goto(`/odonto/profesionales/${fixture.professionalId}?tab=servicios`);
 		await expect(masterPage.getByRole('heading', { name: 'Página no encontrada' })).toBeVisible();

@@ -8,7 +8,7 @@ import type { KeyboardEventHandler } from 'svelte/elements';
 
 type FormResult = {
 	duplicate?: boolean;
-	duplicateField?: 'dni' | 'name';
+	duplicateField?: 'dni' | 'phone';
 	message?: string;
 	existingId?: string;
 	full_name?: string;

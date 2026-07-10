@@ -4,6 +4,7 @@
 	import { onDestroy, onMount } from 'svelte';
 	import OdontoRouteSkeleton from '$lib/components/skeleton/OdontoRouteSkeleton.svelte';
 	import FollowUpsNotice from '$lib/components/seguimientos/FollowUpsNotice.svelte';
+	import { formatAccessRemaining, formatDateTime } from '$lib/utils/format';
 
 	let { data, children } = $props();
 	let mobileMenuOpen = $state(false);
@@ -89,6 +90,7 @@
 	];
 
 	const activeBusiness = $derived(data?.activeBusiness);
+	const isMasterPage = $derived($page.url.pathname.startsWith('/odonto/maestro'));
 	const accountAssistance = $derived(data?.accountAssistance);
 	const accountPendingManualSetup = $derived(Boolean(data?.pendingManualSetup && !activeBusiness));
 	const isAssistingAccount = $derived(Boolean(activeBusiness?.assistance));
@@ -152,6 +154,7 @@
 		);
 	});
 	const visibleNav = $derived.by(() => {
+		if (isMasterPage) return [];
 		if (!activeBusiness || accountPendingManualSetup) return [];
 		if (commercialAccessRestricted) return [];
 		if (activeBusiness?.role === 'professional') {
@@ -167,6 +170,7 @@
 	});
 
 	const canShowConfigMenu = $derived(
+		!isMasterPage &&
 		!commercialAccessRestricted &&
 			(activeBusiness?.role === 'owner' || activeBusiness?.role === 'admin')
 	);
@@ -189,7 +193,9 @@
 		if (!access) return null;
 		if (!access.commercialAccessEnabled) return 'Acceso pausado';
 		if (access.visualStatus === 'permanent') return 'Permanente';
-		if (access.visualStatus === 'expiring') return 'Vence mañana';
+		if (access.visualStatus === 'expiring') {
+			return formatAccessRemaining(access.paidUntil) ?? 'Vence pronto';
+		}
 		if (access.commercialStatus === 'grace') return 'Vencido';
 		if (access.commercialStatus === 'restricted') return 'Activar';
 		if (access.commercialStatus === 'archived') return 'Archivado';
@@ -216,7 +222,7 @@
 
 	const commercialNotice = $derived.by(() => {
 		const access = activeBusiness?.access;
-		if (!access || !canSeeCommercialNotice) return null;
+		if (isMasterPage || !access || !canSeeCommercialNotice) return null;
 		if (!access.commercialAccessEnabled) return 'La cuenta no está disponible. Contactá soporte.';
 		if (access.commercialStatus === 'archived') {
 			return access.archivedAt
@@ -234,13 +240,17 @@
 				: 'La suscripción está vencida. Regularizá el pago para evitar restricciones operativas.';
 		}
 		if (access.visualStatus === 'expiring') {
-			return 'La suscripción vence mañana. Regularizá el pago para evitar restricciones operativas.';
+			const deadline = formatDateTime(access.paidUntil, activeBusiness?.business?.timezone);
+			const remaining = formatAccessRemaining(access.paidUntil);
+			return deadline
+				? `La suscripción vence el ${deadline}${remaining ? ` (${remaining.toLowerCase()})` : ''}. Regularizá el pago para evitar restricciones operativas.`
+				: 'La suscripción vence pronto. Regularizá el pago para evitar restricciones operativas.';
 		}
 		return null;
 	});
 
 	const shouldShowAccessChip = $derived.by(() => {
-		if (!accessLabel || !canSeeCommercialNotice) return false;
+		if (isMasterPage || !accessLabel || !canSeeCommercialNotice) return false;
 		return activeBusiness?.access?.visualStatus !== 'active';
 	});
 
@@ -459,7 +469,12 @@
 						</button>
 					</div>
 					<nav class="mt-4 min-h-0 flex-1 overflow-y-auto px-4 pb-3">
-						{#if activeBusiness?.business}
+						{#if isMasterPage}
+							<div class="rounded-xl border border-violet-300/25 bg-violet-500/10 px-4 py-3 text-sm">
+								<p class="text-xs font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-200/70">Modo actual</p>
+								<p class="mt-1 font-semibold text-neutral-900 dark:text-white">Administración Cita Suite</p>
+							</div>
+						{:else if activeBusiness?.business}
 							<div class="rounded-xl border border-neutral-200 px-4 py-3 text-sm dark:border-white/10">
 								<p class="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
 									Consultorio activo
@@ -599,7 +614,11 @@
 						decoding="async"
 					/>
 				</picture>
-				{#if activeBusiness?.business}
+				{#if isMasterPage}
+					<div class="min-w-0">
+						<p class="truncate text-sm font-semibold text-neutral-900 dark:text-white">Administración Cita Suite</p>
+					</div>
+				{:else if activeBusiness?.business}
 					<div class="min-w-0">
 						<p class="truncate text-sm font-semibold text-neutral-900 dark:text-white">
 							{activeBusiness.business.name}
@@ -703,10 +722,10 @@
 					</picture>
 						<span class="min-w-0">
 							<span class="block truncate text-sm font-semibold text-neutral-900 dark:text-white">
-								{activeBusiness?.business?.name ?? 'Cuenta'}
+								{isMasterPage ? 'Panel maestro' : (activeBusiness?.business?.name ?? 'Cuenta')}
 							</span>
 						<span class="flex items-center gap-2 truncate text-xs text-neutral-500 dark:text-neutral-300">
-							<span>{roleLabel}</span>
+							<span>{isMasterPage ? 'Administrador del sistema' : roleLabel}</span>
 							{#if shouldShowAccessChip}
 								<span
 									class={`rounded-full px-2 py-0.5 text-[10px] font-black ${
