@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { beforeNavigate, goto } from '$app/navigation';
+	import { beforeNavigate, goto, invalidate } from '$app/navigation';
 	import { enhance } from '$app/forms';
 	import BackLink from '$lib/components/BackLink.svelte';
 	import { clearTtlDraft, loadTtlDraft, saveTtlDraft } from '$lib/client/ttl-draft';
@@ -106,8 +106,10 @@
 		defaultServiceIds: string[];
 		rules: Rule[];
 		exceptions: Exception[];
-		appointmentCount: number;
-		clinicalEntryCount: number;
+		appointmentCount: number | null;
+		clinicalEntryCount: number | null;
+		followUpCount: number | null;
+		dependencyCountsDeferred?: boolean;
 		tab: string;
 		userId: string | null;
 		demo: boolean;
@@ -217,14 +219,28 @@
 	const canManage = $derived(data.context.canManage && !data.demo);
 	const defaultServiceIdSet = $derived(new Set(data.defaultServiceIds ?? []));
 	const professional = $derived(data.professional);
-	const appointmentCount = $derived(data.appointmentCount ?? 0);
-	const clinicalEntryCount = $derived(data.clinicalEntryCount ?? 0);
-	const canDelete = $derived(appointmentCount === 0 && clinicalEntryCount === 0);
+	// svelte-ignore state_referenced_locally
+	let appointmentCount = $state<number | null>(data.appointmentCount);
+	// svelte-ignore state_referenced_locally
+	let clinicalEntryCount = $state<number | null>(data.clinicalEntryCount);
+	// svelte-ignore state_referenced_locally
+	let followUpCount = $state<number | null>(data.followUpCount);
+	// svelte-ignore state_referenced_locally
+	let dependencyCountsLoaded = $state(!data.dependencyCountsDeferred);
+	let dependencyCountsLoading = $state(false);
+	let dependencyCountsError = $state('');
+	const canDelete = $derived(
+		dependencyCountsLoaded &&
+		appointmentCount === 0 &&
+		clinicalEntryCount === 0 &&
+		followUpCount === 0
+	);
 	let showDeleteConfirm = $state(false);
 	const businessId = $derived(data.context.business?.id ?? 'sin-consultorio');
 	const businessTimeZone = $derived(data.context.business?.timezone ?? 'America/Argentina/Buenos_Aires');
 	const userId = $derived(data.userId ?? 'sin-usuario');
 	const professionalId = $derived(data.professional?.id ?? 'nuevo');
+	const professionalDependencyKey = $derived(`app:professional:${professionalId}`);
 	const draftStorageKey = $derived(`cita-suite:draft:professional-profile:${businessId}:${userId}:${professionalId}`);
 
 	// svelte-ignore state_referenced_locally
@@ -243,6 +259,37 @@
 	let showExitGuard = $state(false);
 	let pendingNavigationHref = $state<string | null>(null);
 	let guardError = $state('');
+
+	const loadDependencyCounts = async () => {
+		if (dependencyCountsLoaded || dependencyCountsLoading || !professional?.id) return;
+		dependencyCountsLoading = true;
+		dependencyCountsError = '';
+		try {
+			const response = await fetch(
+				`/odonto/profesionales/${professional.id}/dependencias`
+			);
+			const payload = await response.json().catch(() => ({}));
+			if (!response.ok) {
+				throw new Error(payload?.message ?? 'No se pudo comprobar el historial del profesional.');
+			}
+			appointmentCount = Number(payload?.appointment_count ?? 0);
+			clinicalEntryCount = Number(payload?.clinical_entry_count ?? 0);
+			followUpCount = Number(payload?.follow_up_count ?? 0);
+			dependencyCountsLoaded = true;
+		} catch (error) {
+			dependencyCountsError =
+				error instanceof Error
+					? error.message
+					: 'No se pudo comprobar el historial del profesional.';
+		} finally {
+			dependencyCountsLoading = false;
+		}
+	};
+
+	const openDeleteConfirm = () => {
+		showDeleteConfirm = true;
+		void loadDependencyCounts();
+	};
 	let saveAllForm = $state<HTMLFormElement | null>(null);
 	let scheduleError = $state('');
 	let scheduleBlockSeq = 100;
@@ -608,7 +655,8 @@
 			saving = null;
 			if (result.type === 'success') {
 				markSaved(section);
-				await update({ reset: false, invalidateAll: true });
+				await update({ reset: false, invalidateAll: false });
+				await invalidate(professionalDependencyKey);
 				return;
 			}
 			await update({ reset: false });
@@ -626,7 +674,8 @@
 					if (!baseline.serviceIds.includes(serviceId)) baseline.serviceIds = [...baseline.serviceIds, serviceId];
 				}
 				showNewService = false;
-				await update({ reset: true, invalidateAll: true });
+				await update({ reset: true, invalidateAll: false });
+				await invalidate(professionalDependencyKey);
 				return;
 			}
 			await update({ reset: false });
@@ -635,7 +684,8 @@
 
 	const refreshEnhance: SubmitFunction = () => {
 		return async ({ update }) => {
-			await update({ reset: false, invalidateAll: true });
+			await update({ reset: false, invalidateAll: false });
+			await invalidate(professionalDependencyKey);
 		};
 	};
 
@@ -671,7 +721,8 @@
 			saving = null;
 			if (result.type === 'success') {
 				markSaved('all');
-				await update({ reset: false, invalidateAll: true });
+				await update({ reset: false, invalidateAll: false });
+				await invalidate(professionalDependencyKey);
 				continuePendingNavigation();
 				return;
 			}
@@ -907,7 +958,8 @@
 										return;
 									}
 									archiveSubmitting = false;
-									await update({ reset: false, invalidateAll: true });
+									await update({ reset: false, invalidateAll: false });
+									await invalidate(professionalDependencyKey);
 								};
 							}}
 						>
@@ -927,7 +979,8 @@
 										return;
 									}
 									restoreSubmitting = false;
-									await update({ reset: false, invalidateAll: true });
+									await update({ reset: false, invalidateAll: false });
+									await invalidate(professionalDependencyKey);
 								};
 							}}
 						>
@@ -936,12 +989,31 @@
 							</button>
 						</form>
 					{/if}
-					<button type="button" class="ux-btn-danger" onclick={() => (showDeleteConfirm = true)}>Eliminar</button>
+					<button type="button" class="ux-btn-danger" onclick={openDeleteConfirm}>Eliminar</button>
 				</div>
 			</div>
 
-			<Modal open={showDeleteConfirm} title={canDelete ? 'Eliminar profesional' : 'No se puede eliminar'} on:close={() => (showDeleteConfirm = false)}>
-				{#if canDelete}
+			<Modal
+				open={showDeleteConfirm}
+				title={dependencyCountsLoading
+					? 'Comprobando historial'
+					: dependencyCountsError
+						? 'No se pudo comprobar'
+						: canDelete
+							? 'Eliminar profesional'
+							: 'No se puede eliminar'}
+				on:close={() => (showDeleteConfirm = false)}
+			>
+				{#if dependencyCountsLoading}
+					<p class="text-sm font-semibold text-white/70" aria-live="polite">
+						Revisando turnos, consultas y seguimientos…
+					</p>
+				{:else if dependencyCountsError}
+					<p class="text-sm text-red-100">{dependencyCountsError}</p>
+					<div class="mt-5 flex justify-end">
+						<button type="button" class="ux-btn-secondary" onclick={loadDependencyCounts}>Reintentar</button>
+					</div>
+				{:else if canDelete}
 					<p class="text-sm text-white/70">
 						¿Eliminar a <span class="font-bold text-white">{professional?.name}</span> de forma permanente? Esta acción no se puede deshacer.
 					</p>
@@ -959,7 +1031,8 @@
 									}
 									deleteSubmitting = false;
 									showDeleteConfirm = false;
-									await update({ reset: false, invalidateAll: true });
+									await update({ reset: false, invalidateAll: false });
+									await invalidate(professionalDependencyKey);
 								};
 							}}
 						>
@@ -970,7 +1043,7 @@
 					</div>
 				{:else}
 					<p class="text-sm text-white/70">
-						No se puede eliminar a <span class="font-bold text-white">{professional?.name}</span> porque tiene historial cargado{#if clinicalEntryCount > 0} ({clinicalEntryCount} consulta{clinicalEntryCount === 1 ? '' : 's'}){/if}{#if appointmentCount > 0}{clinicalEntryCount > 0 ? ' y' : ''} {appointmentCount} turno{appointmentCount === 1 ? '' : 's'}{/if}. Esos registros pertenecen a los pacientes y se conservan.
+						No se puede eliminar a <span class="font-bold text-white">{professional?.name}</span> porque tiene historial cargado{#if clinicalEntryCount && clinicalEntryCount > 0} ({clinicalEntryCount} consulta{clinicalEntryCount === 1 ? '' : 's'}){/if}{#if appointmentCount && appointmentCount > 0}{clinicalEntryCount && clinicalEntryCount > 0 ? ' y' : ''} {appointmentCount} turno{appointmentCount === 1 ? '' : 's'}{/if}{#if followUpCount && followUpCount > 0}{(clinicalEntryCount ?? 0) + (appointmentCount ?? 0) > 0 ? ' y' : ''} {followUpCount} seguimiento{followUpCount === 1 ? '' : 's'}{/if}. Esos registros pertenecen a los pacientes y se conservan.
 					</p>
 					<div class="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
 						<button type="button" class="ux-btn-secondary" onclick={() => (showDeleteConfirm = false)}>Cerrar</button>

@@ -100,14 +100,19 @@ describe('isExecuting', () => {
 
 describe('buildNotice', () => {
 	it('0 → sin single; 1 → single; 2+ → sólo count', () => {
-		expect(buildNotice([], 0)).toEqual({ count: 0, single: null });
+		expect(buildNotice([], 0)).toEqual({
+			count: 0,
+			single: null,
+			dismissalKey: expect.any(String)
+		});
 
 		const one = buildNotice([item('a')], 1);
 		expect(one.count).toBe(1);
 		expect(one.single?.id).toBe('a');
 
-		const many = buildNotice([item('a')], 3);
+		const many = buildNotice([], 3, ['a', 'b', 'c']);
 		expect(many.count).toBe(3);
 		expect(many.single).toBeNull();
+		expect(many.dismissalKey).not.toBe(one.dismissalKey);
 	});
 });

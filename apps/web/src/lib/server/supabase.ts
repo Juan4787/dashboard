@@ -55,8 +55,8 @@ export const resolveModuleByEmail = (email: string): Module | null => {
 
 export const getModuleEntryRoute = (module: Module) =>
 	// Administrativo deshabilitado por ahora.
-	// module === 'odonto' ? '/odonto' : '/administrativo/expedientes';
-	'/odonto';
+	// module === 'odonto' ? '/odonto/agenda' : '/administrativo/expedientes';
+	'/odonto/agenda';
 
 export const isMasterEmail = (email?: string | null) =>
 	Boolean(email && email.trim().toLowerCase() === MASTER_EMAIL);

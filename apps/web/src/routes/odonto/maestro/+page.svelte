@@ -395,7 +395,7 @@
 	{/if}
 
 	{#if assistance.length > 0}
-		<section class="master-action-strip master-action-strip-help" aria-labelledby="assistance-title">
+		<section id="solicitudes-ayuda" class="master-action-strip master-action-strip-help scroll-mt-28" aria-labelledby="assistance-title">
 			<div class="master-action-icon" aria-hidden="true">
 				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
 					<path d="M12 3a7 7 0 0 0-4 12.7V19l3-1.5h1a7 7 0 1 0 0-14.5Z" />

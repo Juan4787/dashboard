@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
 	clearSupabaseOAuthCookies: vi.fn(),
 	createSupabaseOAuthClient: vi.fn(),
-	getModuleEntryRoute: vi.fn(() => '/odonto'),
+	getModuleEntryRoute: vi.fn(() => '/odonto/agenda'),
 	isMasterEmail: vi.fn()
 }));
 
@@ -56,7 +56,7 @@ describe('/auth/callback Google OAuth', () => {
 
 		await expect(
 			GET(makeEvent('https://app.test/auth/callback?code=ok', cookies) as never)
-		).rejects.toMatchObject({ status: 303, location: '/odonto' });
+		).rejects.toMatchObject({ status: 303, location: '/odonto/agenda' });
 
 		expect(mocks.clearSupabaseOAuthCookies).toHaveBeenCalledWith(cookies);
 		expect(calls).toEqual(
@@ -73,7 +73,7 @@ describe('/auth/callback Google OAuth', () => {
 
 		await expect(
 			GET(makeEvent('https://app.test/auth/callback?code=ok', cookies) as never)
-		).rejects.toMatchObject({ status: 303, location: '/odonto' });
+		).rejects.toMatchObject({ status: 303, location: '/odonto/agenda' });
 
 		expect(calls).toEqual(
 			expect.arrayContaining([

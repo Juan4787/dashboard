@@ -58,6 +58,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 			services: [],
 			serviceProfessionalIds: {},
 			patients: [],
+			referencesLoaded: true,
 			reminderCount: 0,
 			demo: true
 		};
@@ -75,6 +76,12 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 	const patientId = url.searchParams.get('patient_id') ?? '';
 	const searchApplied =
 		url.searchParams.has('date') || Boolean(professionalId || status || serviceId || patientId);
+	const reminderCountPromise = countTomorrowUncovered(supabase, business.business).catch(
+		(reminderError) => {
+			console.error('Error contando recordatorios pendientes', reminderError);
+			return 0;
+		}
+	);
 
 	let dayAppointments: any[] | null = null;
 	let appointmentsError: unknown = null;
@@ -131,9 +138,13 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 		count: filteredAppointments.filter((appointment: any) => appointment.status === appointmentStatus).length
 	}));
 
-	const [{ data: appointments }, { data: professionals }, { data: services }, { data: patients }, { data: assignments }] =
-		await Promise.all([
-			Promise.resolve({ data: filteredAppointments }),
+	const shouldLoadReferences = Boolean(professionalId || serviceId || patientId);
+	let professionals: any[] = [];
+	let services: any[] = [];
+	let patients: any[] = [];
+	let assignments: any[] = [];
+	if (shouldLoadReferences) {
+		const referenceResults = await Promise.all([
 			supabase
 				.from('professionals')
 				.select('id, name, specialty, is_active')
@@ -160,6 +171,12 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 				.select('service_id, professional_id')
 				.eq('business_id', business.business.id)
 		]);
+		professionals = referenceResults[0].data ?? [];
+		services = referenceResults[1].data ?? [];
+		patients = referenceResults[2].data ?? [];
+		assignments = referenceResults[3].data ?? [];
+	}
+	const appointments = filteredAppointments;
 
 	const serviceProfessionalIds = (assignments ?? []).reduce<Record<string, string[]>>((acc, assignment: any) => {
 		const service = String(assignment.service_id);
@@ -170,14 +187,9 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 
 	// Aviso liviano de Recordatorios: count aproximado de mañana sin calendario
 	// registrado (el número exacto, con exclusiones de push/dispatch, vive en la sección).
-	let reminderCount = 0;
-	try {
-		reminderCount = await countTomorrowUncovered(supabase, business.business);
-	} catch (reminderError) {
-		console.error('Error contando recordatorios pendientes', reminderError);
-	}
+	const reminderCount = await reminderCountPromise;
 
-	let patientRows = patients ?? [];
+	let patientRows = patients;
 	if (patientId && !patientRows.some((patient: any) => patient.id === patientId)) {
 		const { data: selectedPatient } = await supabase
 			.from('patients')
@@ -205,6 +217,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 		services: services ?? [],
 		serviceProfessionalIds,
 		patients: patientRows,
+		referencesLoaded: shouldLoadReferences,
 		reminderCount,
 		demo: false
 	};

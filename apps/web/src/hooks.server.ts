@@ -9,6 +9,32 @@ import {
 } from '$lib/server/supabase';
 import { redirect, type Handle } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
+import { createHash } from 'node:crypto';
+
+const AUTH_VALIDATION_CACHE_TTL_MS = 30_000;
+const AUTH_VALIDATION_CACHE_MAX_ENTRIES = 500;
+const validatedAccessTokens = new Map<string, number>();
+
+const accessTokenCacheKey = (accessToken: string) =>
+	createHash('sha256').update(accessToken).digest('base64url');
+
+const hasFreshAuthValidation = (accessToken: string, now = Date.now()) => {
+	const key = accessTokenCacheKey(accessToken);
+	const expiresAt = validatedAccessTokens.get(key) ?? 0;
+	if (expiresAt <= now) {
+		validatedAccessTokens.delete(key);
+		return false;
+	}
+	return true;
+};
+
+const rememberAuthValidation = (accessToken: string, now = Date.now()) => {
+	if (validatedAccessTokens.size >= AUTH_VALIDATION_CACHE_MAX_ENTRIES) {
+		const oldestKey = validatedAccessTokens.keys().next().value;
+		if (typeof oldestKey === 'string') validatedAccessTokens.delete(oldestKey);
+	}
+	validatedAccessTokens.set(accessTokenCacheKey(accessToken), now + AUTH_VALIDATION_CACHE_TTL_MS);
+};
 
 const moduleHome = (module: Module) => getModuleEntryRoute(module);
 const toHost = (value?: string | null) => {
@@ -30,6 +56,8 @@ export const handle: Handle = async ({ event, resolve }) => {
 	const startedAt = performance.now();
 	let authMs = 0;
 	let dbQ = 0;
+	let dbMs = 0;
+	let dbMaxMs = 0;
 
 	const originalFetch = event.fetch;
 	event.fetch = async (input, init) => {
@@ -50,7 +78,11 @@ export const handle: Handle = async ({ event, resolve }) => {
 		const response = await originalFetch(input, init);
 		const fetchMs = performance.now() - fetchStart;
 
-		if (isRestRequest || isAuthRequest) dbQ += 1;
+		if (isRestRequest || isAuthRequest) {
+			dbQ += 1;
+			dbMs += fetchMs;
+			dbMaxMs = Math.max(dbMaxMs, fetchMs);
+		}
 		if (isAuthRequest) authMs += fetchMs;
 		return response;
 	};
@@ -104,11 +136,16 @@ export const handle: Handle = async ({ event, resolve }) => {
 					access_token: session.access_token,
 					refresh_token: session.refresh_token
 				};
-			} else {
-				const { data, error } = await supabase.auth.getUser(event.locals.auth.access_token);
-				if (error || !data.user) {
+				// refreshSession ya validó el refresh token y emitió este access token.
+				rememberAuthValidation(session.access_token);
+			} else if (!hasFreshAuthValidation(event.locals.auth.access_token)) {
+				const { data, error } = await supabase.auth.getClaims(
+					event.locals.auth.access_token
+				);
+				if (error || !data?.claims?.sub) {
 					throw error ?? new Error('Sesión inválida');
 				}
+				rememberAuthValidation(event.locals.auth.access_token);
 			}
 		} catch (err) {
 			clearAuthCookies();
@@ -150,7 +187,18 @@ export const handle: Handle = async ({ event, resolve }) => {
 	const response = await resolve(event);
 	const totalMs = performance.now() - startedAt;
 	const loadMs = Math.max(totalMs - authMs, 0);
-	const timingValue = `auth;dur=${authMs.toFixed(1)}, load;dur=${loadMs.toFixed(1)}, db_q;desc="${dbQ}"`;
+	const runtimeRegion = String(env.AWS_REGION ?? env.NETLIFY_REGION ?? 'unknown').replace(
+		/[^a-zA-Z0-9_-]/g,
+		''
+	);
+	const timingValue = [
+		`auth;dur=${authMs.toFixed(1)}`,
+		`load;dur=${loadMs.toFixed(1)}`,
+		`db;dur=${dbMs.toFixed(1)}`,
+		`db_max;dur=${dbMaxMs.toFixed(1)}`,
+		`db_q;desc="${dbQ}"`,
+		`runtime_region;desc="${runtimeRegion || 'unknown'}"`
+	].join(', ');
 	const existingTiming = response.headers.get('Server-Timing');
 	response.headers.set('Server-Timing', existingTiming ? `${existingTiming}, ${timingValue}` : timingValue);
 	return response;

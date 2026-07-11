@@ -37,7 +37,12 @@ from public.businesses
 where slug = 'e2e-public-booking-concurrency';
 
 insert into public.patients (business_id, full_name, phone_e164)
-select id, 'Juan Concurrencia', '+5493510000199'
+select id, 'Ana Concurrencia', '+5493510000198'
+from public.businesses
+where slug = 'e2e-public-booking-concurrency';
+
+insert into public.patients (business_id, full_name, phone_e164)
+select id, '  ANA   CONCURRENCIA ', '+5493510000199'
 from public.businesses
 where slug = 'e2e-public-booking-concurrency';
 
@@ -66,11 +71,13 @@ join public.patients patient on patient.business_id = b.id
 join public.services service on service.business_id = b.id
 join public.professionals professional on professional.business_id = b.id
 cross join generate_series(1, 3) as series(day)
-where b.slug = 'e2e-public-booking-concurrency';
+where b.slug = 'e2e-public-booking-concurrency'
+	and patient.phone_e164 = '+5493510000198';
 SQL
 
 insert_sql() {
 	local day="$1"
+	local phone="$2"
 	cat <<SQL
 begin;
 insert into public.appointments (
@@ -90,16 +97,17 @@ from public.businesses b
 join public.patients patient on patient.business_id = b.id
 join public.services service on service.business_id = b.id
 join public.professionals professional on professional.business_id = b.id
-where b.slug = 'e2e-public-booking-concurrency';
+where b.slug = 'e2e-public-booking-concurrency'
+	and patient.phone_e164 = '$phone';
 select pg_sleep(1);
 commit;
 SQL
 }
 
 set +e
-psql "$database_url" -v ON_ERROR_STOP=1 -q -c "$(insert_sql 10)" >"$tmpdir/a.log" 2>&1 &
+psql "$database_url" -v ON_ERROR_STOP=1 -q -c "$(insert_sql 10 +5493510000198)" >"$tmpdir/a.log" 2>&1 &
 pid_a=$!
-psql "$database_url" -v ON_ERROR_STOP=1 -q -c "$(insert_sql 11)" >"$tmpdir/b.log" 2>&1 &
+psql "$database_url" -v ON_ERROR_STOP=1 -q -c "$(insert_sql 11 +5493510000199)" >"$tmpdir/b.log" 2>&1 &
 pid_b=$!
 wait "$pid_a"
 status_a=$?
@@ -123,7 +131,11 @@ active_count=$(psql "$database_url" -v ON_ERROR_STOP=1 -qAtc "
 	select count(*)
 	from public.appointments appointment
 	join public.businesses business on business.id = appointment.business_id
+	join public.patients patient
+		on patient.business_id = appointment.business_id
+		and patient.id = appointment.patient_id
 	where business.slug = '$slug'
+		and public.normalized_patient_name(patient.full_name) = 'ana concurrencia'
 		and appointment.status in ('reserved', 'confirmed', 'reschedule_requested')
 		and appointment.starts_at > statement_timestamp();
 ")
@@ -133,4 +145,4 @@ if [[ "$active_count" != '4' ]]; then
 	exit 1
 fi
 
-echo 'PASS: two simultaneous requests from 3/4 produced exactly one success and one 4/4 rejection.'
+echo 'PASS: two simultaneous requests with the same normalized name and different phones produced exactly one success and one 4/4 rejection.'

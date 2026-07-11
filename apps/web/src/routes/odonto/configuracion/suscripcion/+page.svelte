@@ -1,12 +1,16 @@
 <script lang="ts">
 	import BackLink from '$lib/components/BackLink.svelte';
 	import type { BusinessSubscriptionRow } from '$lib/server/commercial-access';
+	import { visibleCommercialAccessNote } from '$lib/utils/commercial-access-copy';
 	import { formatAccessRemaining } from '$lib/utils/format';
 
 	let { data, form } = $props();
 
 	const access = $derived(data.context.access);
 	const subscription = $derived((access.subscription ?? {}) as Partial<BusinessSubscriptionRow>);
+	const accessNote = $derived(
+		visibleCommercialAccessNote(subscription.access_note, access.canUseBusiness)
+	);
 	const mpSub = $derived(data.mpSubscription);
 	const mpReturn = $derived(data.mpReturn);
 	// Anti doble-click: los forms son POST nativos (sin enhance, porque el 303
@@ -138,8 +142,10 @@
 			</div>
 		</div>
 
-		{#if subscription.access_note}
-			<p class="ux-alert ux-alert-success mt-5">{subscription.access_note}</p>
+		{#if accessNote}
+			<p class={`ux-alert mt-5 ${access.canUseBusiness ? 'ux-alert-success' : 'ux-alert-warning'}`}>
+				{accessNote}
+			</p>
 		{/if}
 	</div>
 
@@ -151,6 +157,22 @@
 				Serás redirigido a Mercado Pago para completar el pago de forma segura. Los medios
 				de pago disponibles los muestra Mercado Pago al momento de autorizar.
 			</p>
+			{#if data.mpEnvironment === 'test'}
+				<div class="ux-alert ux-alert-warning mt-4">
+					<p class="font-black">Mercado Pago está en modo de prueba.</p>
+					<p class="mt-1">
+						Abrí el checkout en una ventana privada e ingresá con un comprador de prueba de
+						Argentina. No uses tu cuenta personal de Mercado Pago: las tarjetas de prueba se
+						rechazan cuando el comprador o el vendedor pertenece al entorno productivo.
+					</p>
+				</div>
+			{/if}
+			{#if access.commercialStatus === 'active' && access.paidUntil && mpSub?.status !== 'authorized' && mpSub?.status !== 'paused'}
+				<p class="ux-alert ux-alert-success mt-4">
+					Tu tiempo vigente se conserva: cuando se acredite el primer pago, se suman 30 días
+					al vencimiento actual.
+				</p>
+			{/if}
 
 			{#if form?.message && !form?.success}
 				<p class="ux-alert ux-alert-danger mt-4">{form.message}</p>

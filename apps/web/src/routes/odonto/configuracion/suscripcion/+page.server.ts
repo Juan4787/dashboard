@@ -4,10 +4,15 @@ import {
 	cancelPreapproval,
 	confirmMpSubscriptionForBusiness,
 	createPreapproval,
+	getMercadoPagoEnvironment,
 	getMercadoPagoApiConfigIssue,
+	getPreapproval,
 	getSubscriptionAmountArs,
 	pickRelevantMpSubscription,
 	settleApprovedChargesForPreapproval,
+	upsertMpSubscription,
+	type MpApiResult,
+	type MpPreapproval,
 	type MpReturnSummary
 } from '$lib/server/mercadopago';
 import { getExternalCallbackSiteUrl } from '$lib/server/messaging';
@@ -28,6 +33,8 @@ export type MpSubscriptionView = {
 	next_charge_at: string | null;
 	updated_at: string | null;
 };
+
+const PENDING_PREAPPROVAL_REUSE_MS = 15 * 60 * 1000;
 
 const loadMpSubscription = async (
 	admin: Awaited<ReturnType<typeof createSupabaseAdminClient>>,
@@ -56,6 +63,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 			demo: true,
 			mpSubscription: null,
 			mpAmount: getSubscriptionAmountArs(),
+			mpEnvironment: getMercadoPagoEnvironment(),
 			mpReturn: null as MpReturnSummary | null,
 			mpReturnFailed: false
 		};
@@ -128,6 +136,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 		demo: false,
 		mpSubscription,
 		mpAmount: getSubscriptionAmountArs(),
+		mpEnvironment: getMercadoPagoEnvironment(),
 		mpReturn,
 		mpReturnFailed: mpReturnFailed || (!admin && url.searchParams.get('mp') === 'retorno')
 	};
@@ -204,20 +213,139 @@ export const actions: Actions = {
 			});
 		}
 
-		// Nunca dos débitos para el mismo negocio: si ya hay una suscripción
-		// activa o pausada, no se crea otra (la UI oculta el botón, pero una
-		// pestaña vieja o un re-POST directo no deben poder duplicar el cobro).
+		// Nunca dos débitos para el mismo negocio. Además de bloquear una activa,
+		// reutilizamos la solicitud pendiente más nueva: repetir el botón ya no
+		// crea varios links que podrían autorizarse y debitarse por separado.
 		const { data: existingRows, error: existingError } = await admin
 			.from('mp_subscriptions')
-			.select('preapproval_id, status')
+			.select('preapproval_id, status, created_at')
 			.eq('business_id', context.business.id)
-			.in('status', ['authorized', 'paused'])
-			.limit(1);
+			.in('status', ['authorized', 'paused', 'pending'])
+			.order('created_at', { ascending: false });
 		if (existingError) {
 			console.error('No se pudo verificar suscripciones existentes', existingError);
 			return fail(500, { message: 'No se pudo verificar el estado de la suscripción.' });
 		}
-		if ((existingRows ?? []).length > 0) {
+		const blockingSubscription = (existingRows ?? []).find((row) =>
+			['authorized', 'paused'].includes(String(row.status))
+		);
+		const pendingRows = (existingRows ?? []).filter(
+			(row) => String(row.status) === 'pending' && row.preapproval_id
+		);
+		if (pendingRows.length > 0) {
+			let synchronized: Array<{
+				row: { preapproval_id: string; created_at: string | null };
+				result: MpApiResult<MpPreapproval>;
+			}>;
+			try {
+				synchronized = await Promise.all(
+					pendingRows.map(async (row) => ({
+						row: {
+							preapproval_id: String(row.preapproval_id),
+							created_at: row.created_at ? String(row.created_at) : null
+						},
+						result: await getPreapproval(String(row.preapproval_id), fetch)
+					}))
+				);
+			} catch (error) {
+				console.error('No se pudieron consultar las solicitudes pendientes de Mercado Pago', error);
+				return fail(502, {
+					message:
+						'Ya hay una solicitud de suscripción pendiente, pero no pudimos abrirla en este momento. Probá de nuevo en unos minutos.'
+				});
+			}
+
+			if (synchronized.some(({ result }) => !result.ok || !result.data)) {
+				return fail(502, {
+					message:
+						'Ya hay una solicitud de suscripción pendiente, pero Mercado Pago no respondió. Probá de nuevo en unos minutos.'
+				});
+			}
+
+			const livePending: Array<{
+				preapproval: MpPreapproval;
+				createdAt: number;
+			}> = [];
+			let hasBlockingRemoteSubscription = false;
+			for (const entry of synchronized) {
+				const preapproval = entry.result.data!;
+				if (preapproval.external_reference !== context.business.id) {
+					console.error('Una solicitud pendiente de Mercado Pago no pertenece al negocio activo');
+					return fail(409, {
+						message: 'La solicitud pendiente no corresponde a este consultorio. Avisá al administrador.'
+					});
+				}
+				await upsertMpSubscription(admin, preapproval);
+				if (preapproval.status === 'authorized' || preapproval.status === 'paused') {
+					hasBlockingRemoteSubscription = true;
+				}
+				if (preapproval.status === 'pending') {
+					livePending.push({
+						preapproval,
+						createdAt: Date.parse(String(entry.row.created_at ?? ''))
+					});
+				}
+			}
+
+			const cancelLivePending = async () => {
+				if (livePending.length === 0) return true;
+				let cancelledResults: Array<MpApiResult<MpPreapproval>>;
+				try {
+					cancelledResults = await Promise.all(
+						livePending.map(({ preapproval }) => cancelPreapproval(fetch, preapproval.id))
+					);
+				} catch (error) {
+					console.error('No se pudieron cancelar solicitudes pendientes viejas', error);
+					return false;
+				}
+				if (cancelledResults.some((result) => !result.ok || !result.data)) return false;
+				for (let index = 0; index < cancelledResults.length; index += 1) {
+					const cancelled = cancelledResults[index].data!;
+					await upsertMpSubscription(admin, {
+						...livePending[index].preapproval,
+						...cancelled,
+						external_reference: cancelled.external_reference ?? context.business.id
+					});
+				}
+				return true;
+			};
+
+			if (blockingSubscription || hasBlockingRemoteSubscription) {
+				if (!(await cancelLivePending())) {
+					return fail(502, {
+						message:
+							'La suscripción ya está activa, pero no pudimos cerrar otra solicitud pendiente. Avisá al administrador antes de autorizar otro link.'
+					});
+				}
+				return fail(400, {
+					message: 'La suscripción ya está activa o pausada. Actualizá la página para ver su estado.'
+				});
+			}
+
+			const reusable = livePending.length === 1 ? livePending[0] : null;
+			const reusableIsRecent = Boolean(
+				reusable &&
+					Number.isFinite(reusable.createdAt) &&
+					Date.now() - reusable.createdAt <= PENDING_PREAPPROVAL_REUSE_MS
+			);
+			if (reusable && reusable.preapproval.init_point && reusableIsRecent) {
+				throw redirect(303, reusable.preapproval.init_point);
+			}
+
+			if (livePending.length > 0) {
+				// Una solicitud vieja puede devolver un checkout vencido. Si hay más
+				// de una, ninguna se reutiliza: primero se cancelan todas para que no
+				// queden enlaces autorizables capaces de producir débitos duplicados.
+				if (!(await cancelLivePending())) {
+					return fail(502, {
+						message:
+							'No pudimos renovar la solicitud pendiente en Mercado Pago. Probá de nuevo en unos minutos.'
+					});
+				}
+			}
+		}
+
+		if (blockingSubscription) {
 			return fail(400, {
 				message:
 					'Ya hay una suscripción activa o pausada para este negocio. Actualizá la página para ver su estado.'

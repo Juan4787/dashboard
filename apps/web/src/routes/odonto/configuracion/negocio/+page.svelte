@@ -6,7 +6,6 @@
 		data: {
 			context: BusinessContext;
 			industries: readonly BusinessIndustry[];
-			publicBookingUrl: string;
 			readiness: {
 				services: number;
 				professionals: number;
@@ -64,9 +63,6 @@
 			data.readiness.availabilityRules > 0 &&
 			Boolean(business.address)
 	);
-	const missingAddressWithPublicBooking = $derived(
-		business.public_booking_enabled && !business.address
-	);
 </script>
 
 <section class="ux-page">
@@ -83,22 +79,13 @@
 		</div>
 	</div>
 
-	{#if missingAddressWithPublicBooking}
-		<div class="ux-alert">
-			Falta la dirección del consultorio. Los pacientes no van a saber dónde asistir al turno.
-			Cargala en "Datos visibles" y guardá.
-		</div>
-	{/if}
-
 	<div class="ux-card">
-		<div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-			<div>
-				<h2 class="ux-section-title">Reserva online</h2>
-				<p class="mt-2 text-sm text-white/55">Tus pacientes pueden reservar desde este enlace.</p>
-			</div>
-			<a href={data.publicBookingUrl} target="_blank" rel="noreferrer" class="ux-btn-secondary">Abrir link</a>
+		<div>
+			<h2 class="ux-section-title">Estado de la reserva online</h2>
+			<p class="mt-2 text-sm text-white/55">
+				Elementos disponibles para recibir reservas. El enlace está en “Link de reserva”.
+			</p>
 		</div>
-		<input readonly value={data.publicBookingUrl} class="ux-input mt-4" />
 		<div class="mt-4 grid gap-3 sm:grid-cols-3">
 			<div class="ux-soft-card p-4">
 				<p class="text-sm font-bold text-white/55">Servicios</p>
@@ -115,7 +102,7 @@
 		</div>
 	</div>
 
-	<form method="post" action="?/update_business" class="ux-card">
+	<form id="datos-visibles" method="post" action="?/update_business" class="ux-card scroll-mt-28">
 		<input type="hidden" name="whatsapp_enabled" value={checkedOf('whatsapp_enabled', business.whatsapp_enabled) ? 'true' : 'false'} />
 		<input type="hidden" name="is_active" value={checkedOf('is_active', business.is_active) ? 'true' : 'false'} />
 		<div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">

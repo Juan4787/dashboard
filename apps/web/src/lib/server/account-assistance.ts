@@ -33,6 +33,14 @@ export type AccountAssistanceView = {
 	endedAt: string | null;
 };
 
+export type MasterAccountAssistanceRequest = {
+	id: string;
+	businessId: string;
+	businessName: string;
+	businessSlug: string;
+	expiresAt: string;
+};
+
 const ASSISTANCE_SELECT =
 	'id, business_id, requested_by_user_id, support_user_id, status, starts_at, expires_at, revoked_at, dismissed_at, created_at, updated_at';
 
@@ -141,15 +149,17 @@ export const buildAccountAssistanceView = ({
 	const withinNoticeWindow = Boolean(
 		endedDate && endedDate <= now && endedDate > addHours(now, -ACCOUNT_ASSISTANCE_FINAL_NOTICE_HOURS)
 	);
-	const shouldShowFinalState = isOwner && canUseBusiness && withinNoticeWindow && !dismissedAt;
+	const canDismissFinalState = isOwner && canUseBusiness && withinNoticeWindow && !dismissedAt;
 
 	return {
 		status,
 		grantId: grant.id,
-		showBanner: shouldShowFinalState,
+		// El estado final sigue disponible en la página de detalle, pero no queda
+		// fijado globalmente después de que el permiso ya terminó.
+		showBanner: false,
 		canActivate: isOwner && canUseBusiness,
 		canRevoke: false,
-		canDismiss: shouldShowFinalState,
+		canDismiss: canDismissFinalState,
 		expiresAt: grant.expires_at,
 		endsAtLabel: grant.expires_at ? formatAccountAssistanceLocalTime(grant.expires_at, timeZone) : null,
 		endedAt
@@ -202,6 +212,43 @@ export const loadAccountAssistanceView = async ({
 		canUseBusiness,
 		isAssisting: Boolean(isAssisting)
 	});
+};
+
+export const loadActiveMasterAccountAssistanceRequests = async ({
+	admin,
+	supportUserId,
+	now = new Date()
+}: {
+	admin: SupabaseClient;
+	supportUserId: string;
+	now?: Date;
+}): Promise<MasterAccountAssistanceRequest[]> => {
+	const { data, error } = await admin
+		.from('account_assistance_grants')
+		.select('id, business_id, expires_at, business:businesses(id, name, slug)')
+		.eq('support_user_id', supportUserId)
+		.eq('status', 'active')
+		.is('revoked_at', null)
+		.gt('expires_at', now.toISOString())
+		.order('expires_at', { ascending: true });
+	if (error) {
+		if (!isMissingSchemaError(error)) console.error('Error cargando solicitudes de ayuda activas', error);
+		return [];
+	}
+
+	return ((data ?? []) as any[])
+		.map((row) => {
+			const business = Array.isArray(row.business) ? row.business[0] : row.business;
+			if (!row?.id || !row?.business_id || !row?.expires_at) return null;
+			return {
+				id: String(row.id),
+				businessId: String(row.business_id),
+				businessName: String(business?.name ?? 'Consultorio'),
+				businessSlug: String(business?.slug ?? ''),
+				expiresAt: String(row.expires_at)
+			};
+		})
+		.filter((row): row is MasterAccountAssistanceRequest => Boolean(row));
 };
 
 const findAuthUserIdByEmail = async (admin: SupabaseClient, email: string) => {

@@ -80,7 +80,12 @@ const createFixture = async (admin: SupabaseClient): Promise<Fixture> => {
 			business_id: business.id,
 			commercial_access_enabled: true,
 			is_permanent: true,
-			subscription_status: 'active'
+			subscription_status: 'active',
+			access_starts_at: new Date().toISOString(),
+			paid_until: null,
+			grace_until: null,
+			restricted_until: null,
+			archived_at: null
 		}, {
 			onConflict: 'business_id'
 		})
@@ -364,16 +369,23 @@ test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 		await pendingPage.goto('/login');
 		await pendingPage.waitForLoadState('networkidle');
 		await pendingPage.locator('.mb-6').getByRole('button', { name: 'Crear cuenta' }).click();
-		await expect(pendingPage.locator('form').getByRole('button', { name: 'Crear cuenta' })).toBeVisible();
+		await expect(
+			pendingPage.locator('form').getByRole('button', { name: 'Crear cuenta', exact: true })
+		).toBeVisible();
 		await pendingPage.getByLabel('Correo electrónico').fill(pendingProfessionalEmail);
-		await pendingPage.getByLabel('Contraseña').fill(password);
-		await pendingPage.getByLabel('Confirmar contraseña').fill(password);
+		await pendingPage.locator('input[name="password"]').fill(password);
+		await pendingPage.locator('input[name="confirm_password"]').fill(password);
 		await pendingPage.getByLabel(/Leí y acepto/).check();
-		await pendingPage.locator('form').getByRole('button', { name: 'Crear cuenta' }).click();
+		await pendingPage.locator('form').getByRole('button', { name: 'Crear cuenta', exact: true }).click();
 		await expect(pendingPage).toHaveURL(/\/odonto\/mis-turnos/);
 		await expect(pendingPage.getByRole('link', { name: 'Mis turnos' })).toBeVisible();
 		await expect(pendingPage.getByRole('link', { name: 'Pacientes' })).toBeVisible();
 		await pendingContext.close();
+		// Restablece explícitamente la sesión dueña antes de continuar con las
+		// verificaciones administrativas; evita que una implementación de auth o
+		// un navegador compartido contamine la segunda mitad del flujo.
+		await page.context().clearCookies();
+		await login(page, fixture);
 
 		const { data: acceptedInvite } = await admin
 			.from('business_user_invites')

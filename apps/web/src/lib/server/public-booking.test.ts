@@ -6,7 +6,6 @@ import {
 	getPublicBookingErrorCode,
 	getPublicBookingErrorMessage,
 	loadPublicBookingState,
-	PUBLIC_ACTIVE_APPOINTMENT_STATUSES,
 	PUBLIC_BOOKING_ERROR_MESSAGES,
 	summarizeSlotsByDate,
 	todayForBusiness
@@ -54,6 +53,8 @@ describe('public booking UX helpers', () => {
 		}
 		expect(PUBLIC_BOOKING_ERROR_MESSAGES.PUBLIC_BOOKING_ACTIVE_LIMIT).toContain('4 turnos');
 		expect(PUBLIC_BOOKING_ERROR_MESSAGES.PUBLIC_BOOKING_ACTIVE_LIMIT).toContain('a futuro');
+		expect(PUBLIC_BOOKING_ERROR_MESSAGES.PUBLIC_BOOKING_ACTIVE_LIMIT).toContain('nombre');
+		expect(PUBLIC_BOOKING_ERROR_MESSAGES.PUBLIC_BOOKING_ACTIVE_LIMIT).not.toContain('teléfono');
 	});
 
 	it('resume días con nombres completos y sin repetir disponibilidad por cada día', () => {
@@ -101,33 +102,27 @@ const createPatientPolicyMock = (input: {
 	patient: { id: string; blocked: boolean } | null;
 	activeFutureCount?: number;
 }) => {
-	const calls: Array<{ table: string; method: string; column?: string; value?: unknown }> = [];
+	const calls: Array<{
+		table?: string;
+		method: string;
+		column?: string;
+		value?: unknown;
+		fn?: string;
+		args?: Record<string, unknown>;
+	}> = [];
 	const supabase = {
+		rpc: async (fn: string, args: Record<string, unknown>) => {
+			calls.push({ method: 'rpc', fn, args });
+			return { data: input.activeFutureCount ?? 0, error: null };
+		},
 		from: (table: string) => ({
 			select: () => {
-				if (table === 'patients') {
-					const query = {
-						eq: (column: string, value: unknown) => {
-							calls.push({ table, method: 'eq', column, value });
-							return query;
-						},
-						maybeSingle: async () => ({ data: input.patient, error: null })
-					};
-					return query;
-				}
 				const query = {
 					eq: (column: string, value: unknown) => {
 						calls.push({ table, method: 'eq', column, value });
 						return query;
 					},
-					in: (column: string, value: unknown) => {
-						calls.push({ table, method: 'in', column, value });
-						return query;
-					},
-					gt: async (column: string, value: unknown) => {
-						calls.push({ table, method: 'gt', column, value });
-						return { count: input.activeFutureCount ?? 0, error: null };
-					}
+					maybeSingle: async () => ({ data: input.patient, error: null })
 				};
 				return query;
 			}
@@ -148,6 +143,7 @@ describe('public booking patient capacity', () => {
 		await expect(
 			assertPublicBookingPatientPolicy(supabase, {
 				businessId: 'business-1',
+				patientName: 'Ana Gomez',
 				phoneE164: '+5493515550000',
 				now
 			})
@@ -163,37 +159,40 @@ describe('public booking patient capacity', () => {
 		await expect(
 			assertPublicBookingPatientPolicy(supabase, {
 				businessId: 'business-1',
+				patientName: 'Ana Gomez',
 				phoneE164: '+5493515550000',
 				now
 			})
 		).rejects.toThrow('PUBLIC_BOOKING_ACTIVE_LIMIT');
 	});
 
-	it('consulta sólo estados activos con inicio estrictamente posterior a ahora', async () => {
+	it('consulta el cupo por nombre y no usa el teléfono como identidad', async () => {
 		const { supabase, calls } = createPatientPolicyMock({
-			patient: { id: 'patient-1', blocked: false },
+			patient: null,
 			activeFutureCount: 0
 		});
 
 		await assertPublicBookingPatientPolicy(supabase, {
 			businessId: 'business-1',
-			phoneE164: '+5493515550000',
+			patientName: '  Ana   Gomez  ',
+			phoneE164: '+5493515559999',
 			now
 		});
 
 		expect(calls).toContainEqual({
-			table: 'appointments',
-			method: 'in',
-			column: 'status',
-			value: [...PUBLIC_ACTIVE_APPOINTMENT_STATUSES]
+			method: 'rpc',
+			fn: 'get_public_booking_active_future_count_by_name',
+			args: {
+				p_business_id: 'business-1',
+				p_patient_name: '  Ana   Gomez  ',
+				p_now: now.toISOString()
+			}
 		});
-		expect(calls).toContainEqual({
-			table: 'appointments',
-			method: 'gt',
-			column: 'starts_at',
-			value: now.toISOString()
-		});
-		expect(calls.some((call) => call.method === 'gte')).toBe(false);
+		expect(
+			calls.some(
+				(call) => call.table === 'appointments' || call.column === 'patient_id'
+			)
+		).toBe(false);
 	});
 
 	it('informa por separado cuando la ficha está bloqueada', async () => {
@@ -204,6 +203,7 @@ describe('public booking patient capacity', () => {
 		await expect(
 			assertPublicBookingPatientPolicy(supabase, {
 				businessId: 'business-1',
+				patientName: 'Ana Gomez',
 				phoneE164: '+5493515550000',
 				now
 			})

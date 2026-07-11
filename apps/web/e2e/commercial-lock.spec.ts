@@ -177,10 +177,11 @@ test.describe('Acceso comercial bloqueado', () => {
 
 		const menuButton = page.getByRole('button', { name: 'Abrir menú' }).last();
 		await expect(menuButton).toBeVisible();
-		await menuButton.click();
-
 		const dialog = page.getByRole('dialog', { name: 'Menú de navegación' });
-		await expect(dialog).toBeVisible();
+		await expect(async () => {
+			await menuButton.click();
+			await expect(dialog).toBeVisible({ timeout: 1_000 });
+		}).toPass({ timeout: 10_000 });
 		const logout = dialog.getByRole('link', { name: 'Salir' });
 		await expect(logout).toBeVisible();
 		await expect(logout).toBeInViewport();

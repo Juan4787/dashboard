@@ -72,6 +72,12 @@ const queryReturning = (result: unknown) => {
 	return query;
 };
 
+const missingContextsRpc = () =>
+	Promise.resolve({
+		data: null,
+		error: { code: 'PGRST202', message: 'Could not find the function list_user_business_contexts' }
+	});
+
 describe('resolveActiveBusiness', () => {
 	it('loads the auto-created owner business after allowed-email bootstrap', async () => {
 		const userId = 'user-allowed';
@@ -106,7 +112,11 @@ describe('resolveActiveBusiness', () => {
 				if (table === 'business_subscriptions') return subscriptionsRead;
 				throw new Error(`Unexpected table ${table}`);
 			}),
-			rpc: vi.fn(() => Promise.resolve({ data: [{ business_id: 'business-1', role: 'owner' }], error: null }))
+			rpc: vi.fn((name: string) =>
+				name === 'list_user_business_contexts'
+					? missingContextsRpc()
+					: Promise.resolve({ data: [{ business_id: 'business-1', role: 'owner' }], error: null })
+			)
 		} as any;
 
 		const context = await resolveActiveBusiness({
@@ -144,11 +154,13 @@ describe('resolveActiveBusiness', () => {
 				if (table === 'business_subscriptions') return subscriptionsRead;
 				throw new Error(`Unexpected table ${table}`);
 			}),
-			rpc: vi.fn(() =>
-				Promise.resolve({
-					data: null,
-					error: { message: 'DEFAULT_BUSINESS_CREATION_DISABLED' }
-				})
+			rpc: vi.fn((name: string) =>
+				name === 'list_user_business_contexts'
+					? missingContextsRpc()
+					: Promise.resolve({
+							data: null,
+							error: { message: 'DEFAULT_BUSINESS_CREATION_DISABLED' }
+						})
 			)
 		} as any;
 
@@ -194,6 +206,7 @@ describe('resolveActiveBusiness', () => {
 					throw new Error(`Unexpected table ${table}`);
 				}),
 				rpc: vi.fn((name: string) => {
+					if (name === 'list_user_business_contexts') return missingContextsRpc();
 					if (name === 'user_has_active_account_assistance') {
 						return Promise.resolve({ data: true, error: null });
 					}
@@ -245,6 +258,7 @@ describe('resolveActiveBusiness', () => {
 					throw new Error(`Unexpected table ${table}`);
 				}),
 				rpc: vi.fn((name: string) => {
+					if (name === 'list_user_business_contexts') return missingContextsRpc();
 					if (name === 'user_has_active_account_assistance') {
 						return Promise.resolve({ data: false, error: null });
 					}
@@ -264,4 +278,46 @@ describe('resolveActiveBusiness', () => {
 				target_business_id: 'business-1'
 			});
 		});
+
+	it('uses the consolidated RPC and reuses it inside the same request', async () => {
+		const supabase = {
+			from: vi.fn(() => {
+				throw new Error('Legacy queries must not run when the RPC is available');
+			}),
+			rpc: vi.fn((name: string) => {
+				if (name !== 'list_user_business_contexts') throw new Error(`Unexpected RPC ${name}`);
+				return Promise.resolve({
+					data: [
+						{
+							business: businessRow,
+							role: 'owner',
+							assistance: null,
+							subscription: subscriptionRow
+						}
+					],
+					error: null
+				});
+			})
+		} as any;
+		const cookies = {
+			get: vi.fn(() => null),
+			set: vi.fn()
+		} as any;
+
+		const first = await resolveActiveBusiness({
+			supabase,
+			accessToken: accessTokenFor('rpc-user'),
+			cookies
+		});
+		const second = await resolveActiveBusiness({
+			supabase,
+			accessToken: accessTokenFor('rpc-user'),
+			cookies
+		});
+
+		expect(first?.business.id).toBe('business-1');
+		expect(second?.access.canUseBusiness).toBe(true);
+		expect(supabase.rpc).toHaveBeenCalledTimes(1);
+		expect(supabase.from).not.toHaveBeenCalled();
 	});
+});

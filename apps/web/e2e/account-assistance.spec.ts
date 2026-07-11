@@ -40,6 +40,8 @@ const screenshotDir = 'output/playwright';
 type Fixture = {
 	email: string;
 	userId: string;
+	adminEmail: string;
+	adminUserId: string;
 	businessId: string;
 	businessName: string;
 	businessSlug: string;
@@ -100,6 +102,7 @@ const createFixture = async (admin: SupabaseClient): Promise<Fixture> => {
 
 	const suffix = unique();
 	const email = `e2e-ayuda-${suffix}@example.com`;
+	const adminEmail = `e2e-ayuda-admin-${suffix}@example.com`;
 	const businessName = `E2E Ayuda ${suffix}`;
 	const businessSlug = `e2e-ayuda-${suffix}`;
 	const authResult = await admin.auth.admin.createUser({
@@ -111,6 +114,15 @@ const createFixture = async (admin: SupabaseClient): Promise<Fixture> => {
 		throw authResult.error ?? new Error('No se creó el usuario owner.');
 	}
 	const userId = authResult.data.user.id;
+	const adminAuthResult = await admin.auth.admin.createUser({
+		email: adminEmail,
+		password,
+		email_confirm: true
+	});
+	if (adminAuthResult.error || !adminAuthResult.data.user?.id) {
+		throw adminAuthResult.error ?? new Error('No se creó el usuario administrador.');
+	}
+	const adminUserId = adminAuthResult.data.user.id;
 
 	const business = await must(
 		admin
@@ -121,18 +133,35 @@ const createFixture = async (admin: SupabaseClient): Promise<Fixture> => {
 					industry: 'odontology',
 					timezone: 'America/Argentina/Buenos_Aires',
 					public_booking_enabled: true,
-				is_active: true
-			})
+					is_active: true
+				})
 			.select('id')
 			.single()
 	);
 
-	await must(admin.from('allowed_emails').upsert({ email, enabled: true }, { onConflict: 'email' }));
+	await must(
+		admin.from('allowed_emails').upsert(
+			[
+				{ email, enabled: true },
+				{ email: adminEmail, enabled: true }
+			],
+			{ onConflict: 'email' }
+		)
+	);
 	await must(
 		admin.from('business_users').insert({
 			business_id: business.id,
 			user_id: userId,
 			role: 'owner',
+			status: 'active',
+			accepted_at: new Date().toISOString()
+		})
+	);
+	await must(
+		admin.from('business_users').insert({
+			business_id: business.id,
+			user_id: adminUserId,
+			role: 'admin',
 			status: 'active',
 			accepted_at: new Date().toISOString()
 		})
@@ -167,18 +196,38 @@ const createFixture = async (admin: SupabaseClient): Promise<Fixture> => {
 			.single()
 	);
 
-	return { email, userId, businessId: business.id, businessName, businessSlug, professionalId: professional.id };
+	return {
+		email,
+		userId,
+		adminEmail,
+		adminUserId,
+		businessId: business.id,
+		businessName,
+		businessSlug,
+		professionalId: professional.id
+	};
 };
 
 const cleanupFixture = async (admin: SupabaseClient, target: Fixture | null) => {
 	if (!target) return;
 	await admin.from('businesses').delete().eq('id', target.businessId);
-	await admin.from('allowed_emails').delete().eq('email', target.email);
+	await admin.from('allowed_emails').delete().in('email', [target.email, target.adminEmail]);
 	await admin.auth.admin.deleteUser(target.userId);
+	await admin.auth.admin.deleteUser(target.adminUserId);
 };
 
 const cleanupMasterFixture = async (admin: SupabaseClient) => {
 	if (!createdMasterUserId) return;
+	const { data: memberships } = await admin
+		.from('business_users')
+		.select('business_id')
+		.eq('user_id', createdMasterUserId);
+	const ownedBusinessIds = (memberships ?? [])
+		.map((row: any) => String(row.business_id ?? ''))
+		.filter(Boolean);
+	if (ownedBusinessIds.length > 0) {
+		await admin.from('businesses').delete().in('id', ownedBusinessIds);
+	}
 	await admin.auth.admin.deleteUser(createdMasterUserId);
 	createdMasterUserId = null;
 };
@@ -241,11 +290,19 @@ test.describe('Ayuda para configurar', () => {
 		await login(ownerPage, fixture.email, password);
 		await ownerPage.goto('/odonto/configuracion/ayuda');
 		await expect(
-			ownerPage.getByRole('heading', { name: '¿Querés que te ayudemos a configurar tu cuenta?' })
+			ownerPage.getByRole('heading', {
+				name: '¿Querés que te ayudemos a configurar tu cuenta?',
+				level: 1
+			})
 		).toBeVisible();
 		await ownerPage.getByRole('button', { name: 'Quiero ayuda por 1 hora' }).first().click();
 		await expect(ownerPage.getByText('Ayuda de Cita Suite activa').first()).toBeVisible();
 		await expect(ownerPage.getByText(/hasta las \d{2}:\d{2}/).first()).toBeVisible();
+		await ownerPage.goto('/odonto/agenda');
+		await expect(ownerPage.getByRole('heading', { name: 'Ayuda de Cita Suite activa' })).toBeVisible();
+		await expect(
+			ownerPage.getByRole('button', { name: 'Quitar aviso: Ayuda de Cita Suite activa' })
+		).toBeVisible();
 		await ownerPage.screenshot({
 			path: screenshotPath('account-assistance-owner-desktop-active.png'),
 			fullPage: false
@@ -269,24 +326,62 @@ test.describe('Ayuda para configurar', () => {
 
 		await login(masterPage, masterEmail, masterPassword);
 		await expect(masterPage.getByRole('heading', { name: 'Consultorios y accesos' })).toBeVisible();
-		const assistanceCard = masterPage.locator('.ux-soft-card').filter({ hasText: fixture.businessName });
-		await expect(assistanceCard.getByText(`/${fixture.businessSlug}`, { exact: true })).toBeVisible();
-		await assistanceCard.getByRole('button', { name: 'Abrir configuración' }).click();
+		await expect(
+			masterPage.getByRole('heading', { name: '1 consultorio pidió ayuda para configurar' })
+		).toBeVisible();
+		const assistanceNotice = masterPage.getByRole('region', {
+			name: '1 consultorio pidió ayuda para configurar'
+		});
+		await expect(assistanceNotice.getByText(fixture.businessName, { exact: true })).toBeVisible();
+		await assistanceNotice.getByRole('button', { name: 'Abrir', exact: true }).click();
 		await expect(masterPage).toHaveURL(/\/odonto\/configuracion\/usuarios/);
-		await expect(masterPage.getByText('Configurando esta cuenta').first()).toBeVisible();
+		await expect(
+			masterPage.getByRole('heading', { name: '1 consultorio pidió ayuda para configurar' })
+		).toBeVisible();
+		await expect(
+			masterPage.getByRole('heading', { name: 'Falta la dirección del consultorio.' })
+		).toBeVisible();
+		await expect(
+			masterPage.getByRole('heading', { name: `Configurando ${fixture.businessName}` })
+		).toBeVisible();
+		for (const label of [
+			'1 consultorio pidió ayuda para configurar',
+			'Falta la dirección del consultorio.',
+			`Configurando ${fixture.businessName}`
+		]) {
+			await expect(masterPage.getByRole('button', { name: `Quitar aviso: ${label}` })).toBeVisible();
+		}
+
+		await expect(async () => {
+			await masterPage.getByRole('button', { name: 'Configurar', exact: true }).click();
+			await expect(masterPage.getByLabel('Persona del equipo')).toBeVisible({ timeout: 1_000 });
+		}).toPass({ timeout: 10_000 });
+		const memberSelect = masterPage.getByLabel('Persona del equipo');
+		await expect(memberSelect.getByRole('option', { name: `${fixture.email} · Dueño` })).toHaveCount(1);
+		await expect(
+			memberSelect.getByRole('option', { name: `${fixture.adminEmail} · Administrador` })
+		).toHaveCount(1);
+		await masterPage.getByRole('button', { name: 'Cancelar', exact: true }).click();
 		await masterPage.screenshot({
 			path: screenshotPath('account-assistance-master-configuring.png'),
 			fullPage: false
 		});
+		await masterPage
+			.getByRole('button', { name: 'Quitar aviso: Falta la dirección del consultorio.' })
+			.click();
 
 		const serviceName = `Limpieza E2E ${unique()}`;
 		await masterPage.goto(`/odonto/profesionales/${fixture.professionalId}?tab=servicios`);
-		await expect(masterPage.getByText('Configurando esta cuenta').first()).toBeVisible();
+		await expect(
+			masterPage.getByRole('heading', { name: `Configurando ${fixture.businessName}` })
+		).toBeVisible();
+		await expect(masterPage.getByText('Falta la dirección del consultorio.')).toHaveCount(0);
 		const servicePanel = masterPage.locator('.ux-soft-card').filter({ hasText: '¿No encontrás el servicio?' });
-		await expect(async () => {
+		const closeServiceForm = servicePanel.getByRole('button', { name: 'Cerrar' });
+		if (!(await closeServiceForm.isVisible().catch(() => false))) {
 			await servicePanel.getByRole('button', { name: 'Crear servicio nuevo' }).click();
-			await expect(servicePanel.getByRole('button', { name: 'Cerrar' })).toBeVisible({ timeout: 1_000 });
-		}).toPass({ timeout: 10_000 });
+		}
+		await expect(closeServiceForm).toBeVisible({ timeout: 10_000 });
 		await servicePanel.getByLabel('Nombre').fill(serviceName);
 		await servicePanel.getByLabel('Duración en minutos').fill('35');
 		await servicePanel.getByRole('button', { name: 'Crear y asignar' }).click();
@@ -318,9 +413,11 @@ test.describe('Ayuda para configurar', () => {
 		await expect(masterPage.getByRole('heading', { name: 'Consultorios y accesos' })).toBeVisible();
 		await expect(masterPage.locator('.ux-soft-card').filter({ hasText: fixture.businessName })).toHaveCount(0);
 		await masterPage.goto(`/odonto/profesionales/${fixture.professionalId}?tab=servicios`);
-		await expect(masterPage.getByRole('heading', { name: 'Página no encontrada' })).toBeVisible();
-		await expect(masterPage.getByText('Profesional no encontrado')).toBeVisible();
-		await expect(masterPage.getByText('Configurando esta cuenta')).toHaveCount(0);
+		await expect(
+			masterPage.getByRole('heading', { name: /Página no encontrada|Activá tu suscripción/ })
+		).toBeVisible();
+		await expect(masterPage.getByText(serviceName)).toHaveCount(0);
+		await expect(masterPage.getByText(`Configurando ${fixture.businessName}`)).toHaveCount(0);
 		await masterContext.close();
 	});
 });

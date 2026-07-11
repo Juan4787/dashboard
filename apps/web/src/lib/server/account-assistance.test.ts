@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
 	buildAccountAssistanceView,
 	formatAccountAssistanceLocalTime,
+	loadActiveMasterAccountAssistanceRequests,
 	type AccountAssistanceRow
 } from './account-assistance';
 
@@ -18,6 +19,49 @@ const baseGrant = (overrides: Partial<AccountAssistanceRow> = {}): AccountAssist
 	created_at: '2026-07-08T20:45:00.000Z',
 	updated_at: '2026-07-08T20:45:00.000Z',
 	...overrides
+});
+
+describe('active master assistance requests', () => {
+	it('returns only the rows assigned by the query to the current support user', async () => {
+		const result = {
+			data: [
+				{
+					id: 'grant-1',
+					business_id: 'business-1',
+					expires_at: '2026-07-10T22:00:00.000Z',
+					business: { name: 'Consultorio Norte', slug: 'norte' }
+				}
+			],
+			error: null
+		};
+		const query: any = {
+			select: vi.fn(() => query),
+			eq: vi.fn(() => query),
+			is: vi.fn(() => query),
+			gt: vi.fn(() => query),
+			order: vi.fn(() => Promise.resolve(result))
+		};
+		const admin = { from: vi.fn(() => query) } as any;
+
+		const requests = await loadActiveMasterAccountAssistanceRequests({
+			admin,
+			supportUserId: 'master-1',
+			now: new Date('2026-07-10T20:00:00.000Z')
+		});
+
+		expect(query.eq).toHaveBeenCalledWith('support_user_id', 'master-1');
+		expect(query.eq).toHaveBeenCalledWith('status', 'active');
+		expect(query.gt).toHaveBeenCalledWith('expires_at', '2026-07-10T20:00:00.000Z');
+		expect(requests).toEqual([
+			{
+				id: 'grant-1',
+				businessId: 'business-1',
+				businessName: 'Consultorio Norte',
+				businessSlug: 'norte',
+				expiresAt: '2026-07-10T22:00:00.000Z'
+			}
+		]);
+	});
 });
 
 describe('account assistance view state', () => {
@@ -69,7 +113,7 @@ describe('account assistance view state', () => {
 		expect(view.endsAtLabel).toBe('18:45');
 	});
 
-	it('marks an expired active row as expired for UX and keeps the final notice for 24 hours', () => {
+	it('marks an expired active row as expired without keeping a stale global banner', () => {
 		const view = buildAccountAssistanceView({
 			grant: baseGrant(),
 			role: 'owner',
@@ -79,7 +123,7 @@ describe('account assistance view state', () => {
 		});
 
 		expect(view.status).toBe('expired');
-		expect(view.showBanner).toBe(true);
+		expect(view.showBanner).toBe(false);
 		expect(view.canActivate).toBe(true);
 		expect(view.canDismiss).toBe(true);
 	});

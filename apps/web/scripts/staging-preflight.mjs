@@ -15,7 +15,8 @@ const REQUIRED_ENV = [
 	'DEMO_MODE',
 	'MASTER_EMAIL',
 	'MP_ACCESS_TOKEN',
-	'MP_WEBHOOK_SECRET'
+	'MP_WEBHOOK_SECRET',
+	'MP_ENVIRONMENT'
 ];
 
 const RECOMMENDED_ENV = [
@@ -68,6 +69,9 @@ const REQUIRED_FILES = [
 	'apps/web/src/lib/server/mercadopago.ts',
 	'supabase/migrations/20260704120000_mercadopago_billing.sql',
 	'supabase/migrations/20260704130000_mp_billing_hardening.sql',
+	'supabase/migrations/20260710210000_prevent_cross_business_email_association.sql',
+	'supabase/migrations/20260711010000_limit_public_bookings_by_patient_name.sql',
+	'supabase/migrations/20260711013000_restore_audit_security_event.sql',
 	'apps/web/src/routes/internal/jobs/generate-reminder-dispatches/+server.ts',
 	'apps/web/src/routes/internal/jobs/process-message-dispatches/+server.ts',
 	'apps/web/src/routes/odonto/configuracion/whatsapp/+page.server.ts',
@@ -109,6 +113,8 @@ const REQUIRED_REMOTE_TABLES = [
 	'mp_subscriptions',
 	'mp_webhook_events'
 ];
+
+const REQUIRED_REMOTE_RPCS = ['get_public_booking_active_future_count_by_name'];
 
 const args = new Set(process.argv.slice(2));
 const shouldCheckRemote = args.has('--remote');
@@ -267,6 +273,15 @@ const main = async () => {
 		warn('PUBLIC_SITE_URL points to localhost; OK for local, not OK for deployed staging');
 	}
 
+	if (!['test', 'production'].includes(valueOf('MP_ENVIRONMENT'))) {
+		failures.push('MP_ENVIRONMENT must be test or production');
+		failLine('MP_ENVIRONMENT must be test or production');
+	}
+	if (valueOf('MP_ENVIRONMENT') === 'production' && valueOf('MP_ACCESS_TOKEN').startsWith('TEST-')) {
+		failures.push('MP_ENVIRONMENT=production cannot use a TEST- access token');
+		failLine('MP_ENVIRONMENT=production cannot use a TEST- access token');
+	}
+
 	const hasTurnstileSite = Boolean(valueOf('PUBLIC_TURNSTILE_SITE_KEY'));
 	const hasTurnstileSecret = Boolean(valueOf('TURNSTILE_SECRET_KEY'));
 	if (hasTurnstileSite !== hasTurnstileSecret) {
@@ -293,6 +308,28 @@ const main = async () => {
 				failures.push(`Remote table check failed for ${table}: HTTP ${response.status}`);
 			} else {
 				ok(`${table}`);
+			}
+		}
+
+		const schemaResponse = await fetch(`${restBaseUrl}/`, {
+			headers: {
+				apikey: serviceRoleKey,
+				Authorization: `Bearer ${serviceRoleKey}`,
+				Accept: 'application/openapi+json'
+			}
+		});
+		if (!schemaResponse.ok) {
+			failLine(`PostgREST OpenAPI: HTTP ${schemaResponse.status}`);
+			failures.push(`Remote PostgREST schema check failed: HTTP ${schemaResponse.status}`);
+		} else {
+			const schema = await schemaResponse.json();
+			const paths = new Set(Object.keys(schema?.paths ?? {}));
+			for (const rpc of REQUIRED_REMOTE_RPCS) {
+				if (paths.has(`/rpc/${rpc}`)) ok(`rpc/${rpc}`);
+				else {
+					failLine(`rpc/${rpc}: missing`);
+					failures.push(`Remote RPC is missing: ${rpc}`);
+				}
 			}
 		}
 	} else if (shouldCheckRemote) {

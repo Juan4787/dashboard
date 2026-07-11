@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { invalidateAll } from '$app/navigation';
+	import { invalidate } from '$app/navigation';
 	import Modal from '$lib/components/Modal.svelte';
 	import FollowUpDatePicker from './FollowUpDatePicker.svelte';
 
@@ -36,7 +36,7 @@
 			snoozeOpen = false;
 			showDateModal = false;
 			customDate = '';
-			await invalidateAll();
+			await invalidate('app:follow-ups');
 		} catch {
 			actionError = 'Error de conexión.';
 		} finally {
@@ -54,7 +54,7 @@
 				actionError = data?.message ?? 'No se pudo gestionar.';
 				return;
 			}
-			await invalidateAll();
+			await invalidate('app:follow-ups');
 		} catch {
 			actionError = 'Error de conexión.';
 		} finally {

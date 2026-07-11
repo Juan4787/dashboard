@@ -19,6 +19,7 @@ export type FollowUpListItem = {
 export type FollowUpNotice = {
 	count: number;
 	single: FollowUpListItem | null;
+	dismissalKey: string;
 };
 
 export type AssignableProfessionalSource = 'patient_link' | 'owner_admin_attending';
@@ -120,9 +121,24 @@ export const roleParticipatesInFollowUps = (role: BusinessRole): boolean =>
 /** Ejecutándose = pending AND remind_on <= hoy (comparación lexicográfica válida para ISO). */
 export const isExecuting = (remindOn: string, todayISO: string): boolean => remindOn <= todayISO;
 
-export const buildNotice = (rows: FollowUpListItem[], count: number): FollowUpNotice => ({
+export const followUpNoticeFingerprint = (ids: string[], count: number): string => {
+	let hash = 2166136261;
+	const source = `${count}:${ids.join('|')}`;
+	for (let index = 0; index < source.length; index += 1) {
+		hash ^= source.charCodeAt(index);
+		hash = Math.imul(hash, 16777619);
+	}
+	return `${count}-${(hash >>> 0).toString(36)}`;
+};
+
+export const buildNotice = (
+	rows: FollowUpListItem[],
+	count: number,
+	identityIds: string[] = rows.map((row) => row.id)
+): FollowUpNotice => ({
 	count,
-	single: count === 1 ? rows[0] ?? null : null
+	single: count === 1 ? rows[0] ?? null : null,
+	dismissalKey: followUpNoticeFingerprint(identityIds, count)
 });
 
 export const mergeAssignableProfessionals = (
@@ -248,21 +264,33 @@ export const getNoticeSummary = async (
 	admin: SupabaseClient,
 	scope: TzScope
 ): Promise<FollowUpNotice> => {
-	if (!roleSeesAllFollowUps(scope.role) && !scope.professionalId) return { count: 0, single: null };
+	if (!roleSeesAllFollowUps(scope.role) && !scope.professionalId) return buildNotice([], 0);
 	const today = businessTodayISO(scope.timezone);
-	const { data, count, error } = await applyRoleScope(
+	const { data: identityRows, count, error } = await applyRoleScope(
 		admin
 			.from('follow_ups')
-			.select(FOLLOWUP_SELECT, { count: 'exact' })
+			.select('id', { count: 'exact' })
 			.eq('business_id', scope.businessId)
 			.eq('status', 'pending')
 			.lte('remind_on', today)
 			.order('remind_on', { ascending: true })
-			.limit(1),
+			.order('id', { ascending: true })
+			.limit(300),
 		scope
 	);
 	if (error) throw error;
-	return buildNotice((data ?? []).map(mapRow), count ?? 0);
+	const identityIds = (identityRows ?? []).map((row: any) => String(row.id));
+	const total = count ?? 0;
+	if (total !== 1 || identityIds.length !== 1) return buildNotice([], total, identityIds);
+
+	const { data: singleRow, error: singleError } = await admin
+		.from('follow_ups')
+		.select(FOLLOWUP_SELECT)
+		.eq('business_id', scope.businessId)
+		.eq('id', identityIds[0])
+		.maybeSingle();
+	if (singleError) throw singleError;
+	return buildNotice(singleRow ? [mapRow(singleRow)] : [], total, identityIds);
 };
 
 /** Profesionales atendibles (activos) vinculados a un paciente. */

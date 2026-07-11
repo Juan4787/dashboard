@@ -1,8 +1,9 @@
 <script lang="ts">
+	import { goto, invalidate, invalidateAll } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { navigating } from '$app/stores';
 	import { onDestroy, onMount } from 'svelte';
-	import OdontoRouteSkeleton from '$lib/components/skeleton/OdontoRouteSkeleton.svelte';
+	import DismissibleNotice from '$lib/components/notices/DismissibleNotice.svelte';
 	import FollowUpsNotice from '$lib/components/seguimientos/FollowUpsNotice.svelte';
 	import { formatAccessRemaining, formatDateTime } from '$lib/utils/format';
 
@@ -85,17 +86,49 @@
 		{ label: 'Negocio', href: '/odonto/configuracion/negocio' },
 		{ label: 'Equipo', href: '/odonto/configuracion/usuarios' },
 		{ label: 'Suscripción', href: '/odonto/configuracion/suscripcion' },
-		{ label: 'Comunicación', href: '/odonto/configuracion/comunicacion' },
+		{ label: 'Link de reserva', href: '/odonto/configuracion/comunicacion' },
 		{ label: 'Ayuda', href: '/odonto/configuracion/ayuda' }
 	];
 
 	const activeBusiness = $derived(data?.activeBusiness);
 	const isMasterPage = $derived($page.url.pathname.startsWith('/odonto/maestro'));
 	const accountAssistance = $derived(data?.accountAssistance);
+	const masterAssistanceRequests = $derived(data?.masterAssistanceRequests ?? []);
 	const accountPendingManualSetup = $derived(Boolean(data?.pendingManualSetup && !activeBusiness));
 	const isAssistingAccount = $derived(Boolean(activeBusiness?.assistance));
 	const assistanceReturnTo = $derived(`${$page.url.pathname}${$page.url.search}`);
-	const isAssistancePage = $derived($page.url.pathname.startsWith('/odonto/configuracion/ayuda'));
+	const noticeViewerKey = $derived(
+		encodeURIComponent(String(data?.email ?? 'usuario').trim().toLowerCase())
+	);
+	const businessNoticeStoragePrefix = $derived(
+		`cita-suite:notice:v1:${noticeViewerKey}:${activeBusiness?.business?.id ?? 'sin-consultorio'}`
+	);
+	const masterAssistanceNoticeKey = $derived.by(() => {
+		const grantIds = masterAssistanceRequests.map((request: any) => String(request.id)).sort();
+		return `cita-suite:notice:v1:${noticeViewerKey}:master-assistance:${grantIds.join('.')}`;
+	});
+	const missingAddressNoticeKey = $derived(`${businessNoticeStoragePrefix}:missing-address`);
+	const accountAssistanceNoticeKey = $derived.by(() => {
+		const identity =
+			accountAssistance?.status === 'active' && accountAssistance.grantId
+				? `active-${accountAssistance.grantId}`
+				: 'available';
+		return `${businessNoticeStoragePrefix}:account-assistance:${identity}`;
+	});
+	const accountAssistanceTitle = $derived.by(() => {
+		if (isAssistingAccount) return `Configurando ${activeBusiness?.business?.name ?? 'esta cuenta'}`;
+		if (accountAssistance?.status === 'active') return 'Ayuda de Cita Suite activa';
+		return '¿Querés que te ayudemos a configurar tu cuenta?';
+	});
+	const accountAssistanceMessage = $derived.by(() => {
+		if (isAssistingAccount) {
+			return `La autorización termina a las ${accountAssistance?.endsAtLabel ?? 'hora indicada'}. Al vencer, volverás automáticamente al panel maestro.`;
+		}
+		if (accountAssistance?.status === 'active') {
+			return `Podemos configurar esta cuenta hasta las ${accountAssistance.endsAtLabel ?? 'hora indicada'}.`;
+		}
+		return 'Podemos ayudarte a cargar profesionales, servicios y horarios iniciales durante una hora.';
+	});
 	const configNav = $derived.by(() =>
 		isAssistingAccount
 			? baseConfigNav.filter((item) => item.href !== '/odonto/configuracion/suscripcion')
@@ -120,6 +153,22 @@
 			access.commercialStatus === 'restricted' ||
 			access.commercialStatus === 'archived'
 		);
+	});
+	const shouldShowMissingAddress = $derived.by(() => {
+		if (isMasterPage || commercialAccessRestricted || !activeBusiness?.access?.canUseBusiness) return false;
+		if (activeBusiness.role !== 'owner' && activeBusiness.role !== 'admin') return false;
+		return !String(activeBusiness.business.address ?? '').trim();
+	});
+	const shouldShowAccountAssistanceNotice = $derived.by(() => {
+		if (
+			isMasterPage ||
+			commercialAccessRestricted ||
+			accountPendingManualSetup ||
+			!accountAssistance
+		) {
+			return false;
+		}
+		return Boolean(isAssistingAccount || accountAssistance.status === 'active' || accountAssistance.canActivate);
 	});
 	const routeAllowsCommercialBypass = $derived.by(() => {
 		if ($page.url.pathname.startsWith('/odonto/maestro')) return true;
@@ -276,6 +325,49 @@
 		return () => document.removeEventListener('pointerdown', handleOutsideClick, true);
 	});
 
+	$effect(() => {
+		const key = missingAddressNoticeKey;
+		const hasAddress = Boolean(String(activeBusiness?.business?.address ?? '').trim());
+		if (!activeBusiness?.business?.id || !hasAddress) return;
+		try {
+			window.localStorage.removeItem(key);
+		} catch {
+			// Si storage está bloqueado, el estado visible de esta sesión igualmente es correcto.
+		}
+	});
+
+	$effect(() => {
+		const expiresAt =
+			accountAssistance?.status === 'active' ? Date.parse(accountAssistance.expiresAt ?? '') : Number.NaN;
+		if (!Number.isFinite(expiresAt)) return;
+		const handleExpiration = () => {
+			if (isAssistingAccount) {
+				void goto('/odonto/maestro', { replaceState: true, invalidateAll: true });
+				return;
+			}
+			void invalidate('app:odonto-shell');
+		};
+		const delay = expiresAt - Date.now();
+		if (delay <= 0) {
+			queueMicrotask(handleExpiration);
+			return;
+		}
+		const timer = window.setTimeout(handleExpiration, delay + 50);
+		return () => window.clearTimeout(timer);
+	});
+
+	$effect(() => {
+		const expirations = masterAssistanceRequests
+			.map((request: any) => Date.parse(String(request.expiresAt ?? '')))
+			.filter((value: number) => Number.isFinite(value) && value > Date.now());
+		if (expirations.length === 0) return;
+		const timer = window.setTimeout(
+			() => void invalidate('app:odonto-shell'),
+			Math.max(0, Math.min(...expirations) - Date.now()) + 50
+		);
+		return () => window.clearTimeout(timer);
+	});
+
 	const mobileTitle = $derived.by(() => {
 		const path = $page.url.pathname;
 		if (path.startsWith('/odonto/pacientes/') && $page.data?.patient?.full_name) {
@@ -404,6 +496,15 @@
 </script>
 
 <div class="min-h-screen bg-neutral-50 text-neutral-900 dark:bg-[#0b1626] dark:text-[#eaf1ff]">
+	{#if showSkeleton}
+		<div
+			class="fixed inset-x-0 top-0 z-[100] h-1 overflow-hidden bg-violet-200/40 dark:bg-violet-950/70"
+			role="progressbar"
+			aria-label="Cargando sección"
+		>
+			<div class="odonto-navigation-progress h-full w-2/5 rounded-r-full bg-[#7c3aed] shadow-[0_0_12px_rgba(124,58,237,0.75)]"></div>
+		</div>
+	{/if}
 	<header class="sticky top-0 z-40 border-b border-neutral-100 bg-white/95 dark:border-[#1f2b45] dark:bg-[#0f1f36]/95">
 		<div class="flex h-14 items-center gap-2 px-3 md:hidden">
 			{#if showBack}
@@ -662,6 +763,7 @@
 									{#each configNav as configItem}
 										<a
 											href={configItem.href}
+											data-sveltekit-preload-data="hover"
 											class={`block rounded-xl px-4 py-3 text-sm font-semibold transition ${
 												isNavItemActive(configItem)
 													? 'bg-[#7c3aed] text-white'
@@ -679,6 +781,7 @@
 					{:else}
 						<a
 							href={item.href}
+							data-sveltekit-preload-data="hover"
 							class={`group rounded-2xl px-4 py-3 transition-all duration-200 ${
 								isNavItemActive(item)
 									? 'bg-[#7c3aed]/90 text-white shadow-sm shadow-[#7c3aed]/20'
@@ -799,100 +902,104 @@
 				{data.businessError}
 			</div>
 		{/if}
-		{#if commercialNotice && !commercialAccessRestricted}
-			<div
-				class={`mb-4 rounded-2xl border px-4 py-3 text-sm font-bold ${
-					accessTone === 'danger'
-						? 'border-red-300 bg-red-50 text-red-900 dark:border-red-300/60 dark:bg-red-200 dark:text-red-950'
-						: 'border-amber-300 bg-amber-100 text-amber-950 dark:border-amber-200/70 dark:bg-amber-200 dark:text-amber-950'
-				}`}
-			>
-				{commercialNotice}
-			</div>
-		{/if}
-		{#if !isAssistancePage && !commercialAccessRestricted && !accountPendingManualSetup && accountAssistance && (accountAssistance.showBanner || isAssistingAccount)}
-			<section class="mb-4 rounded-2xl border border-white/10 bg-[#102842]/95 px-3 py-3 shadow-xl shadow-black/15 sm:px-4">
-				<div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-					<div class="min-w-0">
-						{#if isAssistingAccount}
-							<p class="inline-flex items-center gap-2 text-sm font-black text-emerald-100">
-							<span class="h-[0.85em] w-[0.85em] rounded-full bg-emerald-400 shadow-[0_0_0.75rem_rgba(52,211,153,0.85)]"></span>
-							Configurando esta cuenta
-						</p>
-						<p class="mt-1 text-sm font-semibold text-white/60">
-							La ayuda termina a las {accountAssistance.endsAtLabel ?? 'hora indicada'}.
-						</p>
-					{:else if accountAssistance.status === 'active'}
-						<p class="inline-flex items-center gap-2 text-sm font-black text-emerald-100">
-							<span class="h-[0.85em] w-[0.85em] rounded-full bg-emerald-400 shadow-[0_0_0.75rem_rgba(52,211,153,0.85)]"></span>
-							Ayuda de Cita Suite activa
-						</p>
-						<p class="mt-1 text-sm font-semibold text-white/60">
-							Podemos configurar esta cuenta hasta las {accountAssistance.endsAtLabel ?? 'hora indicada'}.
-						</p>
-					{:else if accountAssistance.status === 'expired'}
-						<p class="text-sm font-black text-white">La ayuda de Cita Suite finalizó</p>
-						<p class="mt-1 text-sm font-semibold text-white/60">
-							Ya no podemos hacer cambios en esta cuenta. Podés activarla otra vez si todavía necesitás ayuda.
-						</p>
-					{:else if accountAssistance.status === 'revoked'}
-						<p class="text-sm font-black text-white">Ayuda detenida</p>
-						<p class="mt-1 text-sm font-semibold text-white/60">
-							Cita Suite ya no puede hacer cambios en esta cuenta.
-						</p>
-					{:else}
-						<p class="text-sm font-black text-white">¿Querés que te ayudemos a configurar tu cuenta?</p>
-						<p class="mt-1 text-sm font-semibold text-white/60">
-							Podemos ayudarte a cargar profesionales, servicios y horarios iniciales.
-						</p>
-					{/if}
+		{#if (commercialNotice && !commercialAccessRestricted) || masterAssistanceRequests.length > 0 || shouldShowMissingAddress || shouldShowAccountAssistanceNotice || (!commercialAccessRestricted && data?.followUps?.count > 0)}
+			<div class="mb-6 grid gap-3" aria-label="Avisos importantes">
+				{#if commercialNotice && !commercialAccessRestricted}
+					<div
+						class={`rounded-2xl border px-4 py-3 text-sm font-bold ${
+							accessTone === 'danger'
+								? 'border-red-300 bg-red-50 text-red-900 dark:border-red-300/60 dark:bg-red-200 dark:text-red-950'
+								: 'border-amber-300 bg-amber-100 text-amber-950 dark:border-amber-200/70 dark:bg-amber-200 dark:text-amber-950'
+						}`}
+					>
+						{commercialNotice}
 					</div>
+				{/if}
 
-					{#if !isAssistingAccount}
-						<div class="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
-							{#if accountAssistance.status === 'active'}
+				{#if masterAssistanceRequests.length > 0}
+					<DismissibleNotice
+						storageKey={masterAssistanceNoticeKey}
+						eyebrow="Panel maestro"
+						title={masterAssistanceRequests.length === 1
+							? '1 consultorio pidió ayuda para configurar'
+							: `${masterAssistanceRequests.length} consultorios pidieron ayuda para configurar`}
+						message="Sólo aparecen las solicitudes cuya autorización de una hora sigue vigente."
+						tone="info"
+					>
+						<div class="mt-3 grid gap-2 lg:grid-cols-2">
+							{#each masterAssistanceRequests as request (request.id)}
+								<div class="flex flex-col gap-3 rounded-xl border border-white/10 bg-white/[0.04] p-3 sm:flex-row sm:items-center sm:justify-between">
+									<div class="min-w-0">
+										<p class="truncate font-black text-white">{request.businessName}</p>
+										<p class="mt-1 text-xs font-bold text-emerald-200">
+											{formatAccessRemaining(request.expiresAt) ?? 'La autorización vence pronto'}
+										</p>
+									</div>
+									<form method="post" action="/odonto/maestro?/enter_assisted_business" class="shrink-0">
+										<input type="hidden" name="grant_id" value={request.id} />
+										<input type="hidden" name="business_id" value={request.businessId} />
+										<button class="ux-btn-primary w-full px-4 py-2 text-sm sm:w-auto">Abrir</button>
+									</form>
+								</div>
+							{/each}
+						</div>
+						<a href="/odonto/maestro#solicitudes-ayuda" class="mt-3 inline-flex text-sm font-black text-violet-200 hover:text-white">
+							Ver en el panel maestro
+						</a>
+					</DismissibleNotice>
+				{/if}
+
+				{#if shouldShowMissingAddress}
+					<DismissibleNotice
+						storageKey={missingAddressNoticeKey}
+						eyebrow="Datos visibles"
+						title="Falta la dirección del consultorio."
+						message={'Los pacientes no van a saber dónde asistir al turno. Cargala en "Datos visibles" y guardá.'}
+						tone="warning"
+					>
+						<a href="/odonto/configuracion/negocio#datos-visibles" class="ux-btn-secondary mt-3 inline-flex px-4 py-2 text-sm">
+							Cargar dirección
+						</a>
+					</DismissibleNotice>
+				{/if}
+
+				{#if shouldShowAccountAssistanceNotice}
+					<DismissibleNotice
+						storageKey={accountAssistanceNoticeKey}
+						eyebrow={isAssistingAccount ? 'Asistencia temporal' : 'Ayuda para configurar'}
+						title={accountAssistanceTitle}
+						message={accountAssistanceMessage}
+						tone={accountAssistance?.status === 'active' ? 'success' : 'neutral'}
+					>
+						<div class="mt-3 flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
+							{#if isAssistingAccount}
+								<a href="/odonto/maestro" class="ux-btn-secondary w-full px-4 py-2 text-center text-sm sm:w-auto">Volver al panel maestro</a>
+							{:else if accountAssistance?.status === 'active'}
 								<form method="post" action="/odonto/configuracion/ayuda?/revoke" class="w-full sm:w-auto">
 									<input type="hidden" name="return_to" value={assistanceReturnTo} />
 									<button class="ux-btn-secondary w-full px-4 py-2 text-sm sm:w-auto">Detener ayuda</button>
 								</form>
-							{:else if accountAssistance.status === 'expired'}
-								<form method="post" action="/odonto/configuracion/ayuda?/activate" class="w-full sm:w-auto">
-									<input type="hidden" name="return_to" value={assistanceReturnTo} />
-									<button class="ux-btn-primary w-full px-4 py-2 text-sm sm:w-auto">Volver a activar</button>
-								</form>
-								{#if accountAssistance.canDismiss && accountAssistance.grantId}
-									<form method="post" action="/odonto/configuracion/ayuda?/dismiss" class="w-full sm:w-auto">
-										<input type="hidden" name="return_to" value={assistanceReturnTo} />
-										<input type="hidden" name="grant_id" value={accountAssistance.grantId} />
-										<button class="ux-btn-secondary w-full px-4 py-2 text-sm sm:w-auto" aria-label="Cerrar aviso">Cerrar</button>
-									</form>
-								{/if}
-							{:else if accountAssistance.status === 'revoked'}
-								<form method="post" action="/odonto/configuracion/ayuda?/activate" class="w-full sm:w-auto">
-									<input type="hidden" name="return_to" value={assistanceReturnTo} />
-									<button class="ux-btn-secondary w-full px-4 py-2 text-sm sm:w-auto">Activar nuevamente</button>
-								</form>
-								{#if accountAssistance.canDismiss && accountAssistance.grantId}
-									<form method="post" action="/odonto/configuracion/ayuda?/dismiss" class="w-full sm:w-auto">
-										<input type="hidden" name="return_to" value={assistanceReturnTo} />
-										<input type="hidden" name="grant_id" value={accountAssistance.grantId} />
-										<button class="ux-btn-secondary w-full px-4 py-2 text-sm sm:w-auto" aria-label="Cerrar aviso">Cerrar</button>
-									</form>
-								{/if}
 							{:else}
 								<form method="post" action="/odonto/configuracion/ayuda?/activate" class="w-full sm:w-auto">
 									<input type="hidden" name="return_to" value={assistanceReturnTo} />
 									<button class="ux-btn-primary w-full px-4 py-2 text-sm sm:w-auto">Quiero ayuda por 1 hora</button>
 								</form>
 							{/if}
-							<a href="/odonto/configuracion/ayuda" class="ux-btn-secondary w-full px-4 py-2 text-sm sm:w-auto">Ver detalle</a>
+							{#if !isAssistingAccount}
+								<a href="/odonto/configuracion/ayuda" class="ux-btn-secondary w-full px-4 py-2 text-center text-sm sm:w-auto">Ver detalle</a>
+							{/if}
 						</div>
-					{/if}
-				</div>
-			</section>
-		{/if}
-		{#if !commercialAccessRestricted && data?.followUps?.count > 0}
-			<FollowUpsNotice notice={data.followUps} todayISO={data.followUpsTodayISO} />
+					</DismissibleNotice>
+				{/if}
+
+				{#if !commercialAccessRestricted && data?.followUps?.count > 0}
+					<FollowUpsNotice
+						notice={data.followUps}
+						todayISO={data.followUpsTodayISO}
+						storageKeyPrefix={businessNoticeStoragePrefix}
+					/>
+				{/if}
+			</div>
 		{/if}
 		{#if commercialLockActive}
 			<section class="mx-auto mt-8 max-w-2xl rounded-3xl border border-amber-300/40 bg-amber-400/12 p-8 text-center shadow-2xl shadow-amber-950/10 dark:border-amber-400/25 dark:bg-amber-400/10">
@@ -977,10 +1084,10 @@
 					¿Necesitás ayuda? Contactar soporte
 				</p>
 			</section>
-		{:else if showSkeleton}
-			<OdontoRouteSkeleton kind={skeletonKind} />
 		{:else}
-			{@render children()}
+			<div aria-busy={showSkeleton} class:cursor-progress={showSkeleton}>
+				{@render children()}
+			</div>
 		{/if}
 	</main>
 
@@ -1056,3 +1163,26 @@
 		</nav>
 	{/if}
 </div>
+
+<style>
+	.odonto-navigation-progress {
+		animation: odonto-navigation-progress 1.05s ease-in-out infinite;
+		will-change: transform;
+	}
+
+	@keyframes odonto-navigation-progress {
+		0% {
+			transform: translateX(-110%);
+		}
+		100% {
+			transform: translateX(360%);
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.odonto-navigation-progress {
+			animation: none;
+			width: 100%;
+		}
+	}
+</style>

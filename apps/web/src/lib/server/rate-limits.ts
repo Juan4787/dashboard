@@ -205,8 +205,8 @@ export const mpSubscriptionRateLimitRules = (businessId: string): RateLimitRule[
 	{
 		action: 'mp_subscription_create_by_business',
 		subject: businessId,
-		limit: 3,
-		windowSeconds: 10 * 60,
+		limit: 1,
+		windowSeconds: 60,
 		message: 'Hay demasiados intentos de activar la suscripción.'
 	},
 	{

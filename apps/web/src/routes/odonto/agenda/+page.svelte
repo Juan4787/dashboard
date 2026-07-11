@@ -28,7 +28,7 @@
 
 	let { data, form } = $props<{
 		data: {
-			context: { canOperate: boolean };
+			context: { canOperate: boolean; business?: { id?: string } };
 			date: string;
 			anyDay: boolean;
 			anyDayLimited: boolean;
@@ -44,6 +44,7 @@
 			services: Service[];
 			serviceProfessionalIds: Record<string, string[]>;
 			patients: Patient[];
+			referencesLoaded?: boolean;
 			reminderCount?: number;
 			demo: boolean;
 		};
@@ -56,6 +57,20 @@
 	let initialized = $state(false);
 	let createSection = $state<HTMLElement | null>(null);
 	let searchSection = $state<HTMLElement | null>(null);
+	// svelte-ignore state_referenced_locally
+	let professionals = $state<Professional[]>(data.professionals ?? []);
+	// svelte-ignore state_referenced_locally
+	let services = $state<Service[]>(data.services ?? []);
+	// svelte-ignore state_referenced_locally
+	let patients = $state<Patient[]>(data.patients ?? []);
+	// svelte-ignore state_referenced_locally
+	let serviceProfessionalIds = $state<Record<string, string[]>>(data.serviceProfessionalIds ?? {});
+	// svelte-ignore state_referenced_locally
+	let referencesLoaded = $state(Boolean(data.referencesLoaded));
+	let referencesLoading = $state(false);
+	let referencesError = $state('');
+	// svelte-ignore state_referenced_locally
+	let referencesBusinessId = $state(String(data.context.business?.id ?? ''));
 
 	const statusLabels: Record<string, string> = {
 		reserved: 'Reservado',
@@ -93,9 +108,9 @@
 	const searchSummary = $derived.by(() => {
 		const parts: string[] = [];
 		if (data.anyDay) parts.push('Cualquier día');
-		const professional = data.professionals.find((item: Professional) => item.id === data.selectedProfessionalId);
+		const professional = professionals.find((item: Professional) => item.id === data.selectedProfessionalId);
 		if (professional) parts.push(professional.name);
-		const service = data.services.find((item: Service) => item.id === data.selectedServiceId);
+		const service = services.find((item: Service) => item.id === data.selectedServiceId);
 		if (service) parts.push(service.name);
 		if (data.selectedStatus) parts.push(statusLabels[data.selectedStatus] ?? data.selectedStatus);
 		return parts.join(' · ');
@@ -213,7 +228,36 @@
 		liveActive && liveResults === null ? '…' : `${visibleCount} ${visibleCount === 1 ? 'turno' : 'turnos'}`
 	);
 
-	const needsSetup = $derived(data.professionals.length === 0 || data.services.length === 0);
+	const needsSetup = $derived(
+		referencesLoaded && (professionals.length === 0 || services.length === 0)
+	);
+
+	const loadReferences = async () => {
+		if (referencesLoaded || referencesLoading) return;
+		referencesLoading = true;
+		referencesError = '';
+		try {
+			const response = await fetch('/odonto/agenda/referencias');
+			const payload = await response.json().catch(() => ({}));
+			if (!response.ok) {
+				throw new Error(
+					payload?.message ?? 'No se pudieron cargar profesionales, servicios y pacientes.'
+				);
+			}
+			professionals = Array.isArray(payload?.professionals) ? payload.professionals : [];
+			services = Array.isArray(payload?.services) ? payload.services : [];
+			patients = Array.isArray(payload?.patients) ? payload.patients : [];
+			serviceProfessionalIds = payload?.service_professional_ids ?? {};
+			referencesLoaded = true;
+		} catch (error) {
+			referencesError =
+				error instanceof Error
+					? error.message
+					: 'No se pudieron cargar profesionales, servicios y pacientes.';
+		} finally {
+			referencesLoading = false;
+		}
+	};
 
 	const scrollToElement = async (element: HTMLElement | null) => {
 		await tick();
@@ -223,18 +267,45 @@
 
 	const toggleCreate = async () => {
 		showCreate = !showCreate;
-		if (showCreate) await scrollToElement(createSection);
+		if (showCreate) {
+			void loadReferences();
+			await scrollToElement(createSection);
+		}
 	};
 
 	const toggleSearch = async () => {
 		showSearch = !showSearch;
-		if (showSearch) await scrollToElement(searchSection);
+		if (showSearch) {
+			void loadReferences();
+			await scrollToElement(searchSection);
+		}
 	};
+
+	$effect(() => {
+		const businessId = String(data.context.business?.id ?? '');
+		if (businessId && referencesBusinessId && businessId !== referencesBusinessId) {
+			professionals = [];
+			services = [];
+			patients = [];
+			serviceProfessionalIds = {};
+			referencesLoaded = false;
+			referencesError = '';
+		}
+		referencesBusinessId = businessId;
+		if (data.referencesLoaded) {
+			professionals = data.professionals ?? [];
+			services = data.services ?? [];
+			patients = data.patients ?? [];
+			serviceProfessionalIds = data.serviceProfessionalIds ?? {};
+			referencesLoaded = true;
+		}
+	});
 
 	$effect(() => {
 		if (initialized) return;
 		showCreate = Boolean(form?.message || data.selectedPatientId);
 		showSearch = Boolean(hasActiveSearch || form?.message);
+		if (showCreate || showSearch) void loadReferences();
 		initialized = true;
 	});
 </script>
@@ -331,9 +402,9 @@
 			<h2 class="ux-section-title">Antes de tomar turnos</h2>
 			<p class="mt-1 text-sm text-white/55">Completá lo básico para poder agendar.</p>
 			<div class="mt-4 flex flex-wrap gap-2">
-				{#if data.professionals.length === 0}
+				{#if professionals.length === 0}
 					<a href="/odonto/configuracion/usuarios" class="ux-btn-primary">Agregar profesional</a>
-				{:else if data.services.length === 0}
+				{:else if services.length === 0}
 					<a href="/odonto/configuracion/usuarios" class="ux-btn-secondary">Cargar servicio</a>
 				{/if}
 			</div>
@@ -355,6 +426,16 @@
 			<p class="mt-2 text-xs font-semibold text-white/40">
 				Busca en todas las fechas a medida que escribís, sin usar los filtros.
 			</p>
+			{#if referencesLoading}
+				<p class="mt-3 text-sm font-semibold text-[#c4b5fd]" aria-live="polite">
+					Cargando profesionales y servicios…
+				</p>
+			{:else if referencesError}
+				<div class="ux-alert mt-3">
+					{referencesError}
+					<button type="button" class="ml-2 font-bold underline" onclick={loadReferences}>Reintentar</button>
+				</div>
+			{/if}
 
 			<div class="my-5 flex items-center gap-3" aria-hidden="true">
 				<span class="h-px flex-1 bg-white/10"></span>
@@ -369,18 +450,18 @@
 				</div>
 				<label>
 					<span class="ux-label">Profesional</span>
-					<select name="professional_id" class="ux-select">
+					<select name="professional_id" class="ux-select" disabled={referencesLoading}>
 						<option value="">Todos</option>
-						{#each data.professionals as professional}
+						{#each professionals as professional}
 							<option value={professional.id} selected={professional.id === data.selectedProfessionalId}>{professional.name}</option>
 						{/each}
 					</select>
 				</label>
 				<label>
 					<span class="ux-label">Servicio</span>
-					<select name="service_id" class="ux-select">
+					<select name="service_id" class="ux-select" disabled={referencesLoading}>
 						<option value="">Todos</option>
-						{#each data.services as service}
+						{#each services as service}
 							<option value={service.id} selected={service.id === data.selectedServiceId}>{service.name}</option>
 						{/each}
 					</select>
@@ -406,16 +487,27 @@
 
 	{#if showCreate}
 		<div transition:slide={{ duration: 180 }} class="scroll-mt-5" bind:this={createSection}>
-			<ManualAppointmentWizard
-				services={data.services}
-				professionals={data.professionals}
-				serviceProfessionalIds={data.serviceProfessionalIds}
-				patients={data.patients}
-				initialDate={data.date}
-				initialPatientId={data.selectedPatientId}
-				{canOperate}
-				{form}
-			/>
+			{#if referencesLoading}
+				<div class="ux-card text-sm font-semibold text-white/60" aria-live="polite">
+					Cargando profesionales, servicios y pacientes…
+				</div>
+			{:else if referencesError}
+				<div class="ux-card">
+					<p class="ux-alert">{referencesError}</p>
+					<button type="button" class="ux-btn-secondary mt-4" onclick={loadReferences}>Reintentar</button>
+				</div>
+			{:else if referencesLoaded}
+				<ManualAppointmentWizard
+					{services}
+					{professionals}
+					{serviceProfessionalIds}
+					{patients}
+					initialDate={data.date}
+					initialPatientId={data.selectedPatientId}
+					{canOperate}
+					{form}
+				/>
+			{/if}
 		</div>
 	{/if}
 

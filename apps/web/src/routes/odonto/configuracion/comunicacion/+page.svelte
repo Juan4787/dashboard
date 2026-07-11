@@ -1,204 +1,67 @@
 <script lang="ts">
 	import BackLink from '$lib/components/BackLink.svelte';
+	import { onDestroy } from 'svelte';
 
-	let { data, form } = $props<{
+	let { data } = $props<{
 		data: {
 			demo: boolean;
-			context: any;
-			account: any;
-			botTemplate: any;
-			defaultBotReplyBody: string;
-			lastEvent: any;
+			context: { business: { name: string } };
 			bookingPath: string;
-			pushStats?: { active: number; sent7d: number; revoked7d: number };
 		};
-		form?: { success?: boolean; message?: string };
 	}>();
 
-	const canManage = $derived(Boolean(data.context?.canManage));
-	const replyEnabled = $derived(Boolean(data.account?.bot_enabled && data.account?.status === 'active'));
-	const initialProvider = () => data.account?.provider ?? 'meta_cloud';
-	const initialReplyBody = () => data.botTemplate?.body ?? data.defaultBotReplyBody;
-	let selectedProvider = $state(initialProvider());
-	let replyBody = $state(initialReplyBody());
-	const siteUrl = $derived(typeof window === 'undefined' ? '' : window.location.origin);
-	const bookingUrl = $derived(`${siteUrl}${data.bookingPath}`);
-	const previewReply = $derived(
-		(replyBody || data.defaultBotReplyBody)
-			.replaceAll('{{business_name}}', data.context?.business?.name ?? 'Consultorio')
-			.replaceAll('{{booking_url}}', bookingUrl || data.bookingPath)
+	const bookingUrl = $derived(
+		typeof window === 'undefined' ? data.bookingPath : `${window.location.origin}${data.bookingPath}`
 	);
-	let copied = $state(false);
+	let copyStatus = $state<'idle' | 'copied' | 'error'>('idle');
+	let copyTimer: number | null = null;
 
 	const copyBookingUrl = async () => {
-		if (!bookingUrl) return;
-		await navigator.clipboard.writeText(bookingUrl);
-		copied = true;
-		window.setTimeout(() => (copied = false), 1800);
+		try {
+			await navigator.clipboard.writeText(bookingUrl);
+			copyStatus = 'copied';
+		} catch {
+			copyStatus = 'error';
+		}
+		if (copyTimer) window.clearTimeout(copyTimer);
+		copyTimer = window.setTimeout(() => (copyStatus = 'idle'), 2200);
 	};
+
+	onDestroy(() => {
+		if (copyTimer) window.clearTimeout(copyTimer);
+	});
 </script>
 
 <section class="ux-page">
 	<div class="ux-hero">
 		<BackLink href="/odonto/configuracion" label="Volver" class="mb-5" />
 		<p class="ux-badge">Configuración</p>
-		<div class="mt-4 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-			<div>
-				<h1 class="ux-title">Comunicación</h1>
-				<p class="ux-subtitle">Configurá la respuesta automática que recibe el paciente.</p>
-			</div>
-			<span class={replyEnabled ? 'ux-badge ux-badge-success' : 'ux-badge'}>
-				{replyEnabled ? 'Activa' : 'Inactiva'}
-			</span>
-		</div>
-	</div>
-
-	{#if form?.message}
-		<p class={form.success ? 'ux-alert ux-alert-success' : 'ux-alert'}>{form.message}</p>
-	{/if}
-
-	<div class="ux-card">
-		<div class="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-			<div class="max-w-2xl">
-				<h2 class="ux-section-title">Respuesta automática por WhatsApp</h2>
-				<p class="mt-2 text-sm text-white/55">
-					Cuando alguien escribe por WhatsApp, recibe el enlace para reservar turno.
-				</p>
-			</div>
-		</div>
-
-		<form method="POST" action="?/save_reply" class="mt-6 grid gap-5">
-			<input type="hidden" name="account_id" value={data.account?.id ?? ''} />
-			<div class="grid gap-4 md:grid-cols-2">
-				<label>
-					<span class="ux-label">Estado</span>
-					<select name="reply_enabled" class="ux-select" disabled={!canManage || data.demo}>
-						<option value="true" selected={replyEnabled}>Activa</option>
-						<option value="false" selected={!replyEnabled}>Inactiva</option>
-					</select>
-				</label>
-				<label>
-					<span class="ux-label">Conexión</span>
-					<select name="provider" class="ux-select" bind:value={selectedProvider} disabled={!canManage || data.demo}>
-						<option value="meta_cloud">WhatsApp real</option>
-						<option value="mock">Prueba interna</option>
-					</select>
-				</label>
-				<label>
-					<span class="ux-label">Nombre visible (opcional)</span>
-					<input
-						name="display_name"
-						class="ux-input"
-						value={data.account?.display_name ?? data.context?.business?.name ?? ''}
-						disabled={!canManage || data.demo}
-					/>
-				</label>
-				<label>
-					<span class="ux-label">Teléfono de WhatsApp</span>
-					<input
-						name="phone_number"
-						class="ux-input"
-						value={data.account?.phone_number ?? ''}
-						placeholder="+54 9 ..."
-						disabled={!canManage || data.demo}
-					/>
-				</label>
-				{#if selectedProvider === 'meta_cloud'}
-					<label>
-						<span class="ux-label">Phone Number ID</span>
-						<input
-							name="phone_number_id"
-							class="ux-input"
-							value={data.account?.phone_number_id ?? ''}
-							placeholder="123456789012345"
-							disabled={!canManage || data.demo}
-						/>
-					</label>
-					<label>
-						<span class="ux-label">WABA ID (opcional)</span>
-						<input
-							name="waba_id"
-							class="ux-input"
-							value={data.account?.waba_id ?? ''}
-							placeholder="123456789012345"
-							disabled={!canManage || data.demo}
-						/>
-					</label>
-					<label class="md:col-span-2">
-						<span class="ux-label">Variable del token</span>
-						<input
-							name="access_token_secret_name"
-							class="ux-input"
-							value={data.account?.access_token_secret_name ?? 'WHATSAPP_ACCESS_TOKEN'}
-							placeholder="WHATSAPP_ACCESS_TOKEN"
-							disabled={!canManage || data.demo}
-						/>
-					</label>
-				{/if}
-				<label class="md:col-span-2">
-					<span class="ux-label">Mensaje automático</span>
-					<textarea
-						name="reply_body"
-						class="ux-input min-h-44"
-						maxlength="1000"
-						bind:value={replyBody}
-						disabled={!canManage || data.demo}
-					></textarea>
-					<p class="mt-2 text-xs font-bold text-white/45">
-						Variables: {'{{business_name}}'} y {'{{booking_url}}'}
-					</p>
-				</label>
-			</div>
-			<button class="ux-btn-primary w-full sm:w-fit" disabled={!canManage || data.demo}>Guardar comunicación</button>
-		</form>
-	</div>
-
-	<div class="grid gap-4 lg:grid-cols-[1fr_0.85fr]">
-		<div class="ux-card">
-			<h2 class="ux-section-title">Link de reserva</h2>
-			<p class="mt-2 text-sm text-white/55">Tus pacientes reservan desde este enlace.</p>
-			<div class="mt-5 flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4 sm:flex-row sm:items-center">
-				<p class="min-w-0 flex-1 break-all text-sm font-bold text-white">{bookingUrl || data.bookingPath}</p>
-				<div class="flex gap-2">
-					<button type="button" class="ux-btn-secondary" onclick={copyBookingUrl}>
-						{copied ? 'Copiado' : 'Copiar'}
-					</button>
-					<a href={data.bookingPath} target="_blank" rel="noreferrer" class="ux-btn-secondary">Abrir</a>
-				</div>
-			</div>
-		</div>
-
-		<div class="ux-card">
-			<h2 class="ux-section-title">Mensaje que recibirá</h2>
-			<div class="mt-5 rounded-3xl border border-white/10 bg-[#0b1626] p-5">
-				<p class="whitespace-pre-line break-words text-sm leading-6 text-white/82">{previewReply}</p>
-			</div>
-			{#if data.lastEvent}
-				<p class="mt-4 text-xs font-bold text-white/45">
-					Última actividad: {new Date(data.lastEvent.received_at).toLocaleString('es-AR')}
-				</p>
-			{/if}
-		</div>
+		<h1 class="ux-title mt-4">Link de reserva</h1>
+		<p class="ux-subtitle">Compartí este enlace para que tus pacientes reserven un turno.</p>
 	</div>
 
 	<div class="ux-card">
-		<h2 class="ux-section-title">Recordatorios push</h2>
-		<p class="mt-2 text-sm text-white/55">
-			Pacientes que activaron "Activar avisos en este teléfono" desde la página del turno.
-		</p>
-		<div class="mt-4 grid gap-3 sm:grid-cols-3">
-			<div class="ux-soft-card p-4">
-				<p class="text-sm font-bold text-white/55">Dispositivos activos</p>
-				<p class="mt-1 text-3xl font-bold text-white">{data.pushStats?.active ?? 0}</p>
-			</div>
-			<div class="ux-soft-card p-4">
-				<p class="text-sm font-bold text-white/55">Enviados (7 días)</p>
-				<p class="mt-1 text-3xl font-bold text-white">{data.pushStats?.sent7d ?? 0}</p>
-			</div>
-			<div class="ux-soft-card p-4">
-				<p class="text-sm font-bold text-white/55">Dados de baja (7 días)</p>
-				<p class="mt-1 text-3xl font-bold text-white">{data.pushStats?.revoked7d ?? 0}</p>
+		<div class="max-w-2xl">
+			<h2 class="ux-section-title">Link de reserva de {data.context.business.name}</h2>
+			<p class="mt-2 text-sm text-white/55">
+				Es el único enlace que necesitás enviarles a tus pacientes.
+			</p>
+		</div>
+
+		<div class="mt-5 flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4 sm:flex-row sm:items-center">
+			<p class="min-w-0 flex-1 break-all text-sm font-bold text-white">{bookingUrl}</p>
+			<div class="flex flex-col gap-2 sm:flex-row">
+				<button type="button" class="ux-btn-secondary" onclick={copyBookingUrl}>
+					{copyStatus === 'copied' ? 'Copiado' : 'Copiar'}
+				</button>
+				<a href={data.bookingPath} target="_blank" rel="noreferrer" class="ux-btn-primary text-center">Abrir link</a>
 			</div>
 		</div>
+
+		{#if copyStatus === 'error'}
+			<p class="ux-alert mt-4" role="status">
+				No pudimos copiar el enlace automáticamente. Seleccionalo y copialo de forma manual.
+			</p>
+		{/if}
 	</div>
 </section>

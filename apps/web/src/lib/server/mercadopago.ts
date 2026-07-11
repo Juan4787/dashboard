@@ -201,8 +201,29 @@ const mpSend = async <T>(
 
 export const MP_SUBSCRIPTION_REASON = 'Cita Suite — Suscripción mensual';
 
+export type MercadoPagoEnvironment = 'test' | 'production';
+
+export const getMercadoPagoEnvironment = (): MercadoPagoEnvironment => {
+	const configured = env.MP_ENVIRONMENT?.trim().toLowerCase();
+	if (configured === 'test' || configured === 'production') return configured;
+	// Compatibilidad con la credencial de prueba histórica de Suscripciones.
+	// Los tokens APP_USR pueden pertenecer a prueba o producción, por eso en
+	// ese caso MP_ENVIRONMENT debe configurarse explícitamente.
+	return env.MP_ACCESS_TOKEN?.trim().startsWith('TEST-') ? 'test' : 'production';
+};
+
 export const getMercadoPagoApiConfigIssue = (): string | null => {
 	if (!env.MP_ACCESS_TOKEN?.trim()) return 'MP_ACCESS_TOKEN';
+	const configuredEnvironment = env.MP_ENVIRONMENT?.trim().toLowerCase();
+	if (!configuredEnvironment && !env.MP_ACCESS_TOKEN.trim().startsWith('TEST-')) {
+		return 'MP_ENVIRONMENT';
+	}
+	if (configuredEnvironment && configuredEnvironment !== 'test' && configuredEnvironment !== 'production') {
+		return 'MP_ENVIRONMENT';
+	}
+	if (getMercadoPagoEnvironment() === 'production' && env.MP_ACCESS_TOKEN.trim().startsWith('TEST-')) {
+		return 'MP_ENVIRONMENT';
+	}
 	return null;
 };
 

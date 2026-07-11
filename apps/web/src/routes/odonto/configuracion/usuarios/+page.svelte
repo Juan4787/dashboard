@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { BusinessContext, BusinessRole } from '$lib/server/business';
+	import { canConfigureAttendingProfile } from '$lib/utils/team-permissions';
 	import { formatPriceLabel } from '$lib/utils/money-input';
 	import { normalizeTimeRangesForCommit, normalizeTimeRangesInput, parseTimeRanges } from '$lib/utils/time-ranges';
 	import {
@@ -9,6 +10,7 @@
 		type ScheduleBlockDraft
 	} from '$lib/utils/schedule-blocks';
 	import { enhance } from '$app/forms';
+	import { invalidate } from '$app/navigation';
 	import type { SubmitFunction } from '@sveltejs/kit';
 
 	type RoleAccess = {
@@ -80,7 +82,15 @@
 	let attendingName = $state('');
 	let attendingError = $state('');
 	const attendingEligible = $derived(
-		isAssisting ? [] : members.filter((m) => m.status === 'active' && (m.role === 'owner' || m.role === 'admin'))
+		members.filter(
+			(member) =>
+				member.status === 'active' &&
+				canConfigureAttendingProfile({
+					actorRole: data.context.role,
+					targetRole: member.role,
+					isAssisting
+				})
+		)
 	);
 	const attendingPending = $derived(attendingEligible.filter((m) => !m.professional_id && m.user_id));
 	const attendingActive = $derived(attendingEligible.filter((m) => m.professional_id));
@@ -498,10 +508,12 @@
 			if (result.type === 'success') {
 				showWizard = false;
 				resetWizard();
-				await update({ reset: false, invalidateAll: true });
+				await update({ reset: false, invalidateAll: false });
+				await invalidate('app:team');
 				return;
 			}
-			await update({ reset: false, invalidateAll: true });
+			await update({ reset: false, invalidateAll: false });
+			await invalidate('app:team');
 		};
 	};
 </script>
@@ -1106,7 +1118,8 @@
 													teamActionBusy = `update-${member.id}`;
 													return async ({ update }) => {
 														teamActionBusy = '';
-														await update({ reset: false, invalidateAll: true });
+												await update({ reset: false, invalidateAll: false });
+												await invalidate('app:team');
 													};
 												}}
 											>
@@ -1129,7 +1142,8 @@
 													teamActionBusy = `remove-${member.id}`;
 													return async ({ update }) => {
 														teamActionBusy = '';
-														await update({ reset: false, invalidateAll: true });
+												await update({ reset: false, invalidateAll: false });
+												await invalidate('app:team');
 													};
 												}}
 											>

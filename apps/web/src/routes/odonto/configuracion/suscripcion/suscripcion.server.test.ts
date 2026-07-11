@@ -114,7 +114,12 @@ const createDbMock = (
 
 type FetchCall = { url: string; method: string; body: Record<string, unknown> | null };
 
-const createMpFetch = (routes: Array<[string, { status?: number; body?: unknown }]>) => {
+const createMpFetch = (
+	routes: Array<[
+		string,
+		{ status?: number; body?: unknown; method?: 'GET' | 'POST' | 'PUT' }
+	]>
+) => {
 	const requests: FetchCall[] = [];
 	const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = String(input);
@@ -126,8 +131,11 @@ const createMpFetch = (routes: Array<[string, { status?: number; body?: unknown 
 				parsedBody = null;
 			}
 		}
-		requests.push({ url, method: init?.method ?? 'GET', body: parsedBody });
-		const hit = routes.find(([fragment]) => url.includes(fragment));
+		const method = init?.method ?? 'GET';
+		requests.push({ url, method, body: parsedBody });
+		const hit = routes.find(
+			([fragment, response]) => url.includes(fragment) && (!response.method || response.method === method)
+		);
 		if (!hit) return new Response('{}', { status: 404 });
 		return new Response(JSON.stringify(hit[1].body ?? {}), { status: hit[1].status ?? 200 });
 	});
@@ -154,6 +162,7 @@ beforeEach(() => {
 	for (const key of Object.keys(envState.privateEnv)) delete envState.privateEnv[key];
 	envState.privateEnv.MP_ACCESS_TOKEN = 'token-de-prueba';
 	envState.privateEnv.MP_WEBHOOK_SECRET = 'secreto';
+	envState.privateEnv.MP_ENVIRONMENT = 'test';
 });
 
 describe('action subscribe', () => {
@@ -209,6 +218,214 @@ describe('action subscribe', () => {
 			status: 'pending',
 			transaction_amount: 50000
 		});
+	});
+
+	it('reutiliza el preapproval pendiente en vez de crear otra suscripción', async () => {
+		const server = createDbMock();
+		const admin = createDbMock({
+			mp_subscriptions: [
+				{
+					data: [
+						{
+							preapproval_id: 'pre-pending',
+							status: 'pending',
+							created_at: new Date().toISOString()
+						}
+					],
+					error: null
+				},
+				{ error: null }
+			],
+			businesses: [{ data: { id: BUSINESS_ID }, error: null }]
+		});
+		mocks.createSupabaseServerClient.mockResolvedValue(server.client);
+		mocks.createSupabaseAdminClient.mockResolvedValue(admin.client);
+		mocks.resolveActiveBusiness.mockResolvedValue(ownerContext());
+		const { fetchMock, requests } = createMpFetch([
+			[
+				'/preapproval/pre-pending',
+				{
+					body: {
+						id: 'pre-pending',
+						status: 'pending',
+						external_reference: BUSINESS_ID,
+						init_point: 'https://mp.test/init/pre-pending',
+						payer_email: 'duena@mail.com',
+						auto_recurring: { transaction_amount: 50000, currency_id: 'ARS' }
+					}
+				}
+			]
+		]);
+
+		await expect(actions.subscribe(makeEvent({ fetchMock }) as never)).rejects.toMatchObject({
+			status: 303,
+			location: 'https://mp.test/init/pre-pending'
+		});
+		expect(requests).toHaveLength(1);
+		expect(requests[0].method).toBe('GET');
+		expect(
+			admin.calls.filter((call) => call.table === 'mp_subscriptions' && call.method === 'upsert')
+		).toHaveLength(1);
+	});
+
+	it('cancela todos los pendings duplicados, aunque sean recientes, antes de crear uno nuevo', async () => {
+		const server = createDbMock();
+		const existing = [
+			{ preapproval_id: 'pre-a', status: 'pending', created_at: new Date().toISOString() },
+			{ preapproval_id: 'pre-b', status: 'pending', created_at: new Date().toISOString() }
+		];
+		const admin = createDbMock({
+			mp_subscriptions: [
+				{ data: existing, error: null },
+				{ error: null },
+				{ error: null },
+				{ error: null },
+				{ error: null },
+				{ error: null }
+			],
+			businesses: [
+				{ data: { id: BUSINESS_ID }, error: null },
+				{ data: { id: BUSINESS_ID }, error: null },
+				{ data: { id: BUSINESS_ID }, error: null },
+				{ data: { id: BUSINESS_ID }, error: null }
+			]
+		});
+		mocks.createSupabaseServerClient.mockResolvedValue(server.client);
+		mocks.createSupabaseAdminClient.mockResolvedValue(admin.client);
+		mocks.resolveActiveBusiness.mockResolvedValue(ownerContext());
+		const pending = (id: string) => ({
+			id,
+			status: 'pending',
+			external_reference: BUSINESS_ID,
+			init_point: `https://mp.test/init/${id}`,
+			payer_email: 'duena@mail.com',
+			auto_recurring: { transaction_amount: 50000, currency_id: 'ARS' }
+		});
+		const { fetchMock, requests } = createMpFetch([
+			['/preapproval/pre-a', { method: 'GET', body: pending('pre-a') }],
+			['/preapproval/pre-b', { method: 'GET', body: pending('pre-b') }],
+			['/preapproval/pre-a', { method: 'PUT', body: { ...pending('pre-a'), status: 'cancelled' } }],
+			['/preapproval/pre-b', { method: 'PUT', body: { ...pending('pre-b'), status: 'cancelled' } }],
+			[
+				'/preapproval',
+				{
+					method: 'POST',
+					status: 201,
+					body: { id: 'pre-new', status: 'pending', init_point: 'https://mp.test/init/pre-new' }
+				}
+			]
+		]);
+
+		await expect(actions.subscribe(makeEvent({ fetchMock }) as never)).rejects.toMatchObject({
+			status: 303,
+			location: 'https://mp.test/init/pre-new'
+		});
+		expect(requests.map((request) => request.method).sort()).toEqual([
+			'GET',
+			'GET',
+			'POST',
+			'PUT',
+			'PUT'
+		]);
+		const methods = requests.map((request) => request.method);
+		expect(methods.indexOf('POST')).toBeGreaterThan(methods.lastIndexOf('PUT'));
+		expect(admin.calls.some((call) => call.table === 'mp_subscriptions' && call.method === 'limit')).toBe(false);
+	});
+
+	it('si un pending ya fue autorizado, cancela los otros links antes de bloquear el alta', async () => {
+		const server = createDbMock();
+		const admin = createDbMock({
+			mp_subscriptions: [
+				{
+					data: [
+						{ preapproval_id: 'pre-active', status: 'pending', created_at: new Date().toISOString() },
+						{ preapproval_id: 'pre-extra', status: 'pending', created_at: new Date().toISOString() }
+					],
+					error: null
+				},
+				{ error: null },
+				{ error: null },
+				{ error: null }
+			],
+			businesses: [
+				{ data: { id: BUSINESS_ID }, error: null },
+				{ data: { id: BUSINESS_ID }, error: null },
+				{ data: { id: BUSINESS_ID }, error: null }
+			]
+		});
+		mocks.createSupabaseServerClient.mockResolvedValue(server.client);
+		mocks.createSupabaseAdminClient.mockResolvedValue(admin.client);
+		mocks.resolveActiveBusiness.mockResolvedValue(ownerContext());
+		const base = (id: string, status: string) => ({
+			id,
+			status,
+			external_reference: BUSINESS_ID,
+			init_point: `https://mp.test/init/${id}`,
+			payer_email: 'duena@mail.com',
+			auto_recurring: { transaction_amount: 50000, currency_id: 'ARS' }
+		});
+		const { fetchMock, requests } = createMpFetch([
+			['/preapproval/pre-active', { method: 'GET', body: base('pre-active', 'authorized') }],
+			['/preapproval/pre-extra', { method: 'GET', body: base('pre-extra', 'pending') }],
+			['/preapproval/pre-extra', { method: 'PUT', body: base('pre-extra', 'cancelled') }]
+		]);
+
+		const result = (await actions.subscribe(makeEvent({ fetchMock }) as never)) as {
+			status: number;
+			data: { message?: string };
+		};
+		expect(result.status).toBe(400);
+		expect(result.data.message).toContain('ya está activa o pausada');
+		expect(requests.filter((request) => request.method === 'PUT')).toHaveLength(1);
+		expect(requests.filter((request) => request.method === 'POST')).toHaveLength(0);
+	});
+
+	it('si ya hay una fila autorizada localmente, también cancela cualquier pending coexistente', async () => {
+		const server = createDbMock();
+		const admin = createDbMock({
+			mp_subscriptions: [
+				{
+					data: [
+						{ preapproval_id: 'pre-active', status: 'authorized', created_at: new Date().toISOString() },
+						{ preapproval_id: 'pre-extra', status: 'pending', created_at: new Date().toISOString() }
+					],
+					error: null
+				},
+				{ error: null },
+				{ error: null }
+			],
+			businesses: [
+				{ data: { id: BUSINESS_ID }, error: null },
+				{ data: { id: BUSINESS_ID }, error: null }
+			]
+		});
+		mocks.createSupabaseServerClient.mockResolvedValue(server.client);
+		mocks.createSupabaseAdminClient.mockResolvedValue(admin.client);
+		mocks.resolveActiveBusiness.mockResolvedValue(ownerContext());
+		const pending = {
+			id: 'pre-extra',
+			status: 'pending',
+			external_reference: BUSINESS_ID,
+			init_point: 'https://mp.test/init/pre-extra',
+			payer_email: 'duena@mail.com',
+			auto_recurring: { transaction_amount: 50000, currency_id: 'ARS' }
+		};
+		const { fetchMock, requests } = createMpFetch([
+			['/preapproval/pre-extra', { method: 'GET', body: pending }],
+			[
+				'/preapproval/pre-extra',
+				{ method: 'PUT', body: { ...pending, status: 'cancelled' } }
+			]
+		]);
+
+		const result = (await actions.subscribe(makeEvent({ fetchMock }) as never)) as {
+			status: number;
+			data: { message?: string };
+		};
+		expect(result.status).toBe(400);
+		expect(result.data.message).toContain('ya está activa o pausada');
+		expect(requests.map((request) => request.method)).toEqual(['GET', 'PUT']);
+		expect(requests.filter((request) => request.method === 'POST')).toHaveLength(0);
 	});
 
 	it('usa MP_SUBSCRIPTION_AMOUNT_ARS cuando está configurado', async () => {

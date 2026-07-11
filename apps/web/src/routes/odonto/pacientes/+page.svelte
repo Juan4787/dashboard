@@ -238,7 +238,7 @@ const canCreatePatient = $derived(data.canCreatePatient !== false);
 										<div class="table-cell align-middle px-6 py-5 text-right">
 											<a
 												href={`/odonto/pacientes/${patient.id}`}
-												data-sveltekit-preload-data="tap"
+								data-sveltekit-preload-data="hover"
 												onclick={(event) => event.stopPropagation()}
 												onkeydown={(event) => event.stopPropagation()}
 												class="rounded-full px-4 py-2 text-xs font-semibold text-white bg-[#7c3aed] shadow-sm transition hover:-translate-y-0.5 hover:shadow-card"
@@ -304,7 +304,7 @@ const canCreatePatient = $derived(data.canCreatePatient !== false);
 										<div class="table-cell align-middle px-6 py-5 text-right">
 											<a
 												href={`/odonto/pacientes/${patient.id}`}
-												data-sveltekit-preload-data="tap"
+								data-sveltekit-preload-data="hover"
 												onclick={(event) => event.stopPropagation()}
 												onkeydown={(event) => event.stopPropagation()}
 												class="rounded-full px-4 py-2 text-xs font-semibold text-white bg-[#7c3aed] shadow-sm transition hover:-translate-y-0.5 hover:shadow-card"
@@ -366,7 +366,7 @@ const canCreatePatient = $derived(data.canCreatePatient !== false);
 								<div class="mt-3 flex flex-col gap-2">
 									<a
 										href={`/odonto/pacientes/${patient.id}`}
-										data-sveltekit-preload-data="tap"
+							data-sveltekit-preload-data="hover"
 										onclick={(event) => event.stopPropagation()}
 										onkeydown={(event) => event.stopPropagation()}
 										class="w-full rounded-full bg-[#7c3aed] px-4 py-2.5 text-center text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-card"
@@ -512,7 +512,7 @@ const canCreatePatient = $derived(data.canCreatePatient !== false);
 					<a
 						class="mt-3 inline-flex rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-slate-950 transition hover:bg-amber-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-300"
 						href={`/odonto/pacientes/${formState.existingId}`}
-						data-sveltekit-preload-data="tap"
+					data-sveltekit-preload-data="hover"
 					>
 						Abrir paciente existente
 					</a>

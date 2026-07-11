@@ -148,6 +148,13 @@ type ResolveBusinessOptions = {
 	fetch?: typeof fetch;
 };
 
+type BusinessContextRpcRow = {
+	business?: Business | null;
+	role?: string | null;
+	assistance?: BusinessAssistanceContext | null;
+	subscription?: BusinessSubscriptionRow | null;
+};
+
 const mapMembership = (row: any): BusinessContext | null => {
 	const role = String(row?.role ?? '');
 	const business = row?.business;
@@ -198,6 +205,24 @@ const applySubscription = (
 		canOperate: canOperateRole(membership.role) && access.canUseBusiness,
 		access
 	};
+};
+
+const mapRpcMembership = (row: BusinessContextRpcRow): BusinessContext | null => {
+	const business = row.business;
+	const role = String(row.role ?? '');
+	if (!business || !isBusinessRole(role)) return null;
+	const assistance = row.assistance ?? null;
+	const base = assistance
+		? mapAssistanceMembership({
+				id: assistance.grantId,
+				requested_by_user_id: assistance.requestedByUserId,
+				support_user_id: assistance.supportUserId,
+				starts_at: assistance.startsAt,
+				expires_at: assistance.expiresAt,
+				business
+			})
+		: mapMembership({ role, business });
+	return base ? applySubscription(base, row.subscription ?? null) : null;
 };
 
 const isMissingAssistanceSchemaError = (error: unknown) => {
@@ -264,7 +289,7 @@ const loadAssistanceMemberships = async (
 	}
 };
 
-const loadMemberships = async (
+const loadMembershipsLegacy = async (
 	supabase: SupabaseClient,
 	userId: string
 ): Promise<BusinessContext[]> => {
@@ -324,6 +349,52 @@ const loadMemberships = async (
 	);
 };
 
+const isMissingBusinessContextsRpcError = (error: unknown) => {
+	const message = errorMessage(error).toLowerCase();
+	const code =
+		typeof error === 'object' && error !== null && 'code' in error
+			? String((error as { code?: unknown }).code ?? '')
+			: '';
+	return (
+		code === '42883' ||
+		code === 'PGRST202' ||
+		message.includes('list_user_business_contexts') ||
+		message.includes('could not find the function')
+	);
+};
+
+const loadMemberships = async (
+	supabase: SupabaseClient,
+	userId: string
+): Promise<BusinessContext[]> => {
+	const { data, error } = await supabase.rpc('list_user_business_contexts');
+	if (!error) {
+		return ((data ?? []) as BusinessContextRpcRow[])
+			.map(mapRpcMembership)
+			.filter((item): item is BusinessContext => Boolean(item));
+	}
+	if (!isMissingBusinessContextsRpcError(error)) throw error;
+	return loadMembershipsLegacy(supabase, userId);
+};
+
+const membershipsByRequest = new WeakMap<object, Promise<BusinessContext[]>>();
+
+const loadMembershipsForRequest = (
+	supabase: SupabaseClient,
+	userId: string,
+	requestKey?: object
+) => {
+	if (!requestKey) return loadMemberships(supabase, userId);
+	const cached = membershipsByRequest.get(requestKey);
+	if (cached) return cached;
+	const pending = loadMemberships(supabase, userId).catch((error) => {
+		membershipsByRequest.delete(requestKey);
+		throw error;
+	});
+	membershipsByRequest.set(requestKey, pending);
+	return pending;
+};
+
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const errorMessage = (error: unknown) =>
@@ -342,8 +413,10 @@ const isDefaultBusinessBootstrapBlocked = (error: unknown) =>
 
 const reloadMembershipsAfterBootstrap = async (
 	supabase: SupabaseClient,
-	userId: string
+	userId: string,
+	requestKey?: object
 ): Promise<BusinessContext[]> => {
+	if (requestKey) membershipsByRequest.delete(requestKey);
 	for (const delay of [0, 150, 350]) {
 		if (delay > 0) await wait(delay);
 		const memberships = await loadMemberships(supabase, userId);
@@ -365,7 +438,8 @@ export const resolveActiveBusiness = async ({
 	const userId = await getAuthUserId(supabase, accessToken);
 	if (!userId) return null;
 
-	let memberships = await loadMemberships(supabase, userId);
+	const requestKey = cookies as unknown as object | undefined;
+	let memberships = await loadMembershipsForRequest(supabase, userId, requestKey);
 
 	if (memberships.length === 0 && ensureDefault) {
 		if (defaultBusinessCreationIp) {
@@ -376,12 +450,12 @@ export const resolveActiveBusiness = async ({
 			p_industry: 'odontology'
 		});
 		if (error) {
-			memberships = await reloadMembershipsAfterBootstrap(supabase, userId);
+			memberships = await reloadMembershipsAfterBootstrap(supabase, userId, requestKey);
 			if (memberships.length === 0 || !isDefaultBusinessBootstrapBlocked(error)) {
 				throw error;
 			}
 		} else {
-			memberships = await reloadMembershipsAfterBootstrap(supabase, userId);
+			memberships = await reloadMembershipsAfterBootstrap(supabase, userId, requestKey);
 		}
 	}
 

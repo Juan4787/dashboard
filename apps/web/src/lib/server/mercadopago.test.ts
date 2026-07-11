@@ -11,6 +11,8 @@ import {
 	buildSignatureManifest,
 	confirmMpSubscriptionForBusiness,
 	creditApprovedPayment,
+	getMercadoPagoApiConfigIssue,
+	getMercadoPagoEnvironment,
 	getSubscriptionAmountArs,
 	logMpWebhookEvent,
 	logMpWebhookEventOnce,
@@ -120,6 +122,7 @@ beforeEach(() => {
 	for (const key of Object.keys(envState.privateEnv)) delete envState.privateEnv[key];
 	envState.privateEnv.MP_ACCESS_TOKEN = 'token-de-prueba';
 	envState.privateEnv.MP_WEBHOOK_SECRET = SECRET;
+	envState.privateEnv.MP_ENVIRONMENT = 'test';
 });
 
 describe('parseSignatureHeader', () => {
@@ -870,6 +873,34 @@ describe('getSubscriptionAmountArs', () => {
 		expect(getSubscriptionAmountArs()).toBe(50000);
 		delete envState.privateEnv.MP_SUBSCRIPTION_AMOUNT_ARS;
 		expect(getSubscriptionAmountArs()).toBe(50000);
+	});
+});
+
+describe('Mercado Pago environment', () => {
+	it('uses the explicit environment and supports the legacy TEST subscription token', () => {
+		envState.privateEnv.MP_ACCESS_TOKEN = 'APP_USR-example';
+		envState.privateEnv.MP_ENVIRONMENT = 'test';
+		expect(getMercadoPagoEnvironment()).toBe('test');
+		expect(getMercadoPagoApiConfigIssue()).toBeNull();
+
+		delete envState.privateEnv.MP_ENVIRONMENT;
+		envState.privateEnv.MP_ACCESS_TOKEN = 'TEST-example';
+		expect(getMercadoPagoEnvironment()).toBe('test');
+		expect(getMercadoPagoApiConfigIssue()).toBeNull();
+	});
+
+	it('rejects an invalid environment or a TEST token declared as production', () => {
+		envState.privateEnv.MP_ACCESS_TOKEN = 'APP_USR-example';
+		envState.privateEnv.MP_ENVIRONMENT = 'staging';
+		expect(getMercadoPagoApiConfigIssue()).toBe('MP_ENVIRONMENT');
+
+		envState.privateEnv.MP_ACCESS_TOKEN = 'TEST-example';
+		envState.privateEnv.MP_ENVIRONMENT = 'production';
+		expect(getMercadoPagoApiConfigIssue()).toBe('MP_ENVIRONMENT');
+
+		delete envState.privateEnv.MP_ENVIRONMENT;
+		envState.privateEnv.MP_ACCESS_TOKEN = 'APP_USR-example';
+		expect(getMercadoPagoApiConfigIssue()).toBe('MP_ENVIRONMENT');
 	});
 });
 

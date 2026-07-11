@@ -38,7 +38,6 @@ const normalizeFilename = (value?: string | null) => {
 };
 
 const ENTRIES_PAGE_SIZE = 30;
-const RADIOGRAPHS_PAGE_SIZE = 24;
 const COMMERCIAL_RESTRICTED_MESSAGE =
 	'Tu acceso a Cita Suite venció. Activá tu suscripción para volver a usar la plataforma.';
 const PROFESSIONAL_DELETE_PATIENT_MESSAGE =
@@ -341,7 +340,8 @@ const clinicalEntryRpcError = (error: { message?: string; code?: string } | null
 	return { status: 500, message: 'No se pudo guardar la entrada.' };
 };
 
-export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) => {
+export const load: PageServerLoad = async ({ params, locals, fetch, cookies, depends }) => {
+	depends(`app:patient:${params.id}`);
 	if (!locals.auth) {
 		throw redirect(303, '/login');
 	}
@@ -409,13 +409,8 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 		{ data: patient, error: patientError },
 		{ data: clinicalProfile, error: clinicalProfileError },
 		{ data: entries, error: entriesError },
-		{ data: costs, error: costsError },
-		{ data: radiographs, error: radiographsError },
 		{ data: appointments, error: appointmentsError },
-		{ data: driveConnection, error: driveError },
-		{ data: driveFolderRecord, error: driveFolderError },
-		{ data: professionalLink, error: professionalLinkError },
-		{ data: changeEvents, error: changeEventsError }
+		{ data: professionalLink, error: professionalLinkError }
 	] = await Promise.all([
 		supabase
 			.from('patients')
@@ -435,30 +430,15 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 			: Promise.resolve({ data: null, error: null }),
 		supabase
 			.from('clinical_entries')
-			.select('id, created_at, entry_type, description, teeth, internal_note, created_by_user_id, locked_after')
+			.select(
+				'id, created_at, entry_type, description, teeth, internal_note, created_by_user_id, locked_after, clinical_entry_costs(amount)'
+			)
 			.eq('patient_id', params.id)
 			.eq('business_id', context.business.id)
 			.is('archived_at', null)
 			.order('created_at', { ascending: false })
 			.order('id', { ascending: false })
 			.limit(ENTRIES_PAGE_SIZE + 1),
-		permissions.canViewCosts
-			? supabase
-					.from('clinical_entry_costs')
-					.select('clinical_entry_id, amount')
-					.eq('business_id', context.business.id)
-			: Promise.resolve({ data: [], error: null }),
-		supabase
-			.from('patient_radiographs')
-			.select(
-				'id, patient_id, status, drive_file_id, original_filename, mime_type, bytes, taken_at, note, created_at'
-			)
-			.eq('patient_id', params.id)
-			.eq('business_id', context.business.id)
-			.is('deleted_at', null)
-			.order('created_at', { ascending: false })
-			.order('id', { ascending: false })
-			.limit(RADIOGRAPHS_PAGE_SIZE + 1),
 		supabase
 			.from('appointments')
 			.select('id, starts_at, ends_at, status, source, service_name_snapshot, professional_name_snapshot')
@@ -466,21 +446,6 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 			.eq('business_id', context.business.id)
 			.order('starts_at', { ascending: false })
 			.limit(12),
-		ownerId
-			? supabase
-					.from('drive_connections')
-					.select('connected_email, root_folder_id, updated_at')
-					.eq('owner_id', ownerId)
-					.maybeSingle()
-			: Promise.resolve({ data: null, error: null }),
-		permissions.canManageDriveFolders
-			? admin
-					.from('patients')
-					.select('drive_folder_id')
-					.eq('id', params.id)
-					.eq('business_id', context.business.id)
-					.maybeSingle()
-			: Promise.resolve({ data: null, error: null }),
 		context.role === 'professional' && currentProfessional
 			? admin
 					.from('professional_patient_links')
@@ -491,20 +456,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 					.eq('is_active', true)
 					.limit(1)
 					.maybeSingle()
-			: Promise.resolve({ data: null, error: null }),
-		(async () => {
-			try {
-				return await admin
-					.from('patient_profile_change_events')
-					.select('id, summary, changed_by_name, changed_fields, created_at')
-					.eq('business_id', context.business.id)
-					.eq('patient_id', params.id)
-					.order('created_at', { ascending: false })
-					.limit(5);
-			} catch (error) {
-				return { data: [], error };
-			}
-		})()
+			: Promise.resolve({ data: null, error: null })
 	]);
 
 	if (patientError) {
@@ -521,39 +473,24 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 	if (entriesError) {
 		console.error('Error cargando entradas', entriesError);
 	}
-	if (costsError) {
-		console.error('Error cargando costos clinicos', costsError);
-	}
-	if (radiographsError) {
-		console.error('Error cargando radiografias', radiographsError);
-	}
 	if (appointmentsError) {
 		console.error('Error cargando turnos del paciente', appointmentsError);
-	}
-	if (driveError) {
-		console.error('Error cargando conexion Drive', driveError);
-	}
-	if (driveFolderError) {
-		console.error('Error cargando carpeta Drive del paciente', driveFolderError);
 	}
 	if (professionalLinkError) {
 		console.error('Error cargando archivo personal del profesional', professionalLinkError);
 	}
-	if (changeEventsError) {
-		console.error('Error cargando cambios del paciente', changeEventsError);
-	}
 
 	const safeEntries = entries ?? [];
-	const costByEntryId = new Map((costs ?? []).map((item: any) => [String(item.clinical_entry_id), item.amount]));
 	const entriesWithCosts = safeEntries.map((entry: any) => ({
 		...entry,
 		amount: permissions.canViewCosts
-			? (costByEntryId.get(String(entry.id)) ?? null)
-			: null
+			? (Array.isArray(entry.clinical_entry_costs)
+					? (entry.clinical_entry_costs[0]?.amount ?? null)
+					: null)
+			: null,
+		clinical_entry_costs: undefined
 	}));
-	const safeRadiographs = radiographs ?? [];
 	const hasMoreEntries = entriesWithCosts.length > ENTRIES_PAGE_SIZE;
-	const hasMoreRadiographs = safeRadiographs.length > RADIOGRAPHS_PAGE_SIZE;
 
 	return {
 		patient: {
@@ -562,22 +499,19 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 			medication: clinicalProfile?.medication ?? null,
 			background: clinicalProfile?.background ?? null,
 			custom_fields: clinicalProfile?.custom_fields ?? null,
-			drive_folder_id:
-				typeof (driveFolderRecord as any)?.drive_folder_id === 'string'
-					? (driveFolderRecord as any).drive_folder_id
-					: null,
+			drive_folder_id: typeof patient.drive_folder_id === 'string' ? patient.drive_folder_id : null,
 			professional_archived_at:
 				context.role === 'professional' ? ((professionalLink as any)?.archived_at ?? null) : null
 		},
 		entries: hasMoreEntries ? entriesWithCosts.slice(0, ENTRIES_PAGE_SIZE) : entriesWithCosts,
 		appointments: appointments ?? [],
-		radiographs: hasMoreRadiographs
-			? safeRadiographs.slice(0, RADIOGRAPHS_PAGE_SIZE)
-			: safeRadiographs,
+		radiographs: [],
 		hasMoreEntries,
-		hasMoreRadiographs,
-		driveConnection: driveConnection ?? null,
-		changeEvents: changeEvents ?? [],
+		hasMoreRadiographs: false,
+		driveConnection: null,
+		radiographsDeferred: true,
+		changeEvents: [],
+		changeEventsDeferred: true,
 		role: context.role,
 		currentUserId: ownerId,
 		permissions,

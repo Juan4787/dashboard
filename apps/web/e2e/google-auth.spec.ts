@@ -1,6 +1,12 @@
 import { expect, test } from '@playwright/test';
 
+const supabaseUrl = process.env.ODONTO_SUPABASE_URL ?? '';
+const isLocalSupabase =
+	supabaseUrl.startsWith('http://127.0.0.1') || supabaseUrl.startsWith('http://localhost');
+
 test.describe('Google Auth', () => {
+	test.skip(isLocalSupabase, 'Supabase local no tiene configurado el proveedor OAuth de Google.');
+
 	test('el botón de Google inicia OAuth contra Google', async ({ page }) => {
 		await page.goto('/login');
 		await page.getByRole('button', { name: 'Ingresar con Google' }).click();

@@ -57,6 +57,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 			reprogramDate: new Date().toISOString().slice(0, 10),
 			minReprogramDate: new Date().toISOString().slice(0, 10),
 			reprogramSlots: [],
+			reprogramSlotsLoaded: true,
 			fromDate: '',
 			justRescheduled: false,
 			rescheduleWhatsAppUrl: null,
@@ -88,7 +89,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 		requestedReprogramDate ?? (appointmentLocalDate >= minReprogramDate ? appointmentLocalDate : minReprogramDate);
 	const fromDate = url.searchParams.get('from_date') ?? localDateFor(data.starts_at, business.business.timezone);
 
-	const [auditResult, usersResult, messageResult, reprogramSlots] = await Promise.all([
+	const [auditResult, usersResult, messageResult] = await Promise.all([
 		supabase
 			.from('audit_logs')
 			.select('id, user_id, action, entity_type, entity_id, metadata, created_at')
@@ -102,18 +103,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 			.select('id, type, status, scheduled_for, sent_at, delivered_at, read_at, failed_at, human_error_message, created_at')
 			.eq('business_id', business.business.id)
 			.eq('appointment_id', params.appointmentId)
-			.order('created_at', { ascending: false }),
-		business.canOperate && !['cancelled', 'attended', 'no_show'].includes(data.status)
-			? getAvailabilitySlots(supabase, {
-					business: business.business,
-					serviceId: data.service_id,
-					professionalId: data.professional_id,
-					fromDate: reprogramDate,
-					toDate: reprogramDate,
-					publicOnly: false,
-					excludeAppointmentId: data.id
-				})
-			: Promise.resolve([])
+			.order('created_at', { ascending: false })
 	]);
 
 	if (auditResult.error) console.error('Error cargando auditoria del turno', auditResult.error);
@@ -158,7 +148,8 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 		userLabels,
 		reprogramDate,
 		minReprogramDate,
-		reprogramSlots,
+		reprogramSlots: [],
+		reprogramSlotsLoaded: false,
 		fromDate,
 		justRescheduled: url.searchParams.get('rescheduled') === '1',
 		rescheduleWhatsAppUrl,

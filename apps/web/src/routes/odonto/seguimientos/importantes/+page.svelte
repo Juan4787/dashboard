@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { invalidateAll } from '$app/navigation';
+	import { invalidate } from '$app/navigation';
 	import BackLink from '$lib/components/BackLink.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import Modal from '$lib/components/Modal.svelte';
@@ -23,7 +23,7 @@
 
 	const handleEdited = async () => {
 		editingItem = null;
-		await invalidateAll();
+		await invalidate('app:follow-ups');
 	};
 </script>
 

@@ -11,7 +11,8 @@ import {
 import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
+export const load: PageServerLoad = async ({ locals, fetch, cookies, depends }) => {
+	depends('app:follow-ups');
 	if (!locals.auth) throw redirect(303, '/login');
 	if (env.DEMO_MODE === 'true') {
 		return {

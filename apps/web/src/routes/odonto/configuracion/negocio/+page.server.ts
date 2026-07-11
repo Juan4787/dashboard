@@ -5,10 +5,8 @@ import {
 	resolveActiveBusiness
 } from '$lib/server/business';
 import { createSupabaseServerClient } from '$lib/server/supabase';
-import { PUBLIC_SITE_URL_FALLBACK } from '$lib/constants';
 import { isValidMapsUrl } from '$lib/server/location';
 import { env } from '$env/dynamic/private';
-import { env as publicEnv } from '$env/dynamic/public';
 import { error as kitError, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -20,7 +18,6 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 		return {
 			context: demoBusinessContext(),
 			industries: BUSINESS_INDUSTRIES,
-			publicBookingUrl: `${PUBLIC_SITE_URL_FALLBACK}/reservar/demo-business`,
 			readiness: { services: 1, professionals: 1, availabilityRules: 1, reservableServices: 1, reservableProfessionals: 1 },
 			demo: true
 		};
@@ -85,13 +82,9 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 		readyServices.add(String((assignment as any).service_id));
 		readyProfessionals.add(String((assignment as any).professional_id));
 	}
-	const siteUrl = publicEnv.PUBLIC_SITE_URL?.trim() || PUBLIC_SITE_URL_FALLBACK;
-	const publicBookingUrl = `${siteUrl.replace(/\/$/, '')}/reservar/${context.business.id}`;
-
 	return {
 		context,
 		industries: BUSINESS_INDUSTRIES,
-		publicBookingUrl,
 		readiness: {
 			services: services ?? 0,
 			professionals: professionals ?? 0,

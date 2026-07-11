@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
 	env: {} as Record<string, string | undefined>,
 	createSupabaseServerClient: vi.fn(),
-	getModuleEntryRoute: vi.fn(() => '/odonto'),
+	getModuleEntryRoute: vi.fn(() => '/odonto/agenda'),
 	isMasterEmail: vi.fn(() => false),
 	MASTER_EMAIL: 'master@example.com',
 	enforceRateLimits: vi.fn(),
@@ -72,7 +72,7 @@ describe('login/register server actions', () => {
 					accepted_terms: 'true'
 				}) as never
 			)
-		).rejects.toMatchObject({ status: 303, location: '/odonto' });
+		).rejects.toMatchObject({ status: 303, location: '/odonto/agenda' });
 
 		expect(mocks.enforceRateLimits).toHaveBeenCalled();
 		expect(auth.signUp).toHaveBeenCalledWith({
@@ -121,7 +121,7 @@ describe('login/register server actions', () => {
 					password: 'secret123'
 				}) as never
 			)
-		).rejects.toMatchObject({ status: 303, location: '/odonto' });
+		).rejects.toMatchObject({ status: 303, location: '/odonto/agenda' });
 
 		expect(auth.signInWithPassword).toHaveBeenCalledWith({
 			email: 'cliente@example.com',

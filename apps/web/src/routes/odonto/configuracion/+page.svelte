@@ -147,7 +147,7 @@
 		<a href="/odonto/configuracion/negocio" class="ux-choice p-6">
 			<span class="ux-badge">Consultorio</span>
 			<h2 class="mt-4 text-2xl font-bold text-white">Datos y reserva online</h2>
-			<p class="mt-2 text-sm text-white/55">Nombre, enlace público, contacto y reglas de reserva.</p>
+			<p class="mt-2 text-sm text-white/55">Nombre, contacto y reglas de reserva.</p>
 		</a>
 		<a href="/odonto/configuracion/usuarios" class="ux-choice p-6">
 			<span class="ux-badge">Permisos</span>
@@ -160,9 +160,9 @@
 			<p class="mt-2 text-sm text-white/55">Estado comercial, vencimiento e historial de acceso.</p>
 		</a>
 		<a href="/odonto/configuracion/comunicacion" class="ux-choice p-6">
-			<span class="ux-badge">Comunicación</span>
-			<h2 class="mt-4 text-2xl font-bold text-white">Respuesta automática</h2>
-			<p class="mt-2 text-sm text-white/55">Link de reserva y mensaje que recibe el paciente por WhatsApp.</p>
+			<span class="ux-badge">Reservas</span>
+			<h2 class="mt-4 text-2xl font-bold text-white">Link de reserva</h2>
+			<p class="mt-2 text-sm text-white/55">Copiá o abrí el enlace que compartís con tus pacientes.</p>
 		</a>
 		<a href="/odonto/configuracion/ayuda" class="ux-choice p-6">
 			<span class="ux-badge">Ayuda</span>

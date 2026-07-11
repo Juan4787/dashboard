@@ -6,7 +6,7 @@ import { getOdontoContext } from '$lib/server/odonto-context';
 import { createSupabaseAdminClient } from '$lib/server/supabase';
 import { professionalHasFollowUps } from '$lib/server/follow-ups';
 import { idsFromForm, setProfessionalServices } from '$lib/server/professional-services';
-import { ensureDefaultServices, ensureDefaultServicesAssigned } from '$lib/server/default-services';
+import { ensureDefaultServices, isDefaultServiceName } from '$lib/server/default-services';
 import { replaceProfessionalScheduleBlocks } from '$lib/server/availability-rules';
 import {
 	findProfessionalByEmail,
@@ -232,7 +232,8 @@ const createAvailabilityException = async (
 	};
 };
 
-export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url }) => {
+export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url, depends }) => {
+	depends(`app:professional:${params.professionalId}`);
 	if (!locals.auth) throw redirect(303, '/login');
 	if (env.DEMO_MODE === 'true') {
 		return {
@@ -252,7 +253,6 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 	const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
 	if (!business.canManage) throw redirect(303, business.role === 'professional' ? '/odonto/mis-turnos' : '/odonto/agenda');
 	const businessId = business.business.id;
-	const admin = await createSupabaseAdminClient('odonto', fetch);
 
 	const { data: professional, error: professionalError } = await supabase
 		.from('professionals')
@@ -262,15 +262,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 		.maybeSingle();
 	if (professionalError || !professional) throw kitError(404, 'Profesional no encontrado');
 
-	// Consulta y Otro servicio existen siempre y quedan asignados automáticamente.
-	let defaultServiceIds: string[] = [];
-	try {
-		defaultServiceIds = await ensureDefaultServicesAssigned(supabase, businessId, params.professionalId);
-	} catch (defaultsError) {
-		console.error('No se pudieron asegurar los servicios predeterminados', defaultsError);
-	}
-
-	const [{ data: services }, { data: assignments }, { data: rules }, { data: exceptions }, { count: appointmentCount }, { count: clinicalEntryCount }] =
+	const [{ data: services }, { data: assignments }, { data: rules }, { data: exceptions }] =
 		await Promise.all([
 			supabase
 				.from('services')
@@ -296,18 +288,11 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 				.eq('business_id', businessId)
 				.or(`professional_id.eq.${params.professionalId},professional_id.is.null`)
 				.order('starts_at', { ascending: false })
-				.limit(80),
-			admin
-				.from('appointments')
-				.select('id', { count: 'exact', head: true })
-				.eq('business_id', businessId)
-				.eq('professional_id', params.professionalId),
-			admin
-				.from('clinical_entries')
-				.select('id', { count: 'exact', head: true })
-				.eq('business_id', businessId)
-				.eq('created_by_professional_id', params.professionalId)
+				.limit(80)
 		]);
+	const defaultServiceIds = (services ?? [])
+		.filter((service: any) => isDefaultServiceName(String(service.name ?? '')))
+		.map((service: any) => String(service.id));
 
 	return {
 		context: business,
@@ -317,8 +302,10 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 		defaultServiceIds,
 			rules: rules ?? [],
 			exceptions: exceptions ?? [],
-			appointmentCount: appointmentCount ?? 0,
-			clinicalEntryCount: clinicalEntryCount ?? 0,
+			appointmentCount: null,
+			clinicalEntryCount: null,
+			followUpCount: null,
+			dependencyCountsDeferred: true,
 			tab: url.searchParams.get('tab') ?? 'perfil',
 			userId,
 			demo: false

@@ -58,7 +58,7 @@ describe('hooks auth validation', () => {
 		const resolve = vi.fn(async () => new Response('ok'));
 		mocks.createSupabaseServerClient.mockResolvedValue({
 			auth: {
-				getUser: vi.fn(async () => ({ data: { user: null }, error: new Error('invalid') }))
+				getClaims: vi.fn(async () => ({ data: null, error: new Error('invalid') }))
 			}
 		});
 
@@ -71,5 +71,40 @@ describe('hooks auth validation', () => {
 		expect(event.cookies.delete).toHaveBeenCalledWith('sb-module', { path: '/' });
 		expect(event.cookies.delete).toHaveBeenCalledWith('sb-access-token', { path: '/' });
 		expect(event.cookies.delete).toHaveBeenCalledWith('sb-refresh-token', { path: '/' });
+	});
+
+	it('reutiliza durante un intervalo corto una verificación criptográfica válida', async () => {
+		const firstEvent = makeEvent();
+		const secondEvent = makeEvent();
+		(firstEvent.cookies.get as ReturnType<typeof vi.fn>).mockImplementation((key: string) =>
+			key === 'sb-access-token'
+				? 'valid-token-for-cache-test'
+				: key === 'sb-refresh-token'
+					? 'refresh-token'
+					: key === 'sb-module'
+						? 'odonto'
+						: undefined
+		);
+		(secondEvent.cookies.get as ReturnType<typeof vi.fn>).mockImplementation((key: string) =>
+			key === 'sb-access-token'
+				? 'valid-token-for-cache-test'
+				: key === 'sb-refresh-token'
+					? 'refresh-token'
+					: key === 'sb-module'
+						? 'odonto'
+						: undefined
+		);
+		const getClaims = vi.fn(async () => ({
+			data: { claims: { sub: 'user-1' } },
+			error: null
+		}));
+		mocks.createSupabaseServerClient.mockResolvedValue({ auth: { getClaims } });
+		const resolve = vi.fn(async () => new Response('ok'));
+
+		await handle({ event: firstEvent, resolve } as never);
+		await handle({ event: secondEvent, resolve } as never);
+
+		expect(getClaims).toHaveBeenCalledTimes(1);
+		expect(resolve).toHaveBeenCalledTimes(2);
 	});
 });

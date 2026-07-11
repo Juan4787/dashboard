@@ -40,24 +40,28 @@ conciliar ahora, eventos con atención). Migraciones: `20260704120000` y
 | `MP_ACCESS_TOKEN` | Netlify (prod) y `.env` (test local) | Access Token de la app **Cita Suite** (ID `6430070537499696`). El de prueba y el de producción son distintos. |
 | `MP_WEBHOOK_SECRET` | Netlify (prod) y `.env` (test) | Clave secreta del panel de Webhooks. **La de la config de prueba y la de producción son DISTINTAS** — causa clásica de "firma inválida solo en prod". |
 | `MP_SUBSCRIPTION_AMOUNT_ARS` | Netlify | Precio mensual. Si falta o es inválida, el código usa 50000. |
+| `MP_ENVIRONMENT` | Netlify y `.env` | `test` o `production`. Debe declararse: un token `APP_USR-` puede pertenecer a cualquiera de los dos entornos. |
 
 El preflight (`node scripts/staging-preflight.mjs`) falla si faltan las dos
 primeras. Sin `MP_WEBHOOK_SECRET` el webhook rechaza TODO con 401
 (falla-cerrado); sin `MP_ACCESS_TOKEN` el checkout y la conciliación fallan con
 error visible.
 
-## Prueba en sandbox (antes del go-live)
+## Prueba de integración (antes del go-live)
 
 1. En el [panel de la app Cita Suite](https://www.mercadopago.com.ar/developers/panel/app),
-   copiar las **credenciales de prueba** → `MP_ACCESS_TOKEN` en `.env`.
+	 copiar las **credenciales de prueba** → `MP_ACCESS_TOKEN` y configurar
+	 `MP_ENVIRONMENT=test`. En Suscripciones todavía pueden existir tokens
+	 históricos `TEST-`; los actuales también pueden comenzar con `APP_USR-`.
 2. Configurar el **webhook de prueba** (misma URL de producción o un túnel) y
    copiar su clave secreta → `MP_WEBHOOK_SECRET`.
-3. Ya existe un comprador de prueba: `TESTUSER8175905898976554137`
-   (contraseña en el panel → Cuentas de prueba). Tarjetas de prueba: las lista
-   `/mp-test-cards` del plugin o la doc oficial.
+3. Usar el comprador de prueba guardado sólo en el `.env` local como
+   `MP_TEST_BUYER_USERNAME` / `MP_TEST_BUYER_PASSWORD`. Tarjetas de prueba: las
+   lista `/mp-test-cards` del plugin o la documentación oficial.
 4. Flujo completo: entrar como owner de un negocio de prueba →
-   Configuración → Suscripción → "Suscribirme con Mercado Pago" → autorizar en
-   la ventana de MP **logueado como el usuario de prueba** → verificar al
+	 Configuración → Suscripción → "Suscribirme con Mercado Pago" → abrir el
+	 checkout en una ventana privada y autorizar **logueado como comprador de
+	 prueba de Argentina, nunca con una cuenta personal** → verificar al
    volver: banner "¡Pago acreditado!", vencimiento +30 días, grant
    `payment_registered` con source `mercado_pago` en el historial.
 5. Verificar el webhook con el **simulador de notificaciones** del panel de MP

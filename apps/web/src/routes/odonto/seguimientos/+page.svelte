@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { invalidateAll } from '$app/navigation';
+	import { invalidate } from '$app/navigation';
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import FollowUpComposer from '$lib/components/seguimientos/FollowUpComposer.svelte';
@@ -27,12 +27,12 @@
 
 	const handleCreated = async () => {
 		showComposer = false;
-		await invalidateAll();
+		await invalidate('app:follow-ups');
 	};
 
 	const handleEdited = async () => {
 		editingItem = null;
-		await invalidateAll();
+		await invalidate('app:follow-ups');
 	};
 </script>
 

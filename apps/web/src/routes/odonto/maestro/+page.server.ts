@@ -17,7 +17,13 @@ import {
 	getUserIdFromAccessToken,
 	isMasterEmail
 } from '$lib/server/supabase';
+import {
+	businessEmailAssociationErrorMessage,
+	businessEmailAssociationErrorStatus,
+	EMAIL_ALREADY_ASSOCIATED_WITH_OTHER_BUSINESS_MESSAGE
+} from '$lib/server/business-email-association';
 import { parseMoneyInteger } from '$lib/utils/money-input';
+import { defaultManualAccessNote } from '$lib/utils/commercial-access-copy';
 import { fail, redirect } from '@sveltejs/kit';
 import { randomUUID } from 'node:crypto';
 import type { Actions, PageServerLoad } from './$types';
@@ -163,44 +169,57 @@ const buildMasterData = async (
 	admin: Awaited<ReturnType<typeof createSupabaseAdminClient>>,
 	masterEmail: string
 ) => {
-	const emailsRes = await admin
-		.from('allowed_emails')
-		.select('id, email, enabled, note, onboarding_mode, disabled_at, disabled_reason, created_at, updated_at')
-		.order('email', { ascending: true });
-	const businessesRes = await admin
-		.from('businesses')
-		.select('id, name, slug, email, timezone, is_active, created_at, updated_at')
-		.order('created_at', { ascending: false });
-	const subscriptionsRes = await admin
-		.from('business_subscriptions')
-		.select(
-			'id, business_id, commercial_access_enabled, is_permanent, subscription_status, access_starts_at, paid_until, grace_until, restricted_until, archived_at, last_payment_at, last_payment_amount, last_grant_duration_seconds, expiration_notice_enabled, access_source, access_note, updated_by, created_at, updated_at'
-		);
-	const membershipsRes = await admin.from('business_users').select('id, business_id, user_id, role, created_at');
-	const grantsRes = await admin
-		.from('access_grants')
-		.select('id, business_id, operation, duration_unit, duration_seconds, amount, source, note, admin_email, paid_until_before, paid_until_after, status_before, status_after, created_at')
-		.order('created_at', { ascending: false })
-		.limit(200);
-	const mpSubsRes = await admin
-		.from('mp_subscriptions')
-		.select(
-			'business_id, preapproval_id, status, payer_email, transaction_amount, next_charge_at, last_synced_at'
-		)
-		.order('created_at', { ascending: false });
-	const mpAttentionRes = await admin
-		.from('mp_webhook_events')
-		.select('id, received_at, topic, action, resource_id, processing_status, processing_detail, business_id')
-		.eq('requires_attention', true)
-		.order('received_at', { ascending: false })
-		.limit(20);
-	const assistanceRes = await admin
-		.from('account_assistance_grants')
-		.select('id, business_id, requested_by_user_id, support_user_id, status, starts_at, expires_at, revoked_at, business:businesses(id, name, slug)')
-		.eq('status', 'active')
-		.is('revoked_at', null)
-		.gt('expires_at', new Date().toISOString())
-		.order('expires_at', { ascending: true });
+	const [
+		emailsRes,
+		businessesRes,
+		subscriptionsRes,
+		membershipsRes,
+		grantsRes,
+		mpSubsRes,
+		mpAttentionRes,
+		assistanceRes,
+		emailsByUserId
+	] = await Promise.all([
+		admin
+			.from('allowed_emails')
+			.select('id, email, enabled, note, onboarding_mode, disabled_at, disabled_reason, created_at, updated_at')
+			.order('email', { ascending: true }),
+		admin
+			.from('businesses')
+			.select('id, name, slug, email, timezone, is_active, created_at, updated_at')
+			.order('created_at', { ascending: false }),
+		admin
+			.from('business_subscriptions')
+			.select(
+				'id, business_id, commercial_access_enabled, is_permanent, subscription_status, access_starts_at, paid_until, grace_until, restricted_until, archived_at, last_payment_at, last_payment_amount, last_grant_duration_seconds, expiration_notice_enabled, access_source, access_note, updated_by, created_at, updated_at'
+			),
+		admin.from('business_users').select('id, business_id, user_id, role, created_at'),
+		admin
+			.from('access_grants')
+			.select('id, business_id, operation, duration_unit, duration_seconds, amount, source, note, admin_email, paid_until_before, paid_until_after, status_before, status_after, created_at')
+			.order('created_at', { ascending: false })
+			.limit(200),
+		admin
+			.from('mp_subscriptions')
+			.select(
+				'business_id, preapproval_id, status, payer_email, transaction_amount, next_charge_at, last_synced_at'
+			)
+			.order('created_at', { ascending: false }),
+		admin
+			.from('mp_webhook_events')
+			.select('id, received_at, topic, action, resource_id, processing_status, processing_detail, business_id')
+			.eq('requires_attention', true)
+			.order('received_at', { ascending: false })
+			.limit(20),
+		admin
+			.from('account_assistance_grants')
+			.select('id, business_id, requested_by_user_id, support_user_id, status, starts_at, expires_at, revoked_at, business:businesses(id, name, slug)')
+			.eq('status', 'active')
+			.is('revoked_at', null)
+			.gt('expires_at', new Date().toISOString())
+			.order('expires_at', { ascending: true }),
+		listAuthEmailsById(admin)
+	]);
 
 	if (emailsRes.error) throw emailsRes.error;
 	if (businessesRes.error) throw businessesRes.error;
@@ -223,7 +242,6 @@ const buildMasterData = async (
 		console.error('Error cargando ayuda para configurar', assistanceRes.error);
 	}
 
-	const emailsByUserId = await listAuthEmailsById(admin);
 	const subscriptionsByBusinessId = new Map(
 		((subscriptionsRes.data ?? []) as BusinessSubscriptionRow[]).map((subscription) => [
 			subscription.business_id,
@@ -443,6 +461,7 @@ export const actions: Actions = {
 				.from('business_users')
 				.select('business_id, role')
 				.eq('user_id', ownerUserId)
+				.eq('status', 'active')
 				.limit(1);
 			if (existingMembershipsError) {
 				console.error('Error validando membresías existentes del owner', existingMembershipsError);
@@ -450,8 +469,7 @@ export const actions: Actions = {
 			}
 			if ((existingMemberships ?? []).length > 0) {
 				return fail(409, {
-					message:
-						'Ese owner ya está vinculado a un consultorio. Evitá crear otro hasta que exista selector de negocios.'
+					message: EMAIL_ALREADY_ASSOCIATED_WITH_OTHER_BUSINESS_MESSAGE
 				});
 			}
 		}
@@ -468,8 +486,7 @@ export const actions: Actions = {
 		}
 		if ((existingInvites ?? []).length > 0) {
 			return fail(409, {
-				message:
-					'Ese owner ya tiene una invitación pendiente. Cancelala o usá ese consultorio antes de crear otro.'
+				message: EMAIL_ALREADY_ASSOCIATED_WITH_OTHER_BUSINESS_MESSAGE
 			});
 		}
 
@@ -535,7 +552,12 @@ export const actions: Actions = {
 			if (membershipError) {
 				console.error('Error vinculando owner al consultorio', membershipError);
 				await admin.from('businesses').delete().eq('id', business.id);
-				return fail(500, { message: 'No pudimos vincular el owner al consultorio.' });
+				return fail(businessEmailAssociationErrorStatus(membershipError), {
+					message: businessEmailAssociationErrorMessage(
+						membershipError,
+						'No pudimos vincular el owner al consultorio.'
+					)
+				});
 			}
 		} else {
 			const { error: inviteError } = await admin.from('business_user_invites').insert({
@@ -549,7 +571,12 @@ export const actions: Actions = {
 			if (inviteError) {
 				console.error('Error creando invitación owner del consultorio', inviteError);
 				await admin.from('businesses').delete().eq('id', business.id);
-				return fail(500, { message: 'No pudimos dejar invitado al owner del consultorio.' });
+				return fail(businessEmailAssociationErrorStatus(inviteError), {
+					message: businessEmailAssociationErrorMessage(
+						inviteError,
+						'No pudimos dejar invitado al owner del consultorio.'
+					)
+				});
 			}
 		}
 
@@ -730,7 +757,7 @@ export const actions: Actions = {
 			p_is_permanent: durationKey === 'permanent' || operation === 'set_permanent',
 			p_amount: amount,
 			p_source: source,
-			p_note: note,
+			p_note: note ?? defaultManualAccessNote(operation),
 			p_admin_id: master.userId,
 			p_admin_email: master.email,
 			p_idempotency_key: idempotencyKey

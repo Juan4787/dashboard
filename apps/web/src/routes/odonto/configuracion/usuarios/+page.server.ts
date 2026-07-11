@@ -26,7 +26,13 @@ import {
 	createSupabaseServerClient,
 	getAuthUserId
 } from '$lib/server/supabase';
+import {
+	businessEmailAssociationErrorStatus,
+	EMAIL_ALREADY_ASSOCIATED_WITH_OTHER_BUSINESS_MESSAGE,
+	isEmailAlreadyAssociatedWithOtherBusinessError
+} from '$lib/server/business-email-association';
 import { formatPriceLabel } from '$lib/utils/money-input';
+import { canConfigureAttendingProfile } from '$lib/utils/team-permissions';
 import {
 	parseScheduleBlocksJson,
 	validateScheduleBlocks,
@@ -178,6 +184,9 @@ const countOwners = (members: BusinessRoleAccess[]) =>
 
 const roleAccessErrorMessage = (error: { code?: string; message?: string } | null | undefined) => {
 	const raw = error?.message ?? '';
+	if (isEmailAlreadyAssociatedWithOtherBusinessError(error)) {
+		return EMAIL_ALREADY_ASSOCIATED_WITH_OTHER_BUSINESS_MESSAGE;
+	}
 	if (raw.includes('BUSINESS_MANAGE_DENIED')) return 'No tenés permisos para administrar el equipo.';
 	if (raw.includes('INVALID_EMAIL')) return 'Ingresá un email válido.';
 	if (raw.includes('INVALID_ROLE')) return 'El rol seleccionado no es válido.';
@@ -197,6 +206,9 @@ const roleAccessErrorMessage = (error: { code?: string; message?: string } | nul
 	if (raw.includes('SELF_REMOVE_DENIED')) return 'No podés quitar tu propio rol desde esta pantalla.';
 	return 'No se pudo guardar el rol.';
 };
+
+const roleAccessErrorStatus = (error: { code?: string; message?: string } | null | undefined) =>
+	businessEmailAssociationErrorStatus(error);
 
 const roleLabel = (role: BusinessRole) => {
 	const labels: Record<BusinessRole, string> = {
@@ -482,7 +494,8 @@ const scheduleBlocksFromForm = (
 	return { ok: true, blocks: result.blocks };
 };
 
-export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
+export const load: PageServerLoad = async ({ locals, fetch, cookies, depends }) => {
+	depends('app:team');
 	if (!locals.auth) throw redirect(303, '/login');
 
 	if (env.DEMO_MODE === 'true') {
@@ -751,7 +764,8 @@ export const actions: Actions = {
 				if (code === 'INVALID_SERVICE_ASSIGNMENT') {
 					return fail(400, { message: 'Algún servicio seleccionado no pertenece a este consultorio.', values });
 				}
-				return fail(500, { message: roleAccessErrorMessage(error as { code?: string; message?: string }), values });
+				const roleError = error as { code?: string; message?: string };
+				return fail(roleAccessErrorStatus(roleError), { message: roleAccessErrorMessage(roleError), values });
 			}
 		}
 
@@ -770,7 +784,8 @@ export const actions: Actions = {
 			});
 		} catch (error) {
 			console.error('Error guardando acceso al negocio', error);
-			return fail(500, { message: roleAccessErrorMessage(error as { code?: string; message?: string }), values });
+			const roleError = error as { code?: string; message?: string };
+			return fail(roleAccessErrorStatus(roleError), { message: roleAccessErrorMessage(roleError), values });
 		}
 
 		const status = String(result.status ?? '');
@@ -801,11 +816,6 @@ export const actions: Actions = {
 		if (!context.canManage) {
 			return fail(403, { message: 'No tenés permisos para administrar el equipo.' });
 		}
-		if (context.assistance) {
-			return fail(403, {
-				message: 'El dueño y los administradores se configuran desde el consultorio.'
-			});
-		}
 		if (!targetUserId) return fail(400, { message: 'Elegí a la persona del equipo.' });
 		if (!professionalName) return fail(400, { message: 'El nombre profesional es obligatorio.' });
 
@@ -817,7 +827,13 @@ export const actions: Actions = {
 				message: 'Desde acá solo se configura como atendible al dueño o a un administrador.'
 			});
 		}
-		if (context.role === 'admin' && member.role === 'owner') {
+		if (
+			!canConfigureAttendingProfile({
+				actorRole: context.role,
+				targetRole: member.role,
+				isAssisting: Boolean(context.assistance)
+			})
+		) {
 			return fail(403, { message: 'Un administrador no puede configurar al dueño.' });
 		}
 		if (member.professional_id) {
@@ -928,7 +944,7 @@ export const actions: Actions = {
 
 		if (error) {
 			console.error('Error actualizando rol', error);
-			return fail(500, { message: roleAccessErrorMessage(error) });
+			return fail(roleAccessErrorStatus(error), { message: roleAccessErrorMessage(error) });
 		}
 
 		return { success: true, message: 'Rol actualizado.' };
@@ -986,7 +1002,7 @@ export const actions: Actions = {
 
 		if (error) {
 			console.error('Error quitando acceso', error);
-			return fail(500, { message: roleAccessErrorMessage(error) });
+			return fail(roleAccessErrorStatus(error), { message: roleAccessErrorMessage(error) });
 		}
 
 		return { success: true, message: 'Rol quitado del consultorio.' };

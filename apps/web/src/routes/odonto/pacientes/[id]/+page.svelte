@@ -2,7 +2,7 @@
 	import { deserialize } from '$app/forms';
 	import { page } from '$app/stores';
 	import { env } from '$env/dynamic/public';
-	import { invalidateAll } from '$app/navigation';
+	import { invalidate } from '$app/navigation';
 	import Modal from '$lib/components/Modal.svelte';
 	import FollowUpComposer from '$lib/components/seguimientos/FollowUpComposer.svelte';
 	import DateTimePartsInput from '$lib/components/DateTimePartsInput.svelte';
@@ -19,7 +19,9 @@
 			entries: any[];
 			appointments: any[];
 			radiographs: any[];
+			radiographsDeferred?: boolean;
 			changeEvents?: any[];
+			changeEventsDeferred?: boolean;
 			role?: string;
 			currentUserId?: string | null;
 			hasMoreEntries?: boolean;
@@ -79,8 +81,15 @@
 	let entries = $state<any[]>([]);
 	let driveConnection = $state<typeof data.driveConnection>(null);
 	let radiographs = $state<any[]>([]);
+	let changeEvents = $state<any[]>([]);
 	let hasMoreEntries = $state(false);
 	let hasMoreRadiographs = $state(false);
+	let radiographsLoaded = $state(false);
+	let changeEventsLoaded = $state(false);
+	let loadingInitialRadiographs = $state(false);
+	let loadingChangeEvents = $state(false);
+	let radiographsLoadError = $state('');
+	let changeEventsLoadError = $state('');
 	let loadingMoreEntries = $state(false);
 	let loadingMoreRadiographs = $state(false);
 	let uploadingRadiograph = $state(false);
@@ -146,14 +155,14 @@
 		entries = data.entries ?? [];
 		driveConnection = data.driveConnection;
 		radiographs = data.radiographs ?? [];
+		changeEvents = data.changeEvents ?? [];
 		hasMoreEntries = Boolean(data.hasMoreEntries);
 		hasMoreRadiographs = Boolean(data.hasMoreRadiographs);
+		radiographsLoaded = !data.radiographsDeferred;
+		changeEventsLoaded = !data.changeEventsDeferred;
+		radiographsLoadError = '';
+		changeEventsLoadError = '';
 		patientDriveFolderId = data.patient.drive_folder_id ?? null;
-	});
-	$effect(() => {
-		if (tab === 'radiografias' && googleClientId && !data.demo) {
-			void getDriveClient().catch(() => null);
-		}
 	});
 	const fmtTime = (dateStr: string) =>
 		new Intl.DateTimeFormat('es-AR', {
@@ -262,7 +271,70 @@
 		}
 	};
 
+	const loadInitialRadiographs = async () => {
+		if (data.demo || radiographsLoaded || loadingInitialRadiographs) return;
+		loadingInitialRadiographs = true;
+		radiographsLoadError = '';
+		try {
+			const response = await fetch(`/odonto/pacientes/${data.patient.id}/radiografias`);
+			const payload = await response.json().catch(() => ({}));
+			if (!response.ok) {
+				throw new Error(payload?.message ?? 'No se pudieron cargar las radiografías.');
+			}
+			radiographs = Array.isArray(payload?.items) ? payload.items : [];
+			hasMoreRadiographs = Boolean(payload?.has_more);
+			driveConnection = payload?.drive_connection ?? null;
+			radiographsLoaded = true;
+		} catch (error) {
+			radiographsLoadError =
+				error instanceof Error ? error.message : 'No se pudieron cargar las radiografías.';
+		} finally {
+			loadingInitialRadiographs = false;
+		}
+	};
+
+	const loadChangeEvents = async () => {
+		if (data.demo || changeEventsLoaded || loadingChangeEvents) return;
+		loadingChangeEvents = true;
+		changeEventsLoadError = '';
+		try {
+			const response = await fetch(`/odonto/pacientes/${data.patient.id}/datos`);
+			const payload = await response.json().catch(() => ({}));
+			if (!response.ok) {
+				throw new Error(payload?.message ?? 'No se pudieron cargar los últimos cambios.');
+			}
+			changeEvents = Array.isArray(payload?.change_events) ? payload.change_events : [];
+			changeEventsLoaded = true;
+		} catch (error) {
+			changeEventsLoadError =
+				error instanceof Error ? error.message : 'No se pudieron cargar los últimos cambios.';
+		} finally {
+			loadingChangeEvents = false;
+		}
+	};
+
+	const selectTab = (nextTab: 'historial' | 'datos' | 'radiografias') => {
+		tab = nextTab;
+		if (nextTab === 'datos') void loadChangeEvents();
+		if (nextTab === 'radiografias') {
+			if (googleClientId && !data.demo) void getDriveClient().catch(() => null);
+			void loadInitialRadiographs();
+		}
+	};
+
+	$effect(() => {
+		if (tab === 'radiografias') {
+			if (googleClientId && !data.demo) void getDriveClient().catch(() => null);
+			void loadInitialRadiographs();
+		}
+		if (tab === 'datos') void loadChangeEvents();
+	});
+
 	const loadMoreRadiographs = async () => {
+		if (!radiographsLoaded) {
+			await loadInitialRadiographs();
+			return;
+		}
 		if (loadingMoreRadiographs || !hasMoreRadiographs) return;
 		const last = radiographs.at(-1);
 		if (!last?.created_at || !last?.id) {
@@ -894,7 +966,7 @@ const openNewEntryModal = () => {
 
 const handleFollowUpCreated = async () => {
 	showFollowUpModal = false;
-	await invalidateAll();
+	await invalidate('app:follow-ups');
 };
 
 const preventEnterSubmit = (event: KeyboardEvent) => {
@@ -1003,7 +1075,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 						? 'bg-[#7c3aed] text-white shadow-sm'
 						: 'text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-[#0f1f36]'
 				}`}
-				onclick={() => (tab = 'historial')}
+				onclick={() => selectTab('historial')}
 			>
 				Historial
 			</button>
@@ -1013,7 +1085,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 						? 'bg-[#7c3aed] text-white shadow-sm'
 						: 'text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-[#0f1f36]'
 				}`}
-				onclick={() => (tab = 'datos')}
+				onclick={() => selectTab('datos')}
 			>
 				Datos
 			</button>
@@ -1023,7 +1095,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 						? 'bg-[#7c3aed] text-white shadow-sm'
 						: 'text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-[#0f1f36]'
 				}`}
-				onclick={() => (tab = 'radiografias')}
+				onclick={() => selectTab('radiografias')}
 			>
 				Radiografías
 			</button>
@@ -1406,11 +1478,20 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 					</div>
 				</div>
 			</div>
-			{#if (data.changeEvents ?? []).length > 0}
+			{#if loadingChangeEvents}
+				<div class="mt-5 rounded-xl border border-neutral-100 bg-white/60 p-4 text-sm font-semibold text-neutral-500 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-neutral-300" aria-live="polite">
+					Cargando últimos cambios…
+				</div>
+			{:else if changeEventsLoadError}
+				<div class="mt-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 dark:border-red-400/40 dark:bg-red-500/10 dark:text-red-100">
+					<p>{changeEventsLoadError}</p>
+					<button type="button" class="mt-3 font-semibold underline" onclick={loadChangeEvents}>Reintentar</button>
+				</div>
+			{:else if changeEvents.length > 0}
 				<div class="mt-5 rounded-xl border border-neutral-100 bg-white/60 p-4 dark:border-[#1f3554] dark:bg-[#0f1f36]">
 					<p class="text-[13px] font-bold uppercase tracking-wide text-neutral-600 dark:text-neutral-300">Últimos cambios</p>
 					<div class="mt-3 space-y-3">
-						{#each (data.changeEvents ?? []).slice(0, 5) as event}
+						{#each changeEvents.slice(0, 5) as event}
 							<div class="rounded-lg border border-neutral-100 bg-white/70 px-3 py-2 dark:border-[#1f3554] dark:bg-[#122641]">
 								<p class="text-sm font-semibold text-neutral-900 dark:text-white">{event.summary}</p>
 								<p class="mt-1 text-xs text-neutral-500 dark:text-neutral-300">
@@ -1481,7 +1562,16 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				{/if}
 			</div>
 
-			{#if isDriveConnected}
+			{#if loadingInitialRadiographs}
+				<div class="mt-5 rounded-2xl border border-neutral-200 bg-neutral-50/80 p-5 text-sm font-semibold text-neutral-600 dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-neutral-200" aria-live="polite">
+					Cargando radiografías y conexión con Google Drive…
+				</div>
+			{:else if radiographsLoadError}
+				<div class="mt-5 rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-800 dark:border-red-400/40 dark:bg-red-500/10 dark:text-red-100">
+					<p>{radiographsLoadError}</p>
+					<button type="button" class="mt-3 font-semibold underline" onclick={loadInitialRadiographs}>Reintentar</button>
+				</div>
+			{:else if isDriveConnected}
 				<div class="mt-5 flex flex-wrap items-center gap-2 text-xs text-neutral-500 dark:text-neutral-300">
 					<span class="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 font-semibold text-emerald-800 dark:bg-emerald-400/15 dark:text-emerald-200">
 						✓ Google Drive conectado

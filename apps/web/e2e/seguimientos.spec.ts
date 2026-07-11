@@ -52,6 +52,23 @@ const restHeaders = (key: string) => ({
 	'content-type': 'application/json'
 });
 
+const clearLocalLoginRateLimits = async () => {
+	const { url, key } = restEnv();
+	if (!url || !key || (!url.startsWith('http://127.0.0.1') && !url.startsWith('http://localhost'))) {
+		return;
+	}
+	const response = await fetch(
+		`${url}/rest/v1/server_rate_limit_events?action=in.(login_password_by_email,login_password_by_ip)`,
+		{
+			method: 'DELETE',
+			headers: { ...restHeaders(key), prefer: 'return=minimal' }
+		}
+	);
+	if (!response.ok) {
+		throw new Error(`No se pudo limpiar el rate limit de login local: ${await response.text()}`);
+	}
+};
+
 /** Borra los follow_ups de esta corrida (marcador en message). Idempotente. */
 const cleanupFollowUps = async () => {
 	const { url, key } = restEnv();
@@ -79,6 +96,7 @@ const anyPatientName = async (): Promise<string | null> => {
 
 // ---------- login adaptivo (owner/admin/reception → Agenda; professional → Mis turnos) ----------
 const login = async (page: Page) => {
+	await clearLocalLoginRateLimits();
 	await page.goto('/login');
 	await page.waitForLoadState('networkidle');
 	await page.getByLabel('Correo electrónico').fill(email ?? '');
@@ -145,7 +163,7 @@ test.describe('Seguimientos — cobertura E2E', () => {
 		await page.goto('/odonto/seguimientos');
 		await openFollowUpDialog(page);
 
-		const patientInput = page.getByLabel('Paciente');
+		const patientInput = page.getByRole('textbox', { name: 'Paciente', exact: true });
 		await expect(patientInput).toBeVisible();
 
 		// < 2 chars: no busca.
@@ -177,7 +195,7 @@ test.describe('Seguimientos — cobertura E2E', () => {
 		await page.goto('/odonto/seguimientos');
 		await openFollowUpDialog(page);
 
-		const patientInput = page.getByLabel('Paciente');
+		const patientInput = page.getByRole('textbox', { name: 'Paciente', exact: true });
 		await patientInput.fill((name as string).slice(0, Math.max(3, Math.min((name as string).length, 8))));
 		const result = page.getByRole('button', { name: new RegExp(escapeRegex((name as string).split(/\s+/)[0]), 'i') });
 		await expect(result.first()).toBeVisible({ timeout: 10_000 });
@@ -191,13 +209,15 @@ test.describe('Seguimientos — cobertura E2E', () => {
 		const assignLabel = page.getByText('Asignar a', { exact: true });
 		if (await assignLabel.isVisible({ timeout: 2000 }).catch(() => false)) {
 			const noProf = page.getByText('No hay perfiles profesionales atendibles para asignar este seguimiento.');
-			if (await noProf.isVisible({ timeout: 1500 }).catch(() => false)) {
+			const professionalSelect = page.locator('#fu-prof');
+			await expect(noProf.or(professionalSelect)).toBeVisible({ timeout: 10_000 });
+			if (await noProf.isVisible()) {
 				test.info().annotations.push({ type: 'note', value: 'Paciente sin profesional asignable: creación no permitida por diseño.' });
 				await expect(page.getByRole('button', { name: 'Continuar' })).toBeDisabled();
 				return;
 			}
 			// Elegir la primera opción real del select.
-			await page.locator('#fu-prof').selectOption({ index: 1 });
+			await professionalSelect.selectOption({ index: 1 });
 		}
 
 		await page.getByLabel('Mensaje / nota (opcional)').fill(`Seguimiento ${marker}`);

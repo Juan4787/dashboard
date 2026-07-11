@@ -77,11 +77,6 @@ export const PUBLIC_BUSINESS_SELECT =
 	'id, name, slug, phone, address, address_instructions, maps_url, logo_url, timezone, public_booking_enabled, is_active, created_at, min_booking_notice_minutes, max_booking_days_ahead, cancellation_policy';
 
 export const PUBLIC_ACTIVE_FUTURE_APPOINTMENT_LIMIT = 4;
-export const PUBLIC_ACTIVE_APPOINTMENT_STATUSES = [
-	'reserved',
-	'confirmed',
-	'reschedule_requested'
-] as const;
 
 const pad = (value: number) => String(value).padStart(2, '0');
 
@@ -642,6 +637,7 @@ export const assertPublicBookingPatientPolicy = async (
 	supabase: SupabaseClient,
 	input: {
 		businessId: string;
+		patientName: string;
 		phoneE164: string;
 		now?: Date;
 	}
@@ -655,20 +651,20 @@ export const assertPublicBookingPatientPolicy = async (
 		.maybeSingle();
 	if (patientError) throw patientError;
 	if (patient?.blocked) throw new Error('PUBLIC_BOOKING_BLOCKED_PATIENT');
-	if (!patient?.id) return;
 
-	// Capacidad pública por paciente: sólo estados activos cuyo inicio todavía
-	// está en el futuro estricto. Un historial de cualquier tamaño, los turnos
-	// que ya empezaron y los estados terminales no consumen el cupo 4/4.
-	const { count, error } = await supabase
-		.from('appointments')
-		.select('id', { count: 'exact', head: true })
-		.eq('business_id', input.businessId)
-		.eq('patient_id', patient.id)
-		.in('status', [...PUBLIC_ACTIVE_APPOINTMENT_STATUSES])
-		.gt('starts_at', now.toISOString());
+	// El teléfono sólo identifica una ficha explícitamente bloqueada. El cupo
+	// se calcula por nombre normalizado en PostgreSQL, sumando todas las fichas
+	// con ese nombre aunque tengan números distintos.
+	const { data: count, error } = await supabase.rpc(
+		'get_public_booking_active_future_count_by_name',
+		{
+			p_business_id: input.businessId,
+			p_patient_name: input.patientName,
+			p_now: now.toISOString()
+		}
+	);
 	if (error) throw error;
-	if ((count ?? 0) >= PUBLIC_ACTIVE_FUTURE_APPOINTMENT_LIMIT) {
+	if (Number(count ?? 0) >= PUBLIC_ACTIVE_FUTURE_APPOINTMENT_LIMIT) {
 		throw new Error('PUBLIC_BOOKING_ACTIVE_LIMIT');
 	}
 };
@@ -712,6 +708,7 @@ export const createPublicBooking = async (
 		// intentos para no ocultar un 4/4 real detrás de un mensaje de rate limit.
 		await assertPublicBookingPatientPolicy(supabase, {
 			businessId: business.id,
+			patientName,
 			phoneE164,
 			now
 		});
@@ -802,7 +799,7 @@ export const PUBLIC_BOOKING_ERROR_MESSAGES = {
 	PUBLIC_RATE_LIMIT_PHONE:
 		'Se alcanzó el máximo de 5 intentos para este teléfono en 30 minutos. Esperá unos minutos antes de volver a probar.',
 	PUBLIC_BOOKING_ACTIVE_LIMIT:
-		'Este teléfono ya alcanzó el máximo permitido: 4 turnos activos a futuro. Podés reservar otro cuando uno pase o sea cancelado.',
+		'Este nombre ya alcanzó el máximo permitido: 4 turnos activos a futuro. Podés reservar otro cuando uno pase o sea cancelado.',
 	PUBLIC_BOOKING_BLOCKED_PATIENT:
 		'Las reservas online están deshabilitadas para esta ficha de paciente. Comunicate con el consultorio para que puedan ayudarte.',
 	PUBLIC_CAPTCHA_REQUIRED: 'Completá la verificación anti-spam para reservar el turno.',
