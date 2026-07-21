@@ -1,7 +1,17 @@
 import crypto from 'crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Business } from './business';
-import { getAvailabilitySlots, type AvailabilitySlot, addMinutes } from './availability';
+import {
+	addMinutes,
+	calculateAvailabilitySlots,
+	getAvailabilitySlots,
+	type AvailabilityAppointmentBlockRow,
+	type AvailabilityExceptionRow,
+	type AvailabilityProfessionalRow,
+	type AvailabilityRuleRow,
+	type AvailabilityServiceRow,
+	type AvailabilitySlot
+} from './availability';
 import { createManualAppointment } from './appointments';
 import {
 	getBusinessAccessState,
@@ -60,6 +70,32 @@ export type PublicBookingState = {
 	slots: AvailabilitySlot[];
 	days: Array<{ date: string; label: string; count: number }>;
 	issue: PublicBookingIssue | null;
+};
+
+type PublicAvailabilityService = AvailabilityServiceRow & {
+	description: string | null;
+	price_label: string | null;
+	sort_order: number;
+};
+
+type PublicAvailabilityProfessional = AvailabilityProfessionalRow & {
+	specialty: string | null;
+	avatar_url: string | null;
+	sort_order: number;
+};
+
+type PublicAvailabilityRows = {
+	services: PublicAvailabilityService[];
+	professionals: PublicAvailabilityProfessional[];
+	assignments: Array<{ service_id: string; professional_id: string }>;
+	rules: AvailabilityRuleRow[];
+	exceptions: AvailabilityExceptionRow[];
+	blocks: AvailabilityAppointmentBlockRow[];
+};
+
+type PublicAvailabilitySnapshot = PublicAvailabilityRows & {
+	fromDate: string;
+	toDate: string;
 };
 
 type BookingAttemptInput = {
@@ -193,6 +229,29 @@ export const canUsePublicBusiness = async (
 	}).allowedCapabilities.canUsePublicBooking;
 };
 
+const getPublicBusinessSubscription = async (
+	supabase: SupabaseClient,
+	businessId: string
+): Promise<{ subscription: BusinessSubscriptionRow | null; lookupFailed: boolean }> => {
+	const { data, error } = await supabase
+		.from('business_subscriptions')
+		.select(
+			'id, business_id, commercial_access_enabled, is_permanent, subscription_status, paid_until, grace_until, restricted_until, archived_at, expiration_notice_enabled'
+		)
+		.eq('business_id', businessId)
+		.maybeSingle();
+	if (error) {
+		// Mismo fallback de compatibilidad que canUsePublicBusiness: una migración
+		// comercial pendiente no debe romper links que ya funcionaban.
+		console.error('Error cargando acceso comercial público', error);
+		return { subscription: null, lookupFailed: true };
+	}
+	return {
+		subscription: (data as BusinessSubscriptionRow | null) ?? null,
+		lookupFailed: false
+	};
+};
+
 export const getReservableServices = async (
 	supabase: SupabaseClient,
 	businessId: string
@@ -288,12 +347,10 @@ export const summarizeSlotsByDate = (
 		}));
 };
 
-const PUBLIC_DAY_BATCH_DAYS = 14;
-const PUBLIC_DAY_TARGET = 12;
-
-const dateLTE = (a: string, b: string) => a <= b;
-const minDateString = (a: string, b: string) => (a <= b ? a : b);
-
+// El rango público ya está acotado a 90 días. Consultarlo completo en una sola
+// tanda evita hasta seis rondas consecutivas a Supabase cuando un profesional
+// tiene pocos horarios, sin aumentar la cantidad de turnos finalmente enviados
+// al navegador.
 const uniqueSlots = (slots: AvailabilitySlot[]) => {
 	const seen = new Set<string>();
 	const result: AvailabilitySlot[] = [];
@@ -311,8 +368,8 @@ const uniqueSlots = (slots: AvailabilitySlot[]) => {
 //
 // El flujo de reserva navega 4-5 veces la misma URL (servicio → profesional →
 // día → horario) y cada navegación recomputaba TODOS los escaneos (varios
-// round-trips a Supabase por lote de 14 días). El caché por instancia con TTL
-// corto convierte esos pasos en una sola computación.
+// round-trips a Supabase). El caché por instancia con TTL corto convierte esos
+// pasos en una sola computación.
 //
 // Staleness acotada y tolerada por diseño: la creación de la reserva SIEMPRE
 // revalida el slot contra disponibilidad viva (PUBLIC_SLOT_UNAVAILABLE si otro
@@ -323,7 +380,11 @@ const SLOT_SCAN_CACHE_TTL_MS = 25_000;
 const STRUCTURE_SCAN_CACHE_TTL_MS = 60_000;
 const SCAN_CACHE_MAX_ENTRIES = 500;
 
-type ScanCacheEntry = { value: unknown; expiresAt: number };
+type ScanCacheEntry = {
+	value?: unknown;
+	promise?: Promise<unknown>;
+	expiresAt: number;
+};
 const scanCache = new Map<string, ScanCacheEntry>();
 
 export const clearPublicBookingScanCache = () => scanCache.clear();
@@ -332,138 +393,209 @@ export const clearPublicBookingScanCache = () => scanCache.clear();
 // (el slot tomado seguiría visible hasta vencer el TTL en esta instancia).
 export const invalidatePublicBookingScans = (businessId: string) => {
 	for (const key of scanCache.keys()) {
-		if (key.includes(`:${businessId}:`)) scanCache.delete(key);
+		if (key.includes(`:${businessId}:`) || key.endsWith(`:${businessId}`)) {
+			scanCache.delete(key);
+		}
 	}
 };
 
 const cachedScan = async <T>(key: string, ttlMs: number, compute: () => Promise<T>): Promise<T> => {
 	const now = Date.now();
 	const hit = scanCache.get(key);
-	if (hit && hit.expiresAt > now) return hit.value as T;
-	const value = await compute();
+	if (hit?.promise) return (await hit.promise) as T;
+	if (hit && hit.expiresAt > now && 'value' in hit) return hit.value as T;
 	if (scanCache.size >= SCAN_CACHE_MAX_ENTRIES) {
 		for (const [entryKey, entry] of scanCache) {
 			if (entry.expiresAt <= now) scanCache.delete(entryKey);
 		}
 		if (scanCache.size >= SCAN_CACHE_MAX_ENTRIES) scanCache.clear();
 	}
-	scanCache.set(key, { value, expiresAt: now + ttlMs });
-	return value;
+	const promise = compute();
+	scanCache.set(key, { promise, expiresAt: Number.POSITIVE_INFINITY });
+	try {
+		const value = await promise;
+		if (scanCache.get(key)?.promise === promise) {
+			scanCache.set(key, { value, expiresAt: Date.now() + ttlMs });
+		}
+		return value;
+	} catch (error) {
+		if (scanCache.get(key)?.promise === promise) scanCache.delete(key);
+		throw error;
+	}
 };
 
-type DaySlotScan = {
-	slots: AvailabilitySlot[];
-	// Última fecha local efectivamente escaneada: si la fecha pedida cae dentro,
-	// sus slots ya están en `slots` y no hace falta otra query.
-	scannedThrough: string;
-};
-
-const collectPublicDaySlots = async (
+const loadPublicAvailabilitySnapshot = async (
 	supabase: SupabaseClient,
 	input: {
-		business: Business;
-		serviceId: string;
-		professionalId?: string | null;
-		fromDate: string;
-		maxDate: string;
-		targetDays?: number;
-		targetProfessionalIds?: string[];
+		businessId: string;
+		rangeStart: Date;
+		rangeEnd: Date;
 	}
-): Promise<DaySlotScan> => {
-	let cursor = input.fromDate;
-	let collected: AvailabilitySlot[] = [];
-	let scannedThrough = input.fromDate;
-	const requiredProfessionals = new Set(input.targetProfessionalIds ?? []);
-	while (dateLTE(cursor, input.maxDate)) {
-		const windowEnd = minDateString(addDaysToDateString(cursor, PUBLIC_DAY_BATCH_DAYS - 1), input.maxDate);
-		const batch = await getAvailabilitySlots(supabase, {
-			business: input.business,
-			serviceId: input.serviceId,
-			professionalId: input.professionalId ?? null,
-			fromDate: cursor,
-			toDate: windowEnd,
-			publicOnly: true
+): Promise<PublicAvailabilityRows> => {
+	// Estas lecturas son independientes. Consultar todas las filas acotadas
+	// al negocio en una sola ola evita esperar catálogo → asignaciones → agenda.
+	// Los turnos se parten en ventanas mensuales para no truncarse en el límite de
+	// 1.000 filas de PostgREST en consultorios de alto volumen.
+	const appointmentWindows: Array<{ start: Date; end: Date }> = [];
+	for (
+		let start = new Date(input.rangeStart);
+		start < input.rangeEnd;
+		start = addMinutes(start, 31 * 24 * 60)
+	) {
+		appointmentWindows.push({
+			start,
+			end: new Date(
+				Math.min(addMinutes(start, 31 * 24 * 60).getTime(), input.rangeEnd.getTime())
+			)
 		});
-		collected = uniqueSlots([...collected, ...batch]);
-		scannedThrough = windowEnd;
-		const collectedDates = new Set(collected.map((slot) => slot.date)).size;
-		const collectedProfessionals = new Set(collected.map((slot) => slot.professional_id));
-		const hasAllRequiredProfessionals =
-			requiredProfessionals.size === 0 ||
-			[...requiredProfessionals].every((professionalId) => collectedProfessionals.has(professionalId));
-		if (collectedDates >= (input.targetDays ?? PUBLIC_DAY_TARGET) && hasAllRequiredProfessionals) break;
-		cursor = addDaysToDateString(windowEnd, 1);
 	}
-	return { slots: collected, scannedThrough };
-};
+	const [
+		servicesResult,
+		professionalsResult,
+		assignmentsResult,
+		rulesResult,
+		exceptionsResult,
+		blocksResults
+	] = await Promise.all([
+		supabase
+			.from('services')
+			.select(
+				'id, business_id, name, description, duration_minutes, buffer_before_minutes, buffer_after_minutes, price_label, is_public, is_active, sort_order'
+			)
+			.eq('business_id', input.businessId)
+			.eq('is_active', true)
+			.eq('is_public', true)
+			.order('sort_order')
+			.order('name'),
+		supabase
+			.from('professionals')
+			.select('id, name, specialty, avatar_url, is_public, is_active, sort_order')
+			.eq('business_id', input.businessId)
+			.eq('is_active', true)
+			.eq('is_public', true)
+			.order('sort_order')
+			.order('name'),
+		supabase
+			.from('professional_services')
+			.select('service_id, professional_id')
+			.eq('business_id', input.businessId),
+		supabase
+			.from('availability_rules')
+			.select('id, professional_id, weekday, start_time, end_time, slot_interval_minutes, is_active')
+			.eq('business_id', input.businessId)
+			.eq('is_active', true),
+		supabase
+			.from('availability_exceptions')
+			.select('id, professional_id, starts_at, ends_at, type')
+			.eq('business_id', input.businessId)
+			.lt('starts_at', input.rangeEnd.toISOString())
+			.gt('ends_at', input.rangeStart.toISOString()),
+		Promise.all(
+			appointmentWindows.map(({ start, end }) =>
+				supabase
+					.from('appointments')
+					.select('id, professional_id, blocking_starts_at, blocking_ends_at')
+					.eq('business_id', input.businessId)
+					.in('status', ['reserved', 'confirmed', 'reschedule_requested'])
+					.lt('blocking_starts_at', end.toISOString())
+					.gt('blocking_ends_at', start.toISOString())
+			)
+		)
+	]);
+	if (servicesResult.error) throw servicesResult.error;
+	if (professionalsResult.error) throw professionalsResult.error;
+	if (assignmentsResult.error) throw assignmentsResult.error;
+	if (rulesResult.error) throw rulesResult.error;
+	if (exceptionsResult.error) throw exceptionsResult.error;
+	for (const blocksResult of blocksResults) {
+		if (blocksResult.error) throw blocksResult.error;
+	}
 
-const getProfessionalsWithPublicAvailability = async (
-	supabase: SupabaseClient,
-	input: {
-		business: PublicBookingBusiness;
-		serviceId: string;
-		professionals: PublicProfessional[];
-		fromDate: string;
-		maxDate: string;
-	}
-) => {
-	if (input.professionals.length === 0) return [];
-	const professionalIds = input.professionals
-		.map((professional) => professional.id)
-		.sort()
-		.join(',');
-	const { slots } = await cachedScan(
-		`prof-scan:${input.business.id}:${input.serviceId}:${input.fromDate}:${input.maxDate}:${professionalIds}`,
-		STRUCTURE_SCAN_CACHE_TTL_MS,
-		() =>
-			collectPublicDaySlots(supabase, {
-				business: input.business as Business,
-				serviceId: input.serviceId,
-				professionalId: null,
-				fromDate: input.fromDate,
-				maxDate: input.maxDate,
-				targetDays: 1,
-				targetProfessionalIds: input.professionals.map((professional) => professional.id)
-			})
+	const services = (servicesResult.data ?? []) as PublicAvailabilityService[];
+	const professionals = ((professionalsResult.data ?? []) as PublicAvailabilityProfessional[]).filter(
+		hasVisibleProfessionalName
+	);
+	const serviceIds = new Set(services.map((service) => service.id));
+	const professionalIds = new Set(professionals.map((professional) => professional.id));
+	const assignments = ((assignmentsResult.data ?? []) as Array<{
+		service_id: string;
+		professional_id: string;
+	}>).filter(
+		(assignment) =>
+			serviceIds.has(assignment.service_id) && professionalIds.has(assignment.professional_id)
 	);
 
-	const firstAvailableByProfessional = new Map<string, string>();
-	for (const slot of slots) {
-		const current = firstAvailableByProfessional.get(slot.professional_id);
-		if (!current || slot.starts_at < current) firstAvailableByProfessional.set(slot.professional_id, slot.starts_at);
-	}
+	const assignedProfessionalIds = new Set(
+		assignments.map((assignment) => assignment.professional_id)
+	);
 
-	return input.professionals
-		.filter((professional) => firstAvailableByProfessional.has(professional.id))
-		.map((professional) => ({
-			...professional,
-			next_available_at: firstAvailableByProfessional.get(professional.id) ?? null
-		}));
+	return {
+		services,
+		professionals,
+		assignments,
+		rules: ((rulesResult.data ?? []) as AvailabilityRuleRow[]).filter((rule) =>
+			assignedProfessionalIds.has(rule.professional_id)
+		),
+		exceptions: ((exceptionsResult.data ?? []) as AvailabilityExceptionRow[]).filter(
+			(exception) =>
+				exception.professional_id === null ||
+				assignedProfessionalIds.has(exception.professional_id)
+		),
+		blocks: [
+			...new Map(
+				blocksResults
+					.flatMap((result) => (result.data ?? []) as AvailabilityAppointmentBlockRow[])
+					.filter((block) => assignedProfessionalIds.has(block.professional_id))
+					.map((block) => [block.id, block] as const)
+			).values()
+		]
+	};
 };
 
-const serviceHasPublicAvailability = async (
-	supabase: SupabaseClient,
-	input: {
-		business: PublicBookingBusiness;
-		serviceId: string;
-		fromDate: string;
-		maxDate: string;
-	}
+const slotsFromPublicSnapshot = (
+	business: PublicBookingBusiness,
+	snapshot: PublicAvailabilitySnapshot,
+	input: { serviceId: string; professionalId?: string | null; maxSlots?: number }
 ) => {
-	const { slots } = await cachedScan(
-		`service-scan:${input.business.id}:${input.serviceId}:${input.fromDate}:${input.maxDate}`,
-		STRUCTURE_SCAN_CACHE_TTL_MS,
-		() =>
-			collectPublicDaySlots(supabase, {
-				business: input.business as Business,
-				serviceId: input.serviceId,
-				professionalId: null,
-				fromDate: input.fromDate,
-				maxDate: input.maxDate,
-				targetDays: 1
-			})
+	const service = snapshot.services.find((candidate) => candidate.id === input.serviceId);
+	if (!service) return [];
+	const assignedProfessionalIds = new Set(
+		snapshot.assignments
+			.filter((assignment) => assignment.service_id === input.serviceId)
+			.map((assignment) => assignment.professional_id)
 	);
-	return slots.length > 0;
+	const professionals = snapshot.professionals.filter(
+		(professional) =>
+			assignedProfessionalIds.has(professional.id) &&
+			(!input.professionalId || professional.id === input.professionalId)
+	);
+	const professionalIds = new Set(professionals.map((professional) => professional.id));
+	return calculateAvailabilitySlots({
+		business: business as Business,
+		service,
+		professionals,
+		rules: snapshot.rules.filter((rule) => professionalIds.has(rule.professional_id)),
+		exceptions: snapshot.exceptions.filter(
+			(exception) =>
+				exception.professional_id === null || professionalIds.has(exception.professional_id)
+		),
+		blocks: snapshot.blocks.filter((block) => professionalIds.has(block.professional_id)),
+		fromDate: snapshot.fromDate,
+		toDate: snapshot.toDate,
+		publicOnly: true,
+		maxSlots: input.maxSlots
+	});
+};
+
+export const getPublicBookingCdnCacheControl = (input: {
+	serviceId?: string | null;
+	professionalId?: string | null;
+	date?: string | null;
+}) => {
+	if (input.date) return 'public, durable, s-maxage=5, stale-while-revalidate=10';
+	if (input.professionalId) return 'public, durable, s-maxage=10, stale-while-revalidate=30';
+	if (input.serviceId) return 'public, durable, s-maxage=10, stale-while-revalidate=30';
+	return 'public, durable, s-maxage=60, stale-while-revalidate=300';
 };
 
 export const loadPublicBookingState = async (
@@ -475,7 +607,50 @@ export const loadPublicBookingState = async (
 		date?: string | null;
 	}
 ): Promise<PublicBookingState> => {
-	const business = await getPublicBusinessBySlug(supabase, input.slug);
+	const normalizedSlug = input.slug.trim().toLowerCase();
+	const businessIdFromSlug = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+		normalizedSlug
+	)
+		? normalizedSlug
+		: null;
+	const loadBusiness = () =>
+		cachedScan(`business-lookup:${normalizedSlug}`, STRUCTURE_SCAN_CACHE_TTL_MS, () =>
+			getPublicBusinessBySlug(supabase, input.slug)
+		);
+	const loadAccess = (businessId: string) =>
+		cachedScan(`commercial-access-row:${businessId}`, STRUCTURE_SCAN_CACHE_TTL_MS, () =>
+			getPublicBusinessSubscription(supabase, businessId)
+		);
+	const availabilityRangeNow = new Date();
+	const loadAvailabilityRows = (businessId: string) =>
+		cachedScan(`availability-rows:${businessId}`, SLOT_SCAN_CACHE_TTL_MS, () =>
+			loadPublicAvailabilitySnapshot(supabase, {
+				businessId,
+				rangeStart: addMinutes(availabilityRangeNow, -24 * 60),
+				rangeEnd: addMinutes(availabilityRangeNow, 92 * 24 * 60)
+			})
+		);
+
+	let business: PublicBookingBusiness | null;
+	let accessLookup: Awaited<ReturnType<typeof getPublicBusinessSubscription>> | null = null;
+	let availabilityRows: PublicAvailabilityRows | null = null;
+	if (businessIdFromSlug) {
+		// Los links generados por Cita Suite usan el UUID. En ese camino todas las
+		// lecturas arrancan juntas y la visita fría espera una sola ola de red.
+		[business, accessLookup, availabilityRows] = await Promise.all([
+			loadBusiness(),
+			loadAccess(businessIdFromSlug),
+			loadAvailabilityRows(businessIdFromSlug)
+		]);
+	} else {
+		business = await loadBusiness();
+		if (business) {
+			[accessLookup, availabilityRows] = await Promise.all([
+				loadAccess(business.id),
+				loadAvailabilityRows(business.id)
+			]);
+		}
+	}
 	if (!business) {
 		return { business: null, services: [], professionals: [], slots: [], days: [], issue: 'business_not_found' };
 	}
@@ -483,38 +658,58 @@ export const loadPublicBookingState = async (
 		return { business, services: [], professionals: [], slots: [], days: [], issue: 'booking_disabled' };
 	}
 
-	// Un solo round-trip de latencia para el gate comercial, el catálogo y las
-	// asignaciones del servicio elegido: son independientes entre sí.
-	const [commerciallyUsable, structurallyReservableServices, assignedProfessionalsForService] =
-		await Promise.all([
-			canUsePublicBusiness(supabase, business.id, business.created_at),
-			getReservableServices(supabase, business.id),
-			input.serviceId
-				? getReservableProfessionals(supabase, { businessId: business.id, serviceId: input.serviceId })
-				: Promise.resolve([] as PublicProfessional[])
-		]);
+	const today = todayForBusiness(business);
+	const maxDate = addDaysToDateString(
+		today,
+		Math.min(Math.max(business.max_booking_days_ahead, 1), 90)
+	);
+	const commerciallyUsable = Boolean(
+		accessLookup?.lookupFailed ||
+			getBusinessAccessState(accessLookup?.subscription ?? null, {
+				businessCreatedAt: business.created_at
+			}).allowedCapabilities.canUsePublicBooking
+	);
 	if (!commerciallyUsable) {
 		return { business, services: [], professionals: [], slots: [], days: [], issue: 'commercial_unavailable' };
 	}
+	if (!availabilityRows) throw new Error('PUBLIC_AVAILABILITY_ROWS_MISSING');
+	// La misma foto alimenta todos los pasos y el cálculo conserva exactamente
+	// los filtros actuales de servicios/profesionales sin horarios.
+	const availabilitySnapshot: PublicAvailabilitySnapshot = {
+		...availabilityRows,
+		fromDate: today,
+		toDate: maxDate
+	};
+
+	const structurallyReservableServices = availabilitySnapshot.services.filter((service) =>
+		availabilitySnapshot.assignments.some((assignment) => assignment.service_id === service.id)
+	);
 	if (structurallyReservableServices.length === 0) {
 		return { business, services: [], professionals: [], slots: [], days: [], issue: 'no_services' };
 	}
 
-	const today = todayForBusiness(business);
-	const maxDate = addDaysToDateString(today, Math.min(Math.max(business.max_booking_days_ahead, 1), 90));
-	const requestedServiceId = input.serviceId ?? null;
-	const services = requestedServiceId
-		? structurallyReservableServices
+	const toPublicService = (service: PublicAvailabilityService): PublicService => ({
+		id: service.id,
+		name: service.name,
+		description: service.description,
+		duration_minutes: service.duration_minutes,
+		price_label: service.price_label
+	});
+	const services = input.serviceId
+		? structurallyReservableServices.map(toPublicService)
 		: (
 				await Promise.all(
 					structurallyReservableServices.map(async (service) => {
-						const hasAvailability = await serviceHasPublicAvailability(supabase, {
-							business,
-							serviceId: service.id,
-							fromDate: today,
-							maxDate
-						});
-						return hasAvailability ? service : null;
+						const hasAvailability = await cachedScan(
+							`service-availability:${business.id}:${service.id}:${today}:${maxDate}`,
+							SLOT_SCAN_CACHE_TTL_MS,
+							async () =>
+								slotsFromPublicSnapshot(business, availabilitySnapshot, {
+									serviceId: service.id,
+									maxSlots: 1
+								}).length > 0
+						);
+						return hasAvailability ? toPublicService(service) : null;
 					})
 				)
 			).filter((service): service is PublicService => service !== null);
@@ -523,14 +718,41 @@ export const loadPublicBookingState = async (
 	}
 
 	const selectedService = services.find((service) => service.id === input.serviceId) ?? null;
+	const assignedProfessionals = selectedService
+		? availabilitySnapshot.professionals.filter((professional) =>
+				availabilitySnapshot.assignments.some(
+					(assignment) =>
+						assignment.service_id === selectedService.id &&
+						assignment.professional_id === professional.id
+				)
+			)
+		: [];
 	const professionals = selectedService
-		? await getProfessionalsWithPublicAvailability(supabase, {
-				business,
-				serviceId: selectedService.id,
-				professionals: assignedProfessionalsForService,
-				fromDate: today,
-				maxDate
-			})
+		? (
+				await Promise.all(
+					assignedProfessionals.map(async (professional) => {
+						const firstSlot = await cachedScan(
+							`professional-first:${business.id}:${selectedService.id}:${professional.id}:${today}:${maxDate}`,
+							SLOT_SCAN_CACHE_TTL_MS,
+							async () =>
+								slotsFromPublicSnapshot(business, availabilitySnapshot, {
+									serviceId: selectedService.id,
+									professionalId: professional.id,
+									maxSlots: 1
+								})[0] ?? null
+						);
+						return firstSlot
+							? {
+									id: professional.id,
+									name: professional.name.trim(),
+									specialty: professional.specialty,
+									avatar_url: professional.avatar_url,
+									next_available_at: firstSlot.starts_at
+								}
+							: null;
+					})
+				)
+			).filter((professional): professional is PublicProfessional => professional !== null)
 		: [];
 	if (selectedService && professionals.length === 0) {
 		return { business, services, professionals, slots: [], days: [], issue: 'no_professionals' };
@@ -541,25 +763,22 @@ export const loadPublicBookingState = async (
 		return { business, services, professionals, slots: [], days: [], issue: null };
 	}
 
-	const dayScan = await cachedScan(
+	const daySlots = await cachedScan(
 		`day-scan:${business.id}:${selectedService.id}:${selectedProfessional.id}:${today}:${maxDate}`,
 		SLOT_SCAN_CACHE_TTL_MS,
-		() =>
-			collectPublicDaySlots(supabase, {
-				business: business as Business,
-				serviceId: selectedService.id,
-				professionalId: selectedProfessional.id,
-				fromDate: today,
-				maxDate
-			})
+		async () =>
+			uniqueSlots(
+				slotsFromPublicSnapshot(business, availabilitySnapshot, {
+					serviceId: selectedService.id,
+					professionalId: selectedProfessional.id
+				})
+			)
 	);
-	// La fecha elegida casi siempre cae dentro del rango ya escaneado: filtrar es
-	// gratis. Solo se consulta aparte si quedó fuera (link viejo o "ver más días").
-	const dateWithinScan = input.date ? input.date >= today && input.date <= dayScan.scannedThrough : false;
+	const dateWithinScan = input.date ? input.date >= today && input.date <= maxDate : false;
 	const selectedDateSlots = !input.date
 		? []
 		: dateWithinScan
-			? dayScan.slots.filter((slot) => slot.date === input.date)
+			? daySlots.filter((slot) => slot.date === input.date)
 			: await getAvailabilitySlots(supabase, {
 					business: business as Business,
 					serviceId: selectedService.id,
@@ -569,7 +788,7 @@ export const loadPublicBookingState = async (
 					publicOnly: true
 				});
 	const slots = input.date ? selectedDateSlots : [];
-	const days = summarizeSlotsByDate(uniqueSlots([...dayScan.slots, ...selectedDateSlots]), business.timezone);
+	const days = summarizeSlotsByDate(uniqueSlots([...daySlots, ...selectedDateSlots]), business.timezone);
 
 	return {
 		business,

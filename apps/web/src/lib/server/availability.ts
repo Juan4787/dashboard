@@ -12,7 +12,7 @@ export type AvailabilitySlot = {
 	professional_name: string;
 };
 
-type ServiceRow = {
+export type AvailabilityServiceRow = {
 	id: string;
 	business_id: string;
 	name: string;
@@ -23,14 +23,14 @@ type ServiceRow = {
 	is_active: boolean;
 };
 
-type ProfessionalRow = {
+export type AvailabilityProfessionalRow = {
 	id: string;
 	name: string;
 	is_public: boolean;
 	is_active: boolean;
 };
 
-type RuleRow = {
+export type AvailabilityRuleRow = {
 	id: string;
 	professional_id: string;
 	weekday: number;
@@ -40,7 +40,7 @@ type RuleRow = {
 	is_active: boolean;
 };
 
-type ExceptionRow = {
+export type AvailabilityExceptionRow = {
 	id: string;
 	professional_id: string | null;
 	starts_at: string;
@@ -48,7 +48,7 @@ type ExceptionRow = {
 	type: 'blocked' | 'extra_available';
 };
 
-type AppointmentBlockRow = {
+export type AvailabilityAppointmentBlockRow = {
 	id: string;
 	professional_id: string;
 	blocking_starts_at: string;
@@ -72,7 +72,7 @@ export type AvailabilityInput = {
 };
 
 const pad = (value: number) => String(value).padStart(2, '0');
-const hasVisibleProfessionalName = (professional: Pick<ProfessionalRow, 'name'>) =>
+const hasVisibleProfessionalName = (professional: Pick<AvailabilityProfessionalRow, 'name'>) =>
 	String(professional.name ?? '').trim().length > 0;
 
 export const addMinutes = (date: Date, minutes: number) =>
@@ -148,10 +148,142 @@ const weekdayForDate = (date: string, timeZone: string) => {
 	return map[value ?? 'Sun'];
 };
 
-const clampRangeToBusinessRules = (business: Business, fromDate: string, toDate: string) => {
+const clampRangeToBusinessRules = (
+	business: Business,
+	fromDate: string,
+	toDate: string,
+	now = new Date()
+) => {
 	const dates = dateRange(fromDate, toDate);
-	const maxDate = addMinutes(new Date(), business.max_booking_days_ahead * 24 * 60);
+	const maxDate = addMinutes(now, business.max_booking_days_ahead * 24 * 60);
 	return dates.filter((date) => zonedDateTimeToUtc(date, '00:00', business.timezone) <= maxDate);
+};
+
+export const calculateAvailabilitySlots = (input: {
+	business: Business;
+	service: AvailabilityServiceRow;
+	professionals: AvailabilityProfessionalRow[];
+	rules: AvailabilityRuleRow[];
+	exceptions: AvailabilityExceptionRow[];
+	blocks: AvailabilityAppointmentBlockRow[];
+	fromDate: string;
+	toDate: string;
+	publicOnly?: boolean;
+	now?: Date;
+	maxSlots?: number;
+}): AvailabilitySlot[] => {
+	const {
+		business,
+		service,
+		publicOnly = false,
+		now = new Date(),
+		maxSlots = Number.POSITIVE_INFINITY
+	} = input;
+	if (publicOnly && (!business.is_active || !business.public_booking_enabled)) return [];
+	if (!service.is_active || (publicOnly && !service.is_public)) return [];
+
+	const professionals = input.professionals.filter(
+		(professional) =>
+			professional?.is_active &&
+			(!publicOnly || (professional.is_public && hasVisibleProfessionalName(professional)))
+	);
+	if (professionals.length === 0 || maxSlots <= 0) return [];
+
+	const dates = clampRangeToBusinessRules(business, input.fromDate, input.toDate, now);
+	if (dates.length === 0) return [];
+
+	const minStartsAt = publicOnly
+		? addMinutes(now, Math.max(0, Number(business.min_booking_notice_minutes ?? 0)))
+		: now;
+	const allSlots: AvailabilitySlot[] = [];
+
+	for (const date of dates) {
+		const weekday = weekdayForDate(date, business.timezone);
+		for (const professional of professionals) {
+			const professionalRules = input.rules.filter(
+				(rule) => rule.professional_id === professional.id
+			);
+			if (publicOnly && professionalRules.length === 0) continue;
+			const professionalStepOptions = professionalRules
+				.map((rule) => rule.slot_interval_minutes)
+				.filter((value) => value > 0);
+			const defaultStepMinutes =
+				professionalStepOptions.length > 0 ? Math.min(...professionalStepOptions) : 15;
+			const intervals: Interval[] = professionalRules
+				.filter((rule) => rule.weekday === weekday)
+				.map((rule) => ({
+					start: zonedDateTimeToUtc(date, rule.start_time.slice(0, 5), business.timezone),
+					end: zonedDateTimeToUtc(date, rule.end_time.slice(0, 5), business.timezone),
+					stepMinutes: rule.slot_interval_minutes
+				}));
+
+			for (const exception of input.exceptions) {
+				if (exception.type !== 'extra_available') continue;
+				if (exception.professional_id !== professional.id) continue;
+				const start = new Date(exception.starts_at);
+				const end = new Date(exception.ends_at);
+				const localDate = zonedDateParts(start, business.timezone).date;
+				if (localDate === date) intervals.push({ start, end, stepMinutes: defaultStepMinutes });
+			}
+			intervals.sort((a, b) => a.start.getTime() - b.start.getTime());
+
+			const blockingExceptions = input.exceptions.filter(
+				(exception) =>
+					exception.type === 'blocked' &&
+					(exception.professional_id === null || exception.professional_id === professional.id)
+			);
+			const appointmentBlocks = input.blocks.filter(
+				(block) => block.professional_id === professional.id
+			);
+
+			for (const interval of intervals) {
+				for (
+					let startsAt = new Date(interval.start);
+					addMinutes(startsAt, service.duration_minutes) <= interval.end;
+					startsAt = addMinutes(startsAt, interval.stepMinutes)
+				) {
+					const endsAt = addMinutes(startsAt, service.duration_minutes);
+					const blockingStart = addMinutes(startsAt, -service.buffer_before_minutes);
+					const blockingEnd = addMinutes(endsAt, service.buffer_after_minutes);
+					if (startsAt < minStartsAt) continue;
+					if (blockingStart < interval.start || blockingEnd > interval.end) continue;
+
+					const blockedByException = blockingExceptions.some((exception) =>
+						overlaps(
+							blockingStart,
+							blockingEnd,
+							new Date(exception.starts_at),
+							new Date(exception.ends_at)
+						)
+					);
+					if (blockedByException) continue;
+
+					const blockedByAppointment = appointmentBlocks.some((block) =>
+						overlaps(
+							blockingStart,
+							blockingEnd,
+							new Date(block.blocking_starts_at),
+							new Date(block.blocking_ends_at)
+						)
+					);
+					if (blockedByAppointment) continue;
+
+					const local = zonedDateParts(startsAt, business.timezone);
+					allSlots.push({
+						date: local.date,
+						time: local.time,
+						starts_at: startsAt.toISOString(),
+						ends_at: endsAt.toISOString(),
+						professional_id: professional.id,
+						professional_name: publicOnly ? professional.name.trim() : professional.name
+					});
+					if (allSlots.length >= maxSlots) return allSlots;
+				}
+			}
+		}
+	}
+
+	return allSlots.sort((a, b) => a.starts_at.localeCompare(b.starts_at));
 };
 
 export const getAvailabilitySlots = async (
@@ -169,7 +301,7 @@ export const getAvailabilitySlots = async (
 		)
 		.eq('business_id', business.id)
 		.eq('id', serviceId)
-		.maybeSingle<ServiceRow>();
+		.maybeSingle<AvailabilityServiceRow>();
 	if (serviceError || !service || !service.is_active || (publicOnly && !service.is_public)) return [];
 
 	let assignmentQuery = supabase
@@ -183,7 +315,7 @@ export const getAvailabilitySlots = async (
 	if (assignmentError) throw assignmentError;
 
 	const professionals = (assignments ?? [])
-		.map((row: any) => row.professionals as ProfessionalRow)
+		.map((row: any) => row.professionals as AvailabilityProfessionalRow)
 		.filter(
 			(professional) =>
 				professional?.is_active && (!publicOnly || (professional.is_public && hasVisibleProfessionalName(professional)))
@@ -192,7 +324,8 @@ export const getAvailabilitySlots = async (
 	if (professionals.length === 0) return [];
 	const professionalIds = professionals.map((professional) => professional.id);
 
-	const dates = clampRangeToBusinessRules(business, input.fromDate, input.toDate);
+	const calculationNow = new Date();
+	const dates = clampRangeToBusinessRules(business, input.fromDate, input.toDate, calculationNow);
 	if (dates.length === 0) return [];
 
 	const rangeStart = zonedDateTimeToUtc(dates[0], '00:00', business.timezone);
@@ -231,86 +364,18 @@ export const getAvailabilitySlots = async (
 	if (exceptionsError) throw exceptionsError;
 	if (blocksError) throw blocksError;
 
-	const now = new Date();
-	// Anticipación mínima configurada por el negocio: aplica SOLO a la reserva pública.
-	// El panel (recepción/admin) puede seguir tomando y reprogramando turnos inmediatos.
-	const minStartsAt = publicOnly
-		? addMinutes(now, Math.max(0, Number(business.min_booking_notice_minutes ?? 0)))
-		: now;
-	const allSlots: AvailabilitySlot[] = [];
-
-	for (const date of dates) {
-		const weekday = weekdayForDate(date, business.timezone);
-		for (const professional of professionals) {
-			const professionalRules = ((rules ?? []) as RuleRow[]).filter((rule) => rule.professional_id === professional.id);
-			if (publicOnly && professionalRules.length === 0) continue;
-			const professionalStepOptions = professionalRules
-				.map((rule) => rule.slot_interval_minutes)
-				.filter((value) => value > 0);
-			const defaultStepMinutes = professionalStepOptions.length > 0 ? Math.min(...professionalStepOptions) : 15;
-			const intervals: Interval[] = professionalRules
-				.filter((rule: RuleRow) => rule.weekday === weekday)
-				.map((rule: RuleRow) => ({
-					start: zonedDateTimeToUtc(date, rule.start_time.slice(0, 5), business.timezone),
-					end: zonedDateTimeToUtc(date, rule.end_time.slice(0, 5), business.timezone),
-					stepMinutes: rule.slot_interval_minutes
-				}));
-
-			for (const exception of (exceptions ?? []) as ExceptionRow[]) {
-				if (exception.type !== 'extra_available') continue;
-				if (exception.professional_id !== professional.id) continue;
-				const start = new Date(exception.starts_at);
-				const end = new Date(exception.ends_at);
-				const localDate = zonedDateParts(start, business.timezone).date;
-				if (localDate === date) intervals.push({ start, end, stepMinutes: defaultStepMinutes });
-			}
-
-			const blockingExceptions = ((exceptions ?? []) as ExceptionRow[]).filter(
-				(exception) =>
-					exception.type === 'blocked' &&
-					(exception.professional_id === null || exception.professional_id === professional.id)
-			);
-			const appointmentBlocks = ((blocks ?? []) as AppointmentBlockRow[]).filter(
-				(block) => block.professional_id === professional.id
-			);
-
-			for (const interval of intervals) {
-				for (
-					let startsAt = new Date(interval.start);
-					addMinutes(startsAt, service.duration_minutes) <= interval.end;
-					startsAt = addMinutes(startsAt, interval.stepMinutes)
-				) {
-					const endsAt = addMinutes(startsAt, service.duration_minutes);
-					const blockingStart = addMinutes(startsAt, -service.buffer_before_minutes);
-					const blockingEnd = addMinutes(endsAt, service.buffer_after_minutes);
-					if (startsAt < minStartsAt) continue;
-					if (blockingStart < interval.start || blockingEnd > interval.end) continue;
-
-					const blockedByException = blockingExceptions.some((exception) =>
-						overlaps(blockingStart, blockingEnd, new Date(exception.starts_at), new Date(exception.ends_at))
-					);
-					if (blockedByException) continue;
-
-					const blockedByAppointment = appointmentBlocks.some((block) =>
-						overlaps(blockingStart, blockingEnd, new Date(block.blocking_starts_at), new Date(block.blocking_ends_at))
-					);
-					if (blockedByAppointment) continue;
-
-					const local = zonedDateParts(startsAt, business.timezone);
-					allSlots.push({
-						date: local.date,
-						time: local.time,
-						starts_at: startsAt.toISOString(),
-						ends_at: endsAt.toISOString(),
-						professional_id: professional.id,
-						professional_name: publicOnly ? professional.name.trim() : professional.name
-					});
-				}
-			}
-		}
-	}
-
-	return allSlots.sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+	return calculateAvailabilitySlots({
+		business,
+		service,
+		professionals,
+		rules: (rules ?? []) as AvailabilityRuleRow[],
+		exceptions: (exceptions ?? []) as AvailabilityExceptionRow[],
+		blocks: (blocks ?? []) as AvailabilityAppointmentBlockRow[],
+		fromDate: dates[0],
+		toDate: dates[dates.length - 1],
+		publicOnly,
+		now: calculationNow
+	});
 };
 
 export const groupSlotsByDate = (slots: AvailabilitySlot[]) =>

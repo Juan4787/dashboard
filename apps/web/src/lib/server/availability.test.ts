@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { addMinutes, getAvailabilitySlots, overlaps, zonedDateTimeToUtc } from './availability';
+import {
+	addMinutes,
+	calculateAvailabilitySlots,
+	getAvailabilitySlots,
+	overlaps,
+	zonedDateTimeToUtc
+} from './availability';
 
 const business = {
 	id: 'biz-1',
@@ -72,6 +78,52 @@ describe('availability core', () => {
 	it('convierte fecha/hora de Argentina a UTC sin depender del timezone del servidor', () => {
 		const utc = zonedDateTimeToUtc('2026-05-13', '09:30', 'America/Argentina/Cordoba');
 		expect(utc.toISOString()).toBe('2026-05-13T12:30:00.000Z');
+	});
+
+	it('el atajo de primera disponibilidad conserva el horario más temprano aunque las reglas estén desordenadas', () => {
+		const slots = calculateAvailabilitySlots({
+			business: business as never,
+			service: {
+				id: 'svc-1',
+				business_id: business.id,
+				name: 'Consulta',
+				duration_minutes: 30,
+				buffer_before_minutes: 0,
+				buffer_after_minutes: 0,
+				is_public: true,
+				is_active: true
+			},
+			professionals: [{ id: 'pro-1', name: 'Dra. Uno', is_public: true, is_active: true }],
+			rules: [
+				{
+					id: 'late',
+					professional_id: 'pro-1',
+					weekday: 1,
+					start_time: '11:00',
+					end_time: '12:00',
+					slot_interval_minutes: 30,
+					is_active: true
+				},
+				{
+					id: 'early',
+					professional_id: 'pro-1',
+					weekday: 1,
+					start_time: '09:00',
+					end_time: '10:00',
+					slot_interval_minutes: 30,
+					is_active: true
+				}
+			],
+			exceptions: [],
+			blocks: [],
+			fromDate: '2026-06-22',
+			toDate: '2026-06-22',
+			publicOnly: true,
+			now: new Date('2026-06-20T12:00:00.000Z'),
+			maxSlots: 1
+		});
+
+		expect(slots.map((slot) => slot.time)).toEqual(['09:00']);
 	});
 
 	it('no genera slots públicos para profesionales sin nombre visible', async () => {

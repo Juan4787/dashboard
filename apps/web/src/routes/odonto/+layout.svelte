@@ -4,6 +4,7 @@
 	import { navigating } from '$app/stores';
 	import { onDestroy, onMount } from 'svelte';
 	import DismissibleNotice from '$lib/components/notices/DismissibleNotice.svelte';
+	import OdontoRouteSkeleton from '$lib/components/skeleton/OdontoRouteSkeleton.svelte';
 	import FollowUpsNotice from '$lib/components/seguimientos/FollowUpsNotice.svelte';
 	import { formatAccessRemaining, formatDateTime } from '$lib/utils/format';
 
@@ -416,8 +417,8 @@
 		if (routeId === '/odonto/seguimientos/importantes') return 'config';
 		if (routeId === '/odonto/recordatorios') return 'config';
 		if (routeId === '/odonto/mensajes') return 'config';
-		if (routeId === '/odonto/disponibilidad') return 'professionals';
-		if (routeId === '/odonto/servicios') return 'professionals';
+		if (routeId === '/odonto/disponibilidad') return 'availability';
+		if (routeId === '/odonto/servicios') return 'services';
 		if (routeId === '/odonto/profesionales/[professionalId]') return 'professionalDetail';
 		if (routeId === '/odonto/profesionales') return 'professionals';
 		if (routeId === '/odonto/pacientes/[id]') return 'patientDetail';
@@ -431,8 +432,8 @@
 		if (path.startsWith('/odonto/seguimientos')) return 'config';
 		if (path.startsWith('/odonto/recordatorios')) return 'config';
 		if (path.startsWith('/odonto/mensajes')) return 'config';
-		if (path.startsWith('/odonto/disponibilidad')) return 'professionals';
-		if (path.startsWith('/odonto/servicios')) return 'professionals';
+		if (path.startsWith('/odonto/disponibilidad')) return 'availability';
+		if (path.startsWith('/odonto/servicios')) return 'services';
 		if (path.startsWith('/odonto/profesionales/')) return 'professionalDetail';
 		if (path.startsWith('/odonto/profesionales')) return 'professionals';
 		if (path.startsWith('/odonto/pacientes/')) return 'patientDetail';
@@ -496,15 +497,6 @@
 </script>
 
 <div class="min-h-screen bg-neutral-50 text-neutral-900 dark:bg-[#0b1626] dark:text-[#eaf1ff]">
-	{#if showSkeleton}
-		<div
-			class="fixed inset-x-0 top-0 z-[100] h-1 overflow-hidden bg-violet-200/40 dark:bg-violet-950/70"
-			role="progressbar"
-			aria-label="Cargando sección"
-		>
-			<div class="odonto-navigation-progress h-full w-2/5 rounded-r-full bg-[#7c3aed] shadow-[0_0_12px_rgba(124,58,237,0.75)]"></div>
-		</div>
-	{/if}
 	<header class="sticky top-0 z-40 border-b border-neutral-100 bg-white/95 dark:border-[#1f2b45] dark:bg-[#0f1f36]/95">
 		<div class="flex h-14 items-center gap-2 px-3 md:hidden">
 			{#if showBack}
@@ -1084,10 +1076,10 @@
 					¿Necesitás ayuda? Contactar soporte
 				</p>
 			</section>
+		{:else if showSkeleton}
+			<OdontoRouteSkeleton kind={skeletonKind} />
 		{:else}
-			<div aria-busy={showSkeleton} class:cursor-progress={showSkeleton}>
-				{@render children()}
-			</div>
+			{@render children()}
 		{/if}
 	</main>
 
@@ -1163,26 +1155,3 @@
 		</nav>
 	{/if}
 </div>
-
-<style>
-	.odonto-navigation-progress {
-		animation: odonto-navigation-progress 1.05s ease-in-out infinite;
-		will-change: transform;
-	}
-
-	@keyframes odonto-navigation-progress {
-		0% {
-			transform: translateX(-110%);
-		}
-		100% {
-			transform: translateX(360%);
-		}
-	}
-
-	@media (prefers-reduced-motion: reduce) {
-		.odonto-navigation-progress {
-			animation: none;
-			width: 100%;
-		}
-	}
-</style>

@@ -4,6 +4,7 @@ import { createSupabaseAdminClient } from '$lib/server/supabase';
 import { resolveMapsUrl } from '$lib/server/location';
 import {
 	createPublicBooking,
+	getPublicBookingCdnCacheControl,
 	getPublicBookingErrorMessage,
 	loadPublicBookingState,
 	publicHash,
@@ -18,8 +19,18 @@ const valuesFromForm = (form: FormData) => Object.fromEntries(form.entries());
 // trackea los search params accedidos: al no leerlo, elegir horario no re-ejecuta
 // el load (la página lo resuelve client-side desde page.url) y es instantáneo.
 export const load: PageServerLoad = async ({ params, fetch, url, setHeaders }) => {
-	// Disponibilidad y datos del negocio siempre frescos detrás de CDN.
-	setHeaders({ 'cache-control': 'no-store' });
+	const selected = {
+		serviceId: url.searchParams.get('service_id') ?? '',
+		professionalId: url.searchParams.get('professional_id') ?? '',
+		date: url.searchParams.get('date') ?? ''
+	};
+	// El navegador no conserva datos; Netlify sí puede servirlos desde su caché
+	// durable. Los pasos con horarios usan TTL muy corto y la creación del turno
+	// siempre revalida la disponibilidad viva antes de guardar.
+	setHeaders({
+		'cache-control': 'no-store',
+		'netlify-cdn-cache-control': getPublicBookingCdnCacheControl(selected)
+	});
 
 	if (env.DEMO_MODE === 'true') {
 		return {
@@ -49,11 +60,7 @@ export const load: PageServerLoad = async ({ params, fetch, url, setHeaders }) =
 				days: [],
 				issue: null
 			},
-			selected: {
-				serviceId: url.searchParams.get('service_id') ?? '',
-				professionalId: url.searchParams.get('professional_id') ?? '',
-				date: url.searchParams.get('date') ?? ''
-			},
+			selected,
 			mapsLink: resolveMapsUrl({ address: 'Av. Demo 123' }),
 			turnstileSiteKey: null,
 			demo: true
@@ -64,9 +71,9 @@ export const load: PageServerLoad = async ({ params, fetch, url, setHeaders }) =
 		const supabase = await createSupabaseAdminClient('odonto', fetch);
 		const state = await loadPublicBookingState(supabase, {
 			slug: params.businessSlug,
-			serviceId: url.searchParams.get('service_id'),
-			professionalId: url.searchParams.get('professional_id'),
-			date: url.searchParams.get('date')
+			serviceId: selected.serviceId,
+			professionalId: selected.professionalId,
+			date: selected.date
 		});
 
 		if (state.business && params.businessSlug !== state.business.id) {
@@ -75,11 +82,7 @@ export const load: PageServerLoad = async ({ params, fetch, url, setHeaders }) =
 
 		return {
 			state,
-			selected: {
-				serviceId: url.searchParams.get('service_id') ?? '',
-				professionalId: url.searchParams.get('professional_id') ?? '',
-				date: url.searchParams.get('date') ?? ''
-			},
+			selected,
 			mapsLink: state.business
 				? resolveMapsUrl({ address: state.business.address, maps_url: state.business.maps_url })
 				: null,

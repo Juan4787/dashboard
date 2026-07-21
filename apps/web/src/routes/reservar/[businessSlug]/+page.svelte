@@ -288,6 +288,7 @@
 						{#each data.state.services as service (service.id)}
 							<a
 								data-sveltekit-noscroll
+								data-sveltekit-preload-data="hover"
 								href={queryFor({ service_id: service.id, professional_id: '', date: '', slot: '' })}
 								class="ux-choice p-5"
 							>
@@ -321,6 +322,7 @@
 							{#each data.state.professionals as professional (professional.id)}
 								<a
 									data-sveltekit-noscroll
+									data-sveltekit-preload-data="hover"
 									href={queryFor({ professional_id: professional.id, date: '', slot: '' })}
 									class="ux-choice flex items-start gap-4 p-5"
 								>
@@ -358,7 +360,12 @@
 						<h2 class="ux-section-title">Elegí un día</h2>
 						<div class="mt-5 grid gap-3 sm:grid-cols-2">
 							{#each visibleDays as day (day.date)}
-								<a data-sveltekit-noscroll href={queryFor({ date: day.date, slot: '' })} class="ux-choice px-4 py-3">
+								<a
+									data-sveltekit-noscroll
+									data-sveltekit-preload-data="hover"
+									href={queryFor({ date: day.date, slot: '' })}
+									class="ux-choice px-4 py-3"
+								>
 									<span class="block font-bold text-white">{day.label}</span>
 									<span class="mt-0.5 block text-sm text-white/50">
 										{day.count} {day.count === 1 ? 'horario libre' : 'horarios libres'}

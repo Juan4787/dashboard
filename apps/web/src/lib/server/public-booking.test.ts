@@ -5,6 +5,7 @@ import {
 	clearPublicBookingScanCache,
 	getPublicBookingErrorCode,
 	getPublicBookingErrorMessage,
+	getPublicBookingCdnCacheControl,
 	loadPublicBookingState,
 	PUBLIC_BOOKING_ERROR_MESSAGES,
 	summarizeSlotsByDate,
@@ -20,6 +21,21 @@ vi.mock('./availability', async (importOriginal) => {
 });
 
 describe('public booking UX helpers', () => {
+	it('mantiene la caché del catálogo larga y la de horarios deliberadamente corta', () => {
+		expect(getPublicBookingCdnCacheControl({})).toBe(
+			'public, durable, s-maxage=60, stale-while-revalidate=300'
+		);
+		expect(getPublicBookingCdnCacheControl({ serviceId: 'svc-1' })).toBe(
+			'public, durable, s-maxage=10, stale-while-revalidate=30'
+		);
+		expect(getPublicBookingCdnCacheControl({ professionalId: 'pro-1' })).toBe(
+			'public, durable, s-maxage=10, stale-while-revalidate=30'
+		);
+		expect(getPublicBookingCdnCacheControl({ professionalId: 'pro-1', date: '2026-07-21' })).toBe(
+			'public, durable, s-maxage=5, stale-while-revalidate=10'
+		);
+	});
+
 	it('usa un mensaje claro cuando el horario público ya no está disponible', () => {
 		expect(getPublicBookingErrorMessage(new Error('PUBLIC_SLOT_UNAVAILABLE'))).toBe(
 			'Ese horario acaba de ser ocupado. Elegí otro de los horarios disponibles.'
@@ -249,7 +265,7 @@ const subscription = {
 
 const queryBuilder = (data: unknown) => {
 	const builder: Record<string, unknown> = {};
-	for (const method of ['eq', 'in', 'gte', 'lte', 'lt', 'or', 'order', 'limit', 'is', 'neq', 'not']) {
+	for (const method of ['eq', 'in', 'gte', 'lte', 'lt', 'gt', 'or', 'order', 'limit', 'is', 'neq', 'not']) {
 		builder[method] = () => builder;
 	}
 	builder.maybeSingle = async () => ({ data, error: null });
@@ -259,28 +275,61 @@ const queryBuilder = (data: unknown) => {
 	return builder;
 };
 
-const createSupabaseMock = (overrides: { professionalName?: string } = {}) => ({
+const createSupabaseMock = (
+	overrides: { professionalName?: string; includeUnavailableFixtures?: boolean } = {}
+) => ({
 	from: (table: string) => ({
 		select: (columns: string) => {
 			const professionalName = overrides.professionalName ?? 'Dra. Uno';
 			if (table === 'businesses') return queryBuilder(business);
 			if (table === 'business_subscriptions') return queryBuilder(subscription);
 			if (table === 'services') {
-				return queryBuilder([
+				const services = [
 					{
 						id: 'svc-1',
+						business_id: 'biz-1',
 						name: 'Consulta',
 						description: null,
 						duration_minutes: 30,
+						buffer_before_minutes: 0,
+						buffer_after_minutes: 0,
 						price_label: null,
 						is_active: true,
 						is_public: true,
 						sort_order: 0
 					}
-				]);
+				];
+				if (overrides.includeUnavailableFixtures) {
+					services.push({
+						...services[0],
+						id: 'svc-unavailable',
+						name: 'Sin disponibilidad',
+						sort_order: 1
+					});
+				}
+				return queryBuilder(services);
 			}
 			if (table === 'professionals') {
-				return queryBuilder([{ id: 'pro-1', name: professionalName, is_active: true, is_public: true }]);
+				const professionals = [
+					{
+						id: 'pro-1',
+						name: professionalName,
+						specialty: null,
+						avatar_url: null,
+						is_active: true,
+						is_public: true,
+						sort_order: 0
+					}
+				];
+				if (overrides.includeUnavailableFixtures) {
+					professionals.push({
+						...professionals[0],
+						id: 'pro-unavailable',
+						name: 'Dr. Sin horarios',
+						sort_order: 1
+					});
+				}
+				return queryBuilder(professionals);
 			}
 			if (table === 'professional_services') {
 				if (columns.includes('professionals!inner')) {
@@ -299,7 +348,28 @@ const createSupabaseMock = (overrides: { professionalName?: string } = {}) => ({
 						}
 					]);
 				}
-				return queryBuilder([{ service_id: 'svc-1', professional_id: 'pro-1' }]);
+				return queryBuilder([
+					{ service_id: 'svc-1', professional_id: 'pro-1' },
+					...(overrides.includeUnavailableFixtures
+						? [
+								{ service_id: 'svc-1', professional_id: 'pro-unavailable' },
+								{ service_id: 'svc-unavailable', professional_id: 'pro-unavailable' }
+							]
+						: [])
+				]);
+			}
+			if (table === 'availability_rules') {
+				return queryBuilder(
+					Array.from({ length: 7 }, (_, weekday) => ({
+						id: `rule-${weekday}`,
+						professional_id: 'pro-1',
+						weekday,
+						start_time: '09:00:00',
+						end_time: '12:00:00',
+						slot_interval_minutes: 30,
+						is_active: true
+					}))
+				);
 			}
 			return queryBuilder([]);
 		}
@@ -333,6 +403,31 @@ describe('loadPublicBookingState (performance del flujo público)', () => {
 		);
 	});
 
+	it('muestra el catálogo inicial sin disparar el camino de consultas por servicio', async () => {
+		const supabase = createSupabaseMock() as never;
+
+		const state = await loadPublicBookingState(supabase, { slug: business.slug });
+
+		expect(state.issue).toBeNull();
+		expect(state.services.map((service) => service.id)).toEqual(['svc-1']);
+		expect(getAvailabilitySlotsMock).not.toHaveBeenCalled();
+	});
+
+	it('conserva ocultos servicios y profesionales que no tienen ningún horario', async () => {
+		const supabase = createSupabaseMock({ includeUnavailableFixtures: true }) as never;
+
+		const initial = await loadPublicBookingState(supabase, { slug: business.slug });
+		expect(initial.services.map((service) => service.id)).toEqual(['svc-1']);
+
+		const professionalStep = await loadPublicBookingState(supabase, {
+			slug: business.slug,
+			serviceId: 'svc-1'
+		});
+		expect(professionalStep.professionals.map((professional) => professional.id)).toEqual([
+			'pro-1'
+		]);
+	});
+
 	it('la fecha elegida dentro del rango escaneado se filtra sin query extra', async () => {
 		const supabase = createSupabaseMock() as never;
 		const today = todayForBusiness(business);
@@ -346,11 +441,11 @@ describe('loadPublicBookingState (performance del flujo público)', () => {
 		});
 
 		expect(state.issue).toBeNull();
-		expect(state.slots).toHaveLength(1);
-		expect(state.slots[0]?.date).toBe(date);
-		// 1 escaneo para next_available de profesionales + 1 escaneo de días.
-		// La fecha puntual NO dispara una tercera llamada: se filtra del escaneo.
-		expect(getAvailabilitySlotsMock).toHaveBeenCalledTimes(2);
+		expect(state.slots.length).toBeGreaterThan(0);
+		expect(state.slots.every((slot) => slot.date === date)).toBe(true);
+		// La fecha puntual se filtra de la foto compartida y no dispara el camino
+		// tradicional de cinco consultas de disponibilidad.
+		expect(getAvailabilitySlotsMock).not.toHaveBeenCalled();
 		const dates = state.days.map((day) => day.date);
 		expect(dates).toEqual([...dates].sort());
 	});
@@ -382,7 +477,7 @@ describe('loadPublicBookingState (performance del flujo público)', () => {
 		expect(getAvailabilitySlotsMock).toHaveBeenCalledTimes(callsAfterFirst);
 	});
 
-	it('una fecha fuera del rango escaneado consulta solo ese día puntual', async () => {
+	it('incluye una fecha lejana en el único rango escaneado, sin query puntual', async () => {
 		const supabase = createSupabaseMock() as never;
 		const today = todayForBusiness(business);
 		const farDate = addDaysToDateString(today, 20);
@@ -395,15 +490,9 @@ describe('loadPublicBookingState (performance del flujo público)', () => {
 		});
 
 		expect(state.issue).toBeNull();
-		expect(state.slots).toHaveLength(1);
-		expect(state.slots[0]?.date).toBe(farDate);
-		expect(getAvailabilitySlotsMock).toHaveBeenCalledTimes(3);
-		const lastCall = getAvailabilitySlotsMock.mock.calls.at(-1)?.[1] as {
-			fromDate: string;
-			toDate: string;
-		};
-		expect(lastCall.fromDate).toBe(farDate);
-		expect(lastCall.toDate).toBe(farDate);
+		expect(state.slots.length).toBeGreaterThan(0);
+		expect(state.slots.every((slot) => slot.date === farDate)).toBe(true);
+		expect(getAvailabilitySlotsMock).not.toHaveBeenCalled();
 		// El día lejano se integra ordenado a la lista de días.
 		const dates = state.days.map((day) => day.date);
 		expect(dates).toEqual([...dates].sort());
