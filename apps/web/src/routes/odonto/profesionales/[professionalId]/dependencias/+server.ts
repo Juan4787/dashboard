@@ -21,7 +21,7 @@ export const GET: RequestHandler = async ({ params, locals, fetch, cookies, setH
 	const professionalId = params.professionalId;
 	const [appointments, entries, followUpCount] = await Promise.all([
 		admin
-			.from('appointments')
+			.from('appointment_professionals')
 			.select('id', { count: 'exact', head: true })
 			.eq('business_id', businessId)
 			.eq('professional_id', professionalId),

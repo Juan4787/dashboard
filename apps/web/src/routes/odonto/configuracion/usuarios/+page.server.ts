@@ -485,7 +485,8 @@ const scheduleBlocksFromForm = (
 					.map((value) => Number(value))
 					.filter((value) => Number.isInteger(value) && value >= 0 && value <= 6),
 				timeRanges: String(form.get('time_ranges') ?? ''),
-				slotInterval: String(form.get('slot_interval_minutes') ?? 15)
+				slotInterval: String(form.get('break_minutes') ?? 15),
+				gridInterval: String(form.get('slot_interval_minutes') ?? 15)
 			}
 		];
 	}

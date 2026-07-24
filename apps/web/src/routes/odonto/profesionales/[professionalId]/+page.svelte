@@ -44,6 +44,7 @@
 		start_time: string;
 		end_time: string;
 		slot_interval_minutes: number;
+		break_minutes: number;
 		is_active: boolean;
 		created_at: string | null;
 	};
@@ -164,7 +165,9 @@
 					? block.weekdays.map(Number).filter((item) => Number.isInteger(item) && item >= 0 && item <= 6)
 					: [],
 				timeRanges: typeof block?.timeRanges === 'string' ? block.timeRanges : '',
-				slotInterval: typeof block?.slotInterval === 'string' ? block.slotInterval : '15'
+				slotInterval: typeof block?.slotInterval === 'string' ? block.slotInterval : '15',
+				gridInterval:
+					typeof block?.gridInterval === 'string' ? block.gridInterval : '15'
 			}));
 			return { blocks: blocks.length > 0 ? blocks : cloneDraft(fallback).schedule.blocks };
 		}
@@ -178,7 +181,14 @@
 							.map(Number)
 							.filter((item: number) => Number.isInteger(item) && item >= 0 && item <= 6),
 						timeRanges: typeof legacySchedule.timeRanges === 'string' ? legacySchedule.timeRanges : '',
-						slotInterval: typeof legacySchedule.slotInterval === 'string' ? legacySchedule.slotInterval : '15'
+						slotInterval:
+							typeof legacySchedule.breakMinutes === 'string'
+								? legacySchedule.breakMinutes
+								: '15',
+						gridInterval:
+							typeof legacySchedule.slotInterval === 'string'
+								? legacySchedule.slotInterval
+								: '15'
 					}
 				]
 			};
@@ -439,8 +449,9 @@
 	};
 
 	const scheduleBlockIntervalStatus = (block: ScheduleBlockDraft) => {
-		const interval = Number(block.slotInterval || 15);
-		if (!Number.isInteger(interval) || interval < 5 || interval > 120) return 'Entre 5 y 120 minutos';
+		const rawInterval = String(block.slotInterval ?? '').trim();
+		const interval = rawInterval === '' ? Number.NaN : Number(rawInterval);
+		if (!Number.isInteger(interval) || interval < 0) return 'Ingresá un entero desde 0';
 		return scheduleBlockIntervalDirty(block) ? 'Sin guardar' : '';
 	};
 
@@ -521,7 +532,9 @@
 
 	const removeScheduleBlock = (blockId: string | undefined) => {
 		if (draft.schedule.blocks.length <= 1) {
-			draft.schedule.blocks = [{ ...draft.schedule.blocks[0], weekdays: [], timeRanges: '', slotInterval: '15' }];
+			draft.schedule.blocks = [
+				{ ...draft.schedule.blocks[0], weekdays: [], timeRanges: '', slotInterval: '15' }
+			];
 		} else {
 			draft.schedule.blocks = draft.schedule.blocks.filter((block) => block.id !== blockId);
 		}
@@ -1234,7 +1247,7 @@
 								<label>
 									<span class="ux-label flex flex-wrap items-center gap-2">
 										Descanso entre consultas
-										{#if intervalStatus === 'Entre 5 y 120 minutos'}
+										{#if intervalStatus === 'Ingresá un entero desde 0'}
 											<span class="ux-inline-status ux-inline-status-danger">{intervalStatus}</span>
 										{:else if intervalStatus}
 											<span class="ux-inline-status ux-inline-status-warning">{intervalStatus}</span>
@@ -1243,17 +1256,19 @@
 									<input
 										type="number"
 										inputmode="numeric"
-										min="5"
-										max="120"
-										step="5"
+										min="0"
+										step="1"
 										value={block.slotInterval}
 										disabled={!canOperate}
 										class={`ux-input text-lg font-bold ${fieldStateClass(
 											intervalStatus === 'Sin guardar',
-											intervalStatus === 'Entre 5 y 120 minutos'
+											intervalStatus === 'Ingresá un entero desde 0'
 										)}`}
 										oninput={(event) => updateScheduleBlock(block.id, { slotInterval: (event.currentTarget as HTMLInputElement).value })}
 									/>
+									<span class="mt-2 block text-xs font-semibold leading-relaxed text-white/45">
+										0 permite otro turno inmediatamente. También podés usar cualquier entero, por ejemplo 2, 23 o 60.
+									</span>
 								</label>
 							</div>
 						</div>
@@ -1399,7 +1414,7 @@
 											<form method="POST" action="?/delete_rule" class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-2" use:enhance={refreshEnhance}>
 												<input type="hidden" name="rule_id" value={rule.id} />
 												<span class="text-sm font-bold text-white">{rule.start_time.slice(0, 5)} - {rule.end_time.slice(0, 5)}</span>
-												<span class="text-xs font-bold text-white/50">Descanso entre consultas: {rule.slot_interval_minutes} min</span>
+												<span class="text-xs font-bold text-white/50">Descanso entre consultas: {rule.break_minutes} min</span>
 												<button type="submit" disabled={!canOperate} class="text-xs font-black text-red-200 disabled:opacity-50">Quitar</button>
 											</form>
 										{/each}

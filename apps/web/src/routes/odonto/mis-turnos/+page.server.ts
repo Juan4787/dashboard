@@ -52,9 +52,11 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 		visibleProfessionalIds.length > 0
 			? await supabase
 					.from('appointments')
-					.select('id, starts_at, ends_at, status, source, service_name_snapshot, professional_name_snapshot, patients(id, full_name, phone_e164)')
+					.select(
+						'id, starts_at, ends_at, status, source, service_name_snapshot, professional_name_snapshot, patients(id, full_name, phone_e164), appointment_professionals!inner(professional_id)'
+					)
 					.eq('business_id', business.business.id)
-					.in('professional_id', visibleProfessionalIds)
+					.in('appointment_professionals.professional_id', visibleProfessionalIds)
 					.gte('starts_at', dayStart.toISOString())
 					.lte('starts_at', dayEnd.toISOString())
 					.order('starts_at')
@@ -64,9 +66,11 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 		visibleProfessionalIds.length > 0
 			? await supabase
 					.from('appointments')
-					.select('id, starts_at, ends_at, status, source, service_name_snapshot, professional_name_snapshot, patients(id, full_name, phone_e164)')
+					.select(
+						'id, starts_at, ends_at, status, source, service_name_snapshot, professional_name_snapshot, patients(id, full_name, phone_e164), appointment_professionals!inner(professional_id)'
+					)
 					.eq('business_id', business.business.id)
-					.in('professional_id', visibleProfessionalIds)
+					.in('appointment_professionals.professional_id', visibleProfessionalIds)
 					.gt('starts_at', dayEnd.toISOString())
 					.order('starts_at')
 					.limit(30)

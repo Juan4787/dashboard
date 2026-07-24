@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	assertCanTransitionAppointment,
+	createJointAppointment,
 	createOrFindPatientForAppointment,
 	getHumanAppointmentErrorMessage,
 	rescheduleAppointment
@@ -110,14 +111,15 @@ describe('appointment transitions', () => {
 
 describe('appointment error messages', () => {
 	it('maps overlap and domain errors to human messages', () => {
-		expect(getHumanAppointmentErrorMessage({ code: '23P01' })).toBe(
-			'Ese horario ya fue reservado. Elegí otro horario disponible.'
-		);
+		const overlapMessage = getHumanAppointmentErrorMessage({ code: '23P01' });
+		expect(overlapMessage).toContain('al menos uno de los profesionales');
+		expect(overlapMessage).toContain('No se reservó a ningún integrante');
+		expect(overlapMessage).toContain('elegí otra opción disponible');
 		expect(getHumanAppointmentErrorMessage(new Error('PROFESSIONAL_SERVICE_NOT_ASSIGNED'))).toBe(
-			'Este profesional no ofrece ese servicio.'
+			'Al menos uno de los profesionales seleccionados no está habilitado para este procedimiento. Volvé al paso del equipo, quitá a ese profesional o asignale el procedimiento desde su configuración.'
 		);
-		expect(getHumanAppointmentErrorMessage(new Error('PATIENT_BLOCKED'))).toBe(
-			'Ese paciente está bloqueado.'
+		expect(getHumanAppointmentErrorMessage(new Error('PATIENT_BLOCKED'))).toContain(
+			'Revisá su ficha'
 		);
 	});
 });
@@ -169,6 +171,68 @@ describe('patient identity during appointment creation', () => {
 	});
 });
 
+describe('joint appointment creation', () => {
+	it('envía una sola operación atómica con todo el equipo y la excepción de descanso', async () => {
+		const rpcCalls: Array<{ name: string; payload: Record<string, unknown> }> = [];
+		const supabase = {
+			from: (table: string) => {
+				if (table !== 'patients') throw new Error(`Tabla inesperada: ${table}`);
+				return {
+					select: () => {
+						const query: any = {
+							eq: () => query,
+							maybeSingle: async () => ({
+								data: { id: 'patient-1', blocked: false },
+								error: null
+							})
+						};
+						return query;
+					}
+				};
+			},
+			rpc: (name: string, payload: Record<string, unknown>) => {
+				rpcCalls.push({ name, payload });
+				return {
+					single: async () => ({
+						data: {
+							id: 'appointment-1',
+							professional_name_snapshot: 'Dra. Uno, Dr. Dos'
+						},
+						error: null
+					})
+				};
+			}
+		};
+
+		const created = await createJointAppointment(supabase as never, {
+			businessId: 'business-1',
+			createdByUserId: 'user-1',
+			patientId: 'patient-1',
+			serviceId: 'service-1',
+			professionalIds: ['professional-1', 'professional-2'],
+			startsAt: new Date('2026-07-30T13:00:00.000Z'),
+			ignoreBreak: true
+		});
+
+		expect(created.id).toBe('appointment-1');
+		expect(rpcCalls).toEqual([
+			{
+				name: 'create_joint_appointment',
+				payload: {
+					p_business_id: 'business-1',
+					p_patient_id: 'patient-1',
+					p_service_id: 'service-1',
+					p_professional_ids: ['professional-1', 'professional-2'],
+					p_starts_at: '2026-07-30T13:00:00.000Z',
+					p_internal_note: null,
+					p_created_by_user_id: 'user-1',
+					p_ignore_break: true
+				}
+			}
+		]);
+	});
+});
+
 describe('rescheduleAppointment y versionado de calendario', () => {
 	const baseRow = {
 		id: 'apt-1',
@@ -213,6 +277,23 @@ describe('rescheduleAppointment y versionado de calendario', () => {
 		});
 		expect(updates[0].calendar_sequence).toBe(1);
 		expect(updates[0].calendar_update_required_at).toBeNull();
+	});
+
+	it('vuelve a respetar el descanso salvo que la nueva reprogramación lo ignore explícitamente', async () => {
+		const { supabase, updates } = createRescheduleMock({
+			...baseRow,
+			ignore_break: true,
+			calendar_sequence: 0,
+			calendar_action_count: 0
+		});
+		await rescheduleAppointment(supabase, {
+			businessId: 'biz-1',
+			appointmentId: 'apt-1',
+			userId: 'user-1',
+			startsAt: newStart,
+			now
+		});
+		expect(updates[0].ignore_break).toBe(false);
 	});
 
 	it('rechaza reprogramar turnos terminales', async () => {

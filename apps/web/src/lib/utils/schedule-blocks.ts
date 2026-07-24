@@ -4,13 +4,20 @@ export type ScheduleBlockDraft = {
 	id?: string;
 	weekdays: number[];
 	timeRanges: string;
+	/**
+	 * Descanso real entre consultas. El nombre se conserva para que los
+	 * borradores antiguos sigan pudiendo recuperarse sin perder información.
+	 */
 	slotInterval: string;
+	/** Separación interna de la grilla de horarios; no se muestra como descanso. */
+	gridInterval?: string;
 };
 
 export type NormalizedScheduleBlock = {
 	weekdays: number[];
 	ranges: TimeRange[];
 	slotIntervalMinutes: number;
+	breakMinutes: number;
 };
 
 type RuleLike = {
@@ -18,6 +25,7 @@ type RuleLike = {
 	start_time: string;
 	end_time: string;
 	slot_interval_minutes: number;
+	break_minutes?: number | null;
 };
 
 export const DEFAULT_WEEKDAYS = [1, 2, 3, 4, 5];
@@ -26,14 +34,16 @@ export const createEmptyScheduleBlock = (id?: string): ScheduleBlockDraft => ({
 	id,
 	weekdays: [],
 	timeRanges: '',
-	slotInterval: '15'
+	slotInterval: '15',
+	gridInterval: '15'
 });
 
 export const createDefaultScheduleBlock = (id?: string): ScheduleBlockDraft => ({
 	id,
 	weekdays: [...DEFAULT_WEEKDAYS],
 	timeRanges: '',
-	slotInterval: '15'
+	slotInterval: '15',
+	gridInterval: '15'
 });
 
 export const normalizeScheduleWeekdays = (weekdays: unknown) => {
@@ -83,16 +93,29 @@ export const validateScheduleBlocks = (
 			return { ok: false, message: `Los horarios del ${label} no pueden superponerse.`, blockIndex: index };
 		}
 
-		const slotIntervalMinutes = Number(block.slotInterval || 15);
-		if (!Number.isInteger(slotIntervalMinutes) || slotIntervalMinutes < 5 || slotIntervalMinutes > 120) {
+		const rawBreakMinutes = String(block.slotInterval ?? '').trim();
+		const breakMinutes = rawBreakMinutes === '' ? Number.NaN : Number(rawBreakMinutes);
+		if (!Number.isInteger(breakMinutes) || breakMinutes < 0) {
 			return {
 				ok: false,
-				message: `El descanso entre consultas del ${label} debe estar entre 5 y 120 minutos.`,
+				message: `El descanso entre consultas del ${label} debe ser una cantidad entera de minutos igual o superior a 0. Podés usar, por ejemplo, 0, 2, 23 o 60.`,
+				blockIndex: index
+			};
+		}
+		const slotIntervalMinutes = Number(block.gridInterval || 15);
+		if (
+			!Number.isInteger(slotIntervalMinutes) ||
+			slotIntervalMinutes < 1 ||
+			slotIntervalMinutes > 120
+		) {
+			return {
+				ok: false,
+				message: `No pudimos conservar la grilla horaria del ${label}. Volvé a cargar ese bloque y guardalo otra vez.`,
 				blockIndex: index
 			};
 		}
 
-		normalized.push({ weekdays, ranges, slotIntervalMinutes });
+		normalized.push({ weekdays, ranges, slotIntervalMinutes, breakMinutes });
 	}
 
 	if (normalized.length === 0) {
@@ -112,7 +135,8 @@ export const canonicalScheduleBlocks = (blocks: ScheduleBlockDraft[]) => {
 			.map((block) => ({
 				weekdays: block.weekdays,
 				ranges: rangeKey(block.ranges),
-				slotIntervalMinutes: block.slotIntervalMinutes
+				slotIntervalMinutes: block.slotIntervalMinutes,
+				breakMinutes: block.breakMinutes
 			}))
 			.sort((a, b) => a.weekdays.join(',').localeCompare(b.weekdays.join(',')))
 	);
@@ -123,7 +147,8 @@ export const serializeScheduleBlocks = (blocks: ScheduleBlockDraft[]) =>
 		blocks.map((block) => ({
 			weekdays: normalizeScheduleWeekdays(block.weekdays),
 			timeRanges: block.timeRanges,
-			slotInterval: String(block.slotInterval || '15')
+			slotInterval: String(block.slotInterval),
+			gridInterval: String(block.gridInterval || '15')
 		}))
 	);
 
@@ -139,7 +164,8 @@ export const parseScheduleBlocksJson = (raw: string): ScheduleBlockDraft[] | nul
 	return parsed.map((item: any) => ({
 		weekdays: normalizeScheduleWeekdays(item?.weekdays),
 		timeRanges: String(item?.timeRanges ?? item?.time_ranges ?? ''),
-		slotInterval: String(item?.slotInterval ?? item?.slot_interval_minutes ?? '15')
+		slotInterval: String(item?.breakMinutes ?? item?.break_minutes ?? item?.slotInterval ?? '15'),
+		gridInterval: String(item?.gridInterval ?? item?.slot_interval_minutes ?? '15')
 	}));
 };
 
@@ -167,7 +193,18 @@ export const scheduleBlocksFromRules = (rules: RuleLike[], idPrefix = 'block'): 
 			intervalCounts.set(rule.slot_interval_minutes, (intervalCounts.get(rule.slot_interval_minutes) ?? 0) + 1);
 		}
 		const [slotInterval] = [...intervalCounts.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0] ?? [15];
-		const key = `${rangeKey(ranges)}|${slotInterval}`;
+		const breakCounts = new Map<number, number>();
+		for (const rule of sortedRules) {
+			const breakMinutes = Math.max(
+				0,
+				Number(rule.break_minutes ?? rule.slot_interval_minutes ?? 15)
+			);
+			breakCounts.set(breakMinutes, (breakCounts.get(breakMinutes) ?? 0) + 1);
+		}
+		const [breakMinutes] = [...breakCounts.entries()].sort(
+			(a, b) => b[1] - a[1] || a[0] - b[0]
+		)[0] ?? [15];
+		const key = `${rangeKey(ranges)}|${slotInterval}|${breakMinutes}`;
 		const existing = groups.get(key);
 		if (existing) {
 			existing.weekdays = [...existing.weekdays, weekday].sort((a, b) => a - b);
@@ -177,10 +214,10 @@ export const scheduleBlocksFromRules = (rules: RuleLike[], idPrefix = 'block'): 
 			id: `${idPrefix}-${groups.size + 1}`,
 			weekdays: [weekday],
 			timeRanges: formatTimeRanges(ranges),
-			slotInterval: String(slotInterval)
+			slotInterval: String(breakMinutes),
+			gridInterval: String(slotInterval)
 		});
 	}
 
 	return [...groups.values()];
 };
-

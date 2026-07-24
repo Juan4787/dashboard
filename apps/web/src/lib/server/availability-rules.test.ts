@@ -36,12 +36,14 @@ describe('replaceProfessionalScheduleBlocks', () => {
 				{
 					weekdays: [1, 5],
 					ranges: [{ start: '08:00', end: '15:00' }],
-					slotIntervalMinutes: 15
+					slotIntervalMinutes: 15,
+					breakMinutes: 0
 				},
 				{
 					weekdays: [6],
 					ranges: [{ start: '09:00', end: '13:00' }],
-					slotIntervalMinutes: 20
+					slotIntervalMinutes: 20,
+					breakMinutes: 23
 				}
 			]
 		});
@@ -60,6 +62,7 @@ describe('replaceProfessionalScheduleBlocks', () => {
 						start_time: '08:00',
 						end_time: '15:00',
 						slot_interval_minutes: 15,
+						break_minutes: 0,
 						is_active: true
 					},
 					{
@@ -69,6 +72,7 @@ describe('replaceProfessionalScheduleBlocks', () => {
 						start_time: '08:00',
 						end_time: '15:00',
 						slot_interval_minutes: 15,
+						break_minutes: 0,
 						is_active: true
 					},
 					{
@@ -78,6 +82,7 @@ describe('replaceProfessionalScheduleBlocks', () => {
 						start_time: '09:00',
 						end_time: '13:00',
 						slot_interval_minutes: 20,
+						break_minutes: 23,
 						is_active: true
 					}
 				]
@@ -85,4 +90,3 @@ describe('replaceProfessionalScheduleBlocks', () => {
 		]);
 	});
 });
-

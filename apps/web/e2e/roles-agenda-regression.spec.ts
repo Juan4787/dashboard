@@ -28,6 +28,12 @@ const e2eDate = () => {
 	return value.toISOString().slice(0, 10);
 };
 
+const addIsoDays = (date: string, days: number) => {
+	const value = new Date(`${date}T12:00:00.000Z`);
+	value.setUTCDate(value.getUTCDate() + days);
+	return value.toISOString().slice(0, 10);
+};
+
 const rest = () => {
 	if (!supabaseUrl || !serviceRoleKey) {
 		throw new Error('Faltan ODONTO_SUPABASE_URL u ODONTO_SUPABASE_SERVICE_ROLE_KEY.');
@@ -168,6 +174,7 @@ const createFixture = async (admin: SupabaseClient): Promise<Fixture> => {
 					start_time: '09:00:00',
 					end_time: '12:00:00',
 					slot_interval_minutes: 15,
+					break_minutes: 0,
 					is_active: true
 				})
 			);
@@ -256,12 +263,18 @@ const login = async (page: Page, fixture: Fixture) => {
 const postAction = async (
 	page: Page,
 	url: string,
-	fields: Record<string, string>
+	fields: Record<string, string | string[]>
 ): Promise<{ status: number; text: string; url: string }> =>
 	page.evaluate(
 		async ({ url, fields }) => {
 			const form = new FormData();
-			for (const [key, value] of Object.entries(fields)) form.set(key, value);
+			for (const [key, value] of Object.entries(fields)) {
+				if (Array.isArray(value)) {
+					for (const item of value) form.append(key, item);
+				} else {
+					form.set(key, value);
+				}
+			}
 			const response = await fetch(url, {
 				method: 'POST',
 				body: form,
@@ -520,5 +533,156 @@ test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 		await page.goto(`/odonto/turnos/${appointment?.id}?from_date=${fixture.date}&reprogram_date=${fixture.date}`);
 		const reprogramPanelAfterBlock = await openReprogramPanel(page);
 		await expect(reprogramPanelAfterBlock.getByRole('button', { name: '10:30' })).toHaveCount(0);
+
+		// Turno conjunto desde la interfaz: el primer horario común es 09:45,
+		// justo cuando queda libre el último profesional requerido.
+		await page.goto(`/odonto/agenda?date=${fixture.date}`);
+		await expect(page).toHaveURL(/\/odonto\/agenda\?date=/);
+		await page.waitForLoadState('networkidle');
+		const openCreateButton = page.getByRole('button', { name: '+ Nuevo turno', exact: true });
+		await expect(async () => {
+			if (await openCreateButton.isVisible().catch(() => false)) await openCreateButton.click();
+			await expect(page.getByRole('button', { name: 'Cerrar', exact: true })).toBeVisible({
+				timeout: 1500
+			});
+		}).toPass({ timeout: 10_000 });
+		const wizardHeading = page.getByRole('heading', {
+			name: '¿Qué necesita el paciente?',
+			exact: true
+		});
+		const wizard = page.locator('form').filter({
+			has: page.locator('input[name="booking_mode"]')
+		});
+		await expect(wizard).toBeVisible();
+		await expect(wizardHeading).toBeVisible();
+		await wizard
+			.getByRole('button')
+			.filter({ hasText: `E2E Consulta ${fixture.suffix}` })
+			.click();
+		await wizard.getByRole('button', { name: 'Equipo de profesionales', exact: true }).click();
+		await wizard
+			.getByRole('button')
+			.filter({ hasText: `E2E Profesional Base ${fixture.suffix}` })
+			.click();
+		await wizard
+			.getByRole('button')
+			.filter({ hasText: `E2E Profesional Otro ${fixture.suffix}` })
+			.click();
+		const commonSlotsButton = wizard.getByRole('button', {
+			name: 'Ver horarios de 2 profesionales',
+			exact: true
+		});
+		await expect(commonSlotsButton).toBeEnabled({ timeout: 15_000 });
+		await commonSlotsButton.click();
+		await expect(wizard.getByText('Equipo seleccionado', { exact: true })).toBeVisible();
+		await wizard.getByRole('button', { name: '09:45', exact: true }).first().click();
+		await wizard.getByRole('button', { name: 'Buscar paciente', exact: true }).click();
+		await wizard.getByText(`E2E Paciente ${fixture.suffix}`, { exact: true }).click();
+		await Promise.all([
+			page.waitForURL(/\/odonto\/turnos\/[0-9a-f-]+/),
+			wizard.getByRole('button', { name: 'Crear turno conjunto', exact: true }).click()
+		]);
+
+		const jointId = page.url().match(/\/odonto\/turnos\/([0-9a-f-]+)/)?.[1];
+		if (!jointId) throw new Error('La interfaz no abrió el detalle del turno conjunto creado.');
+		await expect(page.getByText('Turno conjunto · 2 profesionales', { exact: true })).toBeVisible();
+		await expect(page.getByText(`E2E Profesional Base ${fixture.suffix}`, { exact: true })).toBeVisible();
+		await expect(page.getByText(`E2E Profesional Otro ${fixture.suffix}`, { exact: true })).toBeVisible();
+
+		const { data: jointAppointment, error: jointAppointmentError } = await admin
+			.from('appointments')
+			.select('id, professional_name_snapshot, starts_at, ends_at')
+			.eq('business_id', fixture.businessId)
+			.eq('id', jointId)
+			.single();
+		if (jointAppointmentError) throw jointAppointmentError;
+		expect(jointAppointment.professional_name_snapshot).toContain(
+			`E2E Profesional Base ${fixture.suffix}`
+		);
+		expect(jointAppointment.professional_name_snapshot).toContain(
+			`E2E Profesional Otro ${fixture.suffix}`
+		);
+
+		const { data: jointAllocations, error: jointAllocationsError } = await admin
+			.from('appointment_professionals')
+			.select('professional_id, starts_at, ends_at')
+			.eq('business_id', fixture.businessId)
+			.eq('appointment_id', jointId)
+			.order('position');
+		if (jointAllocationsError) throw jointAllocationsError;
+		const jointTeam = jointAllocations ?? [];
+		expect(jointTeam).toHaveLength(2);
+		expect(jointTeam.map((allocation) => allocation.professional_id)).toEqual([
+			fixture.professionalId,
+			fixture.otherProfessionalId
+		]);
+
+		const overlapAttempt = await postAction(page, '/odonto/agenda?/create_appointment', {
+			service_id: fixture.serviceId,
+			professional_id: fixture.otherProfessionalId,
+			date: fixture.date,
+			time: '09:45',
+			patient_id: fixture.secondPatientId
+		});
+		expect(overlapAttempt.text).toContain(
+			'Ese horario ya no está libre para el profesional seleccionado'
+		);
+
+		// La reprogramación vuelve a calcular el equipo completo y mueve las dos
+		// asignaciones en una sola operación.
+		const jointNextDate = addIsoDays(fixture.date, 1);
+		const jointNextStart = `${jointNextDate}T12:00:00.000Z`; // 09:00 en Córdoba.
+		const jointReschedule = await postAction(
+			page,
+			`/odonto/turnos/${jointId}?/reschedule`,
+			{
+				slot_starts_at: jointNextStart,
+				reprogram_date: jointNextDate,
+				ignore_break: 'false'
+			}
+		);
+		expect(jointReschedule.status).toBeLessThan(500);
+
+		const { data: movedAllocations, error: movedAllocationsError } = await admin
+			.from('appointment_professionals')
+			.select('professional_id, starts_at')
+			.eq('business_id', fixture.businessId)
+			.eq('appointment_id', jointId)
+			.order('position');
+		if (movedAllocationsError) throw movedAllocationsError;
+		const movedTeam = movedAllocations ?? [];
+		expect(movedTeam).toHaveLength(2);
+		expect(
+			movedTeam.every(
+				(allocation) => new Date(allocation.starts_at).toISOString() === jointNextStart
+			)
+		).toBe(true);
+
+		// El campo de descanso acepta un entero arbitrario y conserva la grilla
+		// interna. Se prueba por UI y luego directamente en las reglas guardadas.
+		await page.goto(`/odonto/profesionales/${fixture.professionalId}?tab=horarios`);
+		await page.waitForLoadState('networkidle');
+		const scheduleForm = page.locator('form[action="?/save_weekly_rules"]');
+		const breakInput = scheduleForm.locator('input[type="number"]').first();
+		await expect(breakInput).toHaveValue('0');
+		await breakInput.fill('23');
+		const saveScheduleButton = scheduleForm.getByRole('button', {
+			name: 'Guardar sólo horarios',
+			exact: true
+		});
+		await expect(saveScheduleButton).toBeEnabled({ timeout: 5_000 });
+		await saveScheduleButton.click();
+		await expect(page.getByText('Horarios guardados.', { exact: true })).toBeVisible();
+
+		const { data: savedRules, error: savedRulesError } = await admin
+			.from('availability_rules')
+			.select('slot_interval_minutes, break_minutes')
+			.eq('business_id', fixture.businessId)
+			.eq('professional_id', fixture.professionalId);
+		if (savedRulesError) throw savedRulesError;
+		const storedRules = savedRules ?? [];
+		expect(storedRules.length).toBeGreaterThan(0);
+		expect(storedRules.every((rule) => rule.break_minutes === 23)).toBe(true);
+		expect(storedRules.every((rule) => rule.slot_interval_minutes === 15)).toBe(true);
 	});
 });

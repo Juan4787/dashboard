@@ -59,12 +59,21 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 
 	let appointmentsQuery = supabase
 		.from('appointments')
-		.select('id, professional_id, starts_at, status')
+		.select(
+			selectedProfessionalId
+				? 'id, professional_id, starts_at, status, appointment_professionals!inner(professional_id)'
+				: 'id, professional_id, starts_at, status'
+		)
 		.eq('business_id', business.business.id)
 		.gte('starts_at', rangeStart.toISOString())
 		.lte('starts_at', rangeEnd.toISOString())
 		.order('starts_at');
-	if (selectedProfessionalId) appointmentsQuery = appointmentsQuery.eq('professional_id', selectedProfessionalId);
+	if (selectedProfessionalId) {
+		appointmentsQuery = appointmentsQuery.eq(
+			'appointment_professionals.professional_id',
+			selectedProfessionalId
+		);
+	}
 
 	const [{ data: appointments, error: appointmentsError }, { data: professionals }] = await Promise.all([
 		appointmentsQuery,

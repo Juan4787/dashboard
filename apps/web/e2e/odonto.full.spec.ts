@@ -6,6 +6,9 @@ const email = process.env.E2E_EMAIL;
 const password = process.env.E2E_PASSWORD;
 
 const uniqueSuffix = () => `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+const publicPatientMarker = (value: string) =>
+	value.replace(/\d/g, (digit) => 'abcdefghij'[Number(digit)]).replaceAll('-', '');
+const PUBLIC_PATIENT_E2E_PREFIX = 'Pruebaautomatizada';
 
 const readEnvFile = () => {
 	let current = process.cwd();
@@ -108,7 +111,12 @@ const restDelete = async (path: string, { optional = false } = {}) => {
 // también corridas previas. La service_role se usa sólo dentro de este proceso.
 const cleanupE2EFixtures = async () => {
 	const profs = await restGetMany<{ id: string }>('professionals?name=like.E2E*&select=id');
-	const patients = await restGetMany<{ id: string }>('patients?full_name=like.E2E*&select=id');
+	const patients = [
+		...(await restGetMany<{ id: string }>('patients?full_name=like.E2E*&select=id')),
+		...(await restGetMany<{ id: string }>(
+			`patients?full_name=like.${PUBLIC_PATIENT_E2E_PREFIX}*&select=id`
+		))
+	];
 	const profIds = profs.map((p) => p.id);
 	const patientIds = patients.map((p) => p.id);
 	const inList = (ids: string[]) => `(${ids.join(',')})`;
@@ -274,8 +282,9 @@ test.describe('Dental Suite - flujo operativo completo', () => {
 		const unassignedProfessionalName = `E2E No ofrece ${suffix}`;
 		const serviceName = `E2E Limpieza ${suffix}`;
 		const unavailableServiceName = `E2E Sin disponibilidad ${suffix}`;
-		const patientName = `E2E Paciente ${suffix}`;
-		const overlapPatient = `E2E Solapado ${suffix}`;
+		const patientMarker = publicPatientMarker(suffix);
+		const patientName = `${PUBLIC_PATIENT_E2E_PREFIX} Paciente ${patientMarker}`;
+		const overlapPatient = `${PUBLIC_PATIENT_E2E_PREFIX} Solapado ${patientMarker}`;
 		const patientPhone = `+54911${String(Math.floor(10000000 + Math.random() * 90000000)).slice(0, 8)}`;
 		const overlapPhone = `+54911${String(Math.floor(10000000 + Math.random() * 90000000)).slice(0, 8)}`;
 
@@ -359,7 +368,13 @@ test.describe('Dental Suite - flujo operativo completo', () => {
 			},
 			{ serviceId, professionalId, selectedDate, overlapPatient, overlapPhone }
 		);
-		expect(overlapResult.text).toContain('Ese horario no está disponible');
+		expect(overlapResult.text).toContain(
+			'Ese horario ya no está libre para el profesional seleccionado.'
+		);
+		expect(overlapResult.text).toContain('No se creó el turno.');
+		expect(overlapResult.text).toContain(
+			'Volvé al paso de horarios, actualizá la disponibilidad y elegí otra opción.'
+		);
 
 		await page.goto(`/odonto/agenda?date=${selectedDate}`);
 		await page.waitForLoadState('networkidle');

@@ -15,10 +15,55 @@ describe('schedule blocks', () => {
 		expect(result.ok).toBe(true);
 		if (!result.ok) return;
 		expect(result.blocks).toEqual([
-			{ weekdays: [1, 3, 5], ranges: [{ start: '08:00', end: '15:00' }], slotIntervalMinutes: 15 },
-			{ weekdays: [6], ranges: [{ start: '09:00', end: '13:00' }], slotIntervalMinutes: 15 }
+			{
+				weekdays: [1, 3, 5],
+				ranges: [{ start: '08:00', end: '15:00' }],
+				slotIntervalMinutes: 15,
+				breakMinutes: 15
+			},
+			{
+				weekdays: [6],
+				ranges: [{ start: '09:00', end: '13:00' }],
+				slotIntervalMinutes: 15,
+				breakMinutes: 15
+			}
 		]);
 	});
+
+	it.each(['0', '2', '23', '60'])(
+		'acepta %s minutos enteros de descanso sin cambiar la grilla interna',
+		(value) => {
+			const result = validateScheduleBlocks([
+				{
+					weekdays: [1],
+					timeRanges: '9 a 13',
+					slotInterval: value,
+					gridInterval: '15'
+				}
+			]);
+
+			expect(result.ok).toBe(true);
+			if (!result.ok) return;
+			expect(result.blocks[0]).toMatchObject({
+				breakMinutes: Number(value),
+				slotIntervalMinutes: 15
+			});
+		}
+	);
+
+	it.each(['-1', '2.5', ''])(
+		'rechaza el descanso inválido %j con una explicación y ejemplos',
+		(value) => {
+			const result = validateScheduleBlocks([
+				{ weekdays: [1], timeRanges: '9 a 13', slotInterval: value }
+			]);
+
+			expect(result).toMatchObject({ ok: false });
+			if (result.ok) return;
+			expect(result.message).toContain('entera');
+			expect(result.message).toContain('0, 2, 23 o 60');
+		}
+	);
 
 	it('rechaza el mismo día en más de un bloque para evitar reemplazos ambiguos', () => {
 		const result = validateScheduleBlocks([
@@ -40,8 +85,20 @@ describe('schedule blocks', () => {
 		]);
 
 		expect(blocks).toEqual([
-			{ id: 'block-1', weekdays: [1, 5], timeRanges: '08:00-15:00', slotInterval: '15' },
-			{ id: 'block-2', weekdays: [6], timeRanges: '09:00-13:00', slotInterval: '15' }
+			{
+				id: 'block-1',
+				weekdays: [1, 5],
+				timeRanges: '08:00-15:00',
+				slotInterval: '15',
+				gridInterval: '15'
+			},
+			{
+				id: 'block-2',
+				weekdays: [6],
+				timeRanges: '09:00-13:00',
+				slotInterval: '15',
+				gridInterval: '15'
+			}
 		]);
 	});
 
@@ -51,4 +108,3 @@ describe('schedule blocks', () => {
 		).toBe(canonicalScheduleBlocks([{ weekdays: [1, 5], timeRanges: '08:00-15:00', slotInterval: '15' }]));
 	});
 });
-

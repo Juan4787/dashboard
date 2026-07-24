@@ -25,12 +25,36 @@ export const GET: RequestHandler = async ({ url, locals, fetch, cookies }) => {
 	const { supabase, business } = await getOdontoContext({ locals, fetch, cookies });
 	const serviceId = url.searchParams.get('service_id') ?? '';
 	const professionalId = url.searchParams.get('professional_id') ?? '';
+	const professionalIds = [
+		...new Set(
+			(url.searchParams.get('professional_ids') ?? '')
+				.split(',')
+				.map((value) => value.trim())
+				.filter(Boolean)
+		)
+	];
 	const fromDate = url.searchParams.get('from') ?? localDateFor(new Date(), business.business.timezone);
 	const toDate = url.searchParams.get('to') ?? fromDate;
 	const publicOnly = url.searchParams.get('public') === 'true';
+	const ignoreBreak = url.searchParams.get('ignore_break') === 'true' && business.canOperate;
 
 	if (!serviceId) {
-		return json({ message: 'service_id es obligatorio.' }, { status: 400 });
+		return json(
+			{
+				message:
+					'Primero elegí el procedimiento. Lo necesitamos para calcular cuánto dura el turno y qué profesionales pueden atenderlo.'
+			},
+			{ status: 400 }
+		);
+	}
+	if (professionalIds.length === 1) {
+		return json(
+			{
+				message:
+					'Para buscar un horario conjunto seleccioná por lo menos dos profesionales. Si el turno será individual, elegí la opción “Un profesional”.'
+			},
+			{ status: 400 }
+		);
 	}
 
 	try {
@@ -38,13 +62,21 @@ export const GET: RequestHandler = async ({ url, locals, fetch, cookies }) => {
 			business: business.business,
 			serviceId,
 			professionalId,
+			professionalIds,
 			fromDate,
 			toDate,
-			publicOnly
+			publicOnly,
+			ignoreBreak
 		});
 		return json({ slots, days: groupSlotsByDate(slots) });
 	} catch (error) {
 		console.error('Error calculando slots', error);
-		return json({ message: 'No se pudo calcular disponibilidad.' }, { status: 500 });
+		return json(
+			{
+				message:
+					'No pudimos calcular los horarios en este momento. No se reservó nada. Recargá la agenda y volvé a intentarlo; si el problema continúa, pedile a un administrador que revise el registro interno.'
+			},
+			{ status: 500 }
+		);
 	}
 };

@@ -51,7 +51,8 @@ const scheduleBlocksFromForm = (
 					.map((value) => Number(value))
 					.filter((value) => Number.isInteger(value) && value >= 0 && value <= 6),
 				timeRanges: String(form.get('time_ranges') ?? ''),
-				slotInterval: String(form.get('slot_interval_minutes') ?? 15)
+				slotInterval: String(form.get('break_minutes') ?? 15),
+				gridInterval: String(form.get('slot_interval_minutes') ?? 15)
 			}
 		];
 	}
@@ -277,7 +278,9 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 				.eq('professional_id', params.professionalId),
 			supabase
 				.from('availability_rules')
-				.select('id, weekday, start_time, end_time, slot_interval_minutes, is_active, created_at')
+				.select(
+					'id, weekday, start_time, end_time, slot_interval_minutes, break_minutes, is_active, created_at'
+				)
 				.eq('business_id', businessId)
 				.eq('professional_id', params.professionalId)
 				.order('weekday')
@@ -702,7 +705,7 @@ export const actions: Actions = {
 		// No se puede eliminar un profesional con HISTORIAL (turnos o consultas clínicas):
 		// son registros de la agenda y de los pacientes que hay que conservar. Se archiva.
 		const [apptResult, entryResult, followUpCount] = await Promise.all([
-			admin.from('appointments').select('id', { count: 'exact', head: true }).eq('business_id', businessId).eq('professional_id', profId),
+			admin.from('appointment_professionals').select('id', { count: 'exact', head: true }).eq('business_id', businessId).eq('professional_id', profId),
 			admin.from('clinical_entries').select('id', { count: 'exact', head: true }).eq('business_id', businessId).eq('created_by_professional_id', profId),
 			professionalHasFollowUps(admin, businessId, profId)
 		]);

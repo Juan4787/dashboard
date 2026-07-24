@@ -61,7 +61,7 @@ const supabaseForAvailability = (input: {
 			}
 			if (table === 'availability_rules') return queryBuilder(input.rules);
 			if (table === 'availability_exceptions') return queryBuilder(input.exceptions ?? []);
-			if (table === 'appointments') return queryBuilder([]);
+			if (table === 'appointment_professionals') return queryBuilder([]);
 			return queryBuilder([]);
 		}
 	})
@@ -225,5 +225,241 @@ describe('availability core', () => {
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+
+	it('ofrece la primera hora exacta después de un descanso de 23 minutos', () => {
+		const slots = calculateAvailabilitySlots({
+			business: business as never,
+			service: {
+				id: 'svc-1',
+				business_id: business.id,
+				name: 'Consulta',
+				duration_minutes: 30,
+				buffer_before_minutes: 0,
+				buffer_after_minutes: 0,
+				is_public: true,
+				is_active: true
+			},
+			professionals: [{ id: 'pro-1', name: 'Dra. Uno', is_public: true, is_active: true }],
+			rules: [
+				{
+					id: 'rule-1',
+					professional_id: 'pro-1',
+					weekday: 1,
+					start_time: '09:00',
+					end_time: '12:00',
+					slot_interval_minutes: 15,
+					break_minutes: 23,
+					is_active: true
+				}
+			],
+			exceptions: [],
+			blocks: [
+				{
+					id: 'allocation-1',
+					appointment_id: 'appointment-1',
+					professional_id: 'pro-1',
+					starts_at: '2026-06-22T12:00:00.000Z',
+					ends_at: '2026-06-22T12:30:00.000Z',
+					base_blocking_starts_at: '2026-06-22T12:00:00.000Z',
+					base_blocking_ends_at: '2026-06-22T12:30:00.000Z',
+					blocking_starts_at: '2026-06-22T12:00:00.000Z',
+					blocking_ends_at: '2026-06-22T12:53:00.000Z'
+				}
+			],
+			fromDate: '2026-06-22',
+			toDate: '2026-06-22',
+			now: new Date('2026-06-20T12:00:00.000Z')
+		});
+
+		expect(slots[0]?.time).toBe('09:53');
+		expect(slots.some((slot) => slot.time === '09:45')).toBe(false);
+	});
+
+	it('permite que el último turno termine al cierre aunque el descanso continúe fuera de la jornada', () => {
+		const slots = calculateAvailabilitySlots({
+			business: business as never,
+			service: {
+				id: 'svc-1',
+				business_id: business.id,
+				name: 'Consulta',
+				duration_minutes: 30,
+				buffer_before_minutes: 0,
+				buffer_after_minutes: 0,
+				is_public: true,
+				is_active: true
+			},
+			professionals: [{ id: 'pro-1', name: 'Dra. Uno', is_public: true, is_active: true }],
+			rules: [
+				{
+					id: 'rule-1',
+					professional_id: 'pro-1',
+					weekday: 1,
+					start_time: '09:00',
+					end_time: '10:00',
+					slot_interval_minutes: 15,
+					break_minutes: 23,
+					is_active: true
+				}
+			],
+			exceptions: [],
+			blocks: [],
+			fromDate: '2026-06-22',
+			toDate: '2026-06-22',
+			now: new Date('2026-06-20T12:00:00.000Z')
+		});
+
+		expect(slots.map((slot) => slot.time)).toContain('09:30');
+	});
+
+	it('permite ignorar el descanso manualmente sin ignorar la duración real', () => {
+		const slots = calculateAvailabilitySlots({
+			business: business as never,
+			service: {
+				id: 'svc-1',
+				business_id: business.id,
+				name: 'Consulta',
+				duration_minutes: 30,
+				buffer_before_minutes: 0,
+				buffer_after_minutes: 0,
+				is_public: true,
+				is_active: true
+			},
+			professionals: [{ id: 'pro-1', name: 'Dra. Uno', is_public: true, is_active: true }],
+			rules: [
+				{
+					id: 'rule-1',
+					professional_id: 'pro-1',
+					weekday: 1,
+					start_time: '09:00',
+					end_time: '12:00',
+					slot_interval_minutes: 15,
+					break_minutes: 23,
+					is_active: true
+				}
+			],
+			exceptions: [],
+			blocks: [
+				{
+					id: 'allocation-1',
+					professional_id: 'pro-1',
+					base_blocking_starts_at: '2026-06-22T12:00:00.000Z',
+					base_blocking_ends_at: '2026-06-22T12:30:00.000Z',
+					blocking_starts_at: '2026-06-22T12:00:00.000Z',
+					blocking_ends_at: '2026-06-22T12:53:00.000Z'
+				}
+			],
+			fromDate: '2026-06-22',
+			toDate: '2026-06-22',
+			ignoreBreak: true,
+			now: new Date('2026-06-20T12:00:00.000Z')
+		});
+
+		expect(slots[0]?.time).toBe('09:30');
+		expect(slots.some((slot) => slot.time === '09:15')).toBe(false);
+	});
+
+	it('inicia un turno conjunto cuando el último integrante del equipo queda disponible', () => {
+		const slots = calculateAvailabilitySlots({
+			business: business as never,
+			service: {
+				id: 'svc-1',
+				business_id: business.id,
+				name: 'Cirugía',
+				duration_minutes: 30,
+				buffer_before_minutes: 0,
+				buffer_after_minutes: 0,
+				is_public: true,
+				is_active: true
+			},
+			professionals: [
+				{ id: 'pro-1', name: 'Dra. Uno', is_public: true, is_active: true },
+				{ id: 'pro-2', name: 'Dr. Dos', is_public: true, is_active: true }
+			],
+			rules: [
+				{
+					id: 'rule-1',
+					professional_id: 'pro-1',
+					weekday: 1,
+					start_time: '09:00',
+					end_time: '12:00',
+					slot_interval_minutes: 15,
+					break_minutes: 0,
+					is_active: true
+				},
+				{
+					id: 'rule-2',
+					professional_id: 'pro-2',
+					weekday: 1,
+					start_time: '09:23',
+					end_time: '12:00',
+					slot_interval_minutes: 15,
+					break_minutes: 0,
+					is_active: true
+				}
+			],
+			exceptions: [],
+			blocks: [],
+			fromDate: '2026-06-22',
+			toDate: '2026-06-22',
+			requiredProfessionalIds: ['pro-1', 'pro-2'],
+			now: new Date('2026-06-20T12:00:00.000Z')
+		});
+
+		expect(slots[0]).toMatchObject({
+			time: '09:23',
+			professional_ids: ['pro-1', 'pro-2'],
+			professional_names: ['Dra. Uno', 'Dr. Dos'],
+			is_joint: true
+		});
+	});
+
+	it('elimina el horario conjunto si uno solo de los profesionales está ocupado', () => {
+		const baseInput = {
+			business: business as never,
+			service: {
+				id: 'svc-1',
+				business_id: business.id,
+				name: 'Cirugía',
+				duration_minutes: 30,
+				buffer_before_minutes: 0,
+				buffer_after_minutes: 0,
+				is_public: true,
+				is_active: true
+			},
+			professionals: [
+				{ id: 'pro-1', name: 'Dra. Uno', is_public: true, is_active: true },
+				{ id: 'pro-2', name: 'Dr. Dos', is_public: true, is_active: true }
+			],
+			rules: ['pro-1', 'pro-2'].map((professionalId) => ({
+				id: `rule-${professionalId}`,
+				professional_id: professionalId,
+				weekday: 1,
+				start_time: '09:00',
+				end_time: '12:00',
+				slot_interval_minutes: 15,
+				break_minutes: 0,
+				is_active: true
+			})),
+			exceptions: [],
+			fromDate: '2026-06-22',
+			toDate: '2026-06-22',
+			requiredProfessionalIds: ['pro-1', 'pro-2'],
+			now: new Date('2026-06-20T12:00:00.000Z')
+		};
+		const slots = calculateAvailabilitySlots({
+			...baseInput,
+			blocks: [
+				{
+					id: 'allocation-1',
+					professional_id: 'pro-2',
+					blocking_starts_at: '2026-06-22T12:00:00.000Z',
+					blocking_ends_at: '2026-06-22T12:30:00.000Z'
+				}
+			]
+		});
+
+		expect(slots.some((slot) => slot.time === '09:00')).toBe(false);
+		expect(slots[0]?.time).toBe('09:30');
 	});
 });

@@ -84,6 +84,7 @@ export const replaceProfessionalScheduleBlocks = async (
 				start_time: range.start,
 				end_time: range.end,
 				slot_interval_minutes: block.slotIntervalMinutes,
+				break_minutes: block.breakMinutes,
 				is_active: true
 			}))
 		)

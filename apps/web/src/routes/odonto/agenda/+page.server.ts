@@ -3,6 +3,7 @@ import { demoBusinessContext } from '$lib/server/business';
 import { getAvailabilitySlots, zonedDateTimeToUtc } from '$lib/server/availability';
 import {
 	APPOINTMENT_STATUSES,
+	createJointAppointment,
 	createManualAppointment,
 	getHumanAppointmentErrorMessage,
 	isAppointmentStatus,
@@ -92,9 +93,18 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 		const baseQuery = () => {
 			let builder = supabase
 				.from('appointments')
-				.select(APPOINTMENT_COLUMNS)
+				.select(
+					professionalId
+						? `${APPOINTMENT_COLUMNS}, appointment_professionals!inner(professional_id)`
+						: APPOINTMENT_COLUMNS
+				)
 				.eq('business_id', business.business.id);
-			if (professionalId) builder = builder.eq('professional_id', professionalId);
+			if (professionalId) {
+				builder = builder.eq(
+					'appointment_professionals.professional_id',
+					professionalId
+				);
+			}
 			if (serviceId) builder = builder.eq('service_id', serviceId);
 			if (patientId) builder = builder.eq('patient_id', patientId);
 			if (status) builder = builder.eq('status', status);
@@ -115,8 +125,17 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 		const dayEnd = zonedDateTimeToUtc(date, '23:59', business.business.timezone);
 		({ data: dayAppointments, error: appointmentsError } = await supabase
 			.from('appointments')
-			.select(APPOINTMENT_COLUMNS)
+			.select(
+				professionalId
+					? `${APPOINTMENT_COLUMNS}, appointment_professionals!inner(professional_id)`
+					: APPOINTMENT_COLUMNS
+			)
 			.eq('business_id', business.business.id)
+			.match(
+				professionalId
+					? { 'appointment_professionals.professional_id': professionalId }
+					: {}
+			)
 			.gte('starts_at', dayStart.toISOString())
 			.lte('starts_at', dayEnd.toISOString())
 			.order('starts_at'));
@@ -126,7 +145,6 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 	}
 
 	const filteredAppointments = (dayAppointments ?? []).filter((appointment: any) => {
-		if (professionalId && appointment.professional_id !== professionalId) return false;
 		if (serviceId && appointment.service_id !== serviceId) return false;
 		if (patientId && appointment.patient_id !== patientId) return false;
 		if (status && appointment.status !== status) return false;
@@ -232,37 +250,109 @@ export const actions: Actions = {
 
 		const form = await request.formData();
 		const serviceId = String(form.get('service_id') ?? '').trim();
-		const professionalId = String(form.get('professional_id') ?? '').trim();
+		const requestedProfessionalIds = [
+			...new Set(
+				[
+					...form.getAll('professional_ids').map((value) => String(value).trim()),
+					String(form.get('professional_id') ?? '').trim()
+				].filter(Boolean)
+			)
+		];
+		const bookingMode =
+			String(form.get('booking_mode') ?? '').trim() === 'joint' ||
+			requestedProfessionalIds.length > 1
+				? 'joint'
+				: 'individual';
+		const professionalIds =
+			bookingMode === 'joint'
+				? requestedProfessionalIds
+				: requestedProfessionalIds.slice(0, 1);
+		const professionalId = professionalIds[0] ?? '';
 		const date = String(form.get('date') ?? '').trim();
 		const time = String(form.get('time') ?? '').trim();
 		const patientId = String(form.get('patient_id') ?? '').trim();
 		const patientName = String(form.get('patient_name') ?? '').trim();
 		const patientPhone = String(form.get('patient_phone') ?? '').trim();
 		const patientEmail = String(form.get('patient_email') ?? '').trim();
-		const startsAt = zonedDateTimeToUtc(date, time, business.business.timezone);
+		const ignoreBreak = form.get('ignore_break') === 'true';
+		const values = {
+			...Object.fromEntries(form),
+			booking_mode: bookingMode,
+			professional_id: professionalId,
+			professional_ids: professionalIds.join(',')
+		};
 
 		if (!serviceId || !professionalId || !date || !time) {
-			return fail(400, { message: 'Completá servicio, profesional, fecha y hora.', values: Object.fromEntries(form) });
+			return fail(400, {
+				message:
+					'Falta información para crear el turno. Volvé al asistente y completá el procedimiento, los profesionales, la fecha y el horario antes de confirmar.',
+				values
+			});
+		}
+		if (bookingMode === 'joint' && professionalIds.length < 2) {
+			return fail(400, {
+				message:
+					'Un turno conjunto necesita por lo menos dos profesionales diferentes. Volvé al paso del equipo, seleccioná dos o más integrantes y buscá nuevamente un horario.',
+				values
+			});
+		}
+		if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) {
+			return fail(400, {
+				message:
+					'La fecha o la hora no tienen un formato válido. Volvé al paso de horarios y elegí una opción mostrada por la agenda.',
+				values
+			});
 		}
 		if (!patientId && !patientName) {
-			return fail(400, { message: 'Seleccioná un paciente o cargá uno nuevo.', values: Object.fromEntries(form) });
+			return fail(400, {
+				message:
+					'Falta el paciente. Buscá una ficha existente o elegí “Nuevo paciente” y completá sus datos antes de crear el turno.',
+				values
+			});
 		}
+		const startsAt = zonedDateTimeToUtc(date, time, business.business.timezone);
 
-		const slots = await getAvailabilitySlots(supabase, {
-			business: business.business,
-			serviceId,
-			professionalId,
-			fromDate: date,
-			toDate: date,
-			publicOnly: false
-		});
-		if (!slots.some((slot) => slot.starts_at === startsAt.toISOString() && slot.professional_id === professionalId)) {
-			return fail(409, { message: 'Ese horario no está disponible para ese servicio y profesional.', values: Object.fromEntries(form) });
+		let slots;
+		try {
+			slots = await getAvailabilitySlots(supabase, {
+				business: business.business,
+				serviceId,
+				professionalId: bookingMode === 'individual' ? professionalId : null,
+				professionalIds: bookingMode === 'joint' ? professionalIds : [],
+				fromDate: date,
+				toDate: date,
+				publicOnly: false,
+				ignoreBreak
+			});
+		} catch (availabilityError) {
+			console.error('Error revalidando disponibilidad antes de crear turno', availabilityError);
+			return fail(500, {
+				message:
+					'No pudimos volver a comprobar la disponibilidad y, por seguridad, no reservamos a ningún profesional. Recargá la agenda y elegí el horario otra vez.',
+				values
+			});
+		}
+		if (
+			!slots.some(
+				(slot) =>
+					slot.starts_at === startsAt.toISOString() &&
+					(bookingMode === 'joint'
+						? professionalIds.every((id) => slot.professional_ids?.includes(id))
+						: slot.professional_id === professionalId)
+			)
+		) {
+			return fail(409, {
+				message:
+					bookingMode === 'joint'
+						? 'Ese horario ya no está libre para todo el equipo. No se reservó a ningún profesional. Volvé al paso de horarios, actualizá la disponibilidad conjunta y elegí una de las opciones que siguen visibles.'
+						: 'Ese horario ya no está libre para el profesional seleccionado. No se creó el turno. Volvé al paso de horarios, actualizá la disponibilidad y elegí otra opción.',
+				values
+			});
 		}
 
 		try {
 			const admin = await createSupabaseAdminClient('odonto', fetch);
-			const created = await createManualAppointment(admin, {
+			const commonInput = {
 				businessId: business.business.id,
 				ownerId: userId,
 				createdByUserId: userId,
@@ -271,16 +361,26 @@ export const actions: Actions = {
 				patientPhone,
 				patientEmail,
 				serviceId,
-				professionalId,
 				startsAt,
-				internalNote: String(form.get('internal_note') ?? '').trim() || null
-			});
+				internalNote: String(form.get('internal_note') ?? '').trim() || null,
+				ignoreBreak
+			};
+			const created =
+				bookingMode === 'joint'
+					? await createJointAppointment(admin, {
+							...commonInput,
+							professionalIds
+						})
+					: await createManualAppointment(admin, {
+							...commonInput,
+							professionalId
+						});
 			throw redirect(303, `/odonto/turnos/${created.id}`);
 		} catch (error: any) {
 			if (error?.status && error?.location) throw error;
 			console.error('Error creando turno', error);
 			const message = getHumanAppointmentErrorMessage(error);
-			return fail(error?.code === '23P01' ? 409 : 500, { message, values: Object.fromEntries(form) });
+			return fail(error?.code === '23P01' ? 409 : 500, { message, values });
 		}
 	},
 	update_status: async ({ request, locals, fetch, cookies }) => {
@@ -296,7 +396,12 @@ export const actions: Actions = {
 		const professionalId = String(form.get('professional_id') ?? '').trim();
 		const selectedStatus = String(form.get('selected_status') ?? '').trim();
 		const serviceId = String(form.get('service_id') ?? '').trim();
-		if (!appointmentId || !isAppointmentStatus(status)) return fail(400, { message: 'Estado inválido.' });
+		if (!appointmentId || !isAppointmentStatus(status)) {
+			return fail(400, {
+				message:
+					'No pudimos identificar el turno o el estado solicitado. Recargá la agenda y usá una de las acciones visibles en la tarjeta del turno.'
+			});
+		}
 		if (status === 'confirmed') {
 			return fail(400, { message: 'La confirmación queda reservada al paciente desde su enlace.' });
 		}

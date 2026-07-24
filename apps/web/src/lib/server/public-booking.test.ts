@@ -71,6 +71,9 @@ describe('public booking UX helpers', () => {
 		expect(PUBLIC_BOOKING_ERROR_MESSAGES.PUBLIC_BOOKING_ACTIVE_LIMIT).toContain('a futuro');
 		expect(PUBLIC_BOOKING_ERROR_MESSAGES.PUBLIC_BOOKING_ACTIVE_LIMIT).toContain('nombre');
 		expect(PUBLIC_BOOKING_ERROR_MESSAGES.PUBLIC_BOOKING_ACTIVE_LIMIT).not.toContain('teléfono');
+		expect(PUBLIC_BOOKING_ERROR_MESSAGES.PUBLIC_PATIENT_NAME_INVALID).toBe(
+			'Ingresá tu nombre y apellido para reservar.'
+		);
 	});
 
 	it('resume días con nombres completos y sin repetir disponibilidad por cada día', () => {

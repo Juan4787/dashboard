@@ -1,5 +1,10 @@
 import crypto from 'crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import {
+	isValidPatientFullName,
+	normalizePatientFullName,
+	PATIENT_FULL_NAME_ERROR_MESSAGE
+} from '$lib/utils/patient-name';
 import type { Business } from './business';
 import {
 	addMinutes,
@@ -481,7 +486,9 @@ const loadPublicAvailabilitySnapshot = async (
 			.eq('business_id', input.businessId),
 		supabase
 			.from('availability_rules')
-			.select('id, professional_id, weekday, start_time, end_time, slot_interval_minutes, is_active')
+			.select(
+				'id, professional_id, weekday, start_time, end_time, slot_interval_minutes, break_minutes, is_active'
+			)
 			.eq('business_id', input.businessId)
 			.eq('is_active', true),
 		supabase
@@ -493,8 +500,10 @@ const loadPublicAvailabilitySnapshot = async (
 		Promise.all(
 			appointmentWindows.map(({ start, end }) =>
 				supabase
-					.from('appointments')
-					.select('id, professional_id, blocking_starts_at, blocking_ends_at')
+					.from('appointment_professionals')
+					.select(
+						'id, appointment_id, professional_id, starts_at, ends_at, base_blocking_starts_at, base_blocking_ends_at, blocking_starts_at, blocking_ends_at'
+					)
 					.eq('business_id', input.businessId)
 					.in('status', ['reserved', 'confirmed', 'reschedule_requested'])
 					.lt('blocking_starts_at', end.toISOString())
@@ -727,7 +736,7 @@ export const loadPublicBookingState = async (
 				)
 			)
 		: [];
-	const professionals = selectedService
+	const professionals: PublicProfessional[] = selectedService
 		? (
 				await Promise.all(
 					assignedProfessionals.map(async (professional) => {
@@ -752,7 +761,7 @@ export const loadPublicBookingState = async (
 							: null;
 					})
 				)
-			).filter((professional): professional is PublicProfessional => professional !== null)
+			).filter((professional) => professional !== null)
 		: [];
 	if (selectedService && professionals.length === 0) {
 		return { business, services, professionals, slots: [], days: [], issue: 'no_professionals' };
@@ -916,11 +925,11 @@ export const createPublicBooking = async (
 			throw new Error('PUBLIC_BUSINESS_COMMERCIAL_UNAVAILABLE');
 		}
 
-		const patientName = input.patientName.trim();
+		const patientName = normalizePatientFullName(input.patientName);
 		const phoneRaw = normalizePhoneRaw(input.patientPhone);
 		phoneE164 = normalizePhoneE164(input.patientPhone);
 		const email = String(input.patientEmail ?? '').trim();
-		if (patientName.length < 3) throw new Error('PUBLIC_PATIENT_NAME_INVALID');
+		if (!isValidPatientFullName(patientName)) throw new Error('PUBLIC_PATIENT_NAME_INVALID');
 		if (!phoneE164 || !isLikelyPhoneE164(phoneE164)) throw new Error('PUBLIC_PATIENT_PHONE_INVALID');
 
 		// La capacidad del paciente se evalúa antes que los límites temporales de
@@ -1008,7 +1017,7 @@ export const PUBLIC_BOOKING_ERROR_MESSAGES = {
 		'El consultorio desactivó las reservas online. Podés contactarlo para pedir el turno por otro medio.',
 	PUBLIC_BUSINESS_COMMERCIAL_UNAVAILABLE:
 		'El sistema de reservas online del consultorio está temporalmente suspendido. Mientras lo reactivan, pedí el turno por contacto directo.',
-	PUBLIC_PATIENT_NAME_INVALID: 'Ingresá tu nombre (al menos 3 caracteres).',
+	PUBLIC_PATIENT_NAME_INVALID: PATIENT_FULL_NAME_ERROR_MESSAGE,
 	PUBLIC_PATIENT_PHONE_INVALID:
 		'El teléfono no tiene un formato válido. Revisalo e incluí el código de área.',
 	PUBLIC_SLOT_UNAVAILABLE:

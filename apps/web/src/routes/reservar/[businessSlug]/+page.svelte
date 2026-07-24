@@ -4,6 +4,11 @@
 	import { navigating, page } from '$app/state';
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { formatInTimeZone } from '$lib/utils/format';
+	import {
+		isValidPatientFullName,
+		normalizePatientFullName,
+		PATIENT_FULL_NAME_ERROR_MESSAGE
+	} from '$lib/utils/patient-name';
 
 	type Service = {
 		id: string;
@@ -180,6 +185,19 @@
 	};
 
 	let bookingSubmitting = $state(false);
+	const validatePatientNameInput = (event: Event) => {
+		const input = event.currentTarget as HTMLInputElement;
+		input.setCustomValidity(
+			input.value.length === 0 || isValidPatientFullName(input.value)
+				? ''
+				: PATIENT_FULL_NAME_ERROR_MESSAGE
+		);
+	};
+	const normalizePatientNameInput = (event: FocusEvent) => {
+		const input = event.currentTarget as HTMLInputElement;
+		input.value = normalizePatientFullName(input.value);
+		validatePatientNameInput(event);
+	};
 	const onBookingSubmit: SubmitFunction = () => {
 		bookingSubmitting = true;
 		return async ({ result, update }) => {
@@ -463,9 +481,13 @@
 							<input
 								name="patient_name"
 								required
-								minlength="3"
+								minlength="5"
+								pattern=".*[^ ] +[^ ].*"
+								title={PATIENT_FULL_NAME_ERROR_MESSAGE}
 								autocomplete="name"
 								value={String(values.patient_name ?? '')}
+								oninput={validatePatientNameInput}
+								onblur={normalizePatientNameInput}
 								class="ux-input"
 							/>
 						</label>

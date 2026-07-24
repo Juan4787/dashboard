@@ -70,7 +70,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 	const { data, error } = await supabase
 		.from('appointments')
 		.select(
-			'id, business_id, patient_id, service_id, professional_id, starts_at, ends_at, blocking_starts_at, blocking_ends_at, status, source, confirmation_token, service_name_snapshot, professional_name_snapshot, duration_minutes_snapshot, buffer_before_minutes_snapshot, buffer_after_minutes_snapshot, confirmed_at, cancelled_at, cancelled_reason, reschedule_requested_at, attended_at, no_show_at, internal_note, created_by_user_id, updated_by_user_id, cancelled_by_user_id, created_at, updated_at, patients(id, full_name, phone_e164, email, blocked)'
+			'id, business_id, patient_id, service_id, professional_id, starts_at, ends_at, blocking_starts_at, blocking_ends_at, status, source, confirmation_token, service_name_snapshot, professional_name_snapshot, duration_minutes_snapshot, buffer_before_minutes_snapshot, buffer_after_minutes_snapshot, break_minutes_snapshot, ignore_break, confirmed_at, cancelled_at, cancelled_reason, reschedule_requested_at, attended_at, no_show_at, internal_note, created_by_user_id, updated_by_user_id, cancelled_by_user_id, created_at, updated_at, patients(id, full_name, phone_e164, email, blocked)'
 		)
 		.eq('business_id', business.business.id)
 		.eq('id', params.appointmentId)
@@ -78,9 +78,17 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 
 	if (error) {
 		console.error('Error cargando turno', error);
-		throw kitError(500, 'No se pudo cargar el turno');
+		throw kitError(
+			500,
+			'No pudimos cargar el turno. Volvé a la agenda e intentá abrirlo otra vez; si el problema continúa, pedile a un administrador que revise el registro interno.'
+		);
 	}
-	if (!data) throw kitError(404, 'Turno no encontrado o sin permiso');
+	if (!data) {
+		throw kitError(
+			404,
+			'No encontramos ese turno o tu usuario no puede verlo. Volvé a la agenda y comprobá que siga disponible para tu rol.'
+		);
+	}
 
 	const appointmentLocalDate = localDateFor(data.starts_at, business.business.timezone);
 	const minReprogramDate = todayForTimezone(business.business.timezone);
@@ -89,7 +97,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 		requestedReprogramDate ?? (appointmentLocalDate >= minReprogramDate ? appointmentLocalDate : minReprogramDate);
 	const fromDate = url.searchParams.get('from_date') ?? localDateFor(data.starts_at, business.business.timezone);
 
-	const [auditResult, usersResult, messageResult] = await Promise.all([
+	const [auditResult, usersResult, messageResult, teamResult] = await Promise.all([
 		supabase
 			.from('audit_logs')
 			.select('id, user_id, action, entity_type, entity_id, metadata, created_at')
@@ -103,12 +111,21 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 			.select('id, type, status, scheduled_for, sent_at, delivered_at, read_at, failed_at, human_error_message, created_at')
 			.eq('business_id', business.business.id)
 			.eq('appointment_id', params.appointmentId)
-			.order('created_at', { ascending: false })
+			.order('created_at', { ascending: false }),
+		supabase
+			.from('appointment_professionals')
+			.select(
+				'professional_id, position, is_primary, professional_name_snapshot, break_minutes_snapshot'
+			)
+			.eq('business_id', business.business.id)
+			.eq('appointment_id', params.appointmentId)
+			.order('position')
 	]);
 
 	if (auditResult.error) console.error('Error cargando auditoria del turno', auditResult.error);
 	if (usersResult.error) console.error('Error cargando usuarios para auditoria', usersResult.error);
 	if (messageResult.error) console.error('Error cargando mensajes del turno', messageResult.error);
+	if (teamResult.error) console.error('Error cargando equipo del turno', teamResult.error);
 
 	const userLabels = Object.fromEntries(
 		(usersResult.data ?? []).map((user: any) => [String(user.user_id), user.email ?? String(user.user_id).slice(0, 8)])
@@ -142,7 +159,21 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 
 	return {
 		context: business,
-		appointment: data,
+		appointment: {
+			...data,
+			professionals:
+				teamResult.data && teamResult.data.length > 0
+					? teamResult.data
+					: [
+							{
+								professional_id: data.professional_id,
+								position: 0,
+								is_primary: true,
+								professional_name_snapshot: data.professional_name_snapshot,
+								break_minutes_snapshot: data.break_minutes_snapshot ?? 0
+							}
+						]
+		},
 		auditLogs: auditResult.data ?? [],
 		messageDispatches: messageResult.data ?? [],
 		userLabels,
@@ -200,46 +231,103 @@ export const actions: Actions = {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
 		const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
-		if (!business.canOperate) return fail(403, { message: 'No tenés permiso para reprogramar turnos.' });
+		if (!business.canOperate) {
+			return fail(403, {
+				message:
+					'Tu rol no permite reprogramar turnos. Pedile a recepción, al dueño o a un administrador que haga el cambio desde la agenda.'
+			});
+		}
 
 		const form = await request.formData();
 		const slotStartsAt = String(form.get('slot_starts_at') ?? '').trim();
 		const reprogramDate = String(form.get('reprogram_date') ?? '').trim();
-		if (!slotStartsAt || !reprogramDate) return fail(400, { message: 'Elegí un horario disponible.' });
+		const ignoreBreak = form.get('ignore_break') === 'true';
+		if (!slotStartsAt || !reprogramDate) {
+			return fail(400, {
+				message:
+					'Elegí una fecha y uno de los horarios que muestra la agenda antes de confirmar la reprogramación.'
+			});
+		}
 		if (reprogramDate < todayForTimezone(business.business.timezone)) {
-			return fail(400, { message: 'Elegí una fecha futura para reprogramar.' });
+			return fail(400, {
+				message:
+					'No se puede mover un turno a una fecha pasada. Elegí hoy o una fecha futura y seleccioná un horario disponible.'
+			});
 		}
 
-		const { data: appointment, error: loadError } = await supabase
-			.from('appointments')
-			.select('id, service_id, professional_id, status')
-			.eq('business_id', business.business.id)
-			.eq('id', params.appointmentId)
-			.maybeSingle();
-		if (loadError) {
-			console.error('Error cargando turno para reprogramar', loadError);
-			return fail(500, { message: 'No se pudo cargar el turno.' });
+		const [appointmentResult, teamResult] = await Promise.all([
+			supabase
+				.from('appointments')
+				.select('id, service_id, professional_id, status, ignore_break')
+				.eq('business_id', business.business.id)
+				.eq('id', params.appointmentId)
+				.maybeSingle(),
+			supabase
+				.from('appointment_professionals')
+				.select('professional_id, position')
+				.eq('business_id', business.business.id)
+				.eq('appointment_id', params.appointmentId)
+				.order('position')
+		]);
+		const appointment = appointmentResult.data;
+		if (appointmentResult.error || teamResult.error) {
+			console.error(
+				'Error cargando turno o equipo para reprogramar',
+				appointmentResult.error ?? teamResult.error
+			);
+			return fail(500, {
+				message:
+					'No pudimos cargar el turno completo y, por seguridad, no modificamos ninguna agenda. Recargá la página y volvé a intentar.'
+			});
 		}
-		if (!appointment) return fail(404, { message: 'No se encontró el turno.' });
+		if (!appointment) {
+			return fail(404, {
+				message:
+					'No encontramos el turno que querés reprogramar. Volvé a la agenda y abrilo nuevamente.'
+			});
+		}
+		const professionalIds =
+			teamResult.data && teamResult.data.length > 0
+				? teamResult.data.map((allocation) => String(allocation.professional_id))
+				: [String(appointment.professional_id)];
 
-		const slots = await getAvailabilitySlots(supabase, {
-			business: business.business,
-			serviceId: appointment.service_id,
-			professionalId: appointment.professional_id,
-			fromDate: reprogramDate,
-			toDate: reprogramDate,
-			publicOnly: false,
-			excludeAppointmentId: appointment.id
-		});
+		let slots;
+		try {
+			slots = await getAvailabilitySlots(supabase, {
+				business: business.business,
+				serviceId: appointment.service_id,
+				professionalId: professionalIds.length === 1 ? professionalIds[0] : null,
+				professionalIds: professionalIds.length > 1 ? professionalIds : [],
+				fromDate: reprogramDate,
+				toDate: reprogramDate,
+				publicOnly: false,
+				excludeAppointmentId: appointment.id,
+				ignoreBreak
+			});
+		} catch (availabilityError) {
+			console.error('Error revalidando equipo antes de reprogramar', availabilityError);
+			return fail(500, {
+				message:
+					'No pudimos volver a comprobar la disponibilidad de todo el equipo y, por seguridad, el turno conserva su horario anterior. Recargá la página y volvé a intentar.'
+			});
+		}
 		const slot = slots.find((candidate) => candidate.starts_at === slotStartsAt);
-		if (!slot) return fail(409, { message: 'Ese horario ya fue reservado. Elegí otro horario disponible.' });
+		if (!slot) {
+			return fail(409, {
+				message:
+					professionalIds.length > 1
+						? 'Ese horario ya no está disponible para todo el equipo. No se modificó ninguna agenda. Actualizá los horarios y elegí otra opción conjunta.'
+						: 'Ese horario dejó de estar disponible. El turno conserva su fecha anterior. Actualizá los horarios y elegí otra opción.'
+			});
+		}
 
 		try {
 			await rescheduleAppointment(supabase, {
 				businessId: business.business.id,
 				appointmentId: params.appointmentId,
 				userId,
-				startsAt: new Date(slot.starts_at)
+				startsAt: new Date(slot.starts_at),
+				ignoreBreak
 			});
 		} catch (error: any) {
 			console.error('Error reprogramando turno', error);

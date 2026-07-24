@@ -14,6 +14,9 @@
 		ends_at: string;
 		professional_id: string;
 		professional_name: string;
+		professional_ids?: string[];
+		professional_names?: string[];
+		is_joint?: boolean;
 	};
 
 	let {
@@ -67,15 +70,23 @@
 
 	const initialStep = () => {
 		if (value('time')) return 4;
-		if (value('professional_id')) return 3;
+		if (value('professional_id') || value('professional_ids')) return 3;
 		if (value('service_id')) return 2;
 		return 1;
 	};
 	const getInitialPatientSelection = () => value('patient_id') || initialPatientId;
+	const initialProfessionalIds = value('professional_ids')
+		.split(',')
+		.map((professionalId) => professionalId.trim())
+		.filter(Boolean);
 
 	let step = $state(initialStep());
 	let selectedServiceId = $state(value('service_id'));
-	let selectedProfessionalId = $state(value('professional_id'));
+	let bookingMode = $state<'individual' | 'joint'>(
+		value('booking_mode') === 'joint' ? 'joint' : 'individual'
+	);
+	let selectedProfessionalIds = $state<string[]>(initialProfessionalIds);
+	let selectedProfessionalId = $state(value('professional_id') || initialProfessionalIds[0] || '');
 	let visibleWeekStart = $state(value('date') || safeStartDate());
 	let selectedSlotStartsAt = $state('');
 	let patientMode = $state(getInitialPatientSelection() ? 'existing' : 'new');
@@ -86,6 +97,7 @@
 	let patientSearch = $state('');
 	let internalNote = $state(value('internal_note'));
 	let pendingInitialTime = $state(value('time'));
+	let ignoreBreak = $state(value('ignore_break') === 'true');
 	let slots = $state<Slot[]>([]);
 	let loadingSlots = $state(false);
 	let slotsLoaded = $state(false);
@@ -116,12 +128,35 @@
 			(professional: Professional) => slotsLoaded && Boolean(nextSlotByProfessional[professional.id])
 		)
 	);
+	const selectedTeam = $derived(
+		selectedProfessionalIds
+			.map(
+				(professionalId) =>
+					offeringProfessionals.find(
+						(professional: Professional) => professional.id === professionalId
+					) ?? null
+			)
+			.filter((professional): professional is Professional => Boolean(professional))
+	);
+	const hasValidProfessionalSelection = $derived(
+		bookingMode === 'joint'
+			? selectedTeam.length >= 2
+			: Boolean(selectedProfessionalId)
+	);
 	const selectedProfessional = $derived(
 		professionals.find((professional: Professional) => professional.id === selectedProfessionalId) ?? null
 	);
 	const weekDays = $derived(Array.from({ length: 7 }, (_, index) => addDays(visibleWeekStart, index)));
 	const professionalSlots = $derived(
-		slots.filter((slot) => slot.professional_id === selectedProfessionalId && weekDays.includes(slot.date))
+		slots.filter(
+			(slot) =>
+				weekDays.includes(slot.date) &&
+				(bookingMode === 'joint'
+					? selectedProfessionalIds.every((professionalId) =>
+							slot.professional_ids?.includes(professionalId)
+						)
+					: slot.professional_id === selectedProfessionalId)
+		)
 	);
 	const slotsByDay = $derived(
 		weekDays
@@ -131,7 +166,9 @@
 			}))
 			.filter((day) => day.slots.length > 0)
 	);
-	const selectedSlot = $derived(slots.find((slot) => slot.starts_at === selectedSlotStartsAt) ?? null);
+	const selectedSlot = $derived(
+		professionalSlots.find((slot) => slot.starts_at === selectedSlotStartsAt) ?? null
+	);
 	const patientCandidates = $derived(patientSearch.trim().length >= 2 ? remotePatients : patients);
 	const visiblePatients = $derived(
 		patientCandidates
@@ -155,20 +192,27 @@
 		patientMode === 'new' && patientName.trim().length >= 2 && patientPhone.trim().length >= 6
 	);
 	const canCreate = $derived(
-		Boolean(selectedService && selectedProfessional && selectedSlot && (canUseExistingPatient || canUseNewPatient))
+		Boolean(
+			selectedService &&
+				hasValidProfessionalSelection &&
+				selectedSlot &&
+				(canUseExistingPatient || canUseNewPatient)
+		)
 	);
 
 	const goToStep = (target: number) => {
 		if (target < 1 || target > 4) return;
 		if (target > 1 && !selectedService) return;
-		if (target > 2 && !selectedProfessional) return;
+		if (target > 2 && !hasValidProfessionalSelection) return;
 		if (target > 3 && !selectedSlot) return;
 		step = target;
 	};
 
 	const selectService = (serviceId: string) => {
 		selectedServiceId = serviceId;
+		bookingMode = 'individual';
 		selectedProfessionalId = '';
+		selectedProfessionalIds = [];
 		selectedSlotStartsAt = '';
 		selectedPatientId = '';
 		slots = [];
@@ -179,9 +223,41 @@
 	};
 
 	const selectProfessional = (professionalId: string) => {
+		bookingMode = 'individual';
 		selectedProfessionalId = professionalId;
+		selectedProfessionalIds = [professionalId];
 		selectedSlotStartsAt = '';
 		visibleWeekStart = nextSlotByProfessional[professionalId]?.date ?? safeStartDate();
+		step = 3;
+	};
+
+	const selectBookingMode = (mode: 'individual' | 'joint') => {
+		if (bookingMode === mode) return;
+		bookingMode = mode;
+		selectedProfessionalId = '';
+		selectedProfessionalIds = [];
+		selectedSlotStartsAt = '';
+		slots = [];
+		slotsLoaded = false;
+		slotsError = '';
+	};
+
+	const toggleTeamProfessional = (professionalId: string) => {
+		if (selectedProfessionalIds.includes(professionalId)) {
+			selectedProfessionalIds = selectedProfessionalIds.filter(
+				(selectedId) => selectedId !== professionalId
+			);
+		} else {
+			selectedProfessionalIds = [...selectedProfessionalIds, professionalId];
+		}
+		selectedProfessionalId = selectedProfessionalIds[0] ?? '';
+		selectedSlotStartsAt = '';
+		slotsError = '';
+	};
+
+	const continueWithTeam = () => {
+		if (selectedTeam.length < 2) return;
+		visibleWeekStart = slots[0]?.date ?? safeStartDate();
 		step = 3;
 	};
 
@@ -190,7 +266,12 @@
 		step = 4;
 	};
 
-	const loadServiceSlots = async (serviceId: string, fromDate: string) => {
+	const loadServiceSlots = async (
+		serviceId: string,
+		fromDate: string,
+		teamProfessionalIds: string[],
+		shouldIgnoreBreak: boolean
+	) => {
 		const request = ++slotRequest;
 		loadingSlots = true;
 		slotsLoaded = false;
@@ -200,14 +281,20 @@
 			const params = new URLSearchParams({
 				service_id: serviceId,
 				from: fromDate,
-				to: toDate
+				to: toDate,
+				ignore_break: shouldIgnoreBreak ? 'true' : 'false'
 			});
+			if (teamProfessionalIds.length >= 2) {
+				params.set('professional_ids', teamProfessionalIds.join(','));
+			}
 			const response = await fetch(`/odonto/disponibilidad/slots?${params.toString()}`);
 			const payload = await response.json();
 			if (request !== slotRequest) return;
 			if (!response.ok) {
 				slots = [];
-				slotsError = payload?.message ?? 'No se pudieron cargar los horarios.';
+				slotsError =
+					payload?.message ??
+					'No pudimos cargar los horarios. No se reservó nada. Revisá la conexión y volvé a intentar.';
 				return;
 			}
 			slots = Array.isArray(payload?.slots) ? payload.slots : [];
@@ -215,7 +302,8 @@
 		} catch {
 			if (request !== slotRequest) return;
 			slots = [];
-			slotsError = 'No se pudieron cargar los horarios.';
+			slotsError =
+				'No pudimos cargar los horarios porque se interrumpió la conexión. No se reservó nada. Revisá internet y volvé a intentar.';
 		} finally {
 			if (request === slotRequest) loadingSlots = false;
 		}
@@ -250,17 +338,50 @@
 			slotsLoaded = false;
 			return;
 		}
-		void loadServiceSlots(selectedServiceId, visibleWeekStart || safeStartDate());
+		const teamIds =
+			bookingMode === 'joint' && selectedProfessionalIds.length >= 2
+				? [...selectedProfessionalIds]
+				: [];
+		void loadServiceSlots(
+			selectedServiceId,
+			visibleWeekStart || safeStartDate(),
+			teamIds,
+			ignoreBreak
+		);
 	});
 
 	$effect(() => {
-		if (!selectedProfessionalId) return;
-		if (!offeringProfessionals.some((professional: Professional) => professional.id === selectedProfessionalId)) {
+		if (bookingMode === 'joint') {
+			const validIds = selectedProfessionalIds.filter((professionalId) =>
+				offeringProfessionals.some(
+					(professional: Professional) => professional.id === professionalId
+				)
+			);
+			if (validIds.length !== selectedProfessionalIds.length) {
+				selectedProfessionalIds = validIds;
+				selectedProfessionalId = validIds[0] ?? '';
+				selectedSlotStartsAt = '';
+				step = 2;
+			}
+			return;
+		}
+		if (
+			selectedProfessionalId &&
+			!offeringProfessionals.some(
+				(professional: Professional) => professional.id === selectedProfessionalId
+			)
+		) {
 			selectedProfessionalId = '';
+			selectedProfessionalIds = [];
 			selectedSlotStartsAt = '';
 			step = 2;
 		}
 	});
+
+	const updateIgnoreBreak = (event: Event) => {
+		ignoreBreak = (event.currentTarget as HTMLInputElement).checked;
+		selectedSlotStartsAt = '';
+	};
 
 	$effect(() => {
 		if (slots.length === 0 || !pendingInitialTime) return;
@@ -287,10 +408,15 @@
 
 <form method="POST" action="?/create_appointment" class="overflow-hidden rounded-3xl border border-[#244062] bg-[#071626] shadow-2xl shadow-black/20">
 	<input type="hidden" name="service_id" value={selectedServiceId} />
+	<input type="hidden" name="booking_mode" value={bookingMode} />
 	<input type="hidden" name="professional_id" value={selectedProfessionalId} />
+	{#each selectedProfessionalIds as professionalId}
+		<input type="hidden" name="professional_ids" value={professionalId} />
+	{/each}
 	<input type="hidden" name="date" value={selectedSlot?.date ?? visibleWeekStart} />
 	<input type="hidden" name="time" value={selectedSlot?.time ?? ''} />
 	<input type="hidden" name="internal_note" value={internalNote} />
+	<input type="hidden" name="ignore_break" value={ignoreBreak ? 'true' : 'false'} />
 
 	<div class="border-b border-white/10 px-5 py-5 sm:px-8">
 		<div class="mx-auto flex max-w-sm items-center justify-center gap-3">
@@ -360,44 +486,124 @@
 					{/if}
 				</div>
 
-				{#if loadingSlots}
-					<p class="mt-8 text-center text-sm text-white/70">Buscando disponibilidad...</p>
-				{/if}
-
-				<div class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-					{#each selectableProfessionals as professional}
-						{@const nextSlot = nextSlotByProfessional[professional.id] ?? null}
-						<button
-							type="button"
-							disabled={!canOperate || !nextSlot}
-							onclick={() => selectProfessional(professional.id)}
-							class={`relative min-h-56 rounded-3xl border p-5 text-center transition disabled:opacity-50 ${
-								selectedProfessionalId === professional.id
-									? 'border-[#8b5cf6] bg-[#7c3aed]/20 shadow-xl shadow-[#7c3aed]/20'
-									: 'border-white/10 bg-white/[0.04] hover:border-[#8b5cf6]/70 hover:bg-white/[0.07]'
-							}`}
-						>
-							<span class="mx-auto grid h-20 w-20 place-items-center rounded-full bg-[#7c3aed]/25 text-white ring-1 ring-[#8b5cf6]/35">
-								<svg class="h-9 w-9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-									<path stroke-linecap="round" stroke-linejoin="round" d="M20 21a8 8 0 0 0-16 0" />
-									<circle cx="12" cy="8" r="4" />
-								</svg>
-							</span>
-							<span class="mt-5 block text-lg font-semibold text-white">{professional.name}</span>
-							{#if professional.specialty}
-								<span class="mt-1 block text-sm text-white/60">{professional.specialty}</span>
-							{/if}
-							<span class="mt-5 inline-flex items-center gap-2 rounded-full bg-emerald-400/10 px-3 py-1 text-sm font-semibold text-emerald-200">
-								<span class="h-2 w-2 rounded-full bg-emerald-300"></span>
-								{formatNextSlot(nextSlot)}
-							</span>
-						</button>
-					{/each}
+				<div class="mx-auto mt-7 grid max-w-xl grid-cols-2 gap-2 rounded-2xl border border-white/10 bg-white/[0.035] p-1.5">
+					<button
+						type="button"
+						onclick={() => selectBookingMode('individual')}
+						aria-pressed={bookingMode === 'individual'}
+						class={`min-h-12 rounded-xl px-4 py-3 text-sm font-bold transition ${
+							bookingMode === 'individual'
+								? 'bg-[#7c3aed] text-white shadow-lg shadow-[#7c3aed]/25'
+								: 'text-white/60 hover:bg-white/[0.06] hover:text-white'
+						}`}
+					>
+						Un profesional
+					</button>
+					<button
+						type="button"
+						onclick={() => selectBookingMode('joint')}
+						aria-pressed={bookingMode === 'joint'}
+						class={`min-h-12 rounded-xl px-4 py-3 text-sm font-bold transition ${
+							bookingMode === 'joint'
+								? 'bg-[#7c3aed] text-white shadow-lg shadow-[#7c3aed]/25'
+								: 'text-white/60 hover:bg-white/[0.06] hover:text-white'
+						}`}
+					>
+						Equipo de profesionales
+					</button>
 				</div>
 
-				{#if slotsLoaded && selectableProfessionals.length === 0}
+				{#if bookingMode === 'joint'}
+					<p class="mx-auto mt-4 max-w-2xl text-center text-sm leading-relaxed text-white/60">
+						Seleccioná dos o más integrantes. La agenda mostrará únicamente los horarios en los que todo el equipo puede atender al mismo tiempo.
+					</p>
+				{/if}
+
+				{#if loadingSlots}
+					<p class="mt-7 text-center text-sm font-semibold text-white/70" aria-live="polite">
+						{bookingMode === 'joint' && selectedProfessionalIds.length >= 2
+							? 'Comparando la disponibilidad de todo el equipo…'
+							: 'Buscando disponibilidad…'}
+					</p>
+				{/if}
+
+				<div class="mt-7 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+					{#if bookingMode === 'individual'}
+						{#each selectableProfessionals as professional}
+							{@const nextSlot = nextSlotByProfessional[professional.id] ?? null}
+							<button
+								type="button"
+								disabled={!canOperate || !nextSlot}
+								onclick={() => selectProfessional(professional.id)}
+								class={`relative min-h-56 rounded-3xl border p-5 text-center transition disabled:opacity-50 ${
+									selectedProfessionalId === professional.id
+										? 'border-[#8b5cf6] bg-[#7c3aed]/20 shadow-xl shadow-[#7c3aed]/20'
+										: 'border-white/10 bg-white/[0.04] hover:border-[#8b5cf6]/70 hover:bg-white/[0.07]'
+								}`}
+							>
+								<span class="mx-auto grid h-20 w-20 place-items-center rounded-full bg-[#7c3aed]/25 text-white ring-1 ring-[#8b5cf6]/35">
+									<svg class="h-9 w-9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+										<path stroke-linecap="round" stroke-linejoin="round" d="M20 21a8 8 0 0 0-16 0" />
+										<circle cx="12" cy="8" r="4" />
+									</svg>
+								</span>
+								<span class="mt-5 block text-lg font-semibold text-white">{professional.name}</span>
+								{#if professional.specialty}
+									<span class="mt-1 block text-sm text-white/60">{professional.specialty}</span>
+								{/if}
+								<span class="mt-5 inline-flex items-center gap-2 rounded-full bg-emerald-400/10 px-3 py-1 text-sm font-semibold text-emerald-200">
+									<span class="h-2 w-2 rounded-full bg-emerald-300"></span>
+									{formatNextSlot(nextSlot)}
+								</span>
+							</button>
+						{/each}
+					{:else}
+						{#each offeringProfessionals as professional}
+							{@const selected = selectedProfessionalIds.includes(professional.id)}
+							<button
+								type="button"
+								disabled={!canOperate}
+								onclick={() => toggleTeamProfessional(professional.id)}
+								aria-pressed={selected}
+								class={`relative min-h-48 rounded-3xl border p-5 text-center transition disabled:opacity-50 ${
+									selected
+										? 'border-[#8b5cf6] bg-[#7c3aed]/20 shadow-xl shadow-[#7c3aed]/20'
+										: 'border-white/10 bg-white/[0.04] hover:border-[#8b5cf6]/70 hover:bg-white/[0.07]'
+								}`}
+							>
+								<span class={`absolute right-4 top-4 grid h-8 w-8 place-items-center rounded-full border text-sm font-black ${
+									selected
+										? 'border-[#a78bfa] bg-[#7c3aed] text-white'
+										: 'border-white/20 bg-white/[0.04] text-transparent'
+								}`}>
+									✓
+								</span>
+								<span class="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#7c3aed]/25 text-white ring-1 ring-[#8b5cf6]/35">
+									<svg class="h-8 w-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+										<path stroke-linecap="round" stroke-linejoin="round" d="M20 21a8 8 0 0 0-16 0" />
+										<circle cx="12" cy="8" r="4" />
+									</svg>
+								</span>
+								<span class="mt-4 block text-lg font-semibold text-white">{professional.name}</span>
+								{#if professional.specialty}
+									<span class="mt-1 block text-sm text-white/60">{professional.specialty}</span>
+								{/if}
+							</button>
+						{/each}
+					{/if}
+				</div>
+
+				{#if bookingMode === 'individual' && slotsLoaded && selectableProfessionals.length === 0}
 					<p class="mt-8 rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-center text-sm text-white/75">
-						No hay profesionales con horarios disponibles.
+						No hay profesionales con horarios disponibles para este procedimiento. Probá otra fecha o revisá sus horarios de atención.
+					</p>
+				{:else if bookingMode === 'joint' && offeringProfessionals.length < 2}
+					<p class="mt-8 rounded-2xl border border-amber-300/25 bg-amber-400/10 p-4 text-center text-sm text-amber-100">
+						Este procedimiento no tiene al menos dos profesionales asignados. Asignalo a otro integrante desde la configuración del equipo antes de crear un turno conjunto.
+					</p>
+				{:else if bookingMode === 'joint' && selectedProfessionalIds.length >= 2 && slotsLoaded && slots.length === 0}
+					<p class="mt-8 rounded-2xl border border-amber-300/25 bg-amber-400/10 p-4 text-center text-sm text-amber-100">
+						No encontramos un horario común para todo el equipo en las próximas cuatro semanas. Probá con otra combinación de profesionales o revisá sus horarios y ausencias.
 					</p>
 				{/if}
 				{#if slotsError}
@@ -406,10 +612,26 @@
 					</p>
 				{/if}
 
-				<div class="mt-8 flex justify-start">
+				<div class="mt-8 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
 					<button type="button" onclick={() => (step = 1)} class="rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/10">
 						Volver
 					</button>
+					{#if bookingMode === 'joint'}
+						<button
+							type="button"
+							disabled={selectedTeam.length < 2 || loadingSlots || slots.length === 0}
+							onclick={continueWithTeam}
+							class="rounded-2xl bg-[#7c3aed] px-6 py-3 text-sm font-bold text-white shadow-lg shadow-[#7c3aed]/25 transition hover:bg-[#6d28d9] disabled:cursor-not-allowed disabled:opacity-45"
+						>
+							{selectedTeam.length < 2
+								? `Seleccioná ${2 - selectedTeam.length} más`
+								: loadingSlots
+									? 'Comparando horarios…'
+									: slots.length === 0
+										? 'Sin horarios conjuntos'
+										: `Ver horarios de ${selectedTeam.length} profesionales`}
+						</button>
+					{/if}
 				</div>
 			</section>
 		{:else if step === 3}
@@ -448,6 +670,40 @@
 					</div>
 				</div>
 
+				{#if bookingMode === 'joint'}
+					<div class="mt-6 rounded-2xl border border-[#8b5cf6]/25 bg-[#7c3aed]/10 p-4">
+						<p class="text-xs font-bold uppercase tracking-wide text-[#c4b5fd]">
+							Equipo seleccionado
+						</p>
+						<div class="mt-3 flex flex-wrap gap-2">
+							{#each selectedTeam as professional}
+								<span class="rounded-full border border-[#8b5cf6]/30 bg-[#7c3aed]/20 px-3 py-2 text-sm font-semibold text-white">
+									{professional.name}
+								</span>
+							{/each}
+						</div>
+						<p class="mt-3 text-sm leading-relaxed text-white/60">
+							Cada opción disponible mantiene libre la agenda de todos estos profesionales durante el turno completo.
+						</p>
+					</div>
+				{/if}
+
+				<label class="mt-5 flex cursor-pointer items-start gap-3 rounded-2xl border border-amber-300/20 bg-amber-400/[0.07] p-4">
+					<input
+						type="checkbox"
+						checked={ignoreBreak}
+						onchange={updateIgnoreBreak}
+						disabled={!canOperate}
+						class="mt-1 h-5 w-5 shrink-0 accent-amber-400"
+					/>
+					<span>
+						<span class="block text-sm font-bold text-amber-100">Ignorar descanso para esta carga manual</span>
+						<span class="mt-1 block text-sm leading-relaxed text-amber-100/70">
+							Usalo sólo si confirmaste que el profesional puede comenzar inmediatamente. El sistema seguirá bloqueando cualquier superposición con una atención real y nunca reservará parcialmente a un equipo.
+						</span>
+					</span>
+				</label>
+
 				<div class="mt-7 rounded-3xl border border-white/10 bg-white/[0.035] p-4">
 					{#if loadingSlots}
 						<div class="grid min-h-72 place-items-center text-sm text-white/65">Buscando horarios...</div>
@@ -480,7 +736,16 @@
 					{:else}
 						<div class="grid min-h-72 place-items-center text-center">
 							<div>
-								<p class="text-base font-semibold text-white">No hay horarios esta semana.</p>
+								<p class="text-base font-semibold text-white">
+									{bookingMode === 'joint'
+										? 'No hay un horario común para todo el equipo esta semana.'
+										: 'No hay horarios disponibles esta semana.'}
+								</p>
+								<p class="mx-auto mt-2 max-w-xl text-sm leading-relaxed text-white/50">
+									{bookingMode === 'joint'
+										? 'Probá la semana siguiente o volvé para cambiar la combinación de profesionales.'
+										: 'Probá la semana siguiente o revisá el horario habitual del profesional.'}
+								</p>
 								<button
 									type="button"
 									onclick={() => {
@@ -644,8 +909,21 @@
 							<p class="mt-1 font-semibold text-white">{selectedService?.name ?? '-'}</p>
 						</div>
 						<div>
-							<p class="text-xs font-semibold uppercase tracking-wide text-white/40">Profesional</p>
-							<p class="mt-1 font-semibold text-white">{selectedProfessional?.name ?? '-'}</p>
+							<p class="text-xs font-semibold uppercase tracking-wide text-white/40">
+								{bookingMode === 'joint' ? 'Equipo' : 'Profesional'}
+							</p>
+							{#if bookingMode === 'joint'}
+								<ul class="mt-2 grid gap-1.5">
+									{#each selectedTeam as professional}
+										<li class="flex items-center gap-2 text-sm font-semibold text-white">
+											<span class="h-1.5 w-1.5 rounded-full bg-[#a78bfa]"></span>
+											{professional.name}
+										</li>
+									{/each}
+								</ul>
+							{:else}
+								<p class="mt-1 font-semibold text-white">{selectedProfessional?.name ?? '-'}</p>
+							{/if}
 						</div>
 						<div>
 							<p class="text-xs font-semibold uppercase tracking-wide text-white/40">Fecha</p>
@@ -654,6 +932,12 @@
 						<div>
 							<p class="text-xs font-semibold uppercase tracking-wide text-white/40">Hora</p>
 							<p class="mt-1 font-semibold text-white">{selectedSlot?.time ?? '-'}</p>
+						</div>
+						<div>
+							<p class="text-xs font-semibold uppercase tracking-wide text-white/40">Descanso</p>
+							<p class="mt-1 text-sm font-semibold text-white">
+								{ignoreBreak ? 'Ignorado manualmente' : 'Se respeta el configurado'}
+							</p>
 						</div>
 						<div>
 							<p class="text-xs font-semibold uppercase tracking-wide text-white/40">Paciente</p>
@@ -667,7 +951,7 @@
 						disabled={!canOperate || !canCreate}
 						class="mt-6 w-full rounded-2xl bg-[#7c3aed] px-5 py-4 text-base font-semibold text-white shadow-lg shadow-[#7c3aed]/25 transition hover:bg-[#6d28d9] disabled:cursor-not-allowed disabled:opacity-45"
 					>
-						Crear turno
+						{bookingMode === 'joint' ? 'Crear turno conjunto' : 'Crear turno'}
 					</button>
 				</aside>
 			</section>

@@ -20,6 +20,9 @@ declare
 	v_limit_error text;
 	i integer;
 begin
+	insert into auth.users (id, email)
+	values (v_owner_id, 'public-booking-patient-policy@example.test');
+
 	insert into public.businesses (name, slug, industry, timezone)
 	values (
 		'E2E politica de pacientes',
@@ -45,7 +48,7 @@ begin
 	-- El mismo nombre puede existir en dos fichas con teléfonos distintos. Esas
 	-- fichas comparten el cupo público, pero no se fusionan ni se sobrescriben.
 	insert into public.patients (owner_id, business_id, full_name, phone_e164)
-	values (v_owner_id, v_business_id, 'Ana Gomez', '+5493510000101')
+	values (v_owner_id, v_business_id, 'Ana Gómez', '+5493510000101')
 	returning id into v_ana_phone_a_id;
 
 	insert into public.patients (owner_id, business_id, full_name, phone_e164)
@@ -55,6 +58,13 @@ begin
 	insert into public.patients (owner_id, business_id, full_name, phone_e164)
 	values (v_owner_id, v_business_id, 'Bruno Gomez', '+5493510000103')
 	returning id into v_bruno_id;
+
+	if public.normalized_patient_name('  MARÍA   GIMÉNEZ ') <> 'maria gimenez' then
+		raise exception 'TEST_ACCENT_INSENSITIVE_NAME_NORMALIZATION';
+	end if;
+	if public.normalized_patient_name('Ana Peña') = public.normalized_patient_name('Ana Pena') then
+		raise exception 'TEST_ENYE_MUST_REMAIN_DISTINCT';
+	end if;
 
 	-- Un historial grande no consume cupo si ya quedó atrás.
 	for i in 1..345 loop
@@ -102,7 +112,7 @@ begin
 
 	select public.get_public_booking_active_future_count_by_name(
 		v_business_id,
-		'  ana   GOMEZ ',
+		'  ana   GÓMEZ ',
 		statement_timestamp()
 	)
 	into v_count;

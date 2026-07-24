@@ -187,7 +187,10 @@
 							? item.weekdays.map(Number).filter((value: number) => Number.isInteger(value) && value >= 0 && value <= 6)
 							: [],
 						timeRanges: String(item?.timeRanges ?? item?.time_ranges ?? ''),
-						slotInterval: String(item?.slotInterval ?? item?.slot_interval_minutes ?? '15')
+						slotInterval: String(
+							item?.breakMinutes ?? item?.break_minutes ?? item?.slotInterval ?? '15'
+						),
+						gridInterval: String(item?.gridInterval ?? item?.slot_interval_minutes ?? '15')
 					}));
 				}
 			} catch {
@@ -202,7 +205,8 @@
 						.map((value) => Number(value))
 						.filter((value) => Number.isInteger(value) && value >= 0 && value <= 6),
 					timeRanges: String(form.values.time_ranges ?? ''),
-					slotInterval: String(form.values.slot_interval_minutes ?? '15')
+					slotInterval: String(form.values.break_minutes ?? '15'),
+					gridInterval: String(form.values.slot_interval_minutes ?? '15')
 				}
 			];
 		}
@@ -433,7 +437,9 @@
 
 	const removeScheduleBlock = (blockId: string | undefined) => {
 		if (scheduleBlocks.length <= 1) {
-			scheduleBlocks = [{ ...scheduleBlocks[0], weekdays: [], timeRanges: '', slotInterval: '15' }];
+			scheduleBlocks = [
+				{ ...scheduleBlocks[0], weekdays: [], timeRanges: '', slotInterval: '15' }
+			];
 		} else {
 			scheduleBlocks = scheduleBlocks.filter((block) => block.id !== blockId);
 		}
@@ -796,18 +802,20 @@
 											{/if}
 										</label>
 										<label>
-											<span class="ux-label">Descanso entre consultas</span>
+											<span class="ux-label">Descanso entre consultas (minutos)</span>
 											<input
 												type="number"
 												inputmode="numeric"
-												min="5"
-												max="120"
-												step="5"
+												min="0"
+												step="1"
 												disabled={!canManage}
 												class={`ux-input text-lg font-bold ${scheduleError ? 'border-red-400/60' : ''}`}
 												value={block.slotInterval}
 												oninput={(event) => updateScheduleBlock(block.id, { slotInterval: (event.currentTarget as HTMLInputElement).value })}
 											/>
+											<span class="mt-2 block text-xs font-semibold leading-relaxed text-white/45">
+												Usá 0 para permitir otro turno inmediatamente. También podés escribir cualquier entero, por ejemplo 2, 23 o 60.
+											</span>
 										</label>
 									</div>
 								</div>

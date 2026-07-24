@@ -3,6 +3,11 @@ import { env as publicEnv } from '$env/dynamic/public';
 import { createSupabaseAdminClient } from '$lib/server/supabase';
 import { resolveMapsUrl } from '$lib/server/location';
 import {
+	isValidPatientFullName,
+	normalizePatientFullName,
+	PATIENT_FULL_NAME_ERROR_MESSAGE
+} from '$lib/utils/patient-name';
+import {
 	createPublicBooking,
 	getPublicBookingCdnCacheControl,
 	getPublicBookingErrorMessage,
@@ -117,7 +122,7 @@ export const actions: Actions = {
 		const serviceId = String(form.get('service_id') ?? '').trim();
 		const professionalId = String(form.get('professional_id') ?? '').trim();
 		const slotStartsAt = String(form.get('slot_starts_at') ?? '').trim();
-		const patientName = String(form.get('patient_name') ?? '').trim();
+		const patientName = normalizePatientFullName(String(form.get('patient_name') ?? ''));
 		const patientPhone = String(form.get('patient_phone') ?? '').trim();
 		const patientEmail = String(form.get('patient_email') ?? '').trim();
 		const note = String(form.get('note') ?? '').trim();
@@ -127,6 +132,12 @@ export const actions: Actions = {
 
 		if (!serviceId || !professionalId || !slotStartsAt) {
 			return fail(400, { message: 'Elegí servicio, profesional y horario.', values: valuesFromForm(form) });
+		}
+		if (!isValidPatientFullName(patientName)) {
+			return fail(400, {
+				message: PATIENT_FULL_NAME_ERROR_MESSAGE,
+				values: { ...valuesFromForm(form), patient_name: patientName }
+			});
 		}
 
 		try {

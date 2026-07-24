@@ -36,6 +36,8 @@
 	const canOperate = $derived(data.context.canOperate && !data.demo);
 	const canProfessionalClose = $derived(data.context.role === 'professional' && !data.demo);
 	const isClosed = $derived(['cancelled', 'attended', 'no_show'].includes(data.appointment?.status));
+	const appointmentProfessionals = $derived(data.appointment?.professionals ?? []);
+	const isJoint = $derived(appointmentProfessionals.length > 1);
 
 	const statusLabels: Record<string, string> = {
 		reserved: 'Reservado',
@@ -160,7 +162,10 @@
 	let reprogramOpen = $state(false);
 	let loadingSlots = $state(false);
 	let slotsError = $state<string | null>(null);
+	let slotRequest = 0;
 	let selectedSlot = $state('');
+	// svelte-ignore state_referenced_locally
+	let ignoreBreak = $state(false);
 	let submitting = $state(false);
 
 	$effect(() => {
@@ -212,11 +217,19 @@
 
 	const loadSlots = async (date: string) => {
 		if (slotsCache[date]) return;
+		const request = ++slotRequest;
 		loadingSlots = true;
 		slotsError = null;
 		try {
-			const res = await fetch(`/odonto/turnos/${data.appointment.id}/slots?date=${date}`);
+			const params = new URLSearchParams({
+				date,
+				ignore_break: ignoreBreak ? 'true' : 'false'
+			});
+			const res = await fetch(
+				`/odonto/turnos/${data.appointment.id}/slots?${params.toString()}`
+			);
 			const body = await res.json().catch(() => ({}));
+			if (request !== slotRequest) return;
 			if (!res.ok) {
 				slotsError = body?.message ?? 'No se pudieron cargar los horarios.';
 				slotsCache = { ...slotsCache, [date]: [] };
@@ -224,10 +237,11 @@
 				slotsCache = { ...slotsCache, [date]: (body.slots ?? []) as Slot[] };
 			}
 		} catch {
+			if (request !== slotRequest) return;
 			slotsError = 'No se pudieron cargar los horarios. Revisá tu conexión.';
 			slotsCache = { ...slotsCache, [date]: [] };
 		} finally {
-			loadingSlots = false;
+			if (request === slotRequest) loadingSlots = false;
 		}
 	};
 
@@ -241,6 +255,14 @@
 		selectedSlot = '';
 		slotsError = null;
 		loadSlots(iso);
+	};
+
+	const updateIgnoreBreak = (event: Event) => {
+		ignoreBreak = (event.currentTarget as HTMLInputElement).checked;
+		selectedSlot = '';
+		slotsCache = {};
+		slotRequest += 1;
+		void loadSlots(selectedDate);
 	};
 
 	const prevMonth = () => {
@@ -341,8 +363,14 @@
 							{data.appointment.service_name_snapshot}
 						</h1>
 						<p class="mt-2 text-lg font-semibold text-white/55">
-							<span class="text-white/40">Profesional:</span> {data.appointment.professional_name_snapshot}
+							<span class="text-white/40">{isJoint ? 'Equipo:' : 'Profesional:'}</span>
+							{data.appointment.professional_name_snapshot}
 						</p>
+						{#if isJoint}
+							<span class="mt-3 inline-flex rounded-full border border-[#8b5cf6]/30 bg-[#7c3aed]/15 px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-[#c4b5fd]">
+								Turno conjunto · {appointmentProfessionals.length} profesionales
+							</span>
+						{/if}
 					</div>
 				</div>
 				<span class={`w-fit rounded-full px-5 py-3 text-sm font-bold ${statusTone[data.appointment.status] ?? 'bg-white/10 text-white'}`}>
@@ -369,6 +397,21 @@
 					<p class="text-sm font-semibold text-white/55">Duración</p>
 					<p class="mt-2 text-lg font-semibold text-white">{durationText(data.appointment)}</p>
 				</div>
+				{#if isJoint}
+					<div class="rounded-2xl border border-[#8b5cf6]/25 bg-[#7c3aed]/10 p-5 md:col-span-2 xl:col-span-4">
+						<p class="text-sm font-semibold text-[#c4b5fd]">Profesionales reservados</p>
+						<div class="mt-3 flex flex-wrap gap-2">
+							{#each appointmentProfessionals as professional}
+								<span class="rounded-full border border-[#8b5cf6]/30 bg-[#7c3aed]/20 px-3 py-2 text-sm font-semibold text-white">
+									{professional.professional_name_snapshot}
+								</span>
+							{/each}
+						</div>
+						<p class="mt-3 text-sm leading-relaxed text-white/55">
+							Es un único turno y ocupa simultáneamente la agenda de todo el equipo.
+						</p>
+					</div>
+				{/if}
 				{#if data.appointment.internal_note}
 					<div class="rounded-2xl border border-white/10 bg-white/[0.045] p-5">
 						<p class="text-sm font-semibold text-white/55">Nota interna</p>
@@ -448,6 +491,32 @@
 									: 'No tenés permiso para reprogramar este turno.'}
 							</p>
 						{:else}
+							{#if isJoint}
+								<div class="mt-4 rounded-2xl border border-[#8b5cf6]/25 bg-[#7c3aed]/10 p-4">
+									<p class="text-sm font-bold text-[#c4b5fd]">
+										Se recalculará la disponibilidad de todo el equipo
+									</p>
+									<p class="mt-1 text-sm leading-relaxed text-white/60">
+										Sólo verás horarios en los que los {appointmentProfessionals.length} profesionales estén libres. Si uno no puede, el turno completo conserva su horario actual.
+									</p>
+								</div>
+							{/if}
+
+							<label class="mt-4 flex cursor-pointer items-start gap-3 rounded-2xl border border-amber-300/20 bg-amber-400/[0.07] p-4">
+								<input
+									type="checkbox"
+									checked={ignoreBreak}
+									onchange={updateIgnoreBreak}
+									class="mt-1 h-5 w-5 shrink-0 accent-amber-400"
+								/>
+								<span>
+									<span class="block text-sm font-bold text-amber-100">Ignorar descanso en la nueva fecha</span>
+									<span class="mt-1 block text-sm leading-relaxed text-amber-100/70">
+										Usalo sólo después de confirmar que puede comenzarse inmediatamente. Nunca permite superponer dos atenciones reales.
+									</span>
+								</span>
+							</label>
+
 							<div class="mt-4 rounded-2xl border border-white/10 bg-[#0a1b2e] p-4">
 								<div class="flex items-center justify-between">
 									<button type="button" onclick={prevMonth} disabled={!canGoPrev} aria-label="Mes anterior" class="grid h-9 w-9 place-items-center rounded-xl border border-white/10 text-lg text-white/80 transition hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent">‹</button>
@@ -527,6 +596,7 @@
 							<form method="POST" action="?/reschedule" class="mt-5" use:enhance={onReschedule}>
 								<input type="hidden" name="slot_starts_at" value={selectedSlot} />
 								<input type="hidden" name="reprogram_date" value={selectedDate} />
+								<input type="hidden" name="ignore_break" value={ignoreBreak ? 'true' : 'false'} />
 								<button
 									type="submit"
 									disabled={!selectedSlot || submitting}

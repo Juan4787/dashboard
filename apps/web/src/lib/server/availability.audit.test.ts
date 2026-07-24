@@ -64,7 +64,7 @@ const supabaseFor = (input: MockData) => ({
 			if (table === 'professional_services') return queryBuilder(input.assignments);
 			if (table === 'availability_rules') return queryBuilder(input.rules);
 			if (table === 'availability_exceptions') return queryBuilder(input.exceptions ?? []);
-			if (table === 'appointments') return queryBuilder(input.appointments ?? []);
+			if (table === 'appointment_professionals') return queryBuilder(input.appointments ?? []);
 			return queryBuilder([]);
 		}
 	})
@@ -142,9 +142,10 @@ describe('auditoría disponibilidad: turno tomado por profesional', () => {
 			{ business: business as never, serviceId: 'svc-1', fromDate: DATE, toDate: DATE, publicOnly: true }
 		);
 
-		// 15:00 choca con el turno; 16:00 invade su buffer (termina 17:00 + 15' y
-		// arranca antes de 16:15); 18:00 no entra porque su buffer sale de la regla.
-		expect(timesFor(slots, 'pro-1')).toEqual(['17:00']);
+		// 15:00 choca con el turno; 16:00 invade su buffer. 16:15 es la primera
+		// disponibilidad real y se ofrece aunque caiga fuera de la grilla; 18:00 no
+		// entra porque su propio buffer sale de la regla.
+		expect(timesFor(slots, 'pro-1')).toEqual(['16:15', '17:00']);
 	});
 
 	it('los slots duran exactamente lo configurado en el servicio', async () => {

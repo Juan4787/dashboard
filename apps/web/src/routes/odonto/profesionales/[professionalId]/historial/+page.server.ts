@@ -26,9 +26,11 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies }) =
 	const [appointmentsResult, entriesResult] = await Promise.all([
 		admin
 			.from('appointments')
-			.select('id, starts_at, status, service_name_snapshot, patient_id, patients(full_name)')
+			.select(
+				'id, starts_at, status, service_name_snapshot, patient_id, patients(full_name), appointment_professionals!inner(professional_id)'
+			)
 			.eq('business_id', businessId)
-			.eq('professional_id', params.professionalId)
+			.eq('appointment_professionals.professional_id', params.professionalId)
 			.order('starts_at', { ascending: false })
 			.limit(300),
 		admin
