@@ -24,9 +24,25 @@ const valuesFromForm = (form: FormData) => Object.fromEntries(form.entries());
 // trackea los search params accedidos: al no leerlo, elegir horario no re-ejecuta
 // el load (la página lo resuelve client-side desde page.url) y es instantáneo.
 export const load: PageServerLoad = async ({ params, fetch, url, setHeaders }) => {
+	const requestedProfessionalIds = [
+		...new Set(
+			url.searchParams
+				.getAll('professional_ids')
+				.flatMap((value) => value.split(','))
+				.map((value) => value.trim())
+				.filter(Boolean)
+		)
+	];
+	const bookingMode: 'individual' | 'joint' =
+		url.searchParams.get('booking_mode') === 'joint' || requestedProfessionalIds.length > 1
+			? 'joint'
+			: 'individual';
 	const selected = {
 		serviceId: url.searchParams.get('service_id') ?? '',
-		professionalId: url.searchParams.get('professional_id') ?? '',
+		bookingMode,
+		professionalId:
+			bookingMode === 'individual' ? (url.searchParams.get('professional_id') ?? '') : '',
+		professionalIds: bookingMode === 'joint' ? requestedProfessionalIds : [],
 		date: url.searchParams.get('date') ?? ''
 	};
 	// El navegador no conserva datos; Netlify sí puede servirlos desde su caché
@@ -78,6 +94,8 @@ export const load: PageServerLoad = async ({ params, fetch, url, setHeaders }) =
 			slug: params.businessSlug,
 			serviceId: selected.serviceId,
 			professionalId: selected.professionalId,
+			professionalIds: selected.professionalIds,
+			bookingMode: selected.bookingMode,
 			date: selected.date
 		});
 
@@ -106,7 +124,13 @@ export const load: PageServerLoad = async ({ params, fetch, url, setHeaders }) =
 				days: [],
 				issue: 'missing_service_role'
 			},
-			selected: { serviceId: '', professionalId: '', date: '' },
+			selected: {
+				serviceId: '',
+				bookingMode: 'individual',
+				professionalId: '',
+				professionalIds: [],
+				date: ''
+			},
 			mapsLink: null,
 			turnstileSiteKey: null,
 			demo: false
@@ -120,7 +144,24 @@ export const actions: Actions = {
 
 		const form = await request.formData();
 		const serviceId = String(form.get('service_id') ?? '').trim();
-		const professionalId = String(form.get('professional_id') ?? '').trim();
+		const requestedProfessionalIds = [
+			...new Set(
+				[
+					...form.getAll('professional_ids').flatMap((value) => String(value).split(',')),
+					String(form.get('professional_id') ?? '')
+				]
+					.map((value) => value.trim())
+					.filter(Boolean)
+			)
+		];
+		const bookingMode =
+			String(form.get('booking_mode') ?? '').trim() === 'joint' ||
+			requestedProfessionalIds.length > 1
+				? 'joint'
+				: 'individual';
+		const professionalIds =
+			bookingMode === 'joint' ? requestedProfessionalIds : requestedProfessionalIds.slice(0, 1);
+		const professionalId = professionalIds[0] ?? '';
 		const slotStartsAt = String(form.get('slot_starts_at') ?? '').trim();
 		const patientName = normalizePatientFullName(String(form.get('patient_name') ?? ''));
 		const patientPhone = String(form.get('patient_phone') ?? '').trim();
@@ -130,8 +171,26 @@ export const actions: Actions = {
 		const userAgent = request.headers.get('user-agent') ?? null;
 		const ip = getClientAddress();
 
-		if (!serviceId || !professionalId || !slotStartsAt) {
-			return fail(400, { message: 'Elegí servicio, profesional y horario.', values: valuesFromForm(form) });
+		if (!serviceId || !slotStartsAt) {
+			return fail(400, {
+				message:
+					'Falta el procedimiento o el horario. Volvé al inicio de la reserva, completá todos los pasos y elegí una de las opciones mostradas.',
+				values: valuesFromForm(form)
+			});
+		}
+		if (bookingMode === 'joint' && professionalIds.length < 2) {
+			return fail(400, {
+				message:
+					'Para reservar con un equipo, seleccioná por lo menos dos profesionales diferentes y buscá nuevamente los días disponibles.',
+				values: valuesFromForm(form)
+			});
+		}
+		if (bookingMode === 'individual' && !professionalId) {
+			return fail(400, {
+				message:
+					'Falta elegir el profesional. Volvé al segundo paso, seleccioná quién realizará el procedimiento y elegí nuevamente el horario.',
+				values: valuesFromForm(form)
+			});
 		}
 		if (!isValidPatientFullName(patientName)) {
 			return fail(400, {
@@ -153,6 +212,8 @@ export const actions: Actions = {
 				slug: params.businessSlug,
 				serviceId,
 				professionalId,
+				professionalIds,
+				bookingMode,
 				slotStartsAt,
 				patientName,
 				patientPhone,

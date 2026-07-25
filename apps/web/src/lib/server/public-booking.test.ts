@@ -3,6 +3,7 @@ import {
 	assertPublicBookingPatientPolicy,
 	addDaysToDateString,
 	clearPublicBookingScanCache,
+	createPublicBooking,
 	getPublicBookingErrorCode,
 	getPublicBookingErrorMessage,
 	getPublicBookingCdnCacheControl,
@@ -13,12 +14,21 @@ import {
 } from './public-booking';
 import type { AvailabilitySlot } from './availability';
 
-const { getAvailabilitySlotsMock } = vi.hoisted(() => ({ getAvailabilitySlotsMock: vi.fn() }));
+const { createJointAppointmentMock, createManualAppointmentMock, getAvailabilitySlotsMock } =
+	vi.hoisted(() => ({
+		createJointAppointmentMock: vi.fn(),
+		createManualAppointmentMock: vi.fn(),
+		getAvailabilitySlotsMock: vi.fn()
+	}));
 
 vi.mock('./availability', async (importOriginal) => {
 	const original = await importOriginal<typeof import('./availability')>();
 	return { ...original, getAvailabilitySlots: getAvailabilitySlotsMock };
 });
+vi.mock('./appointments', () => ({
+	createJointAppointment: createJointAppointmentMock,
+	createManualAppointment: createManualAppointmentMock
+}));
 
 describe('public booking UX helpers', () => {
 	it('mantiene la caché del catálogo larga y la de horarios deliberadamente corta', () => {
@@ -31,6 +41,9 @@ describe('public booking UX helpers', () => {
 		expect(getPublicBookingCdnCacheControl({ professionalId: 'pro-1' })).toBe(
 			'public, durable, s-maxage=10, stale-while-revalidate=30'
 		);
+		expect(
+			getPublicBookingCdnCacheControl({ professionalIds: ['pro-1', 'pro-2'] })
+		).toBe('public, durable, s-maxage=10, stale-while-revalidate=30');
 		expect(getPublicBookingCdnCacheControl({ professionalId: 'pro-1', date: '2026-07-21' })).toBe(
 			'public, durable, s-maxage=5, stale-while-revalidate=10'
 		);
@@ -54,7 +67,15 @@ describe('public booking UX helpers', () => {
 		['PATIENT_DNI_ALREADY_EXISTS', 'PATIENT_DNI_ALREADY_EXISTS'],
 		['SERVICE_NOT_FOUND', 'SERVICE_NOT_FOUND'],
 		['PROFESSIONAL_NOT_FOUND', 'PROFESSIONAL_NOT_FOUND'],
-		['PROFESSIONAL_SERVICE_NOT_ASSIGNED', 'PROFESSIONAL_SERVICE_NOT_ASSIGNED']
+		['PROFESSIONAL_SERVICE_NOT_ASSIGNED', 'PROFESSIONAL_SERVICE_NOT_ASSIGNED'],
+		[
+			'TEAM_PROFESSIONAL_SERVICE_NOT_ASSIGNED',
+			'TEAM_PROFESSIONAL_SERVICE_NOT_ASSIGNED'
+		],
+		[
+			'JOINT_APPOINTMENT_REQUIRES_TWO_PROFESSIONALS',
+			'PUBLIC_JOINT_REQUIRES_TWO_PROFESSIONALS'
+		]
 	] as const)('no confunde la causa técnica %s con otro mensaje', (technicalCode, expectedCode) => {
 		const error = new Error(technicalCode);
 		expect(getPublicBookingErrorCode(error)).toBe(expectedCode);
@@ -230,6 +251,111 @@ describe('public booking patient capacity', () => {
 	});
 });
 
+describe('public joint booking creation', () => {
+	beforeEach(() => {
+		createJointAppointmentMock.mockReset();
+		createManualAppointmentMock.mockReset();
+		getAvailabilitySlotsMock.mockReset();
+	});
+
+	it('confirma el equipo con una única creación atómica y una sola fila de turno', async () => {
+		const slot: AvailabilitySlot = {
+			date: '2026-07-30',
+			time: '09:23',
+			starts_at: '2026-07-30T12:23:00.000Z',
+			ends_at: '2026-07-30T12:53:00.000Z',
+			professional_id: 'pro-1',
+			professional_name: 'Dra. Uno, Dr. Dos',
+			professional_ids: ['pro-1', 'pro-2'],
+			professional_names: ['Dra. Uno', 'Dr. Dos'],
+			is_joint: true
+		};
+		getAvailabilitySlotsMock.mockResolvedValue([slot]);
+		createJointAppointmentMock.mockResolvedValue({
+			id: 'appointment-joint-1',
+			confirmation_token: 'token-joint-1'
+		});
+		const attemptRows: Array<Record<string, unknown>> = [];
+		const countQuery = queryBuilder([]);
+		(countQuery as { then: unknown }).then = (resolve: (value: unknown) => unknown) =>
+			resolve({ count: 0, error: null });
+		const supabase = {
+			from: (table: string) => {
+				if (table === 'businesses') {
+					return { select: () => queryBuilder(business) };
+				}
+				if (table === 'business_subscriptions') {
+					return { select: () => queryBuilder(subscription) };
+				}
+				if (table === 'patients') {
+					return { select: () => queryBuilder(null) };
+				}
+				if (table === 'public_booking_attempts') {
+					return {
+						select: () => countQuery,
+						insert: async (row: Record<string, unknown>) => {
+							attemptRows.push(row);
+							return { error: null };
+						}
+					};
+				}
+				throw new Error(`Tabla inesperada en la prueba: ${table}`);
+			},
+			rpc: async (name: string) => {
+				if (name !== 'get_public_booking_active_future_count_by_name') {
+					throw new Error(`RPC inesperado en la prueba: ${name}`);
+				}
+				return { data: 0, error: null };
+			}
+		};
+
+		const result = await createPublicBooking(supabase as never, {
+			slug: business.slug,
+			serviceId: 'svc-1',
+			bookingMode: 'joint',
+			professionalIds: ['pro-1', 'pro-2'],
+			slotStartsAt: slot.starts_at,
+			patientName: 'Ana Gomez',
+			patientPhone: '+54 9 351 555 0000',
+			now: new Date('2026-07-25T12:00:00.000Z')
+		});
+
+		expect(result.appointment.id).toBe('appointment-joint-1');
+		expect(getAvailabilitySlotsMock).toHaveBeenCalledWith(
+			supabase,
+			expect.objectContaining({
+				serviceId: 'svc-1',
+				professionalId: null,
+				professionalIds: ['pro-1', 'pro-2'],
+				fromDate: '2026-07-30',
+				toDate: '2026-07-30',
+				publicOnly: true
+			})
+		);
+		expect(createJointAppointmentMock).toHaveBeenCalledTimes(1);
+		expect(createJointAppointmentMock).toHaveBeenCalledWith(
+			supabase,
+			expect.objectContaining({
+				businessId: business.id,
+				serviceId: 'svc-1',
+				professionalIds: ['pro-1', 'pro-2'],
+				source: 'public_booking'
+			})
+		);
+		expect(createManualAppointmentMock).not.toHaveBeenCalled();
+		expect(attemptRows).toHaveLength(1);
+		expect(attemptRows[0]).toMatchObject({
+			action: 'booking_create',
+			success: true,
+			metadata: {
+				appointment_id: 'appointment-joint-1',
+				booking_mode: 'joint',
+				professional_ids: ['pro-1', 'pro-2']
+			}
+		});
+	});
+});
+
 // ---------------------------------------------------------------------------
 // loadPublicBookingState: el flujo navega la misma URL varias veces; estos tests
 // fijan el contrato de performance (caché + reuso del escaneo de días).
@@ -279,9 +405,18 @@ const queryBuilder = (data: unknown) => {
 };
 
 const createSupabaseMock = (
-	overrides: { professionalName?: string; includeUnavailableFixtures?: boolean } = {}
-) => ({
-	from: (table: string) => ({
+	overrides: {
+		professionalName?: string;
+		includeUnavailableFixtures?: boolean;
+		includeSecondProfessional?: boolean;
+	} = {}
+) => {
+	const tableReads: string[] = [];
+	return {
+	tableReads,
+	from: (table: string) => {
+		tableReads.push(table);
+		return {
 		select: (columns: string) => {
 			const professionalName = overrides.professionalName ?? 'Dra. Uno';
 			if (table === 'businesses') return queryBuilder(business);
@@ -324,6 +459,14 @@ const createSupabaseMock = (
 						sort_order: 0
 					}
 				];
+				if (overrides.includeSecondProfessional) {
+					professionals.push({
+						...professionals[0],
+						id: 'pro-2',
+						name: 'Dr. Dos',
+						sort_order: 1
+					});
+				}
 				if (overrides.includeUnavailableFixtures) {
 					professionals.push({
 						...professionals[0],
@@ -348,11 +491,30 @@ const createSupabaseMock = (
 								is_public: true,
 								sort_order: 0
 							}
-						}
+						},
+						...(overrides.includeSecondProfessional
+							? [
+									{
+										professional_id: 'pro-2',
+										professionals: {
+											id: 'pro-2',
+											name: 'Dr. Dos',
+											specialty: 'Control',
+											avatar_url: null,
+											is_active: true,
+											is_public: true,
+											sort_order: 1
+										}
+									}
+								]
+							: [])
 					]);
 				}
 				return queryBuilder([
 					{ service_id: 'svc-1', professional_id: 'pro-1' },
+					...(overrides.includeSecondProfessional
+						? [{ service_id: 'svc-1', professional_id: 'pro-2' }]
+						: []),
 					...(overrides.includeUnavailableFixtures
 						? [
 								{ service_id: 'svc-1', professional_id: 'pro-unavailable' },
@@ -363,21 +525,39 @@ const createSupabaseMock = (
 			}
 			if (table === 'availability_rules') {
 				return queryBuilder(
-					Array.from({ length: 7 }, (_, weekday) => ({
-						id: `rule-${weekday}`,
-						professional_id: 'pro-1',
-						weekday,
-						start_time: '09:00:00',
-						end_time: '12:00:00',
-						slot_interval_minutes: 30,
-						is_active: true
-					}))
+					Array.from({ length: 7 }, (_, weekday) => [
+						{
+							id: `rule-pro-1-${weekday}`,
+							professional_id: 'pro-1',
+							weekday,
+							start_time: '09:00:00',
+							end_time: '12:00:00',
+							slot_interval_minutes: 30,
+							break_minutes: 0,
+							is_active: true
+						},
+						...(overrides.includeSecondProfessional
+							? [
+									{
+										id: `rule-pro-2-${weekday}`,
+										professional_id: 'pro-2',
+										weekday,
+										start_time: '09:23:00',
+										end_time: '12:00:00',
+										slot_interval_minutes: 15,
+										break_minutes: 0,
+										is_active: true
+									}
+								]
+							: [])
+					]).flat()
 				);
 			}
 			return queryBuilder([]);
 		}
-	})
-});
+	};
+	}
+}};
 
 const slotsForRange = (fromDate: string, toDate: string): AvailabilitySlot[] => {
 	const slots: AvailabilitySlot[] = [];
@@ -407,16 +587,18 @@ describe('loadPublicBookingState (performance del flujo público)', () => {
 	});
 
 	it('muestra el catálogo inicial sin disparar el camino de consultas por servicio', async () => {
-		const supabase = createSupabaseMock() as never;
+		const supabase = createSupabaseMock();
 
-		const state = await loadPublicBookingState(supabase, { slug: business.slug });
+		const state = await loadPublicBookingState(supabase as never, { slug: business.slug });
 
 		expect(state.issue).toBeNull();
 		expect(state.services.map((service) => service.id)).toEqual(['svc-1']);
 		expect(getAvailabilitySlotsMock).not.toHaveBeenCalled();
+		expect(supabase.tableReads).not.toContain('availability_exceptions');
+		expect(supabase.tableReads).not.toContain('appointment_professionals');
 	});
 
-	it('conserva ocultos servicios y profesionales que no tienen ningún horario', async () => {
+	it('conserva ocultos servicios y profesionales sin un horario semanal activo', async () => {
 		const supabase = createSupabaseMock({ includeUnavailableFixtures: true }) as never;
 
 		const initial = await loadPublicBookingState(supabase, { slug: business.slug });
@@ -429,6 +611,59 @@ describe('loadPublicBookingState (performance del flujo público)', () => {
 		expect(professionalStep.professionals.map((professional) => professional.id)).toEqual([
 			'pro-1'
 		]);
+	});
+
+	it('no consulta la agenda hasta que la selección individual o conjunta está completa', async () => {
+		const supabase = createSupabaseMock({ includeSecondProfessional: true });
+
+		const state = await loadPublicBookingState(supabase as never, {
+			slug: business.slug,
+			serviceId: 'svc-1',
+			bookingMode: 'joint',
+			professionalIds: ['pro-1']
+		});
+
+		expect(state.issue).toBeNull();
+		expect(state.days).toEqual([]);
+		expect(state.professionals.map((professional) => professional.id)).toEqual(['pro-1', 'pro-2']);
+		expect(supabase.tableReads).not.toContain('availability_exceptions');
+		expect(supabase.tableReads).not.toContain('appointment_professionals');
+	});
+
+	it('calcula días y horarios únicamente cuando los dos integrantes están libres', async () => {
+		const supabase = createSupabaseMock({ includeSecondProfessional: true }) as never;
+		const today = todayForBusiness(business);
+		const date = addDaysToDateString(today, 2);
+
+		const dayState = await loadPublicBookingState(supabase, {
+			slug: business.slug,
+			serviceId: 'svc-1',
+			bookingMode: 'joint',
+			professionalIds: ['pro-1', 'pro-2']
+		});
+		expect(dayState.issue).toBeNull();
+		expect(dayState.days.length).toBeGreaterThan(0);
+		expect(dayState.slots).toEqual([]);
+		expect(dayState.days.every((day) => day.count === 1)).toBe(true);
+
+		const slotState = await loadPublicBookingState(supabase, {
+			slug: business.slug,
+			serviceId: 'svc-1',
+			bookingMode: 'joint',
+			professionalIds: ['pro-1', 'pro-2'],
+			date
+		});
+		expect(slotState.issue).toBeNull();
+		expect(slotState.slots.length).toBeGreaterThan(0);
+		expect(
+			slotState.slots.every(
+				(slot) =>
+					slot.is_joint &&
+					slot.professional_ids?.join(',') === 'pro-1,pro-2' &&
+					slot.date === date
+			)
+		).toBe(true);
+		expect(slotState.slots[0]?.time).toBe('09:23');
 	});
 
 	it('la fecha elegida dentro del rango escaneado se filtra sin query extra', async () => {

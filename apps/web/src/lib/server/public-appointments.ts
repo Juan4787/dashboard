@@ -24,6 +24,8 @@ export type PublicAppointmentView = {
 	ends_at: string;
 	service_name_snapshot: string;
 	professional_name_snapshot: string;
+	professional_count: number;
+	is_joint: boolean;
 	calendar_action_status: string;
 	calendar_action_at: string | null;
 	calendar_action_count: number;
@@ -61,6 +63,8 @@ export const demoPublicAppointment = (token: string): PublicAppointmentView => (
 	ends_at: new Date(Date.now() + 24 * 60 * 60 * 1000 + 30 * 60 * 1000).toISOString(),
 	service_name_snapshot: 'Consulta',
 	professional_name_snapshot: 'Dra. Pérez',
+	professional_count: 1,
+	is_joint: false,
 	calendar_action_status: 'not_offered',
 	calendar_action_at: null,
 	calendar_action_count: 0,
@@ -102,7 +106,8 @@ const appointmentSelect = `
 	calendar_sequence,
 	calendar_update_required_at,
 	businesses!inner(${PUBLIC_BUSINESS_SELECT}),
-	patients(full_name)
+	patients(full_name),
+	appointment_professionals(professional_id)
 `;
 
 const activePublicStatuses = ['reserved', 'confirmed', 'reschedule_requested'] as const;
@@ -138,6 +143,12 @@ export const loadPublicAppointmentByToken = async (
 		? await canUsePublicBusiness(supabase, String(business.id), business.created_at ?? null)
 		: false;
 	const canAct = isBusinessActive && canUsePublicTokens && !isPast;
+	const professionalCount = Math.max(
+		1,
+		Array.isArray((data as any).appointment_professionals)
+			? (data as any).appointment_professionals.length
+			: 0
+	);
 
 	return {
 		id: String(data.id),
@@ -147,6 +158,8 @@ export const loadPublicAppointmentByToken = async (
 		ends_at: String(data.ends_at),
 		service_name_snapshot: String(data.service_name_snapshot),
 		professional_name_snapshot: String(data.professional_name_snapshot),
+		professional_count: professionalCount,
+		is_joint: professionalCount > 1,
 		calendar_action_status: String(data.calendar_action_status ?? 'not_offered'),
 		calendar_action_at: data.calendar_action_at ?? null,
 		calendar_action_count: Number(data.calendar_action_count ?? 0),

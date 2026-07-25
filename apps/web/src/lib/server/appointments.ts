@@ -375,6 +375,7 @@ export const createJointAppointment = async (
 		startsAt: Date;
 		internalNote?: string | null;
 		ignoreBreak?: boolean;
+		source?: AppointmentSource;
 	}
 ) => {
 	const professionalIds = [
@@ -394,7 +395,7 @@ export const createJointAppointment = async (
 	});
 
 	const { data, error } = await supabase
-		.rpc('create_joint_appointment', {
+		.rpc('create_joint_appointment_with_source', {
 			p_business_id: input.businessId,
 			p_patient_id: patientId,
 			p_service_id: input.serviceId,
@@ -402,7 +403,8 @@ export const createJointAppointment = async (
 			p_starts_at: input.startsAt.toISOString(),
 			p_internal_note: input.internalNote || null,
 			p_created_by_user_id: input.createdByUserId ?? null,
-			p_ignore_break: Boolean(input.ignoreBreak)
+			p_ignore_break: Boolean(input.ignoreBreak),
+			p_source: input.source ?? 'manual'
 		})
 		.single();
 	if (error) throw error;

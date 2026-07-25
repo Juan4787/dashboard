@@ -126,6 +126,56 @@ describe('availability core', () => {
 		expect(slots.map((slot) => slot.time)).toEqual(['09:00']);
 	});
 
+	it('el límite global conserva el horario más temprano entre varios profesionales', () => {
+		const slots = calculateAvailabilitySlots({
+			business: business as never,
+			service: {
+				id: 'svc-1',
+				business_id: business.id,
+				name: 'Consulta',
+				duration_minutes: 30,
+				buffer_before_minutes: 0,
+				buffer_after_minutes: 0,
+				is_public: true,
+				is_active: true
+			},
+			professionals: [
+				{ id: 'pro-tarde', name: 'Dra. Tarde', is_public: true, is_active: true },
+				{ id: 'pro-temprano', name: 'Dr. Temprano', is_public: true, is_active: true }
+			],
+			rules: [
+				{
+					id: 'late',
+					professional_id: 'pro-tarde',
+					weekday: 1,
+					start_time: '11:00',
+					end_time: '12:00',
+					slot_interval_minutes: 30,
+					is_active: true
+				},
+				{
+					id: 'early',
+					professional_id: 'pro-temprano',
+					weekday: 1,
+					start_time: '09:00',
+					end_time: '10:00',
+					slot_interval_minutes: 30,
+					is_active: true
+				}
+			],
+			exceptions: [],
+			blocks: [],
+			fromDate: '2026-06-22',
+			toDate: '2026-06-22',
+			publicOnly: true,
+			now: new Date('2026-06-20T12:00:00.000Z'),
+			maxSlots: 1
+		});
+
+		expect(slots).toHaveLength(1);
+		expect(slots[0]).toMatchObject({ time: '09:00', professional_id: 'pro-temprano' });
+	});
+
 	it('no genera slots públicos para profesionales sin nombre visible', async () => {
 		const slots = await getAvailabilitySlots(
 			supabaseForAvailability({
@@ -412,6 +462,51 @@ describe('availability core', () => {
 			professional_names: ['Dra. Uno', 'Dr. Dos'],
 			is_joint: true
 		});
+	});
+
+	it('puede resumir un único horario común por día sin omitir fechas disponibles', () => {
+		const slots = calculateAvailabilitySlots({
+			business: business as never,
+			service: {
+				id: 'svc-1',
+				business_id: business.id,
+				name: 'Cirugía',
+				duration_minutes: 30,
+				buffer_before_minutes: 0,
+				buffer_after_minutes: 0,
+				is_public: true,
+				is_active: true
+			},
+			professionals: [
+				{ id: 'pro-1', name: 'Dra. Uno', is_public: true, is_active: true },
+				{ id: 'pro-2', name: 'Dr. Dos', is_public: true, is_active: true }
+			],
+			rules: [1, 2].flatMap((weekday) =>
+				['pro-1', 'pro-2'].map((professionalId) => ({
+					id: `${professionalId}-${weekday}`,
+					professional_id: professionalId,
+					weekday,
+					start_time: professionalId === 'pro-1' ? '09:00' : '09:23',
+					end_time: '12:00',
+					slot_interval_minutes: 15,
+					break_minutes: 0,
+					is_active: true
+				}))
+			),
+			exceptions: [],
+			blocks: [],
+			fromDate: '2026-06-22',
+			toDate: '2026-06-23',
+			requiredProfessionalIds: ['pro-1', 'pro-2'],
+			now: new Date('2026-06-20T12:00:00.000Z'),
+			maxSlotsPerDate: 1
+		});
+
+		expect(slots.map((slot) => `${slot.date} ${slot.time}`)).toEqual([
+			'2026-06-22 09:23',
+			'2026-06-23 09:23'
+		]);
+		expect(slots.every((slot) => slot.is_joint)).toBe(true);
 	});
 
 	it('elimina el horario conjunto si uno solo de los profesionales está ocupado', () => {

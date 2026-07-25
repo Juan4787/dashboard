@@ -37,7 +37,9 @@
 						<p class="mt-2 text-lg font-bold text-white">{appointment.service_name_snapshot}</p>
 					</div>
 					<div class="ux-soft-card p-5">
-						<p class="text-sm font-bold text-white/55">Profesional</p>
+						<p class="text-sm font-bold text-white/55">
+							{appointment.is_joint ? 'Equipo profesional' : 'Profesional'}
+						</p>
 						<p class="mt-2 text-lg font-bold text-white">{appointment.professional_name_snapshot}</p>
 					</div>
 					<div class="ux-soft-card p-5 sm:col-span-2">

@@ -15,7 +15,10 @@ export const GET: RequestHandler = async ({ params, fetch }) => {
 	const business = appointment.business;
 	const fields: ReceiptField[] = [
 		{ label: 'Servicio', value: appointment.service_name_snapshot },
-		{ label: 'Profesional', value: appointment.professional_name_snapshot },
+		{
+			label: appointment.is_joint ? 'Equipo profesional' : 'Profesional',
+			value: appointment.professional_name_snapshot
+		},
 		{ label: 'Fecha y hora', value: formatDateTime(appointment.starts_at, business.timezone) }
 	];
 	if (business.address) fields.push({ label: 'Ubicación', value: business.address });

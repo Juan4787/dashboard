@@ -10,6 +10,7 @@ import {
 	addMinutes,
 	calculateAvailabilitySlots,
 	getAvailabilitySlots,
+	zonedDateTimeToUtc,
 	type AvailabilityAppointmentBlockRow,
 	type AvailabilityExceptionRow,
 	type AvailabilityProfessionalRow,
@@ -17,7 +18,7 @@ import {
 	type AvailabilityServiceRow,
 	type AvailabilitySlot
 } from './availability';
-import { createManualAppointment } from './appointments';
+import { createJointAppointment, createManualAppointment } from './appointments';
 import {
 	getBusinessAccessState,
 	type BusinessSubscriptionRow
@@ -39,6 +40,8 @@ export type PublicProfessional = {
 	avatar_url: string | null;
 	next_available_at?: string | null;
 };
+
+export type PublicBookingMode = 'individual' | 'joint';
 
 export type PublicBookingBusiness = Pick<
 	Business,
@@ -261,7 +264,12 @@ export const getReservableServices = async (
 	supabase: SupabaseClient,
 	businessId: string
 ): Promise<PublicService[]> => {
-	const [{ data: services, error: servicesError }, { data: professionals, error: professionalsError }, { data: assignments, error: assignmentsError }] =
+	const [
+		{ data: services, error: servicesError },
+		{ data: professionals, error: professionalsError },
+		{ data: assignments, error: assignmentsError },
+		{ data: rules, error: rulesError }
+	] =
 		await Promise.all([
 			supabase
 				.from('services')
@@ -277,20 +285,38 @@ export const getReservableServices = async (
 				.eq('business_id', businessId)
 				.eq('is_active', true)
 				.eq('is_public', true),
-			supabase.from('professional_services').select('service_id, professional_id').eq('business_id', businessId)
+			supabase
+				.from('professional_services')
+				.select('service_id, professional_id')
+				.eq('business_id', businessId),
+			supabase
+				.from('availability_rules')
+				.select('professional_id')
+				.eq('business_id', businessId)
+				.eq('is_active', true)
 		]);
 	if (servicesError) throw servicesError;
 	if (professionalsError) throw professionalsError;
 	if (assignmentsError) throw assignmentsError;
+	if (rulesError) throw rulesError;
 
-	const publicProfessionalIds = new Set(
+	const scheduledProfessionalIds = new Set(
+		(rules ?? []).map((rule: any) => String(rule.professional_id))
+	);
+	const publicScheduledProfessionalIds = new Set(
 		(professionals ?? [])
-			.filter((professional: any) => hasVisibleProfessionalName(professional))
+			.filter(
+				(professional: any) =>
+					hasVisibleProfessionalName(professional) &&
+					scheduledProfessionalIds.has(String(professional.id))
+			)
 			.map((professional: any) => String(professional.id))
 	);
 	const reservableServiceIds = new Set(
 		(assignments ?? [])
-			.filter((assignment: any) => publicProfessionalIds.has(String(assignment.professional_id)))
+			.filter((assignment: any) =>
+				publicScheduledProfessionalIds.has(String(assignment.professional_id))
+			)
 			.map((assignment: any) => String(assignment.service_id))
 	);
 
@@ -309,17 +335,43 @@ export const getReservableProfessionals = async (
 	supabase: SupabaseClient,
 	input: { businessId: string; serviceId: string }
 ): Promise<PublicProfessional[]> => {
-	const { data, error } = await supabase
-		.from('professional_services')
-		.select('professional_id, professionals!inner(id, name, specialty, avatar_url, is_active, is_public, sort_order)')
-		.eq('business_id', input.businessId)
-		.eq('service_id', input.serviceId);
+	const [
+		{ data, error },
+		{ data: rules, error: rulesError }
+	] = await Promise.all([
+		supabase
+			.from('professional_services')
+			.select(
+				'professional_id, professionals!inner(id, name, specialty, avatar_url, is_active, is_public, sort_order)'
+			)
+			.eq('business_id', input.businessId)
+			.eq('service_id', input.serviceId),
+		supabase
+			.from('availability_rules')
+			.select('professional_id')
+			.eq('business_id', input.businessId)
+			.eq('is_active', true)
+	]);
 	if (error) throw error;
+	if (rulesError) throw rulesError;
+	const scheduledProfessionalIds = new Set(
+		(rules ?? []).map((rule: any) => String(rule.professional_id))
+	);
 
 	return (data ?? [])
 		.map((row: any) => row.professionals)
-		.filter((professional: any) => professional?.is_active && professional?.is_public && hasVisibleProfessionalName(professional))
-		.sort((a: any, b: any) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0) || String(a.name).localeCompare(String(b.name)))
+		.filter(
+			(professional: any) =>
+				professional?.is_active &&
+				professional?.is_public &&
+				hasVisibleProfessionalName(professional) &&
+				scheduledProfessionalIds.has(String(professional.id))
+		)
+		.sort(
+			(a: any, b: any) =>
+				Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0) ||
+				String(a.name).localeCompare(String(b.name))
+		)
 		.map((professional: any) => ({
 			id: String(professional.id),
 			name: String(professional.name).trim(),
@@ -433,12 +485,20 @@ const loadPublicAvailabilitySnapshot = async (
 	supabase: SupabaseClient,
 	input: {
 		businessId: string;
+		serviceId: string;
+		professionalIds: string[];
 		rangeStart: Date;
 		rangeEnd: Date;
 	}
 ): Promise<PublicAvailabilityRows> => {
-	// Estas lecturas son independientes. Consultar todas las filas acotadas
-	// al negocio en una sola ola evita esperar catálogo → asignaciones → agenda.
+	const professionalIds = [...new Set(input.professionalIds.map((id) => id.trim()).filter(Boolean))];
+	if (professionalIds.length === 0) {
+		return { services: [], professionals: [], assignments: [], rules: [], exceptions: [], blocks: [] };
+	}
+
+	// Estas lecturas son independientes y se ejecutan en una sola ola, pero ya
+	// no descargan la agenda completa del consultorio: sólo el procedimiento y
+	// los profesionales elegidos por el paciente.
 	// Los turnos se parten en ventanas mensuales para no truncarse en el límite de
 	// 1.000 filas de PostgREST en consultorios de alto volumen.
 	const appointmentWindows: Array<{ start: Date; end: Date }> = [];
@@ -454,6 +514,37 @@ const loadPublicAvailabilitySnapshot = async (
 			)
 		});
 	}
+	const servicesQuery = supabase
+		.from('services')
+		.select(
+			'id, business_id, name, description, duration_minutes, buffer_before_minutes, buffer_after_minutes, price_label, is_public, is_active, sort_order'
+		)
+		.eq('business_id', input.businessId)
+		.eq('id', input.serviceId)
+		.eq('is_active', true)
+		.eq('is_public', true);
+	const professionalsQuery = supabase
+		.from('professionals')
+		.select('id, name, specialty, avatar_url, is_public, is_active, sort_order')
+		.eq('business_id', input.businessId)
+		.in('id', professionalIds)
+		.eq('is_active', true)
+		.eq('is_public', true);
+	const assignmentsQuery = supabase
+		.from('professional_services')
+		.select('service_id, professional_id')
+		.eq('business_id', input.businessId)
+		.eq('service_id', input.serviceId)
+		.in('professional_id', professionalIds);
+	const rulesQuery = supabase
+		.from('availability_rules')
+		.select(
+			'id, professional_id, weekday, start_time, end_time, slot_interval_minutes, break_minutes, is_active'
+		)
+		.eq('business_id', input.businessId)
+		.in('professional_id', professionalIds)
+		.eq('is_active', true);
+
 	const [
 		servicesResult,
 		professionalsResult,
@@ -462,35 +553,10 @@ const loadPublicAvailabilitySnapshot = async (
 		exceptionsResult,
 		blocksResults
 	] = await Promise.all([
-		supabase
-			.from('services')
-			.select(
-				'id, business_id, name, description, duration_minutes, buffer_before_minutes, buffer_after_minutes, price_label, is_public, is_active, sort_order'
-			)
-			.eq('business_id', input.businessId)
-			.eq('is_active', true)
-			.eq('is_public', true)
-			.order('sort_order')
-			.order('name'),
-		supabase
-			.from('professionals')
-			.select('id, name, specialty, avatar_url, is_public, is_active, sort_order')
-			.eq('business_id', input.businessId)
-			.eq('is_active', true)
-			.eq('is_public', true)
-			.order('sort_order')
-			.order('name'),
-		supabase
-			.from('professional_services')
-			.select('service_id, professional_id')
-			.eq('business_id', input.businessId),
-		supabase
-			.from('availability_rules')
-			.select(
-				'id, professional_id, weekday, start_time, end_time, slot_interval_minutes, break_minutes, is_active'
-			)
-			.eq('business_id', input.businessId)
-			.eq('is_active', true),
+		servicesQuery,
+		professionalsQuery,
+		assignmentsQuery,
+		rulesQuery,
 		supabase
 			.from('availability_exceptions')
 			.select('id, professional_id, starts_at, ends_at, type')
@@ -503,9 +569,10 @@ const loadPublicAvailabilitySnapshot = async (
 					.from('appointment_professionals')
 					.select(
 						'id, appointment_id, professional_id, starts_at, ends_at, base_blocking_starts_at, base_blocking_ends_at, blocking_starts_at, blocking_ends_at'
-					)
-					.eq('business_id', input.businessId)
-					.in('status', ['reserved', 'confirmed', 'reschedule_requested'])
+						)
+						.eq('business_id', input.businessId)
+						.in('professional_id', professionalIds)
+						.in('status', ['reserved', 'confirmed', 'reschedule_requested'])
 					.lt('blocking_starts_at', end.toISOString())
 					.gt('blocking_ends_at', start.toISOString())
 			)
@@ -525,13 +592,14 @@ const loadPublicAvailabilitySnapshot = async (
 		hasVisibleProfessionalName
 	);
 	const serviceIds = new Set(services.map((service) => service.id));
-	const professionalIds = new Set(professionals.map((professional) => professional.id));
+	const availableProfessionalIds = new Set(professionals.map((professional) => professional.id));
 	const assignments = ((assignmentsResult.data ?? []) as Array<{
 		service_id: string;
 		professional_id: string;
 	}>).filter(
 		(assignment) =>
-			serviceIds.has(assignment.service_id) && professionalIds.has(assignment.professional_id)
+			serviceIds.has(assignment.service_id) &&
+			availableProfessionalIds.has(assignment.professional_id)
 	);
 
 	const assignedProfessionalIds = new Set(
@@ -564,10 +632,19 @@ const loadPublicAvailabilitySnapshot = async (
 const slotsFromPublicSnapshot = (
 	business: PublicBookingBusiness,
 	snapshot: PublicAvailabilitySnapshot,
-	input: { serviceId: string; professionalId?: string | null; maxSlots?: number }
+	input: {
+		serviceId: string;
+		professionalId?: string | null;
+		professionalIds?: string[];
+		maxSlots?: number;
+		maxSlotsPerDate?: number;
+	}
 ) => {
 	const service = snapshot.services.find((candidate) => candidate.id === input.serviceId);
 	if (!service) return [];
+	const requiredProfessionalIds = [
+		...new Set((input.professionalIds ?? []).map((id) => id.trim()).filter(Boolean))
+	];
 	const assignedProfessionalIds = new Set(
 		snapshot.assignments
 			.filter((assignment) => assignment.service_id === input.serviceId)
@@ -576,7 +653,9 @@ const slotsFromPublicSnapshot = (
 	const professionals = snapshot.professionals.filter(
 		(professional) =>
 			assignedProfessionalIds.has(professional.id) &&
-			(!input.professionalId || professional.id === input.professionalId)
+			(requiredProfessionalIds.length > 0
+				? requiredProfessionalIds.includes(professional.id)
+				: !input.professionalId || professional.id === input.professionalId)
 	);
 	const professionalIds = new Set(professionals.map((professional) => professional.id));
 	return calculateAvailabilitySlots({
@@ -592,17 +671,22 @@ const slotsFromPublicSnapshot = (
 		fromDate: snapshot.fromDate,
 		toDate: snapshot.toDate,
 		publicOnly: true,
-		maxSlots: input.maxSlots
+		requiredProfessionalIds,
+		maxSlots: input.maxSlots,
+		maxSlotsPerDate: input.maxSlotsPerDate
 	});
 };
 
 export const getPublicBookingCdnCacheControl = (input: {
 	serviceId?: string | null;
 	professionalId?: string | null;
+	professionalIds?: string[] | null;
 	date?: string | null;
 }) => {
 	if (input.date) return 'public, durable, s-maxage=5, stale-while-revalidate=10';
-	if (input.professionalId) return 'public, durable, s-maxage=10, stale-while-revalidate=30';
+	if (input.professionalId || (input.professionalIds?.length ?? 0) >= 2) {
+		return 'public, durable, s-maxage=10, stale-while-revalidate=30';
+	}
 	if (input.serviceId) return 'public, durable, s-maxage=10, stale-while-revalidate=30';
 	return 'public, durable, s-maxage=60, stale-while-revalidate=300';
 };
@@ -613,6 +697,8 @@ export const loadPublicBookingState = async (
 		slug: string;
 		serviceId?: string | null;
 		professionalId?: string | null;
+		professionalIds?: string[] | null;
+		bookingMode?: PublicBookingMode | null;
 		date?: string | null;
 	}
 ): Promise<PublicBookingState> => {
@@ -630,33 +716,42 @@ export const loadPublicBookingState = async (
 		cachedScan(`commercial-access-row:${businessId}`, STRUCTURE_SCAN_CACHE_TTL_MS, () =>
 			getPublicBusinessSubscription(supabase, businessId)
 		);
-	const availabilityRangeNow = new Date();
-	const loadAvailabilityRows = (businessId: string) =>
-		cachedScan(`availability-rows:${businessId}`, SLOT_SCAN_CACHE_TTL_MS, () =>
-			loadPublicAvailabilitySnapshot(supabase, {
-				businessId,
-				rangeStart: addMinutes(availabilityRangeNow, -24 * 60),
-				rangeEnd: addMinutes(availabilityRangeNow, 92 * 24 * 60)
-			})
+	const loadServices = (businessId: string) =>
+		cachedScan(`public-services:${businessId}`, STRUCTURE_SCAN_CACHE_TTL_MS, () =>
+			getReservableServices(supabase, businessId)
+		);
+	const loadProfessionals = (businessId: string, serviceId: string) =>
+		cachedScan(
+			`public-professionals:${businessId}:${serviceId}`,
+			STRUCTURE_SCAN_CACHE_TTL_MS,
+			() => getReservableProfessionals(supabase, { businessId, serviceId })
 		);
 
 	let business: PublicBookingBusiness | null;
 	let accessLookup: Awaited<ReturnType<typeof getPublicBusinessSubscription>> | null = null;
-	let availabilityRows: PublicAvailabilityRows | null = null;
+	let services: PublicService[] = [];
+	let professionals: PublicProfessional[] = [];
 	if (businessIdFromSlug) {
-		// Los links generados por Cita Suite usan el UUID. En ese camino todas las
-		// lecturas arrancan juntas y la visita fría espera una sola ola de red.
-		[business, accessLookup, availabilityRows] = await Promise.all([
+		// Los links generados usan UUID: catálogo, acceso y negocio arrancan en
+		// paralelo. La agenda pesada no se consulta hasta que el paciente elige
+		// un profesional o un equipo completo.
+		[business, accessLookup, services, professionals] = await Promise.all([
 			loadBusiness(),
 			loadAccess(businessIdFromSlug),
-			loadAvailabilityRows(businessIdFromSlug)
+			loadServices(businessIdFromSlug),
+			input.serviceId
+				? loadProfessionals(businessIdFromSlug, input.serviceId)
+				: Promise.resolve([])
 		]);
 	} else {
 		business = await loadBusiness();
 		if (business) {
-			[accessLookup, availabilityRows] = await Promise.all([
+			[accessLookup, services, professionals] = await Promise.all([
 				loadAccess(business.id),
-				loadAvailabilityRows(business.id)
+				loadServices(business.id),
+				input.serviceId
+					? loadProfessionals(business.id, input.serviceId)
+					: Promise.resolve([])
 			]);
 		}
 	}
@@ -681,123 +776,89 @@ export const loadPublicBookingState = async (
 	if (!commerciallyUsable) {
 		return { business, services: [], professionals: [], slots: [], days: [], issue: 'commercial_unavailable' };
 	}
-	if (!availabilityRows) throw new Error('PUBLIC_AVAILABILITY_ROWS_MISSING');
-	// La misma foto alimenta todos los pasos y el cálculo conserva exactamente
-	// los filtros actuales de servicios/profesionales sin horarios.
-	const availabilitySnapshot: PublicAvailabilitySnapshot = {
-		...availabilityRows,
-		fromDate: today,
-		toDate: maxDate
-	};
-
-	const structurallyReservableServices = availabilitySnapshot.services.filter((service) =>
-		availabilitySnapshot.assignments.some((assignment) => assignment.service_id === service.id)
-	);
-	if (structurallyReservableServices.length === 0) {
+	if (services.length === 0) {
 		return { business, services: [], professionals: [], slots: [], days: [], issue: 'no_services' };
 	}
 
-	const toPublicService = (service: PublicAvailabilityService): PublicService => ({
-		id: service.id,
-		name: service.name,
-		description: service.description,
-		duration_minutes: service.duration_minutes,
-		price_label: service.price_label
-	});
-	const services = input.serviceId
-		? structurallyReservableServices.map(toPublicService)
-		: (
-				await Promise.all(
-					structurallyReservableServices.map(async (service) => {
-						const hasAvailability = await cachedScan(
-							`service-availability:${business.id}:${service.id}:${today}:${maxDate}`,
-							SLOT_SCAN_CACHE_TTL_MS,
-							async () =>
-								slotsFromPublicSnapshot(business, availabilitySnapshot, {
-									serviceId: service.id,
-									maxSlots: 1
-								}).length > 0
-						);
-						return hasAvailability ? toPublicService(service) : null;
-					})
-				)
-			).filter((service): service is PublicService => service !== null);
-	if (services.length === 0) {
-		return { business, services, professionals: [], slots: [], days: [], issue: 'no_availability' };
-	}
-
 	const selectedService = services.find((service) => service.id === input.serviceId) ?? null;
-	const assignedProfessionals = selectedService
-		? availabilitySnapshot.professionals.filter((professional) =>
-				availabilitySnapshot.assignments.some(
-					(assignment) =>
-						assignment.service_id === selectedService.id &&
-						assignment.professional_id === professional.id
-				)
-			)
-		: [];
-	const professionals: PublicProfessional[] = selectedService
-		? (
-				await Promise.all(
-					assignedProfessionals.map(async (professional) => {
-						const firstSlot = await cachedScan(
-							`professional-first:${business.id}:${selectedService.id}:${professional.id}:${today}:${maxDate}`,
-							SLOT_SCAN_CACHE_TTL_MS,
-							async () =>
-								slotsFromPublicSnapshot(business, availabilitySnapshot, {
-									serviceId: selectedService.id,
-									professionalId: professional.id,
-									maxSlots: 1
-								})[0] ?? null
-						);
-						return firstSlot
-							? {
-									id: professional.id,
-									name: professional.name.trim(),
-									specialty: professional.specialty,
-									avatar_url: professional.avatar_url,
-									next_available_at: firstSlot.starts_at
-								}
-							: null;
-					})
-				)
-			).filter((professional) => professional !== null)
-		: [];
+	if (!selectedService) {
+		return { business, services, professionals: [], slots: [], days: [], issue: null };
+	}
 	if (selectedService && professionals.length === 0) {
 		return { business, services, professionals, slots: [], days: [], issue: 'no_professionals' };
 	}
 
-	const selectedProfessional = professionals.find((professional) => professional.id === input.professionalId) ?? null;
-	if (!selectedService || !selectedProfessional) {
+	const requestedProfessionalIds = [
+		...new Set((input.professionalIds ?? []).map((id) => String(id).trim()).filter(Boolean))
+	];
+	const bookingMode: PublicBookingMode =
+		input.bookingMode === 'joint' || requestedProfessionalIds.length > 1 ? 'joint' : 'individual';
+	const selectedProfessionalIds =
+		bookingMode === 'joint'
+			? requestedProfessionalIds
+			: input.professionalId
+				? [String(input.professionalId).trim()]
+				: [];
+	const professionalsById = new Map(professionals.map((professional) => [professional.id, professional]));
+	const selectedProfessionals = selectedProfessionalIds
+		.map((professionalId) => professionalsById.get(professionalId))
+		.filter((professional): professional is PublicProfessional => Boolean(professional));
+	const completeSelection =
+		bookingMode === 'joint'
+			? selectedProfessionalIds.length >= 2 &&
+				selectedProfessionals.length === selectedProfessionalIds.length
+			: selectedProfessionalIds.length === 1 && selectedProfessionals.length === 1;
+	if (!completeSelection) {
 		return { business, services, professionals, slots: [], days: [], issue: null };
 	}
 
-	const daySlots = await cachedScan(
-		`day-scan:${business.id}:${selectedService.id}:${selectedProfessional.id}:${today}:${maxDate}`,
-		SLOT_SCAN_CACHE_TTL_MS,
-		async () =>
-			uniqueSlots(
-				slotsFromPublicSnapshot(business, availabilitySnapshot, {
-					serviceId: selectedService.id,
-					professionalId: selectedProfessional.id
-				})
-			)
+	const selectedDate = String(input.date ?? '').trim();
+	const selectedDateIsValid =
+		!selectedDate ||
+		(/^\d{4}-\d{2}-\d{2}$/.test(selectedDate) &&
+			selectedDate >= today &&
+			selectedDate <= maxDate);
+	if (!selectedDateIsValid) {
+		return { business, services, professionals, slots: [], days: [], issue: 'no_availability' };
+	}
+	const scanFromDate = selectedDate || today;
+	const scanToDate = selectedDate || maxDate;
+	const rangeStart = zonedDateTimeToUtc(scanFromDate, '00:00', business.timezone);
+	const rangeEnd = zonedDateTimeToUtc(
+		addDaysToDateString(scanToDate, 1),
+		'00:00',
+		business.timezone
 	);
-	const dateWithinScan = input.date ? input.date >= today && input.date <= maxDate : false;
-	const selectedDateSlots = !input.date
-		? []
-		: dateWithinScan
-			? daySlots.filter((slot) => slot.date === input.date)
-			: await getAvailabilitySlots(supabase, {
-					business: business as Business,
-					serviceId: selectedService.id,
-					professionalId: selectedProfessional.id,
-					fromDate: input.date,
-					toDate: input.date,
-					publicOnly: true
-				});
-	const slots = input.date ? selectedDateSlots : [];
-	const days = summarizeSlotsByDate(uniqueSlots([...daySlots, ...selectedDateSlots]), business.timezone);
+	const selectionCacheKey = selectedProfessionalIds.join(',');
+	const availabilityRows = await cachedScan(
+		`availability-rows:${business.id}:${selectedService.id}:${selectionCacheKey}:${scanFromDate}:${scanToDate}`,
+		SLOT_SCAN_CACHE_TTL_MS,
+		() =>
+			loadPublicAvailabilitySnapshot(supabase, {
+				businessId: business.id,
+				serviceId: selectedService.id,
+				professionalIds: selectedProfessionalIds,
+				rangeStart,
+				rangeEnd
+			})
+	);
+	const availabilitySnapshot: PublicAvailabilitySnapshot = {
+		...availabilityRows,
+		fromDate: scanFromDate,
+		toDate: scanToDate
+	};
+	const calculatedSlots = uniqueSlots(
+		slotsFromPublicSnapshot(business, availabilitySnapshot, {
+			serviceId: selectedService.id,
+			professionalId: bookingMode === 'individual' ? selectedProfessionalIds[0] : null,
+			professionalIds: bookingMode === 'joint' ? selectedProfessionalIds : [],
+			// Para listar días sólo hace falta saber si existe al menos una
+			// opción. El día elegido se recalcula completo en la siguiente carga.
+			maxSlotsPerDate: selectedDate ? undefined : 1
+		})
+	);
+	const slots = selectedDate ? calculatedSlots : [];
+	const days = summarizeSlotsByDate(calculatedSlots, business.timezone);
 
 	return {
 		business,
@@ -805,7 +866,7 @@ export const loadPublicBookingState = async (
 		professionals,
 		slots,
 		days,
-		issue: selectedService && selectedProfessional && days.length === 0 ? 'no_availability' : null
+		issue: days.length === 0 ? 'no_availability' : null
 	};
 };
 
@@ -902,7 +963,9 @@ export const createPublicBooking = async (
 	input: {
 		slug: string;
 		serviceId: string;
-		professionalId: string;
+		professionalId?: string | null;
+		professionalIds?: string[] | null;
+		bookingMode?: PublicBookingMode | null;
 		slotStartsAt: string;
 		patientName: string;
 		patientPhone: string;
@@ -915,6 +978,21 @@ export const createPublicBooking = async (
 ) => {
 	const now = input.now ?? new Date();
 	const business = await getPublicBusinessBySlug(supabase, input.slug);
+	const requestedProfessionalIds = [
+		...new Set(
+			[
+				...(input.professionalIds ?? []),
+				...(input.professionalId ? [input.professionalId] : [])
+			]
+				.map((professionalId) => String(professionalId).trim())
+				.filter(Boolean)
+		)
+	];
+	const bookingMode: PublicBookingMode =
+		input.bookingMode === 'joint' || requestedProfessionalIds.length > 1 ? 'joint' : 'individual';
+	const professionalIds =
+		bookingMode === 'joint' ? requestedProfessionalIds : requestedProfessionalIds.slice(0, 1);
+	const professionalId = professionalIds[0] ?? '';
 	let phoneE164: string | null = null;
 
 	try {
@@ -931,6 +1009,12 @@ export const createPublicBooking = async (
 		const email = String(input.patientEmail ?? '').trim();
 		if (!isValidPatientFullName(patientName)) throw new Error('PUBLIC_PATIENT_NAME_INVALID');
 		if (!phoneE164 || !isLikelyPhoneE164(phoneE164)) throw new Error('PUBLIC_PATIENT_PHONE_INVALID');
+		if (bookingMode === 'joint' && professionalIds.length < 2) {
+			throw new Error('PUBLIC_JOINT_REQUIRES_TWO_PROFESSIONALS');
+		}
+		if (bookingMode === 'individual' && !professionalId) {
+			throw new Error('PUBLIC_PROFESSIONAL_REQUIRED');
+		}
 
 		// La capacidad del paciente se evalúa antes que los límites temporales de
 		// intentos para no ocultar un 4/4 real detrás de un mensaje de rate limit.
@@ -951,17 +1035,26 @@ export const createPublicBooking = async (
 		const slots = await getAvailabilitySlots(supabase, {
 			business: business as Business,
 			serviceId: input.serviceId,
-			professionalId: input.professionalId,
+			professionalId: bookingMode === 'individual' ? professionalId : null,
+			professionalIds: bookingMode === 'joint' ? professionalIds : [],
 			fromDate: slotDate,
 			toDate: slotDate,
 			publicOnly: true
 		});
 		const selectedSlot = slots.find(
-			(slot) => slot.starts_at === input.slotStartsAt && slot.professional_id === input.professionalId
+			(slot) => {
+				if (slot.starts_at !== input.slotStartsAt) return false;
+				if (bookingMode === 'individual') return slot.professional_id === professionalId;
+				const slotProfessionalIds = slot.professional_ids ?? [];
+				return (
+					slotProfessionalIds.length === professionalIds.length &&
+					professionalIds.every((id) => slotProfessionalIds.includes(id))
+				);
+			}
 		);
 		if (!selectedSlot) throw new Error('PUBLIC_SLOT_UNAVAILABLE');
 
-		const created = await createManualAppointment(supabase, {
+		const commonInput = {
 			businessId: business.id,
 			ownerId: null,
 			createdByUserId: null,
@@ -969,11 +1062,21 @@ export const createPublicBooking = async (
 			patientPhone: phoneRaw,
 			patientEmail: email || null,
 			serviceId: input.serviceId,
-			professionalId: input.professionalId,
 			startsAt: new Date(selectedSlot.starts_at),
-			internalNote: input.note?.trim() || null,
-			source: 'public_booking'
-		});
+			internalNote: input.note?.trim() || null
+		};
+		const created =
+			bookingMode === 'joint'
+				? await createJointAppointment(supabase, {
+						...commonInput,
+						professionalIds,
+						source: 'public_booking'
+					})
+				: await createManualAppointment(supabase, {
+						...commonInput,
+						professionalId,
+						source: 'public_booking'
+					});
 		invalidatePublicBookingScans(business.id);
 
 		await recordPublicBookingAttempt(supabase, {
@@ -986,7 +1089,9 @@ export const createPublicBooking = async (
 			metadata: {
 				appointment_id: created?.id ?? null,
 				service_id: input.serviceId,
-				professional_id: input.professionalId,
+				booking_mode: bookingMode,
+				professional_id: professionalId,
+				professional_ids: professionalIds,
 				starts_at: selectedSlot.starts_at
 			}
 		});
@@ -1004,7 +1109,9 @@ export const createPublicBooking = async (
 			metadata: {
 				slug: input.slug,
 				service_id: input.serviceId,
-				professional_id: input.professionalId,
+				booking_mode: bookingMode,
+				professional_id: professionalId,
+				professional_ids: professionalIds,
 				slot_starts_at: input.slotStartsAt
 			}
 		});
@@ -1020,6 +1127,10 @@ export const PUBLIC_BOOKING_ERROR_MESSAGES = {
 	PUBLIC_PATIENT_NAME_INVALID: PATIENT_FULL_NAME_ERROR_MESSAGE,
 	PUBLIC_PATIENT_PHONE_INVALID:
 		'El teléfono no tiene un formato válido. Revisalo e incluí el código de área.',
+	PUBLIC_PROFESSIONAL_REQUIRED:
+		'Elegí un profesional antes de buscar el día y el horario del turno.',
+	PUBLIC_JOINT_REQUIRES_TWO_PROFESSIONALS:
+		'Para reservar con un equipo, seleccioná por lo menos dos profesionales diferentes y volvé a buscar los días disponibles.',
 	PUBLIC_SLOT_UNAVAILABLE:
 		'Ese horario acaba de ser ocupado. Elegí otro de los horarios disponibles.',
 	PUBLIC_RATE_LIMIT_IP:
@@ -1045,6 +1156,8 @@ export const PUBLIC_BOOKING_ERROR_MESSAGES = {
 		'El profesional que elegiste dejó de estar disponible. Volvé al paso de profesionales y elegí otro.',
 	PROFESSIONAL_SERVICE_NOT_ASSIGNED:
 		'Ese profesional ya no atiende el servicio elegido. Elegí otro profesional o servicio.',
+	TEAM_PROFESSIONAL_SERVICE_NOT_ASSIGNED:
+		'Uno de los integrantes elegidos ya no atiende ese servicio. Volvé al paso del equipo, revisá la selección y elegí nuevamente el horario.',
 	PUBLIC_BOOKING_UNEXPECTED:
 		'No pudimos confirmar si el turno quedó guardado por un problema interno. Antes de reintentar, comunicate con el consultorio para evitar una reserva duplicada.'
 } as const;
@@ -1058,6 +1171,9 @@ const publicBookingErrorTokenMap: ReadonlyArray<readonly [string, PublicBookingE
 	['PUBLIC_PATIENT_NAME_INVALID', 'PUBLIC_PATIENT_NAME_INVALID'],
 	['PATIENT_NAME_REQUIRED', 'PUBLIC_PATIENT_NAME_INVALID'],
 	['PUBLIC_PATIENT_PHONE_INVALID', 'PUBLIC_PATIENT_PHONE_INVALID'],
+	['PUBLIC_PROFESSIONAL_REQUIRED', 'PUBLIC_PROFESSIONAL_REQUIRED'],
+	['PUBLIC_JOINT_REQUIRES_TWO_PROFESSIONALS', 'PUBLIC_JOINT_REQUIRES_TWO_PROFESSIONALS'],
+	['JOINT_APPOINTMENT_REQUIRES_TWO_PROFESSIONALS', 'PUBLIC_JOINT_REQUIRES_TWO_PROFESSIONALS'],
 	['PUBLIC_SLOT_UNAVAILABLE', 'PUBLIC_SLOT_UNAVAILABLE'],
 	['PUBLIC_RATE_LIMIT_IP', 'PUBLIC_RATE_LIMIT_IP'],
 	['PUBLIC_RATE_LIMIT_PHONE', 'PUBLIC_RATE_LIMIT_PHONE'],
@@ -1071,6 +1187,7 @@ const publicBookingErrorTokenMap: ReadonlyArray<readonly [string, PublicBookingE
 	['PATIENT_OWNER_REQUIRED', 'PATIENT_OWNER_REQUIRED'],
 	['SERVICE_NOT_FOUND', 'SERVICE_NOT_FOUND'],
 	['PROFESSIONAL_NOT_FOUND', 'PROFESSIONAL_NOT_FOUND'],
+	['TEAM_PROFESSIONAL_SERVICE_NOT_ASSIGNED', 'TEAM_PROFESSIONAL_SERVICE_NOT_ASSIGNED'],
 	['PROFESSIONAL_SERVICE_NOT_ASSIGNED', 'PROFESSIONAL_SERVICE_NOT_ASSIGNED']
 ];
 

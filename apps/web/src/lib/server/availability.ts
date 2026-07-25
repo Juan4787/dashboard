@@ -81,6 +81,8 @@ export type AvailabilityInput = {
 	publicOnly?: boolean;
 	excludeAppointmentId?: string | null;
 	ignoreBreak?: boolean;
+	maxSlots?: number;
+	maxSlotsPerDate?: number;
 };
 
 const pad = (value: number) => String(value).padStart(2, '0');
@@ -185,6 +187,7 @@ export const calculateAvailabilitySlots = (input: {
 	ignoreBreak?: boolean;
 	now?: Date;
 	maxSlots?: number;
+	maxSlotsPerDate?: number;
 }): AvailabilitySlot[] => {
 	const {
 		business,
@@ -192,7 +195,8 @@ export const calculateAvailabilitySlots = (input: {
 		publicOnly = false,
 		ignoreBreak = false,
 		now = new Date(),
-		maxSlots = Number.POSITIVE_INFINITY
+		maxSlots = Number.POSITIVE_INFINITY,
+		maxSlotsPerDate = Number.POSITIVE_INFINITY
 	} = input;
 	if (publicOnly && (!business.is_active || !business.public_booking_enabled)) return [];
 	if (!service.is_active || (publicOnly && !service.is_public)) return [];
@@ -216,7 +220,7 @@ export const calculateAvailabilitySlots = (input: {
 			.filter((professional): professional is AvailabilityProfessionalRow => Boolean(professional));
 		if (professionals.length !== requiredProfessionalIds.length) return [];
 	}
-	if (professionals.length === 0 || maxSlots <= 0) return [];
+	if (professionals.length === 0 || maxSlots <= 0 || maxSlotsPerDate <= 0) return [];
 
 	const dates = clampRangeToBusinessRules(business, input.fromDate, input.toDate, now);
 	if (dates.length === 0) return [];
@@ -308,10 +312,11 @@ export const calculateAvailabilitySlots = (input: {
 				remember(addMinutes(new Date(exception.ends_at), service.buffer_before_minutes));
 			}
 		}
-		return [...candidates.values()];
+		return [...candidates.values()].sort((a, b) => a.getTime() - b.getTime());
 	};
 
-	for (const date of dates) {
+	dateLoop: for (const date of dates) {
+		const slotsBeforeDate = allSlots.length;
 		const weekday = weekdayForDate(date, business.timezone);
 		const contexts: ProfessionalDayContext[] = [];
 		for (const professional of professionals) {
@@ -385,16 +390,19 @@ export const calculateAvailabilitySlots = (input: {
 					professional_names: professionalNames,
 					is_joint: contexts.length > 1
 				});
+				if (allSlots.length - slotsBeforeDate >= maxSlotsPerDate) break;
 			}
+			if (allSlots.length >= maxSlots) break dateLoop;
 			continue;
 		}
 
+		const dateSlots: AvailabilitySlot[] = [];
 		for (const context of contexts) {
 			for (const startsAt of candidatesFor(context)) {
 				if (!candidateFits(context, startsAt)) continue;
 				const endsAt = addMinutes(startsAt, service.duration_minutes);
 				const local = zonedDateParts(startsAt, business.timezone);
-				allSlots.push({
+				dateSlots.push({
 					date: local.date,
 					time: local.time,
 					starts_at: startsAt.toISOString(),
@@ -406,6 +414,16 @@ export const calculateAvailabilitySlots = (input: {
 				});
 			}
 		}
+		// Si se consultan varios profesionales, primero se comparan todos los
+		// horarios del día. Limitar durante el primer profesional podría ocultar
+		// un horario más temprano de otro integrante.
+		dateSlots.sort(
+			(a, b) =>
+				a.starts_at.localeCompare(b.starts_at) ||
+				a.professional_name.localeCompare(b.professional_name)
+		);
+		allSlots.push(...dateSlots.slice(0, maxSlotsPerDate));
+		if (allSlots.length >= maxSlots) break dateLoop;
 	}
 
 	const uniqueSlots = [
@@ -548,6 +566,8 @@ export const getAvailabilitySlots = async (
 		publicOnly,
 		requiredProfessionalIds,
 		ignoreBreak,
+		maxSlots: input.maxSlots,
+		maxSlotsPerDate: input.maxSlotsPerDate,
 		now: calculationNow
 	});
 };

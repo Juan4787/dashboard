@@ -16,6 +16,8 @@ const appointment = (overrides: Partial<PublicAppointmentView> = {}): PublicAppo
 	ends_at: '2026-06-15T18:00:00.000Z',
 	service_name_snapshot: 'Extracción',
 	professional_name_snapshot: 'Dra. Jazmin Lopez',
+	professional_count: 1,
+	is_joint: false,
 	calendar_action_status: 'offered',
 	calendar_action_at: null,
 	calendar_action_count: 0,

@@ -217,7 +217,7 @@ describe('joint appointment creation', () => {
 		expect(created.id).toBe('appointment-1');
 		expect(rpcCalls).toEqual([
 			{
-				name: 'create_joint_appointment',
+				name: 'create_joint_appointment_with_source',
 				payload: {
 					p_business_id: 'business-1',
 					p_patient_id: 'patient-1',
@@ -226,7 +226,8 @@ describe('joint appointment creation', () => {
 					p_starts_at: '2026-07-30T13:00:00.000Z',
 					p_internal_note: null,
 					p_created_by_user_id: 'user-1',
-					p_ignore_break: true
+					p_ignore_break: true,
+					p_source: 'manual'
 				}
 			}
 		]);
