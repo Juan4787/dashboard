@@ -123,8 +123,48 @@ create index if not exists appointment_professionals_professional_blocking_idx
 		blocking_ends_at
 	);
 
--- Los turnos previos entran con descanso cero para que una migración no cambie
--- ni invalide reservas históricas que fueron aceptadas por el sistema anterior.
+do $$
+begin
+	if not exists (
+		select 1
+		from pg_constraint
+		where conname = 'appointment_professionals_no_service_overlap'
+			and conrelid = 'public.appointment_professionals'::regclass
+	) then
+		alter table public.appointment_professionals
+			add constraint appointment_professionals_no_service_overlap
+			exclude using gist (
+				business_id with =,
+				professional_id with =,
+				tstzrange(base_blocking_starts_at, base_blocking_ends_at, '[)') with &&
+			)
+			where (status in ('reserved','confirmed','reschedule_requested'));
+	end if;
+
+	if not exists (
+		select 1
+		from pg_constraint
+		where conname = 'appointment_professionals_no_break_overlap'
+			and conrelid = 'public.appointment_professionals'::regclass
+	) then
+		alter table public.appointment_professionals
+			add constraint appointment_professionals_no_break_overlap
+			exclude using gist (
+				business_id with =,
+				professional_id with =,
+				tstzrange(blocking_starts_at, blocking_ends_at, '[)') with &&
+			)
+			where (
+				status in ('reserved','confirmed','reschedule_requested')
+				and ignore_break = false
+			);
+	end if;
+end
+$$;
+
+-- Los turnos previos entran después de crear las restricciones. Se conserva
+-- descanso cero para no modificar ni invalidar reservas históricas aceptadas
+-- por el sistema anterior.
 insert into public.appointment_professionals (
 	business_id,
 	appointment_id,
@@ -165,44 +205,11 @@ select
 from public.appointments appointment
 on conflict (business_id, appointment_id, professional_id) do nothing;
 
-do $$
-begin
-	if not exists (
-		select 1
-		from pg_constraint
-		where conname = 'appointment_professionals_no_service_overlap'
-			and conrelid = 'public.appointment_professionals'::regclass
-	) then
-		alter table public.appointment_professionals
-			add constraint appointment_professionals_no_service_overlap
-			exclude using gist (
-				business_id with =,
-				professional_id with =,
-				tstzrange(base_blocking_starts_at, base_blocking_ends_at, '[)') with &&
-			)
-			where (status in ('reserved','confirmed','reschedule_requested'));
-	end if;
-
-	if not exists (
-		select 1
-		from pg_constraint
-		where conname = 'appointment_professionals_no_break_overlap'
-			and conrelid = 'public.appointment_professionals'::regclass
-	) then
-		alter table public.appointment_professionals
-			add constraint appointment_professionals_no_break_overlap
-			exclude using gist (
-				business_id with =,
-				professional_id with =,
-				tstzrange(blocking_starts_at, blocking_ends_at, '[)') with &&
-			)
-			where (
-				status in ('reserved','confirmed','reschedule_requested')
-				and ignore_break = false
-			);
-	end if;
-end
-$$;
+-- El deploy ejecuta cada migración dentro de una única transacción. Forzamos
+-- ahora la FK diferida para procesar los eventos del backfill antes de crear
+-- triggers o volver a alterar esta tabla más abajo.
+set constraints appointment_professionals_business_id_professional_id_fkey immediate;
+set constraints appointment_professionals_business_id_professional_id_fkey deferred;
 
 create or replace function public.professional_break_minutes_at(
 	target_business_id uuid,
@@ -826,7 +833,15 @@ grant execute on function public.create_joint_appointment(
 	uuid, uuid, uuid, uuid[], timestamptz, text, uuid, boolean
 ) to service_role;
 
-create or replace function public.user_can_read_appointment(
+-- Algunas bases existentes conservan esta función con un segundo parámetro
+-- llamado target_professional_id. PostgreSQL no permite renombrar parámetros
+-- mediante CREATE OR REPLACE. Las dos políticas son sus únicas dependencias:
+-- se recrean abajo con la semántica nueva basada en appointment_id.
+drop policy if exists appointment_professionals_select on public.appointment_professionals;
+drop policy if exists appointments_select on public.appointments;
+drop function if exists public.user_can_read_appointment(uuid, uuid);
+
+create function public.user_can_read_appointment(
 	target_business_id uuid,
 	target_appointment_id uuid
 )
