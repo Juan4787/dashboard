@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('./supabase', async () => {
 	const actual = await vi.importActual<typeof import('./supabase')>('./supabase');
@@ -10,7 +10,7 @@ vi.mock('./supabase', async () => {
 	};
 });
 
-import { resolveActiveBusiness } from './business';
+import { clearBusinessMembershipReadCache, resolveActiveBusiness } from './business';
 
 const accessTokenFor = (userId: string) => {
 	const payload = Buffer.from(JSON.stringify({ sub: userId })).toString('base64url');
@@ -79,6 +79,10 @@ const missingContextsRpc = () =>
 	});
 
 describe('resolveActiveBusiness', () => {
+	beforeEach(() => {
+		clearBusinessMembershipReadCache();
+	});
+
 	it('loads the auto-created owner business after allowed-email bootstrap', async () => {
 		const userId = 'user-allowed';
 		const firstMembershipRead = queryReturning({ data: [], error: null });
@@ -319,5 +323,207 @@ describe('resolveActiveBusiness', () => {
 		expect(second?.access.canUseBusiness).toBe(true);
 		expect(supabase.rpc).toHaveBeenCalledTimes(1);
 		expect(supabase.from).not.toHaveBeenCalled();
+	});
+
+	it('reuses a short read across different requests for the same authenticated session', async () => {
+		const supabase = {
+			from: vi.fn(),
+			rpc: vi.fn(async (name: string) => {
+				if (name !== 'list_user_business_contexts') throw new Error(`Unexpected RPC ${name}`);
+				return {
+					data: [
+						{
+							business: businessRow,
+							role: 'owner',
+							assistance: null,
+							subscription: subscriptionRow
+						}
+					],
+					error: null
+				};
+			})
+		} as any;
+		const firstCookies = { get: vi.fn(() => null), set: vi.fn() } as any;
+		const secondCookies = { get: vi.fn(() => null), set: vi.fn() } as any;
+		const accessToken = accessTokenFor('short-cache-user');
+
+		const first = await resolveActiveBusiness({
+			supabase,
+			accessToken,
+			cookies: firstCookies,
+			membershipCache: 'short'
+		});
+		const second = await resolveActiveBusiness({
+			supabase,
+			accessToken,
+			cookies: secondCookies,
+			membershipCache: 'short'
+		});
+
+		expect(first?.business.id).toBe('business-1');
+		expect(second?.business.id).toBe('business-1');
+		expect(supabase.rpc).toHaveBeenCalledTimes(1);
+	});
+
+	it('coalesces concurrent short reads into one RPC', async () => {
+		let releaseRpc: (value: unknown) => void = () => {};
+		const rpcResult = new Promise((resolve) => {
+			releaseRpc = resolve;
+		});
+		const supabase = {
+			from: vi.fn(),
+			rpc: vi.fn(() => rpcResult)
+		} as any;
+		const accessToken = accessTokenFor('single-flight-user');
+
+		const firstPending = resolveActiveBusiness({
+			supabase,
+			accessToken,
+			cookies: { get: vi.fn(() => null), set: vi.fn() } as any,
+			membershipCache: 'short'
+		});
+		const secondPending = resolveActiveBusiness({
+			supabase,
+			accessToken,
+			cookies: { get: vi.fn(() => null), set: vi.fn() } as any,
+			membershipCache: 'short'
+		});
+
+		await Promise.resolve();
+		expect(supabase.rpc).toHaveBeenCalledTimes(1);
+		releaseRpc({
+			data: [
+				{
+					business: businessRow,
+					role: 'owner',
+					assistance: null,
+					subscription: subscriptionRow
+				}
+			],
+			error: null
+		});
+
+		await expect(Promise.all([firstPending, secondPending])).resolves.toHaveLength(2);
+		expect(supabase.rpc).toHaveBeenCalledTimes(1);
+	});
+
+	it('keeps fresh reads outside the shared cache for actions and sensitive checks', async () => {
+		const supabase = {
+			from: vi.fn(),
+			rpc: vi.fn(async () => ({
+				data: [
+					{
+						business: businessRow,
+						role: 'owner',
+						assistance: null,
+						subscription: subscriptionRow
+					}
+				],
+				error: null
+			}))
+		} as any;
+		const accessToken = accessTokenFor('fresh-bypass-user');
+
+		await resolveActiveBusiness({
+			supabase,
+			accessToken,
+			cookies: { get: vi.fn(() => null), set: vi.fn() } as any,
+			membershipCache: 'short'
+		});
+		await resolveActiveBusiness({
+			supabase,
+			accessToken,
+			cookies: { get: vi.fn(() => null), set: vi.fn() } as any
+		});
+
+		expect(supabase.rpc).toHaveBeenCalledTimes(2);
+	});
+
+	it('stops using a cached assistance grant as soon as its exact expiry is reached', async () => {
+		let now = Date.parse('2026-07-25T12:00:00.000Z');
+		const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+		const supabase = {
+			from: vi.fn(),
+			rpc: vi.fn(async () => ({
+				data: [
+					{
+						business: businessRow,
+						role: 'admin',
+						assistance: {
+							grantId: 'grant-1',
+							requestedByUserId: 'owner-1',
+							supportUserId: 'support-1',
+							startsAt: '2026-07-25T11:59:00.000Z',
+							expiresAt: '2026-07-25T12:00:05.000Z'
+						},
+						subscription: subscriptionRow
+					}
+				],
+				error: null
+			}))
+		} as any;
+		const accessToken = accessTokenFor('support-1');
+
+		try {
+			await expect(
+				resolveActiveBusiness({
+					supabase,
+					accessToken,
+					cookies: { get: vi.fn(() => null), set: vi.fn() } as any,
+					ensureDefault: false,
+					membershipCache: 'short'
+				})
+			).resolves.toMatchObject({ assistance: { grantId: 'grant-1' } });
+
+			now += 6_000;
+			await expect(
+				resolveActiveBusiness({
+					supabase,
+					accessToken,
+					cookies: { get: vi.fn(() => null), set: vi.fn() } as any,
+					ensureDefault: false,
+					membershipCache: 'short'
+				})
+			).resolves.toBeNull();
+			expect(supabase.rpc).toHaveBeenCalledTimes(1);
+		} finally {
+			nowSpy.mockRestore();
+		}
+	});
+
+	it('does not retain failed or empty reads', async () => {
+		const supabase = {
+			from: vi.fn(),
+			rpc: vi
+				.fn()
+				.mockRejectedValueOnce(new Error('temporary failure'))
+				.mockResolvedValueOnce({ data: [], error: null })
+				.mockResolvedValueOnce({
+					data: [
+						{
+							business: businessRow,
+							role: 'owner',
+							assistance: null,
+							subscription: subscriptionRow
+						}
+					],
+					error: null
+				})
+		} as any;
+		const accessToken = accessTokenFor('retry-cache-user');
+		const options = () => ({
+			supabase,
+			accessToken,
+			cookies: { get: vi.fn(() => null), set: vi.fn() } as any,
+			ensureDefault: false,
+			membershipCache: 'short' as const
+		});
+
+		await expect(resolveActiveBusiness(options())).rejects.toThrow('temporary failure');
+		await expect(resolveActiveBusiness(options())).resolves.toBeNull();
+		await expect(resolveActiveBusiness(options())).resolves.toMatchObject({
+			business: { id: 'business-1' }
+		});
+		expect(supabase.rpc).toHaveBeenCalledTimes(3);
 	});
 });

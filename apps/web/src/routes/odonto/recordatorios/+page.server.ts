@@ -65,7 +65,8 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 	const context = await resolveActiveBusiness({
 		supabase,
 		accessToken: locals.auth.access_token,
-		cookies
+		cookies,
+		membershipCache: 'short'
 	});
 	if (!context) throw kitError(500, 'No se pudo resolver el negocio activo');
 	if (context.role === 'professional') throw redirect(303, '/odonto/mis-turnos');

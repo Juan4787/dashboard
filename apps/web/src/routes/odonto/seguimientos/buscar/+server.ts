@@ -13,7 +13,12 @@ export const GET: RequestHandler = async ({ url, locals, fetch, cookies }) => {
 	if (!locals.auth) throw redirect(303, '/login');
 	if (env.DEMO_MODE === 'true') return json({ patients: [] });
 
-	const { business, userId } = await getOdontoContext({ locals, fetch, cookies });
+	const { business, userId } = await getOdontoContext({
+		locals,
+		fetch,
+		cookies,
+		membershipCache: 'short'
+	});
 	if (!roleParticipatesInFollowUps(business.role)) return json({ patients: [] });
 
 	const admin = await createSupabaseAdminClient('odonto', fetch);

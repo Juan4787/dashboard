@@ -17,11 +17,13 @@ export type OdontoContext = {
 export const getOdontoContext = async ({
 	locals,
 	fetch,
-	cookies
+	cookies,
+	membershipCache = 'fresh'
 }: {
 	locals: App.Locals;
 	fetch: typeof globalThis.fetch;
 	cookies: Cookies;
+	membershipCache?: 'fresh' | 'short';
 }): Promise<OdontoContext> => {
 	if (!locals.auth) throw redirect(303, '/login');
 
@@ -30,7 +32,12 @@ export const getOdontoContext = async ({
 	let userId: string | null = null;
 	try {
 		[business, userId] = await Promise.all([
-			resolveActiveBusiness({ supabase, accessToken: locals.auth.access_token, cookies }),
+			resolveActiveBusiness({
+				supabase,
+				accessToken: locals.auth.access_token,
+				cookies,
+				membershipCache
+			}),
 			getAuthUserId(supabase, locals.auth.access_token)
 		]);
 	} catch (error) {

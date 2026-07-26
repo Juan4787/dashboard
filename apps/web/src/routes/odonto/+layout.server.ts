@@ -71,12 +71,19 @@ export const load: LayoutServerLoad = async ({
 			// El panel maestro no consume un consultorio activo. Evitar resolverlo acá
 			// elimina trabajo duplicado antes de cargar su propia vista global.
 			if (!isMasterDashboard) {
+				const useShortMembershipCache = [
+					'/odonto/pacientes',
+					'/odonto/recordatorios',
+					'/odonto/seguimientos',
+					'/odonto/mensajes'
+				].some((prefix) => url.pathname.startsWith(prefix));
 				activeBusiness = await resolveActiveBusiness({
 					supabase,
 					accessToken: auth.access_token,
 					cookies,
 					defaultBusinessCreationIp: getClientAddress(),
-					fetch
+					fetch,
+					membershipCache: useShortMembershipCache ? 'short' : 'fresh'
 				});
 			}
 

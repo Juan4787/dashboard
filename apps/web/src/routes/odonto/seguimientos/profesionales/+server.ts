@@ -10,7 +10,12 @@ export const GET: RequestHandler = async ({ url, locals, fetch, cookies }) => {
 	if (!locals.auth) throw redirect(303, '/login');
 	if (env.DEMO_MODE === 'true') return json({ professionals: [] });
 
-	const { business } = await getOdontoContext({ locals, fetch, cookies });
+	const { business } = await getOdontoContext({
+		locals,
+		fetch,
+		cookies,
+		membershipCache: 'short'
+	});
 	if (!roleSeesAllFollowUps(business.role)) return json({ professionals: [] });
 
 	const patientId = (url.searchParams.get('patient_id') ?? '').trim();

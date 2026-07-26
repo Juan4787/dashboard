@@ -23,7 +23,12 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, depends }) 
 		};
 	}
 
-	const { business, userId } = await getOdontoContext({ locals, fetch, cookies });
+	const { business, userId } = await getOdontoContext({
+		locals,
+		fetch,
+		cookies,
+		membershipCache: 'short'
+	});
 	// Lectura no participa de Seguimientos.
 	if (!roleParticipatesInFollowUps(business.role)) throw redirect(303, '/odonto/agenda');
 

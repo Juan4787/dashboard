@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { deserialize } from '$app/forms';
+	import { deserialize, enhance } from '$app/forms';
 	import { page } from '$app/stores';
 	import { env } from '$env/dynamic/public';
 	import { invalidate } from '$app/navigation';
@@ -10,6 +10,7 @@
 	import { CLINICAL_ENTRY_TYPES } from '$lib/constants';
 	import { formatDate, formatDateTime } from '$lib/utils/format';
 	import { formatMoneyInteger, moneyDigits } from '$lib/utils/money-input';
+	import type { SubmitFunction } from '@sveltejs/kit';
 
 	type DriveClient = typeof import('$lib/client/drive');
 
@@ -40,7 +41,7 @@
 				canManageRadiographs: boolean;
 			};
 			demo?: boolean;
-		};
+	};
 		form: { message?: string; duplicate?: boolean; existingId?: string };
 	}>();
 
@@ -876,6 +877,7 @@ let amountDisplay = $state('');
 let amountRaw = $state('');
 let editAmountDisplay = $state('');
 let editAmountRaw = $state('');
+let savingEntry = $state(false);
 let archiveForm: HTMLFormElement | null = $state(null);
 let unarchiveForm: HTMLFormElement | null = $state(null);
 	const isArchived = $derived(
@@ -902,6 +904,24 @@ const formatAmountInput = (value: string) => {
 	return { digits, formatted };
 };
 
+const enhanceEntry: SubmitFunction = ({ cancel, formElement }) => {
+	showEntryErrors = true;
+	const hidden = formElement.querySelector<HTMLInputElement>('input[name="created_at"]');
+	if (!hidden || !hidden.value || hidden.value === '__invalid__') {
+		cancel();
+		return;
+	}
+	savingEntry = true;
+	return async ({ update, result }) => {
+		try {
+			if (result.type === 'redirect') showEntryModal = false;
+			await update();
+		} finally {
+			savingEntry = false;
+		}
+	};
+};
+
 const handleAmountChange = (event: Event, type: 'new' | 'edit') => {
 	const target = event.currentTarget as HTMLInputElement;
 	const { digits, formatted } = formatAmountInput(target.value);
@@ -914,15 +934,6 @@ const handleAmountChange = (event: Event, type: 'new' | 'edit') => {
 		editAmountRaw = digits;
 	}
 };
-
-	const handleEntrySubmit = (event: SubmitEvent) => {
-		showEntryErrors = true;
-		const formEl = event.currentTarget as HTMLFormElement;
-		const hidden = formEl.querySelector<HTMLInputElement>('input[name="created_at"]');
-		if (!hidden || !hidden.value || hidden.value === '__invalid__') {
-			event.preventDefault();
-		}
-	};
 
 const handleEditSubmit = (event: SubmitEvent) => {
 	showEditErrors = true;
@@ -1958,7 +1969,13 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 
 <Modal open={showEntryModal} title={`Registrar consulta - ${data.patient.full_name}`} on:close={() => (showEntryModal = false)}>
 	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-	<form method="post" action="?/add_entry" class="space-y-4" onkeydown={preventEnterSubmit} onsubmit={handleEntrySubmit}>
+	<form
+		method="post"
+		action="?/add_entry"
+		use:enhance={enhanceEntry}
+		class="space-y-4"
+		onkeydown={preventEnterSubmit}
+	>
 		<div class="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-5">
 			<div class="space-y-2">
 				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="entry_type">Tipo de consulta</label>
@@ -2032,16 +2049,18 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 		<div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
 			<button
 				type="button"
+				disabled={savingEntry}
 				onclick={() => (showEntryModal = false)}
-				class="w-full rounded-xl px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:text-white dark:hover:bg-[#1b2d4b] sm:w-auto"
+				class="w-full rounded-xl px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-white dark:hover:bg-[#1b2d4b] sm:w-auto"
 			>
 				Cancelar
 			</button>
 			<button
 				type="submit"
-				class="w-full rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 sm:w-auto"
+				disabled={savingEntry}
+				class="w-full rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 sm:w-auto"
 			>
-				Guardar
+				{savingEntry ? 'Guardando…' : 'Guardar'}
 			</button>
 		</div>
 	</form>

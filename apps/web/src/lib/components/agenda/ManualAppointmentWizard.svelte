@@ -258,10 +258,6 @@
 		slotsLoaded = false;
 		slotsError = '';
 		visibleWeekStart = safeStartDate();
-	};
-
-	const continueToProfessionals = () => {
-		if (!canOperate || !selectedServiceId) return;
 		step = 2;
 	};
 
@@ -642,7 +638,7 @@
 	<input type="hidden" name="internal_note" value={internalNote} />
 	<input type="hidden" name="ignore_break" value={ignoreBreak ? 'true' : 'false'} />
 
-	<section class="ux-card w-full px-5 py-4 sm:px-6">
+	<section class="ux-card min-w-0 w-full px-5 py-4 sm:px-6">
 		<div class="flex items-center justify-between gap-4">
 			<p class="text-base font-bold text-white/75 sm:text-lg">
 				Paso {step} de 5 · {stepLabels[step - 1]}
@@ -666,7 +662,7 @@
 	</section>
 
 	{#if step === 1}
-		<section class="ux-card w-full p-5 sm:p-7">
+		<section class="ux-card min-w-0 w-full p-5 sm:p-7">
 			<h2 class="text-xl font-bold tracking-tight text-white sm:text-2xl">¿Qué necesita el paciente?</h2>
 			<p class="mt-2 text-base text-white/60">
 				Elegí el procedimiento para ver quién puede realizarlo.
@@ -678,8 +674,7 @@
 						type="button"
 						disabled={!canOperate}
 						onclick={() => selectService(service.id)}
-						aria-pressed={selectedServiceId === service.id}
-						class="ux-choice flex min-h-28 items-center justify-between gap-4 p-5 text-left disabled:cursor-not-allowed disabled:opacity-60"
+						class="ux-choice flex min-h-28 min-w-0 w-full items-center justify-between gap-4 p-5 text-left disabled:cursor-not-allowed disabled:opacity-60"
 						class:ux-choice-active={selectedServiceId === service.id}
 					>
 						<span class="min-w-0">
@@ -693,43 +688,10 @@
 
 			{#if services.length === 0}
 				<p class="ux-empty mt-6 text-base">No hay servicios cargados.</p>
-			{:else}
-				<button
-					type="button"
-					disabled={!canOperate || !selectedServiceId}
-					onclick={continueToProfessionals}
-					class="ux-btn-primary group mt-6 flex min-h-16 w-full items-center justify-between rounded-2xl px-6 py-4 text-left shadow-xl shadow-violet-950/35 disabled:cursor-not-allowed sm:min-h-20 sm:px-7 sm:py-5"
-				>
-					<span class="min-w-0">
-						<span class="block text-lg font-black tracking-tight sm:text-xl">Ver profesionales</span>
-						<span class="mt-1 block truncate text-sm font-semibold text-white/75 sm:text-base">
-							{selectedService
-								? `Continuar con ${selectedService.name}`
-								: 'Primero elegí un servicio'}
-						</span>
-					</span>
-					<span
-						class="ml-5 grid h-11 w-11 shrink-0 place-items-center rounded-full bg-white/15 ring-1 ring-white/20 transition-transform duration-150 group-hover:translate-x-0.5 sm:h-12 sm:w-12"
-						aria-hidden="true"
-					>
-						<svg
-							class="h-6 w-6"
-							viewBox="0 0 24 24"
-							fill="none"
-							stroke="currentColor"
-							stroke-width="2.4"
-							stroke-linecap="round"
-							stroke-linejoin="round"
-						>
-							<path d="M5 12h14" />
-							<path d="m13 6 6 6-6 6" />
-						</svg>
-					</span>
-				</button>
 			{/if}
 		</section>
 	{:else if step === 2}
-		<section class="ux-card w-full p-5 sm:p-7">
+		<section class="ux-card min-w-0 w-full p-5 sm:p-7">
 			<h2 class="text-xl font-bold tracking-tight text-white sm:text-2xl">¿Con quién?</h2>
 			{#if selectedService}
 				<p class="mt-2 text-base text-white/60">
@@ -776,7 +738,7 @@
 							type="button"
 							disabled={!canOperate}
 							onclick={() => selectProfessional(professional.id)}
-							class="ux-choice flex min-h-28 items-start gap-4 p-5 text-left disabled:cursor-not-allowed disabled:opacity-50"
+							class="ux-choice flex min-h-28 min-w-0 w-full items-start gap-4 p-5 text-left disabled:cursor-not-allowed disabled:opacity-50"
 							class:ux-choice-active={selectedProfessionalId === professional.id}
 						>
 							<span class="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-white/10 text-base font-bold text-white/80">
@@ -799,7 +761,7 @@
 							disabled={!canOperate}
 							onclick={() => toggleTeamProfessional(professional.id)}
 							aria-pressed={selected}
-							class="ux-choice flex min-h-28 items-start gap-4 p-5 text-left disabled:cursor-not-allowed disabled:opacity-50"
+							class="ux-choice flex min-h-28 min-w-0 w-full items-start gap-4 p-5 text-left disabled:cursor-not-allowed disabled:opacity-50"
 							class:ux-choice-active={selected}
 						>
 							<span class="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-white/10 text-base font-bold text-white/80">
@@ -853,21 +815,42 @@
 						type="button"
 						disabled={selectedTeam.length < 2 || loadingSlots || slots.length === 0}
 						onclick={continueWithTeam}
-						class="ux-btn-primary"
+						class="ux-btn-primary group min-h-16 min-w-0 w-full justify-between rounded-2xl px-6 py-4 text-left shadow-xl shadow-violet-950/40 sm:w-auto sm:min-w-80"
 					>
-						{selectedTeam.length < 2
-							? 'Seleccioná al menos dos integrantes'
-							: loadingSlots
-								? 'Buscando días…'
-								: slots.length === 0
-									? 'Sin días en común'
-									: 'Ver días disponibles'}
+						<span class="min-w-0">
+							<span class="block text-lg font-black leading-tight tracking-tight">
+								{selectedTeam.length < 2
+									? 'Seleccioná al menos dos integrantes'
+									: loadingSlots
+										? 'Buscando días…'
+										: slots.length === 0
+											? 'Sin días en común'
+											: 'Ver días disponibles'}
+							</span>
+						</span>
+						<span
+							class="ml-4 grid h-11 w-11 shrink-0 place-items-center rounded-full bg-white/15 ring-1 ring-white/20 transition-transform duration-150 group-hover:translate-x-0.5"
+							aria-hidden="true"
+						>
+							<svg
+								class="h-6 w-6"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2.4"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+							>
+								<path d="M5 12h14" />
+								<path d="m13 6 6 6-6 6" />
+							</svg>
+						</span>
 					</button>
 				{/if}
 			</div>
 		</section>
 	{:else if step === 3}
-		<section class="ux-card w-full p-5 sm:p-7">
+		<section class="ux-card min-w-0 w-full p-5 sm:p-7">
 			<div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 				<div>
 					<h2 class="text-xl font-bold tracking-tight text-white sm:text-2xl">Elegí un día</h2>
@@ -917,7 +900,7 @@
 						<button
 							type="button"
 							onclick={() => selectDay(dayGroup.day)}
-							class="ux-choice flex min-h-28 items-center justify-between gap-4 p-5 text-left"
+							class="ux-choice flex min-h-28 min-w-0 w-full items-center justify-between gap-4 p-5 text-left"
 						>
 							<span>
 								<span class="block capitalize text-lg font-bold text-white">{formatDayName(dayGroup.day)}</span>
@@ -950,7 +933,7 @@
 			</div>
 		</section>
 	{:else if step === 4}
-		<section class="ux-card w-full p-5 sm:p-7">
+		<section class="ux-card min-w-0 w-full p-5 sm:p-7">
 			<div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 				<div>
 					<h2 class="text-xl font-bold tracking-tight text-white sm:text-2xl">Elegí un horario</h2>
@@ -1018,7 +1001,7 @@
 					<button
 						type="button"
 						onclick={() => (patientMode = 'existing')}
-						class="ux-choice flex min-h-28 items-center gap-4 p-5 text-left"
+						class="ux-choice flex min-h-28 min-w-0 w-full items-center gap-4 p-5 text-left"
 						class:ux-choice-active={patientMode === 'existing'}
 					>
 						<span class="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[#7c3aed]/25 text-white ring-1 ring-[#8b5cf6]/35">
@@ -1039,7 +1022,7 @@
 							patientMode = 'new';
 							selectedPatientId = '';
 						}}
-						class="ux-choice flex min-h-28 items-center gap-4 p-5 text-left"
+						class="ux-choice flex min-h-28 min-w-0 w-full items-center gap-4 p-5 text-left"
 						class:ux-choice-active={patientMode === 'new'}
 					>
 						<span class="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-white/10 text-white ring-1 ring-white/10">

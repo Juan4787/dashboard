@@ -1,9 +1,10 @@
 <script lang="ts">
 import Modal from '$lib/components/Modal.svelte';
 import { formatDate } from '$lib/utils/format';
-import { goto } from '$app/navigation';
+import { goto, preloadData } from '$app/navigation';
 import { page } from '$app/stores';
 import { enhance } from '$app/forms';
+import { onDestroy } from 'svelte';
 import type { KeyboardEventHandler } from 'svelte/elements';
 
 type FormResult = {
@@ -91,6 +92,41 @@ const canCreatePatient = $derived(data.canCreatePatient !== false);
 		createPhone = '';
 		showCreate = true;
 	};
+
+	let patientWarmTimer: ReturnType<typeof setTimeout> | null = null;
+	let pendingWarmPatientId = '';
+	const warmedPatientIds = new Set<string>();
+
+	const warmPatientNow = (patientId: string) => {
+		if (patientWarmTimer) clearTimeout(patientWarmTimer);
+		patientWarmTimer = null;
+		pendingWarmPatientId = '';
+		if (warmedPatientIds.has(patientId)) return;
+		warmedPatientIds.add(patientId);
+		void preloadData(`/odonto/pacientes/${patientId}`)
+			.then((result) => {
+				if (result.type === 'loaded' && result.status >= 400) warmedPatientIds.delete(patientId);
+			})
+			.catch(() => warmedPatientIds.delete(patientId));
+	};
+
+	const schedulePatientWarmup = (patientId: string) => {
+		if (warmedPatientIds.has(patientId) || pendingWarmPatientId === patientId) return;
+		if (patientWarmTimer) clearTimeout(patientWarmTimer);
+		pendingWarmPatientId = patientId;
+		patientWarmTimer = setTimeout(() => warmPatientNow(patientId), 100);
+	};
+
+	const cancelPatientWarmup = (patientId: string) => {
+		if (pendingWarmPatientId !== patientId) return;
+		if (patientWarmTimer) clearTimeout(patientWarmTimer);
+		patientWarmTimer = null;
+		pendingWarmPatientId = '';
+	};
+
+	onDestroy(() => {
+		if (patientWarmTimer) clearTimeout(patientWarmTimer);
+	});
 </script>
 
 <section class="flex flex-col gap-4">
@@ -262,6 +298,10 @@ const canCreatePatient = $derived(data.canCreatePatient !== false);
 									class="table-row border-b border-white/10 last:border-b-0 hover:bg-neutral-50 dark:hover:bg-[#0f1f36] cursor-pointer"
 									role="button"
 									tabindex="0"
+									onpointerenter={() => schedulePatientWarmup(patient.id)}
+									onpointerleave={() => cancelPatientWarmup(patient.id)}
+									onfocus={() => warmPatientNow(patient.id)}
+									onpointerdown={() => warmPatientNow(patient.id)}
 									onclick={() => goto(`/odonto/pacientes/${patient.id}`)}
 									onkeydown={(event) => {
 										if (event.key === 'Enter' || event.key === ' ') {
@@ -390,6 +430,10 @@ const canCreatePatient = $derived(data.canCreatePatient !== false);
 							class="rounded-xl border border-neutral-100 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-card dark:border-[#1f3554] dark:bg-[#0f1f36] cursor-pointer"
 							role="button"
 							tabindex="0"
+							onpointerenter={() => schedulePatientWarmup(patient.id)}
+							onpointerleave={() => cancelPatientWarmup(patient.id)}
+							onfocus={() => warmPatientNow(patient.id)}
+							onpointerdown={() => warmPatientNow(patient.id)}
 							onclick={() => goto(`/odonto/pacientes/${patient.id}`)}
 							onkeydown={(event) => {
 								if (event.key === 'Enter' || event.key === ' ') {

@@ -12,7 +12,12 @@ export const GET: RequestHandler = async ({ url, locals, fetch, cookies }) => {
 	const query = cleanQuery(url.searchParams.get('q') ?? '');
 	if (query.length < 2) return json({ patients: [] });
 
-	const { supabase, business } = await getOdontoContext({ locals, fetch, cookies });
+	const { supabase, business } = await getOdontoContext({
+		locals,
+		fetch,
+		cookies,
+		membershipCache: 'short'
+	});
 	const safeQuery = query.replace(/[%_]/g, '\\$&');
 	const digits = query.replace(/\D/g, '');
 	const filters = [

@@ -1,6 +1,7 @@
 import { env } from '$env/dynamic/private';
 import type { Cookies } from '@sveltejs/kit';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { createHash } from 'node:crypto';
 import { createSupabaseAdminClient, getAuthUserId } from './supabase';
 import {
 	getBusinessAccessState,
@@ -146,6 +147,7 @@ type ResolveBusinessOptions = {
 	ensureDefault?: boolean;
 	defaultBusinessCreationIp?: string | null;
 	fetch?: typeof fetch;
+	membershipCache?: 'fresh' | 'short';
 };
 
 type BusinessContextRpcRow = {
@@ -379,20 +381,94 @@ const loadMemberships = async (
 
 const membershipsByRequest = new WeakMap<object, Promise<BusinessContext[]>>();
 
+const MEMBERSHIP_READ_CACHE_TTL_MS = 12_000;
+const MEMBERSHIP_READ_CACHE_MAX_ENTRIES = 500;
+type MembershipReadCacheEntry = {
+	expiresAt: number;
+	pending: Promise<BusinessContext[]>;
+};
+const membershipReadCache = new Map<string, MembershipReadCacheEntry>();
+
+const membershipReadCacheKey = (userId: string, accessToken?: string | null) =>
+	createHash('sha256')
+		.update(`${userId}:${accessToken ?? ''}`)
+		.digest('base64url');
+
+const removeOldestMembershipReadCacheEntry = () => {
+	const oldestKey = membershipReadCache.keys().next().value;
+	if (typeof oldestKey === 'string') membershipReadCache.delete(oldestKey);
+};
+
+const rememberMembershipRead = (
+	key: string,
+	pending: Promise<BusinessContext[]>,
+	now = Date.now()
+) => {
+	if (membershipReadCache.size >= MEMBERSHIP_READ_CACHE_MAX_ENTRIES && !membershipReadCache.has(key)) {
+		removeOldestMembershipReadCacheEntry();
+	}
+
+	const guarded = pending.then(
+		(memberships) => {
+			// Una lista vacía puede activar el alta inicial y no debe sobrevivir entre requests.
+			if (
+				memberships.length === 0 &&
+				membershipReadCache.get(key)?.pending === guarded
+			) {
+				membershipReadCache.delete(key);
+			}
+			return memberships;
+		},
+		(error) => {
+			if (membershipReadCache.get(key)?.pending === guarded) membershipReadCache.delete(key);
+			throw error;
+		}
+	);
+	membershipReadCache.set(key, {
+		expiresAt: now + MEMBERSHIP_READ_CACHE_TTL_MS,
+		pending: guarded
+	});
+	return guarded;
+};
+
+const getFreshMembershipRead = (key: string, now = Date.now()) => {
+	const cached = membershipReadCache.get(key);
+	if (!cached) return null;
+	if (cached.expiresAt <= now) {
+		membershipReadCache.delete(key);
+		return null;
+	}
+	// Reinsertar mantiene un límite LRU sencillo sin conservar datos más allá del TTL original.
+	membershipReadCache.delete(key);
+	membershipReadCache.set(key, cached);
+	return cached.pending;
+};
+
+export const clearBusinessMembershipReadCache = () => membershipReadCache.clear();
+
 const loadMembershipsForRequest = (
 	supabase: SupabaseClient,
 	userId: string,
-	requestKey?: object
+	requestKey?: object,
+	readCacheKey?: string
 ) => {
-	if (!requestKey) return loadMemberships(supabase, userId);
-	const cached = membershipsByRequest.get(requestKey);
-	if (cached) return cached;
+	if (readCacheKey) {
+		const shared = getFreshMembershipRead(readCacheKey);
+		if (shared) {
+			if (requestKey) membershipsByRequest.set(requestKey, shared);
+			return shared;
+		}
+	}
+
+	const cached = requestKey ? membershipsByRequest.get(requestKey) : null;
+	if (cached) return readCacheKey ? rememberMembershipRead(readCacheKey, cached) : cached;
+
 	const pending = loadMemberships(supabase, userId).catch((error) => {
-		membershipsByRequest.delete(requestKey);
+		if (requestKey) membershipsByRequest.delete(requestKey);
 		throw error;
 	});
-	membershipsByRequest.set(requestKey, pending);
-	return pending;
+	if (requestKey) membershipsByRequest.set(requestKey, pending);
+	return readCacheKey ? rememberMembershipRead(readCacheKey, pending) : pending;
 };
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -431,7 +507,8 @@ export const resolveActiveBusiness = async ({
 	cookies,
 	ensureDefault = true,
 	defaultBusinessCreationIp,
-	fetch
+	fetch,
+	membershipCache = 'fresh'
 }: ResolveBusinessOptions): Promise<BusinessContext | null> => {
 	if (env.DEMO_MODE === 'true') return demoBusinessContext();
 
@@ -439,7 +516,16 @@ export const resolveActiveBusiness = async ({
 	if (!userId) return null;
 
 	const requestKey = cookies as unknown as object | undefined;
-	let memberships = await loadMembershipsForRequest(supabase, userId, requestKey);
+	const readCacheKey =
+		membershipCache === 'short' ? membershipReadCacheKey(userId, accessToken) : undefined;
+	let memberships = await loadMembershipsForRequest(supabase, userId, requestKey, readCacheKey);
+	const now = Date.now();
+	memberships = memberships.filter((membership) => {
+		if (!membership.assistance) return true;
+		const startsAt = Date.parse(membership.assistance.startsAt);
+		const expiresAt = Date.parse(membership.assistance.expiresAt);
+		return Number.isFinite(startsAt) && Number.isFinite(expiresAt) && startsAt <= now && expiresAt > now;
+	});
 
 	if (memberships.length === 0 && ensureDefault) {
 		if (defaultBusinessCreationIp) {

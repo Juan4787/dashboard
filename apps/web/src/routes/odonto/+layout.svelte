@@ -719,7 +719,10 @@
 					</div>
 				{/if}
 			</div>
-			<nav class="flex min-w-0 flex-1 items-center justify-center gap-2 text-sm font-semibold">
+			<nav
+				class="flex min-w-0 flex-1 items-center justify-center gap-2 text-sm font-semibold"
+				data-sveltekit-preload-code="viewport"
+			>
 				{#each visibleNav as item}
 					{#if item.label === 'Configuración' && canShowConfigMenu}
 							<div class="relative" data-menu-root>
@@ -1119,6 +1122,7 @@
 			class="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-[#0b1d32]/95 backdrop-blur md:hidden"
 			style="padding-bottom: env(safe-area-inset-bottom);"
 			aria-label="Navegación principal"
+			data-sveltekit-preload-code="viewport"
 		>
 			<div class="mx-auto flex max-w-md items-stretch">
 				{#each primaryMobileNav as item}

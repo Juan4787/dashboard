@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import FollowUpDatePicker from './FollowUpDatePicker.svelte';
 
 	type PatientLite = { id: string; full_name: string };
@@ -46,6 +47,12 @@
 	let results = $state<Array<{ id: string; full_name: string; phone_e164: string | null }>>([]);
 	let searching = $state(false);
 	let searchTimer: ReturnType<typeof setTimeout> | null = null;
+	let searchController: AbortController | null = null;
+	let searchRequest = 0;
+	const searchCache = new Map<
+		string,
+		Array<{ id: string; full_name: string; phone_e164: string | null }>
+	>();
 
 	// Asignación (solo canAssign)
 	let professionals = $state<ProfLite[]>([]);
@@ -127,25 +134,58 @@
 	const runSearch = (value: string) => {
 		query = value;
 		if (searchTimer) clearTimeout(searchTimer);
+		searchController?.abort();
+		searchController = null;
+		searchRequest += 1;
 		const q = value.trim();
 		if (q.length < 2) {
 			results = [];
 			searching = false;
 			return;
 		}
+		const cacheKey = q.toLocaleLowerCase('es-AR');
+		const cached = searchCache.get(cacheKey);
+		if (cached) {
+			results = cached;
+			searching = false;
+			return;
+		}
 		searching = true;
 		searchTimer = setTimeout(async () => {
+			const requestId = searchRequest;
+			const controller = new AbortController();
+			searchController = controller;
 			try {
-				const res = await fetch(`/odonto/seguimientos/buscar?q=${encodeURIComponent(q)}`);
+				const res = await fetch(`/odonto/seguimientos/buscar?q=${encodeURIComponent(q)}`, {
+					signal: controller.signal
+				});
+				if (!res.ok) throw new Error('No se pudo buscar pacientes.');
 				const data = await res.json();
-				results = Array.isArray(data?.patients) ? data.patients : [];
-			} catch {
-				results = [];
+				if (requestId !== searchRequest) return;
+				const next = Array.isArray(data?.patients) ? data.patients : [];
+				if (searchCache.size >= 20) {
+					const oldestKey = searchCache.keys().next().value;
+					if (typeof oldestKey === 'string') searchCache.delete(oldestKey);
+				}
+				searchCache.set(cacheKey, next);
+				results = next;
+			} catch (error) {
+				if (requestId === searchRequest && (error as { name?: string })?.name !== 'AbortError') {
+					results = [];
+				}
 			} finally {
-				searching = false;
+				if (requestId === searchRequest) {
+					searching = false;
+					searchController = null;
+				}
 			}
 		}, 250);
 	};
+
+	onDestroy(() => {
+		if (searchTimer) clearTimeout(searchTimer);
+		searchController?.abort();
+	});
 
 	const loadProfessionals = async (patientId: string, preselectId = '') => {
 		if (!canAssign) return;
@@ -173,6 +213,9 @@
 	};
 
 	const pickPatient = (p: PatientLite) => {
+		searchController?.abort();
+		searchController = null;
+		searchRequest += 1;
 		selectedPatient = p;
 		results = [];
 		query = '';
