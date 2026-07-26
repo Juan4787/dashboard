@@ -18,6 +18,11 @@ const localDateFor = (date: Date, timeZone: string) => {
 	return `${parts.year}-${parts.month}-${parts.day}`;
 };
 
+const positiveInteger = (value: string | null, maximum: number) => {
+	const parsed = Number(value);
+	return Number.isInteger(parsed) && parsed > 0 ? Math.min(parsed, maximum) : undefined;
+};
+
 export const GET: RequestHandler = async ({ url, locals, fetch, cookies }) => {
 	if (!locals.auth) throw redirect(303, '/login');
 	if (env.DEMO_MODE === 'true') return json({ days: {}, slots: [] });
@@ -37,6 +42,7 @@ export const GET: RequestHandler = async ({ url, locals, fetch, cookies }) => {
 	const toDate = url.searchParams.get('to') ?? fromDate;
 	const publicOnly = url.searchParams.get('public') === 'true';
 	const ignoreBreak = url.searchParams.get('ignore_break') === 'true' && business.canOperate;
+	const maxSlotsPerDate = positiveInteger(url.searchParams.get('max_slots_per_date'), 48);
 
 	if (!serviceId) {
 		return json(
@@ -66,7 +72,8 @@ export const GET: RequestHandler = async ({ url, locals, fetch, cookies }) => {
 			fromDate,
 			toDate,
 			publicOnly,
-			ignoreBreak
+			ignoreBreak,
+			maxSlotsPerDate
 		});
 		return json({ slots, days: groupSlotsByDate(slots) });
 	} catch (error) {

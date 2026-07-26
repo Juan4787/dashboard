@@ -2,6 +2,10 @@ import { env } from '$env/dynamic/private';
 import { demoBusinessContext } from '$lib/server/business';
 import { getAvailabilitySlots, zonedDateTimeToUtc } from '$lib/server/availability';
 import {
+	defaultInternalAvailabilitySnapshotRange,
+	loadInternalAvailabilitySnapshot
+} from '$lib/server/availability-snapshot';
+import {
 	APPOINTMENT_STATUSES,
 	createJointAppointment,
 	createManualAppointment,
@@ -58,7 +62,9 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 			professionals: [],
 			services: [],
 			serviceProfessionalIds: {},
+			availabilitySnapshot: null,
 			patients: [],
+			patientsLoaded: true,
 			referencesLoaded: true,
 			reminderCount: 0,
 			demo: true
@@ -161,38 +167,20 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 	let services: any[] = [];
 	let patients: any[] = [];
 	let assignments: any[] = [];
+	let availabilitySnapshot = null;
 	if (shouldLoadReferences) {
-		const referenceResults = await Promise.all([
-			supabase
-				.from('professionals')
-				.select('id, name, specialty, is_active')
-				.eq('business_id', business.business.id)
-				.eq('is_active', true)
-				.order('sort_order')
-				.order('name'),
-			supabase
-				.from('services')
-				.select('id, name, duration_minutes, is_active')
-				.eq('business_id', business.business.id)
-				.eq('is_active', true)
-				.order('sort_order')
-				.order('name'),
-			supabase
-				.from('patients')
-				.select('id, full_name, phone_e164, blocked')
-				.eq('business_id', business.business.id)
-				.is('archived_at', null)
-				.order('updated_at', { ascending: false })
-				.limit(250),
-			supabase
-				.from('professional_services')
-				.select('service_id, professional_id')
-				.eq('business_id', business.business.id)
-		]);
-		professionals = referenceResults[0].data ?? [];
-		services = referenceResults[1].data ?? [];
-		patients = referenceResults[2].data ?? [];
-		assignments = referenceResults[3].data ?? [];
+		try {
+			const range = defaultInternalAvailabilitySnapshotRange(business.business, date);
+			availabilitySnapshot = await loadInternalAvailabilitySnapshot(supabase, {
+				business: business.business,
+				...range
+			});
+			professionals = availabilitySnapshot.professionals;
+			services = availabilitySnapshot.services;
+			assignments = availabilitySnapshot.assignments;
+		} catch (error) {
+			console.error('Error cargando referencias y disponibilidad de agenda', error);
+		}
 	}
 	const appointments = filteredAppointments;
 
@@ -207,15 +195,14 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 	// registrado (el número exacto, con exclusiones de push/dispatch, vive en la sección).
 	const reminderCount = await reminderCountPromise;
 
-	let patientRows = patients;
-	if (patientId && !patientRows.some((patient: any) => patient.id === patientId)) {
+	if (patientId) {
 		const { data: selectedPatient } = await supabase
 			.from('patients')
 			.select('id, full_name, phone_e164, blocked')
 			.eq('business_id', business.business.id)
 			.eq('id', patientId)
 			.maybeSingle();
-		if (selectedPatient) patientRows = [selectedPatient, ...patientRows];
+		if (selectedPatient) patients = [selectedPatient];
 	}
 
 	return {
@@ -234,7 +221,9 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 		professionals: professionals ?? [],
 		services: services ?? [],
 		serviceProfessionalIds,
-		patients: patientRows,
+		availabilitySnapshot,
+		patients,
+		patientsLoaded: false,
 		referencesLoaded: shouldLoadReferences,
 		reminderCount,
 		demo: false

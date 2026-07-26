@@ -3,6 +3,10 @@
 	import DayFilterPicker from '$lib/components/agenda/DayFilterPicker.svelte';
 	import ManualAppointmentWizard from '$lib/components/agenda/ManualAppointmentWizard.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
+	import {
+		snapshotContainsRange,
+		type AvailabilitySnapshot
+	} from '$lib/availability/snapshot';
 	import { tick } from 'svelte';
 	import { slide } from 'svelte/transition';
 
@@ -43,7 +47,9 @@
 			professionals: Professional[];
 			services: Service[];
 			serviceProfessionalIds: Record<string, string[]>;
+			availabilitySnapshot?: AvailabilitySnapshot | null;
 			patients: Patient[];
+			patientsLoaded?: boolean;
 			referencesLoaded?: boolean;
 			reminderCount?: number;
 			demo: boolean;
@@ -66,9 +72,15 @@
 	// svelte-ignore state_referenced_locally
 	let serviceProfessionalIds = $state<Record<string, string[]>>(data.serviceProfessionalIds ?? {});
 	// svelte-ignore state_referenced_locally
+	let availabilitySnapshot = $state<AvailabilitySnapshot | null>(data.availabilitySnapshot ?? null);
+	// svelte-ignore state_referenced_locally
 	let referencesLoaded = $state(Boolean(data.referencesLoaded));
 	let referencesLoading = $state(false);
 	let referencesError = $state('');
+	// svelte-ignore state_referenced_locally
+	let patientsLoaded = $state(Boolean(data.patientsLoaded));
+	let patientsLoading = $state(false);
+	let patientsError = $state('');
 	// svelte-ignore state_referenced_locally
 	let referencesBusinessId = $state(String(data.context.business?.id ?? ''));
 
@@ -233,29 +245,64 @@
 	);
 
 	const loadReferences = async () => {
-		if (referencesLoaded || referencesLoading) return;
+		const snapshotCoversAgendaDate = Boolean(
+			availabilitySnapshot &&
+				snapshotContainsRange(availabilitySnapshot, data.date, data.date)
+		);
+		const snapshotIsFresh = Boolean(
+			availabilitySnapshot &&
+				Date.parse(availabilitySnapshot.valid_until) > Date.now()
+		);
+		if ((referencesLoaded && snapshotCoversAgendaDate && snapshotIsFresh) || referencesLoading) return;
 		referencesLoading = true;
 		referencesError = '';
 		try {
-			const response = await fetch('/odonto/agenda/referencias');
+			const response = await fetch(
+				'/odonto/agenda/referencias?from=' + encodeURIComponent(data.date)
+			);
 			const payload = await response.json().catch(() => ({}));
 			if (!response.ok) {
 				throw new Error(
-					payload?.message ?? 'No se pudieron cargar profesionales, servicios y pacientes.'
+					payload?.message ?? 'No se pudieron cargar profesionales y servicios.'
 				);
 			}
 			professionals = Array.isArray(payload?.professionals) ? payload.professionals : [];
 			services = Array.isArray(payload?.services) ? payload.services : [];
-			patients = Array.isArray(payload?.patients) ? payload.patients : [];
 			serviceProfessionalIds = payload?.service_professional_ids ?? {};
+			availabilitySnapshot = payload?.availability_snapshot ?? null;
 			referencesLoaded = true;
 		} catch (error) {
 			referencesError =
 				error instanceof Error
 					? error.message
-					: 'No se pudieron cargar profesionales, servicios y pacientes.';
+					: 'No se pudieron cargar profesionales y servicios.';
 		} finally {
 			referencesLoading = false;
+		}
+	};
+
+	const loadPatientReferences = async () => {
+		if (patientsLoaded || patientsLoading) return;
+		patientsLoading = true;
+		patientsError = '';
+		try {
+			const response = await fetch('/odonto/agenda/referencias?scope=patients');
+			const payload = await response.json().catch(() => ({}));
+			if (!response.ok) {
+				throw new Error(payload?.message ?? 'No se pudieron cargar los pacientes.');
+			}
+			const fetchedPatients = Array.isArray(payload?.patients) ? payload.patients : [];
+			const knownPatients = new Map<string, Patient>();
+			for (const patient of [...fetchedPatients, ...patients]) {
+				knownPatients.set(patient.id, patient);
+			}
+			patients = [...knownPatients.values()];
+			patientsLoaded = true;
+		} catch (error) {
+			patientsError =
+				error instanceof Error ? error.message : 'No se pudieron cargar los pacientes.';
+		} finally {
+			patientsLoading = false;
 		}
 	};
 
@@ -288,8 +335,12 @@
 			services = [];
 			patients = [];
 			serviceProfessionalIds = {};
+			availabilitySnapshot = null;
 			referencesLoaded = false;
 			referencesError = '';
+			patientsLoaded = false;
+			patientsLoading = false;
+			patientsError = '';
 		}
 		referencesBusinessId = businessId;
 		if (data.referencesLoaded) {
@@ -297,7 +348,11 @@
 			services = data.services ?? [];
 			patients = data.patients ?? [];
 			serviceProfessionalIds = data.serviceProfessionalIds ?? {};
+			availabilitySnapshot = data.availabilitySnapshot ?? null;
 			referencesLoaded = true;
+			patientsLoaded = Boolean(data.patientsLoaded);
+			patientsLoading = false;
+			patientsError = '';
 		}
 	});
 
@@ -305,7 +360,9 @@
 		if (initialized) return;
 		showCreate = Boolean(form?.message || data.selectedPatientId);
 		showSearch = Boolean(hasActiveSearch || form?.message);
-		if (showCreate || showSearch) void loadReferences();
+		// Recepción usa esta pantalla para operar: empezamos el snapshot en
+		// background apenas abre /agenda, antes de que elija el primer servicio.
+		if (canOperate || showCreate || showSearch) void loadReferences();
 		initialized = true;
 	});
 </script>
@@ -366,7 +423,13 @@
 
 		<div class="mt-5 flex flex-wrap items-center justify-center gap-2 sm:justify-start">
 			{#if canOperate}
-				<button type="button" class="ux-btn-primary w-full sm:w-auto" onclick={toggleCreate}>
+				<button
+					type="button"
+					class="ux-btn-primary w-full sm:w-auto"
+					onclick={toggleCreate}
+					onpointerenter={() => void loadReferences()}
+					onfocus={() => void loadReferences()}
+				>
 					{showCreate ? 'Cerrar' : '+ Nuevo turno'}
 				</button>
 			{/if}
@@ -487,11 +550,11 @@
 
 	{#if showCreate}
 		<div transition:slide={{ duration: 180 }} class="scroll-mt-5" bind:this={createSection}>
-			{#if referencesLoading}
+			{#if referencesLoading && !referencesLoaded}
 				<div class="ux-card text-sm font-semibold text-white/60" aria-live="polite">
-					Cargando profesionales, servicios y pacientes…
+					Cargando profesionales y servicios…
 				</div>
-			{:else if referencesError}
+			{:else if referencesError && !referencesLoaded}
 				<div class="ux-card">
 					<p class="ux-alert">{referencesError}</p>
 					<button type="button" class="ux-btn-secondary mt-4" onclick={loadReferences}>Reintentar</button>
@@ -501,7 +564,12 @@
 					{services}
 					{professionals}
 					{serviceProfessionalIds}
+					{availabilitySnapshot}
 					{patients}
+					{patientsLoaded}
+					{patientsLoading}
+					{patientsError}
+					onNeedPatients={loadPatientReferences}
 					initialDate={data.date}
 					initialPatientId={data.selectedPatientId}
 					{canOperate}
@@ -593,7 +661,15 @@
 					>
 						{#snippet actions()}
 							{#if canOperate && !needsSetup}
-								<button type="button" class="ux-btn-primary" onclick={toggleCreate}>+ Nuevo turno</button>
+								<button
+									type="button"
+									class="ux-btn-primary"
+									onclick={toggleCreate}
+									onpointerenter={() => void loadReferences()}
+									onfocus={() => void loadReferences()}
+								>
+									+ Nuevo turno
+								</button>
 							{/if}
 							<a href={buildAgendaHref(nextDate)} class="ux-btn-secondary">Día siguiente</a>
 						{/snippet}
