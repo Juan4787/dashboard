@@ -33,7 +33,8 @@ const config = {
 							'https://fonts.gstatic.com',
 							'https://oauth2.googleapis.com',
 							'https://www.googleapis.com',
-							'https://*.supabase.co'
+							'https://*.supabase.co',
+							'wss://*.supabase.co'
 						],
 						'frame-src': ['https://drive.google.com', 'https://accounts.google.com'],
 						'base-uri': ['self'],

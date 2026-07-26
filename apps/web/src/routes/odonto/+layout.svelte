@@ -93,6 +93,17 @@
 
 	const activeBusiness = $derived(data?.activeBusiness);
 	const isMasterPage = $derived($page.url.pathname.startsWith('/odonto/maestro'));
+	const patientRevisionBusinessId = $derived(
+		String(activeBusiness?.business?.id ?? '').trim()
+	);
+	const patientRevisionSyncEnabled = $derived(
+		Boolean(
+			patientRevisionBusinessId &&
+				patientRevisionBusinessId !== 'demo-business' &&
+				activeBusiness?.access?.canUseBusiness &&
+				!isMasterPage
+		)
+	);
 	const accountAssistance = $derived(data?.accountAssistance);
 	const masterAssistanceRequests = $derived(data?.masterAssistanceRequests ?? []);
 	const accountPendingManualSetup = $derived(Boolean(data?.pendingManualSetup && !activeBusiness));
@@ -324,6 +335,30 @@
 
 		document.addEventListener('pointerdown', handleOutsideClick, true);
 		return () => document.removeEventListener('pointerdown', handleOutsideClick, true);
+	});
+
+	$effect(() => {
+		const businessId = patientRevisionBusinessId;
+		if (!patientRevisionSyncEnabled) return;
+
+		let disposed = false;
+		let stopSync: (() => void) | null = null;
+		void import('$lib/client/patient-revision-sync')
+			.then(({ startPatientRevisionSync }) => {
+				if (disposed) return;
+				stopSync = startPatientRevisionSync({
+					businessId,
+					onRevisionChanged: () => void invalidate('app:patients')
+				});
+			})
+			.catch(() => {
+				// La página conserva la verificación HTTP estricta aunque Realtime no cargue.
+			});
+
+		return () => {
+			disposed = true;
+			stopSync?.();
+		};
 	});
 
 	$effect(() => {

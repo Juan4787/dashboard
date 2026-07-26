@@ -1,10 +1,20 @@
 <script lang="ts">
+import { browser } from '$app/environment';
 import Modal from '$lib/components/Modal.svelte';
 import { formatDate } from '$lib/utils/format';
 import { goto, preloadData } from '$app/navigation';
 import { page } from '$app/stores';
 import { enhance } from '$app/forms';
-import { onDestroy } from 'svelte';
+import {
+	acceptPatientListSnapshot,
+	isPatientListSnapshotCurrent,
+	markPatientRevisionUnverified,
+	patientRevisionState,
+	setCachedPatientList,
+	type PatientListSnapshot
+} from '$lib/client/patient-list-cache';
+import { onDestroy, onMount } from 'svelte';
+import type { SubmitFunction } from '@sveltejs/kit';
 import type { KeyboardEventHandler } from 'svelte/elements';
 
 type FormResult = {
@@ -32,8 +42,15 @@ let showReport = $state(false);
 let createFullName = $state('');
 let createDni = $state('');
 let createPhone = $state('');
+let revisionGuardReady = $state(false);
 const isSearching = $derived(search.trim().length > 0);
 const canCreatePatient = $derived(data.canCreatePatient !== false);
+const patientDataCurrent = $derived(
+	!revisionGuardReady ||
+	data.demo ||
+	!data.cacheable ||
+	isPatientListSnapshotCurrent(data as PatientListSnapshot, $patientRevisionState)
+);
 
 	$effect(() => {
 		if ($page.url.searchParams.has('nuevo')) {
@@ -93,6 +110,15 @@ const canCreatePatient = $derived(data.canCreatePatient !== false);
 		showCreate = true;
 	};
 
+	const createPatientEnhance: SubmitFunction = () => {
+		return async ({ result, update }) => {
+			if (result.type === 'success' || result.type === 'redirect') {
+				markPatientRevisionUnverified(data.businessId);
+			}
+			await update();
+		};
+	};
+
 	let patientWarmTimer: ReturnType<typeof setTimeout> | null = null;
 	let pendingWarmPatientId = '';
 	const warmedPatientIds = new Set<string>();
@@ -127,6 +153,20 @@ const canCreatePatient = $derived(data.canCreatePatient !== false);
 	onDestroy(() => {
 		if (patientWarmTimer) clearTimeout(patientWarmTimer);
 	});
+
+	onMount(() => {
+		if (data.cacheable && acceptPatientListSnapshot(data as PatientListSnapshot)) {
+			setCachedPatientList(data as PatientListSnapshot);
+		}
+		revisionGuardReady = true;
+	});
+
+	$effect(() => {
+		if (!browser || !revisionGuardReady || !data.cacheable) return;
+		if (acceptPatientListSnapshot(data as PatientListSnapshot)) {
+			setCachedPatientList(data as PatientListSnapshot);
+		}
+	});
 </script>
 
 <section class="flex flex-col gap-4">
@@ -143,6 +183,15 @@ const canCreatePatient = $derived(data.canCreatePatient !== false);
 		</button>
 	</div>
 
+	{#if !patientDataCurrent}
+		<div
+			class="rounded-2xl border border-neutral-200 bg-white px-5 py-6 text-sm font-semibold text-neutral-700 shadow-sm dark:border-[#1f3554] dark:bg-[#122641] dark:text-[#dce7f8]"
+			role="status"
+			aria-live="polite"
+		>
+			Actualizando pacientes…
+		</div>
+	{:else}
 	<div class="flex flex-col gap-3">
 	<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-6">
 		<div class="w-full sm:flex-1">
@@ -496,12 +545,13 @@ const canCreatePatient = $derived(data.canCreatePatient !== false);
 			{/if}
 		</div>
 	</div>
+	{/if}
 
 </section>
 
 <Modal open={showCreate} title="Alta rápida de paciente" on:close={closeModal}>
 	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<form method="post" action="?/create_patient" use:enhance class="space-y-4" onkeydown={preventEnterSubmit}>
+	<form method="post" action="?/create_patient" use:enhance={createPatientEnhance} class="space-y-4" onkeydown={preventEnterSubmit}>
 		{#if !canCreatePatient}
 			<div class="rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
 				Tu acceso a Cita Suite venció. Activá tu suscripción para volver a usar la plataforma.

@@ -7,6 +7,7 @@
 	import FollowUpComposer from '$lib/components/seguimientos/FollowUpComposer.svelte';
 	import DateTimePartsInput from '$lib/components/DateTimePartsInput.svelte';
 	import DatePartsInput from '$lib/components/DatePartsInput.svelte';
+	import { markPatientRevisionUnverified } from '$lib/client/patient-list-cache';
 	import { CLINICAL_ENTRY_TYPES } from '$lib/constants';
 	import { formatDate, formatDateTime } from '$lib/utils/format';
 	import { formatMoneyInteger, moneyDigits } from '$lib/utils/money-input';
@@ -914,6 +915,9 @@ const enhanceEntry: SubmitFunction = ({ cancel, formElement }) => {
 	savingEntry = true;
 	return async ({ update, result }) => {
 		try {
+			if (result.type === 'success' || result.type === 'redirect') {
+				markPatientRevisionUnverified();
+			}
 			if (result.type === 'redirect') showEntryModal = false;
 			await update();
 		} finally {
