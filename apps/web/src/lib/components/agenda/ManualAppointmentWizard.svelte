@@ -258,6 +258,10 @@
 		slotsLoaded = false;
 		slotsError = '';
 		visibleWeekStart = safeStartDate();
+	};
+
+	const continueToProfessionals = () => {
+		if (!canOperate || !selectedServiceId) return;
 		step = 2;
 	};
 
@@ -674,6 +678,7 @@
 						type="button"
 						disabled={!canOperate}
 						onclick={() => selectService(service.id)}
+						aria-pressed={selectedServiceId === service.id}
 						class="ux-choice flex min-h-28 items-center justify-between gap-4 p-5 text-left disabled:cursor-not-allowed disabled:opacity-60"
 						class:ux-choice-active={selectedServiceId === service.id}
 					>
@@ -688,6 +693,39 @@
 
 			{#if services.length === 0}
 				<p class="ux-empty mt-6 text-base">No hay servicios cargados.</p>
+			{:else}
+				<button
+					type="button"
+					disabled={!canOperate || !selectedServiceId}
+					onclick={continueToProfessionals}
+					class="ux-btn-primary group mt-6 flex min-h-16 w-full items-center justify-between rounded-2xl px-6 py-4 text-left shadow-xl shadow-violet-950/35 disabled:cursor-not-allowed sm:min-h-20 sm:px-7 sm:py-5"
+				>
+					<span class="min-w-0">
+						<span class="block text-lg font-black tracking-tight sm:text-xl">Ver profesionales</span>
+						<span class="mt-1 block truncate text-sm font-semibold text-white/75 sm:text-base">
+							{selectedService
+								? `Continuar con ${selectedService.name}`
+								: 'Primero elegí un servicio'}
+						</span>
+					</span>
+					<span
+						class="ml-5 grid h-11 w-11 shrink-0 place-items-center rounded-full bg-white/15 ring-1 ring-white/20 transition-transform duration-150 group-hover:translate-x-0.5 sm:h-12 sm:w-12"
+						aria-hidden="true"
+					>
+						<svg
+							class="h-6 w-6"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2.4"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+						>
+							<path d="M5 12h14" />
+							<path d="m13 6 6 6-6 6" />
+						</svg>
+					</span>
+				</button>
 			{/if}
 		</section>
 	{:else if step === 2}
