@@ -393,13 +393,13 @@
 	</a>
 {/snippet}
 
-<section class="ux-page">
+<section class="ux-page gap-6 sm:gap-5">
 	<div class="ux-hero">
 		<div class="flex items-center gap-2">
 			{#if !data.anyDay}
 				<a
 					href={buildAgendaHref(prevDate)}
-					class="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-white/10 bg-white/[0.04] text-white/80 transition hover:bg-white/10"
+					class="grid h-12 w-12 shrink-0 place-items-center rounded-xl border border-white/10 bg-white/[0.04] text-white/80 transition hover:bg-white/10 sm:h-11 sm:w-11"
 					aria-label="Día anterior"
 				>
 					<svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m14 6-6 6 6 6" /></svg>
@@ -413,7 +413,7 @@
 			{#if !data.anyDay}
 				<a
 					href={buildAgendaHref(nextDate)}
-					class="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-white/10 bg-white/[0.04] text-white/80 transition hover:bg-white/10"
+					class="grid h-12 w-12 shrink-0 place-items-center rounded-xl border border-white/10 bg-white/[0.04] text-white/80 transition hover:bg-white/10 sm:h-11 sm:w-11"
 					aria-label="Día siguiente"
 				>
 					<svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m10 6 6 6-6 6" /></svg>
@@ -421,7 +421,7 @@
 			{/if}
 		</div>
 
-		<div class="mt-5 flex flex-wrap items-center justify-center gap-2 sm:justify-start">
+		<div class="mt-6 flex flex-wrap items-center justify-center gap-x-2 gap-y-3 sm:mt-5 sm:gap-2 sm:justify-start">
 			{#if canOperate}
 				<button
 					type="button"
@@ -439,7 +439,7 @@
 			<button type="button" class="ux-btn-secondary" onclick={toggleSearch}>
 				{showSearch ? 'Ocultar búsqueda' : 'Buscar'}
 			</button>
-			<a href={weekHref} class="ux-btn-secondary">Semana</a>
+			<a href={weekHref} class="ux-btn-secondary">Ver turnos de la semana</a>
 		</div>
 	</div>
 
@@ -579,7 +579,7 @@
 		</div>
 	{/if}
 
-	<div class="ux-card">
+	<div class="ux-card p-6 sm:p-6">
 		<div class="flex items-center justify-between gap-3">
 			<div class="min-w-0">
 				<h2 class="ux-section-title">
