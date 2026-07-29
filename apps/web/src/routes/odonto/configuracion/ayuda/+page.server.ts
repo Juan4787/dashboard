@@ -9,9 +9,17 @@ import {
 	safeAssistanceReturnTo
 } from '$lib/server/account-assistance';
 import { demoBusinessContext, resolveActiveBusiness } from '$lib/server/business';
-import { createSupabaseAdminClient, createSupabaseServerClient } from '$lib/server/supabase';
+import {
+	createSupabaseAdminClient,
+	createSupabaseServerClient,
+	getEmailFromAccessToken,
+	isMasterEmail
+} from '$lib/server/supabase';
 import { error as kitError, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
+
+const isMasterSession = (locals: App.Locals) =>
+	isMasterEmail(getEmailFromAccessToken(locals.auth?.access_token));
 
 const loadContext = async ({
 	locals,
@@ -51,6 +59,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 	}
 
 	const { supabase, context } = await loadContext({ locals, fetch, cookies });
+	if (isMasterSession(locals) && !context.assistance) throw redirect(303, '/odonto/maestro');
 	if (context.role === 'professional') throw redirect(303, '/odonto/mis-turnos');
 	if (context.role !== 'owner' && context.role !== 'admin') throw redirect(303, '/odonto/agenda');
 
@@ -73,6 +82,11 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 export const actions: Actions = {
 	activate: async ({ request, locals, fetch, cookies }) => {
 		if (!locals.auth) throw redirect(303, '/login');
+		if (isMasterSession(locals)) {
+			return fail(403, {
+				message: 'La cuenta maestra no solicita ayuda. Abrí el consultorio desde el panel maestro.'
+			});
+		}
 		const form = await request.formData();
 		const returnTo = safeAssistanceReturnTo(form.get('return_to'));
 		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
@@ -96,6 +110,11 @@ export const actions: Actions = {
 	},
 	revoke: async ({ request, locals, fetch, cookies }) => {
 		if (!locals.auth) throw redirect(303, '/login');
+		if (isMasterSession(locals)) {
+			return fail(403, {
+				message: 'La cuenta maestra no solicita ayuda. Abrí el consultorio desde el panel maestro.'
+			});
+		}
 		const form = await request.formData();
 		const returnTo = safeAssistanceReturnTo(form.get('return_to'));
 		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
@@ -115,6 +134,11 @@ export const actions: Actions = {
 	},
 	dismiss: async ({ request, locals, fetch, cookies }) => {
 		if (!locals.auth) throw redirect(303, '/login');
+		if (isMasterSession(locals)) {
+			return fail(403, {
+				message: 'La cuenta maestra no solicita ayuda. Abrí el consultorio desde el panel maestro.'
+			});
+		}
 		const form = await request.formData();
 		const returnTo = safeAssistanceReturnTo(form.get('return_to'));
 		const grantId = String(form.get('grant_id') ?? '').trim();

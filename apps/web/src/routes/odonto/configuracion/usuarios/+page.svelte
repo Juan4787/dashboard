@@ -664,7 +664,6 @@
 											{durationLabel(service.duration_minutes)}{service.price_label ? ` · ${service.price_label}` : ''}
 										</span>
 									</span>
-									<span class="ux-badge ux-badge-success shrink-0">Incluido</span>
 								</div>
 							{/each}
 							{#each customServices as service}

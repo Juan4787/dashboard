@@ -13,6 +13,7 @@
 				root_folder_id?: string | null;
 			} | null;
 			canLinkExternalFiles?: boolean;
+			isMaster?: boolean;
 		};
 	}>();
 
@@ -164,11 +165,13 @@
 			<h2 class="mt-4 text-2xl font-bold text-white">Link de reserva</h2>
 			<p class="mt-2 text-sm text-white/55">Copiá o abrí el enlace que compartís con tus pacientes.</p>
 		</a>
-		<a href="/odonto/configuracion/ayuda" class="ux-choice p-6">
-			<span class="ux-badge">Ayuda</span>
-			<h2 class="mt-4 text-2xl font-bold text-white">Ayuda para configurar</h2>
-			<p class="mt-2 text-sm text-white/55">Pedí ayuda por 1 hora para completar la configuración inicial.</p>
-		</a>
+		{#if !data.isMaster}
+			<a href="/odonto/configuracion/ayuda" class="ux-choice p-6">
+				<span class="ux-badge">Ayuda</span>
+				<h2 class="mt-4 text-2xl font-bold text-white">Ayuda para configurar</h2>
+				<p class="mt-2 text-sm text-white/55">Pedí ayuda por 1 hora para completar la configuración inicial.</p>
+			</a>
+		{/if}
 	</div>
 
 	<div class="ux-card">

@@ -33,10 +33,14 @@
 	type Service = {
 		id: string;
 		name: string;
+		description: string | null;
 		duration_minutes: number;
+		buffer_before_minutes: number;
+		buffer_after_minutes: number;
 		price_label: string | null;
 		is_active: boolean;
 		is_public: boolean;
+		sort_order: number;
 	};
 	type Rule = {
 		id: string;
@@ -262,7 +266,9 @@
 	// svelte-ignore state_referenced_locally
 	let activeTab = $state<TabId>(tabs.some((tab) => tab.id === data.tab) ? (data.tab as TabId) : 'perfil');
 	let showNewService = $state(false);
-	let saving = $state<'profile' | 'services' | 'schedule' | 'exception' | 'all' | 'service-create' | null>(null);
+	let editingServiceId = $state<string | null>(null);
+	let serviceEditError = $state('');
+	let saving = $state<'profile' | 'services' | 'schedule' | 'exception' | 'all' | 'service-create' | 'service-update' | null>(null);
 	let archiveSubmitting = $state(false);
 	let restoreSubmitting = $state(false);
 	let deleteSubmitting = $state(false);
@@ -568,6 +574,21 @@
 	};
 
 	const durationLabel = (minutes: number) => `${minutes} ${minutes === 1 ? 'minuto' : 'minutos'}`;
+	const editingService = $derived(
+		data.services.find((service: Service) => service.id === editingServiceId) ?? null
+	);
+	const editingDefaultService = $derived(
+		Boolean(editingService && defaultServiceIdSet.has(editingService.id))
+	);
+	const openServiceEditor = (serviceId: string) => {
+		editingServiceId = serviceId;
+		serviceEditError = '';
+	};
+	const closeServiceEditor = () => {
+		if (saving === 'service-update') return;
+		editingServiceId = null;
+		serviceEditError = '';
+	};
 	const handlePriceInput = (event: Event) => {
 		const input = event.currentTarget as HTMLInputElement;
 		input.value = formatPriceLabel(input.value);
@@ -692,6 +713,22 @@
 				return;
 			}
 			await update({ reset: false });
+		};
+	};
+
+	const updateServiceEnhance: SubmitFunction = () => {
+		saving = 'service-update';
+		serviceEditError = '';
+		return async ({ result, update }) => {
+			saving = null;
+			if (result.type === 'success') {
+				editingServiceId = null;
+				await update({ reset: true, invalidateAll: false });
+				await invalidate(professionalDependencyKey);
+				return;
+			}
+			serviceEditError = messageFromResult(result, 'No pudimos guardar el servicio. Revisá los datos e intentá nuevamente.');
+			await update({ reset: false, invalidateAll: false });
 		};
 	};
 
@@ -1086,26 +1123,33 @@
 				<div class="mt-5 grid gap-3">
 					{#each data.services as service}
 						{@const isDefault = defaultServiceIdSet.has(service.id)}
-						<label class={`ux-choice flex items-center gap-4 p-4 ${isDefault || draft.serviceIds.includes(service.id) ? 'ux-choice-active' : ''} ${serviceRowStateClass(service.id)}`}>
-							<input
-								type="checkbox"
-								name="service_id"
-								value={service.id}
-								checked={isDefault || draft.serviceIds.includes(service.id)}
-								disabled={!canOperate || isDefault}
-								class="accent-[#7c3aed]"
-								onchange={() => !isDefault && toggleService(service.id)}
-							/>
-							<span class="min-w-0 flex-1">
-								<span class="block font-black text-white">{service.name}</span>
-								<span class="mt-1 block text-sm text-white/55">
-									{durationLabel(service.duration_minutes)}{service.price_label ? ` · ${service.price_label}` : ''}
+						<div class={`ux-choice flex items-center gap-3 p-4 ${isDefault || draft.serviceIds.includes(service.id) ? 'ux-choice-active' : ''} ${serviceRowStateClass(service.id)}`}>
+							<label class="flex min-w-0 flex-1 cursor-pointer items-center gap-4">
+								<input
+									type="checkbox"
+									name="service_id"
+									value={service.id}
+									checked={isDefault || draft.serviceIds.includes(service.id)}
+									disabled={!canOperate || isDefault}
+									class="accent-[#7c3aed]"
+									onchange={() => !isDefault && toggleService(service.id)}
+								/>
+								<span class="min-w-0 flex-1">
+									<span class="block font-black text-white">{service.name}</span>
+									<span class="mt-1 block text-sm text-white/55">
+										{durationLabel(service.duration_minutes)}{service.price_label ? ` · ${service.price_label}` : ''}
+									</span>
 								</span>
-							</span>
-							{#if isDefault}
-								<span class="shrink-0 text-xs font-bold text-white/42">Incluido</span>
-							{/if}
-						</label>
+							</label>
+							<button
+								type="button"
+								disabled={!canManage}
+								class="ux-btn-secondary shrink-0 px-3 py-2 text-sm"
+								onclick={() => openServiceEditor(service.id)}
+							>
+								Editar
+							</button>
+						</div>
 					{/each}
 					{#if data.services.length === 0}
 						<p class="ux-empty">Todavía no hay servicios cargados.</p>
@@ -1144,6 +1188,78 @@
 				{/if}
 			</div>
 		</div>
+
+		<Modal open={Boolean(editingService)} title="Editar servicio" on:close={closeServiceEditor}>
+			{#if editingService}
+				<form method="POST" action="?/update_service" class="grid gap-4" use:enhance={updateServiceEnhance}>
+					<input type="hidden" name="service_id" value={editingService.id} />
+					<p class="text-sm text-white/60">
+						Los cambios se aplican a los turnos nuevos. Los turnos ya reservados conservan el servicio y la duración originales.
+					</p>
+					<label>
+						<span class="ux-label">Nombre</span>
+						<input
+							name="name"
+							required
+							value={editingService.name}
+							disabled={!canManage || editingDefaultService}
+							class="ux-input"
+						/>
+						{#if editingDefaultService}
+							<span class="mt-1 block text-xs text-white/45">Este nombre identifica un servicio base del consultorio.</span>
+						{/if}
+					</label>
+					<div class="grid gap-4 sm:grid-cols-2">
+						<label>
+							<span class="ux-label">Duración en minutos</span>
+							<input name="duration_minutes" type="number" min="5" max="480" step="5" required value={editingService.duration_minutes} disabled={!canManage} class="ux-input" />
+						</label>
+						<label>
+							<span class="ux-label">Precio visible (opcional)</span>
+							<input name="price_label" type="text" inputmode="numeric" value={editingService.price_label ?? ''} disabled={!canManage} placeholder="$ 35.000" class="ux-input" oninput={handlePriceInput} />
+						</label>
+					</div>
+					<label>
+						<span class="ux-label">Descripción (opcional)</span>
+						<textarea name="description" rows="3" disabled={!canManage} class="ux-textarea">{editingService.description ?? ''}</textarea>
+					</label>
+					<div class="grid gap-4 sm:grid-cols-2">
+						<label>
+							<span class="ux-label">Margen antes (minutos)</span>
+							<input name="buffer_before_minutes" type="number" min="0" max="480" step="5" required value={editingService.buffer_before_minutes} disabled={!canManage} class="ux-input" />
+						</label>
+						<label>
+							<span class="ux-label">Margen después (minutos)</span>
+							<input name="buffer_after_minutes" type="number" min="0" max="480" step="5" required value={editingService.buffer_after_minutes} disabled={!canManage} class="ux-input" />
+						</label>
+					</div>
+					{#if editingDefaultService}
+						<input type="hidden" name="is_active" value="true" />
+						<input type="hidden" name="is_public" value="true" />
+					{:else}
+						<div class="grid gap-3 sm:grid-cols-2">
+							<label class="ux-choice flex items-center gap-3 px-4 py-3">
+								<input type="checkbox" name="is_active" value="true" checked={editingService.is_active} disabled={!canManage} class="accent-[#7c3aed]" />
+								<span class="font-bold text-white">Servicio activo</span>
+							</label>
+							<label class="ux-choice flex items-center gap-3 px-4 py-3">
+								<input type="checkbox" name="is_public" value="true" checked={editingService.is_public} disabled={!canManage} class="accent-[#7c3aed]" />
+								<span class="font-bold text-white">Visible al reservar</span>
+							</label>
+						</div>
+					{/if}
+					{#if serviceEditError}
+						<p class="ux-alert">{serviceEditError}</p>
+					{/if}
+					<div class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+						<button type="button" class="ux-btn-secondary" disabled={saving === 'service-update'} onclick={closeServiceEditor}>Cancelar</button>
+						<button type="submit" class="ux-btn-primary" disabled={!canManage || saving === 'service-update'}>
+							{saving === 'service-update' ? 'Guardando...' : 'Guardar cambios'}
+						</button>
+					</div>
+				</form>
+			{/if}
+		</Modal>
 	{/if}
 
 	{#if activeTab === 'horarios'}

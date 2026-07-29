@@ -142,9 +142,11 @@
 		return 'Podemos ayudarte a cargar profesionales, servicios y horarios iniciales durante una hora.';
 	});
 	const configNav = $derived.by(() =>
-		isAssistingAccount
-			? baseConfigNav.filter((item) => item.href !== '/odonto/configuracion/suscripcion')
-			: baseConfigNav
+		baseConfigNav.filter((item) => {
+			if (data?.isMaster && item.href === '/odonto/configuracion/ayuda') return false;
+			if (isAssistingAccount && item.href === '/odonto/configuracion/suscripcion') return false;
+			return true;
+		})
 	);
 	const money = (value?: number | string | null) => {
 		if (value === null || value === undefined || value === '') return 'ARS 0';
@@ -174,6 +176,7 @@
 	const shouldShowAccountAssistanceNotice = $derived.by(() => {
 		if (
 			isMasterPage ||
+			(data?.isMaster && !isAssistingAccount) ||
 			commercialAccessRestricted ||
 			accountPendingManualSetup ||
 			!accountAssistance

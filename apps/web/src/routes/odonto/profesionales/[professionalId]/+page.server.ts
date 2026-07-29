@@ -420,6 +420,77 @@ export const actions: Actions = {
 		return { success: true, message: 'Servicio creado y asignado.', serviceId: data.id };
 	},
 
+	update_service: async ({ request, locals, fetch, cookies }) => {
+		if (!locals.auth) throw redirect(303, '/login');
+		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
+		const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
+		if (!business.canManage) return fail(403, { message: 'No tenés permisos para editar servicios.' });
+
+		const form = await request.formData();
+		const serviceId = String(form.get('service_id') ?? '').trim();
+		if (!serviceId) return fail(400, { message: 'No pudimos identificar el servicio. Cerrá el editor y volvé a abrirlo.' });
+
+		const { data: currentService, error: serviceError } = await supabase
+			.from('services')
+			.select('id, name')
+			.eq('business_id', business.business.id)
+			.eq('id', serviceId)
+			.maybeSingle();
+		if (serviceError || !currentService) {
+			console.error('Error buscando servicio para editar', serviceError);
+			return fail(404, { message: 'Ese servicio ya no está disponible. Cerrá el editor y recargá la página.' });
+		}
+
+		const isDefault = isDefaultServiceName(String(currentService.name ?? ''));
+		const name = isDefault
+			? String(currentService.name)
+			: String(form.get('name') ?? '').trim();
+		const duration = parsePositiveInt(form.get('duration_minutes'));
+		const bufferBefore = parsePositiveInt(form.get('buffer_before_minutes'));
+		const bufferAfter = parsePositiveInt(form.get('buffer_after_minutes'));
+		const priceLabel = formatPriceLabel(String(form.get('price_label') ?? ''));
+		if (!name) return fail(400, { message: 'El nombre del servicio es obligatorio.' });
+		if (duration < MIN_SERVICE_DURATION_MINUTES || duration > MAX_SERVICE_DURATION_MINUTES) {
+			return fail(400, { message: 'La duración debe estar entre 5 y 480 minutos.' });
+		}
+		if (bufferBefore < 0 || bufferBefore > 480 || bufferAfter < 0 || bufferAfter > 480) {
+			return fail(400, { message: 'Los márgenes deben estar entre 0 y 480 minutos.' });
+		}
+
+		const { data: updatedService, error } = await supabase
+			.from('services')
+			.update({
+				name,
+				description: String(form.get('description') ?? '').trim() || null,
+				duration_minutes: duration,
+				buffer_before_minutes: bufferBefore,
+				buffer_after_minutes: bufferAfter,
+				price_label: priceLabel || null,
+				is_public: isDefault || form.get('is_public') === 'true',
+				is_active: isDefault || form.get('is_active') === 'true',
+				updated_at: new Date().toISOString()
+			})
+			.eq('business_id', business.business.id)
+			.eq('id', serviceId)
+			.select('id')
+			.maybeSingle();
+		if (error || !updatedService) {
+			console.error('Error actualizando servicio', error);
+			return fail(500, { message: 'No pudimos guardar el servicio. Revisá los datos e intentá nuevamente.' });
+		}
+
+		await writeAuditLog(supabase, {
+			businessId: business.business.id,
+			userId,
+			action: 'service.updated_from_professional',
+			entityType: 'service',
+			entityId: serviceId,
+			metadata: { name, duration_minutes: duration }
+		});
+
+		return { success: true, message: 'Servicio guardado.' };
+	},
+
 	save_weekly_rules: async ({ request, params, locals, fetch, cookies }) => {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });

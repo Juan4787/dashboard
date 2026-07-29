@@ -4,7 +4,7 @@ import {
 	normalizeSlug,
 	resolveActiveBusiness
 } from '$lib/server/business';
-import { createSupabaseServerClient } from '$lib/server/supabase';
+import { createSupabaseAdminClient, createSupabaseServerClient } from '$lib/server/supabase';
 import { isValidMapsUrl } from '$lib/server/location';
 import { env } from '$env/dynamic/private';
 import { error as kitError, fail, redirect } from '@sveltejs/kit';
@@ -196,7 +196,25 @@ export const actions: Actions = {
 			});
 		}
 
-		const { error } = await supabase
+		let updateClient = supabase;
+		if (context.assistance) {
+			const { data: assistanceIsActive, error: assistanceError } = await supabase.rpc(
+				'user_has_active_account_assistance',
+				{ target_business_id: context.business.id }
+			);
+			if (assistanceError || assistanceIsActive !== true) {
+				if (assistanceError) {
+					console.error('Error revalidando ayuda para guardar el consultorio', assistanceError);
+				}
+				return fail(403, {
+					message: 'La autorización para configurar este consultorio ya no está activa. Volvé al panel maestro y abrilo nuevamente.',
+					values: Object.fromEntries(form)
+				});
+			}
+			updateClient = await createSupabaseAdminClient('odonto', fetch);
+		}
+
+		const { data: updatedBusiness, error } = await updateClient
 			.from('businesses')
 			.update({
 				name,
@@ -217,11 +235,16 @@ export const actions: Actions = {
 				is_active: form.get('is_active') === 'true',
 				updated_at: new Date().toISOString()
 			})
-			.eq('id', context.business.id);
+			.eq('id', context.business.id)
+			.select('id')
+			.maybeSingle();
 
-		if (error) {
+		if (error || !updatedBusiness) {
 			console.error('Error actualizando negocio', error);
-			const message = error.code === '23505' ? 'Ese nombre de enlace público ya está en uso.' : 'No se pudo guardar el negocio.';
+			const message =
+				error?.code === '23505'
+					? 'Ese nombre de enlace público ya está en uso. Elegí otro y volvé a guardar.'
+					: 'No pudimos guardar los datos del consultorio. Volvé a abrirlo desde el panel maestro e intentá nuevamente.';
 			return fail(500, { message, values: Object.fromEntries(form) });
 		}
 

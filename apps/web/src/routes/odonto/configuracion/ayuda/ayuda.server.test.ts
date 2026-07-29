@@ -7,6 +7,8 @@ const envState = vi.hoisted(() => ({
 const mocks = vi.hoisted(() => ({
 	createSupabaseServerClient: vi.fn(),
 	createSupabaseAdminClient: vi.fn(),
+	getEmailFromAccessToken: vi.fn(),
+	isMasterEmail: vi.fn(),
 	resolveActiveBusiness: vi.fn(),
 	demoBusinessContext: vi.fn(),
 	activateAccountAssistance: vi.fn(),
@@ -19,7 +21,9 @@ const mocks = vi.hoisted(() => ({
 vi.mock('$env/dynamic/private', () => ({ env: envState.privateEnv }));
 vi.mock('$lib/server/supabase', () => ({
 	createSupabaseServerClient: mocks.createSupabaseServerClient,
-	createSupabaseAdminClient: mocks.createSupabaseAdminClient
+	createSupabaseAdminClient: mocks.createSupabaseAdminClient,
+	getEmailFromAccessToken: mocks.getEmailFromAccessToken,
+	isMasterEmail: mocks.isMasterEmail
 }));
 vi.mock('$lib/server/business', () => ({
 	resolveActiveBusiness: mocks.resolveActiveBusiness,
@@ -69,6 +73,8 @@ beforeEach(() => {
 	for (const key of Object.keys(envState.privateEnv)) delete envState.privateEnv[key];
 	mocks.createSupabaseServerClient.mockResolvedValue({ from: vi.fn(), rpc: vi.fn() });
 	mocks.createSupabaseAdminClient.mockResolvedValue({ from: vi.fn(), auth: { admin: { listUsers: vi.fn() } } });
+	mocks.getEmailFromAccessToken.mockReturnValue('owner@test.com');
+	mocks.isMasterEmail.mockReturnValue(false);
 	mocks.loadAccountAssistanceView.mockResolvedValue({
 		status: 'available',
 		showBanner: true,
@@ -123,6 +129,29 @@ describe('configuracion ayuda server', () => {
 
 		expect(result.status).toBe(403);
 		expect(mocks.activateAccountAssistance).not.toHaveBeenCalled();
+	});
+
+	it('redirects the master away from the request-help page outside an assistance session', async () => {
+		mocks.resolveActiveBusiness.mockResolvedValue(context('owner'));
+		mocks.isMasterEmail.mockReturnValue(true);
+
+		await expect(load(makeEvent() as never)).rejects.toMatchObject({
+			status: 303,
+			location: '/odonto/maestro'
+		});
+	});
+
+	it('blocks a direct master request to activate help', async () => {
+		mocks.isMasterEmail.mockReturnValue(true);
+
+		const result = (await actions.activate(makeEvent() as never)) as {
+			status: number;
+			data: { message: string };
+		};
+
+		expect(result.status).toBe(403);
+		expect(result.data.message).toContain('cuenta maestra no solicita ayuda');
+		expect(mocks.resolveActiveBusiness).not.toHaveBeenCalled();
 	});
 
 	it('revokes only for the owner', async () => {

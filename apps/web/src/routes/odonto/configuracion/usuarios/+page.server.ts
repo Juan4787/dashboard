@@ -32,7 +32,7 @@ import {
 	isEmailAlreadyAssociatedWithOtherBusinessError
 } from '$lib/server/business-email-association';
 import { formatPriceLabel } from '$lib/utils/money-input';
-import { canConfigureAttendingProfile } from '$lib/utils/team-permissions';
+import { canAssignTeamRole, canConfigureAttendingProfile } from '$lib/utils/team-permissions';
 import {
 	parseScheduleBlocksJson,
 	validateScheduleBlocks,
@@ -274,6 +274,7 @@ const saveRoleAccessDirect = async ({
 	professionalId,
 	actorId,
 	actorRole,
+	isAssisting,
 	currentAccess
 }: {
 	admin: SupabaseClient;
@@ -283,10 +284,11 @@ const saveRoleAccessDirect = async ({
 	professionalId: string | null;
 	actorId: string | null;
 	actorRole: BusinessRole;
+	isAssisting: boolean;
 	currentAccess: BusinessRoleAccess[];
 }) => {
 	if (!actorId) throw new Error('AUTH_REQUIRED');
-	if (actorRole === 'admin' && (role === 'owner' || role === 'admin')) {
+	if (!canAssignTeamRole({ actorRole, targetRole: role, isAssisting })) {
 		throw new Error('ADMIN_OWNER_ACTION_DENIED');
 	}
 	if (role === 'professional' && !professionalId) {
@@ -523,7 +525,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, depends }) 
 		context,
 		members,
 		services,
-		roles: context.assistance ? TEAM_ROLES.filter((role) => role !== 'owner' && role !== 'admin') : TEAM_ROLES,
+		roles: context.assistance ? TEAM_ROLES.filter((role) => role !== 'owner') : TEAM_ROLES,
 		defaultServiceNames: DEFAULT_SERVICE_NAMES,
 		currentUserId,
 		demo: false
@@ -553,9 +555,9 @@ export const actions: Actions = {
 			if (!context.canManage) {
 				return fail(403, { message: 'No tenés permisos para administrar el equipo.', values });
 			}
-			if (context.assistance && (role === 'owner' || role === 'admin')) {
+			if (context.assistance && role === 'owner') {
 				return fail(403, {
-					message: 'El dueño y los administradores se configuran desde el consultorio.',
+					message: 'La propiedad del consultorio solo puede administrarla su dueño.',
 					values
 				});
 			}
@@ -731,6 +733,7 @@ export const actions: Actions = {
 					professionalId,
 					actorId: currentUserId,
 					actorRole: context.role,
+					isAssisting: Boolean(context.assistance),
 					currentAccess
 				});
 
@@ -781,6 +784,7 @@ export const actions: Actions = {
 				professionalId,
 				actorId: currentUserId,
 				actorRole: context.role,
+				isAssisting: Boolean(context.assistance),
 				currentAccess
 			});
 		} catch (error) {

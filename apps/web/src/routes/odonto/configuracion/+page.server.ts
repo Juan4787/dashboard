@@ -1,6 +1,11 @@
 import { env } from '$env/dynamic/private';
 import { resolveActiveBusiness } from '$lib/server/business';
-import { createSupabaseServerClient, getAuthUserId } from '$lib/server/supabase';
+import {
+	createSupabaseServerClient,
+	getAuthUserId,
+	getEmailFromAccessToken,
+	isMasterEmail
+} from '$lib/server/supabase';
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -8,9 +13,10 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 	if (!locals.auth) {
 		throw redirect(303, '/login');
 	}
+	const isMaster = isMasterEmail(getEmailFromAccessToken(locals.auth.access_token));
 
 	if (env.DEMO_MODE === 'true') {
-		return { demo: true, driveConnection: null, canLinkExternalFiles: true };
+		return { demo: true, driveConnection: null, canLinkExternalFiles: true, isMaster };
 	}
 
 	const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
@@ -25,7 +31,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 	}
 	const ownerId = await getAuthUserId(supabase, locals.auth.access_token);
 	if (!ownerId) {
-		return { demo: false, driveConnection: null, canLinkExternalFiles: false };
+		return { demo: false, driveConnection: null, canLinkExternalFiles: false, isMaster };
 	}
 
 	const { data, error } = await supabase
@@ -41,7 +47,8 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 	return {
 		demo: false,
 		driveConnection: data ?? null,
-		canLinkExternalFiles: Boolean(context?.access.allowedCapabilities.canLinkExternalFiles)
+		canLinkExternalFiles: Boolean(context?.access.allowedCapabilities.canLinkExternalFiles),
+		isMaster
 	};
 };
 
