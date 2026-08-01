@@ -75,11 +75,29 @@ const failSave = (result: Extract<SaveResult, { ok: false }>) =>
 
 type OdontoSupabase = SupabaseClient<any, any, any>;
 
+const getPendingProfessionalAccountEmail = async (
+	supabase: OdontoSupabase,
+	businessId: string,
+	professionalId: string
+) => {
+	const { data, error } = await supabase.rpc('list_business_role_access', {
+		target_business_id: businessId
+	});
+	if (error) throw error;
+	const pending = (data ?? []).find(
+		(item: any) =>
+			String(item?.status ?? '') === 'pending' &&
+			String(item?.professional_id ?? '') === professionalId
+	);
+	return pending?.email ? String(pending.email).trim().toLowerCase() : null;
+};
+
 const saveProfessionalProfile = async (
 	supabase: OdontoSupabase,
 	businessId: string,
 	professionalId: string,
-	form: FormData
+	form: FormData,
+	options: { accountLinkPending?: boolean } = {}
 ): Promise<SaveResult<{ email: string | null }>> => {
 	const name = String(form.get('name') ?? '').trim();
 	if (!name) return { ok: false, status: 400, message: 'El nombre es obligatorio.' };
@@ -97,8 +115,9 @@ const saveProfessionalProfile = async (
 			specialty: String(form.get('specialty') ?? '').trim() || null,
 			phone: String(form.get('phone') ?? '').trim() || null,
 			email,
-			is_public: isAvailable,
-			is_active: isAvailable,
+			...(options.accountLinkPending
+				? { is_public: false }
+				: { is_public: isAvailable, is_active: isAvailable }),
 			updated_at: new Date().toISOString()
 		})
 		.eq('business_id', businessId)
@@ -247,6 +266,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 			exceptions: [],
 			tab: url.searchParams.get('tab') ?? 'perfil',
 			userId: null,
+			pendingAccountEmail: null,
 			demo: true
 		};
 	}
@@ -263,36 +283,42 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 		.maybeSingle();
 	if (professionalError || !professional) throw kitError(404, 'Profesional no encontrado');
 
-	const [{ data: services }, { data: assignments }, { data: rules }, { data: exceptions }] =
-		await Promise.all([
-			supabase
-				.from('services')
-				.select('id, name, description, duration_minutes, buffer_before_minutes, buffer_after_minutes, price_label, is_active, is_public, sort_order')
-				.eq('business_id', businessId)
-				.order('sort_order')
-				.order('name'),
-			supabase
-				.from('professional_services')
-				.select('service_id')
-				.eq('business_id', businessId)
-				.eq('professional_id', params.professionalId),
-			supabase
-				.from('availability_rules')
-				.select(
-					'id, weekday, start_time, end_time, slot_interval_minutes, break_minutes, is_active, created_at'
-				)
-				.eq('business_id', businessId)
-				.eq('professional_id', params.professionalId)
-				.order('weekday')
-				.order('start_time'),
-			supabase
-				.from('availability_exceptions')
-				.select('id, professional_id, starts_at, ends_at, type, reason')
-				.eq('business_id', businessId)
-				.or(`professional_id.eq.${params.professionalId},professional_id.is.null`)
-				.order('starts_at', { ascending: false })
-				.limit(80)
-		]);
+	const [
+		{ data: services },
+		{ data: assignments },
+		{ data: rules },
+		{ data: exceptions },
+		pendingAccountEmail
+	] = await Promise.all([
+		supabase
+			.from('services')
+			.select('id, name, description, duration_minutes, buffer_before_minutes, buffer_after_minutes, price_label, is_active, is_public, sort_order')
+			.eq('business_id', businessId)
+			.order('sort_order')
+			.order('name'),
+		supabase
+			.from('professional_services')
+			.select('service_id')
+			.eq('business_id', businessId)
+			.eq('professional_id', params.professionalId),
+		supabase
+			.from('availability_rules')
+			.select(
+				'id, weekday, start_time, end_time, slot_interval_minutes, break_minutes, is_active, created_at'
+			)
+			.eq('business_id', businessId)
+			.eq('professional_id', params.professionalId)
+			.order('weekday')
+			.order('start_time'),
+		supabase
+			.from('availability_exceptions')
+			.select('id, professional_id, starts_at, ends_at, type, reason')
+			.eq('business_id', businessId)
+			.or(`professional_id.eq.${params.professionalId},professional_id.is.null`)
+			.order('starts_at', { ascending: false })
+			.limit(80),
+		getPendingProfessionalAccountEmail(supabase, businessId, params.professionalId)
+	]);
 	const defaultServiceIds = (services ?? [])
 		.filter((service: any) => isDefaultServiceName(String(service.name ?? '')))
 		.map((service: any) => String(service.id));
@@ -303,27 +329,39 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 		services: services ?? [],
 		assignedServiceIds: (assignments ?? []).map((item: any) => String(item.service_id)),
 		defaultServiceIds,
-			rules: rules ?? [],
-			exceptions: exceptions ?? [],
-			appointmentCount: null,
-			clinicalEntryCount: null,
-			followUpCount: null,
-			dependencyCountsDeferred: true,
-			tab: url.searchParams.get('tab') ?? 'perfil',
-			userId,
-			demo: false
-		};
+		rules: rules ?? [],
+		exceptions: exceptions ?? [],
+		appointmentCount: null,
+		clinicalEntryCount: null,
+		followUpCount: null,
+		dependencyCountsDeferred: true,
+		tab: url.searchParams.get('tab') ?? 'perfil',
+		userId,
+		pendingAccountEmail,
+		demo: false
 	};
+};
 
 export const actions: Actions = {
 	update_profile: async ({ request, params, locals, fetch, cookies }) => {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
 		const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
-		if (!business.canOperate) return fail(403, { message: 'No tenés permisos para editar profesionales.' });
+		if (!business.canManage) return fail(403, { message: 'No tenés permisos para editar profesionales.' });
 
 		const form = await request.formData();
-		const profileResult = await saveProfessionalProfile(supabase, business.business.id, params.professionalId, form);
+		const pendingAccountEmail = await getPendingProfessionalAccountEmail(
+			supabase,
+			business.business.id,
+			params.professionalId
+		);
+		const profileResult = await saveProfessionalProfile(
+			supabase,
+			business.business.id,
+			params.professionalId,
+			form,
+			{ accountLinkPending: Boolean(pendingAccountEmail) }
+		);
 		if (!profileResult.ok) return failSave(profileResult);
 
 		await writeAuditLog(supabase, {
@@ -341,7 +379,7 @@ export const actions: Actions = {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
 		const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
-		if (!business.canOperate) return fail(403, { message: 'No tenés permisos para asignar servicios.' });
+		if (!business.canManage) return fail(403, { message: 'No tenés permisos para asignar servicios.' });
 
 		const form = await request.formData();
 		const servicesResult = await saveProfessionalServices(supabase, business.business.id, params.professionalId, form);
@@ -363,7 +401,7 @@ export const actions: Actions = {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
 		const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
-		if (!business.canOperate) return fail(403, { message: 'No tenés permisos para crear servicios.' });
+		if (!business.canManage) return fail(403, { message: 'No tenés permisos para crear servicios.' });
 
 		const form = await request.formData();
 		const name = String(form.get('name') ?? '').trim();
@@ -495,7 +533,7 @@ export const actions: Actions = {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
 		const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
-		if (!business.canOperate) return fail(403, { message: 'No tenés permisos para editar horarios.' });
+		if (!business.canManage) return fail(403, { message: 'No tenés permisos para editar horarios.' });
 
 		const form = await request.formData();
 		const scheduleResult = await saveProfessionalWeeklyRules(supabase, business.business.id, params.professionalId, form);
@@ -517,7 +555,7 @@ export const actions: Actions = {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
 		const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
-		if (!business.canOperate) return fail(403, { message: 'No tenés permisos para editar horarios.' });
+		if (!business.canManage) return fail(403, { message: 'No tenés permisos para editar horarios.' });
 
 		const form = await request.formData();
 		const ruleId = String(form.get('rule_id') ?? '').trim();
@@ -549,7 +587,7 @@ export const actions: Actions = {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
 		const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
-		if (!business.canOperate) return fail(403, { message: 'No tenés permisos para crear excepciones.' });
+		if (!business.canManage) return fail(403, { message: 'No tenés permisos para crear excepciones.' });
 
 		const form = await request.formData();
 		const exceptionResult = await createAvailabilityException(
@@ -589,7 +627,7 @@ export const actions: Actions = {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
 		const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
-		if (!business.canOperate) return fail(403, { message: 'No tenés permisos para eliminar excepciones.' });
+		if (!business.canManage) return fail(403, { message: 'No tenés permisos para eliminar excepciones.' });
 
 		const form = await request.formData();
 		const exceptionId = String(form.get('exception_id') ?? '').trim();
@@ -620,13 +658,24 @@ export const actions: Actions = {
 		if (!locals.auth) throw redirect(303, '/login');
 		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
 		const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
-		if (!business.canOperate) return fail(403, { message: 'No tenés permisos para editar profesionales.' });
+		if (!business.canManage) return fail(403, { message: 'No tenés permisos para editar profesionales.' });
 
 		const form = await request.formData();
 		const savedSections: string[] = [];
 
 		if (boolFromForm(form, 'save_profile')) {
-			const profileResult = await saveProfessionalProfile(supabase, business.business.id, params.professionalId, form);
+			const pendingAccountEmail = await getPendingProfessionalAccountEmail(
+				supabase,
+				business.business.id,
+				params.professionalId
+			);
+			const profileResult = await saveProfessionalProfile(
+				supabase,
+				business.business.id,
+				params.professionalId,
+				form,
+				{ accountLinkPending: Boolean(pendingAccountEmail) }
+			);
 			if (!profileResult.ok) return failSave(profileResult);
 			await writeAuditLog(supabase, {
 				businessId: business.business.id,
@@ -739,10 +788,19 @@ export const actions: Actions = {
 		if (!business.canManage) {
 			return fail(403, { message: 'Solo el dueño o un administrador puede restaurar profesionales.' });
 		}
+		const pendingAccountEmail = await getPendingProfessionalAccountEmail(
+			supabase,
+			business.business.id,
+			params.professionalId
+		);
 
 		const { error } = await supabase
 			.from('professionals')
-			.update({ is_active: true, is_public: true, updated_at: new Date().toISOString() })
+			.update({
+				is_active: true,
+				is_public: !pendingAccountEmail,
+				updated_at: new Date().toISOString()
+			})
 			.eq('business_id', business.business.id)
 			.eq('id', params.professionalId);
 		if (error) {

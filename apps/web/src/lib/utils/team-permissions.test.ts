@@ -1,5 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { canAssignTeamRole, canConfigureAttendingProfile } from './team-permissions';
+import {
+	canAssignTeamRole,
+	canConfigureAttendingProfile,
+	roleSupportsProfessionalProfile,
+	shouldConfigureProfessionalProfile
+} from './team-permissions';
+
+describe('professional-profile role model', () => {
+	it('requires a profile for professionals and keeps it optional for owners and admins', () => {
+		expect(shouldConfigureProfessionalProfile({ role: 'professional', requested: false })).toBe(true);
+		expect(shouldConfigureProfessionalProfile({ role: 'admin', requested: false })).toBe(false);
+		expect(shouldConfigureProfessionalProfile({ role: 'admin', requested: true })).toBe(true);
+		expect(shouldConfigureProfessionalProfile({ role: 'owner', requested: true })).toBe(true);
+	});
+
+	it('does not attach a professional profile to reception or readonly access', () => {
+		expect(roleSupportsProfessionalProfile('reception')).toBe(false);
+		expect(roleSupportsProfessionalProfile('readonly')).toBe(false);
+		expect(shouldConfigureProfessionalProfile({ role: 'reception', requested: true })).toBe(false);
+	});
+});
 
 describe('team-role assignment authority', () => {
 	it('lets the owner assign every team role', () => {

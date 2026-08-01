@@ -175,6 +175,8 @@ describe('resolveActiveBusiness', () => {
 
 		expect(context?.business.id).toBe('business-1');
 		expect(context?.role).toBe('professional');
+		expect(context?.canManage).toBe(false);
+		expect(context?.canOperate).toBe(false);
 		expect(context?.access.commercialStatus).toBe('active');
 		expect(supabase.rpc).toHaveBeenCalledWith('ensure_user_default_business', {
 			p_name: 'Consultorio',
@@ -226,6 +228,7 @@ describe('resolveActiveBusiness', () => {
 		expect(context?.business.id).toBe('business-1');
 		expect(context?.role).toBe('admin');
 		expect(context?.canManage).toBe(true);
+		expect(context?.canOperate).toBe(true);
 		expect(context?.assistance).toMatchObject({
 			grantId: 'assist-1',
 			requestedByUserId: 'owner-1',

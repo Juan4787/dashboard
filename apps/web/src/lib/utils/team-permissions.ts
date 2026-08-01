@@ -1,6 +1,17 @@
 export type AttendingActorRole = 'owner' | 'admin' | 'reception' | 'professional' | 'readonly';
 export type AttendingTargetRole = AttendingActorRole;
 
+export const roleSupportsProfessionalProfile = (role: AttendingTargetRole) =>
+	role === 'owner' || role === 'admin' || role === 'professional';
+
+export const shouldConfigureProfessionalProfile = ({
+	role,
+	requested
+}: {
+	role: AttendingTargetRole;
+	requested: boolean;
+}) => role === 'professional' || (requested && roleSupportsProfessionalProfile(role));
+
 export const canAssignTeamRole = ({
 	actorRole,
 	targetRole,

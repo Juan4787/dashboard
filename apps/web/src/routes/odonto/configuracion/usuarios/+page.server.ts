@@ -32,7 +32,12 @@ import {
 	isEmailAlreadyAssociatedWithOtherBusinessError
 } from '$lib/server/business-email-association';
 import { formatPriceLabel } from '$lib/utils/money-input';
-import { canAssignTeamRole, canConfigureAttendingProfile } from '$lib/utils/team-permissions';
+import {
+	canAssignTeamRole,
+	canConfigureAttendingProfile,
+	roleSupportsProfessionalProfile,
+	shouldConfigureProfessionalProfile
+} from '$lib/utils/team-permissions';
 import {
 	parseScheduleBlocksJson,
 	validateScheduleBlocks,
@@ -191,6 +196,9 @@ const roleAccessErrorMessage = (error: { code?: string; message?: string } | nul
 	if (raw.includes('INVALID_EMAIL')) return 'Ingresá un email válido.';
 	if (raw.includes('INVALID_ROLE')) return 'El rol seleccionado no es válido.';
 	if (raw.includes('PROFESSIONAL_REQUIRED')) return 'Completá los datos del profesional.';
+	if (raw.includes('PROFESSIONAL_ROLE_NOT_SUPPORTED')) {
+		return 'Solo un profesional, administrador o dueño puede tener perfil profesional.';
+	}
 	if (raw.includes('PROFESSIONAL_NOT_FOUND')) return 'No se encontró el profesional asociado.';
 	if (raw.includes('PROFESSIONAL_ALREADY_LINKED_TO_USER')) {
 		return 'Ese profesional ya está vinculado a otro usuario.';
@@ -232,40 +240,6 @@ const findAuthUserIdByEmail = async (admin: SupabaseClient, email: string) => {
 	return null;
 };
 
-const enableAllowedEmail = async (admin: SupabaseClient, email: string, actorId: string | null) => {
-	const { data: existingRows, error: readError } = await admin
-		.from('allowed_emails')
-		.select('id, email')
-		.ilike('email', email)
-		.limit(20);
-	if (readError) throw readError;
-
-	const ids = (existingRows ?? []).map((row: any) => String(row.id)).filter(Boolean);
-	if (ids.length > 0) {
-		const { error } = await admin
-			.from('allowed_emails')
-			.update({
-				email,
-				enabled: true,
-				disabled_at: null,
-				disabled_reason: null,
-				updated_by: actorId,
-				updated_at: new Date().toISOString()
-			})
-			.in('id', ids);
-		if (error) throw error;
-		return;
-	}
-
-	const { error } = await admin.from('allowed_emails').insert({
-		email,
-		enabled: true,
-		created_by: actorId,
-		updated_by: actorId
-	});
-	if (error) throw error;
-};
-
 const saveRoleAccessDirect = async ({
 	admin,
 	businessId,
@@ -291,26 +265,33 @@ const saveRoleAccessDirect = async ({
 	if (!canAssignTeamRole({ actorRole, targetRole: role, isAssisting })) {
 		throw new Error('ADMIN_OWNER_ACTION_DENIED');
 	}
-	if (role === 'professional' && !professionalId) {
+	const currentEmailAccess = currentAccess.find(
+		(item) => item.email.toLowerCase() === email.toLowerCase()
+	);
+	const effectiveProfessionalId =
+		professionalId ??
+		(roleSupportsProfessionalProfile(role) ? currentEmailAccess?.professional_id ?? null : null);
+	if (role === 'professional' && !effectiveProfessionalId) {
 		throw new Error('PROFESSIONAL_REQUIRED');
+	}
+	if (effectiveProfessionalId && !roleSupportsProfessionalProfile(role)) {
+		throw new Error('PROFESSIONAL_ROLE_NOT_SUPPORTED');
 	}
 
 	const targetUserId = await findAuthUserIdByEmail(admin, email);
 
-	if (role === 'professional' && professionalId) {
+	if (effectiveProfessionalId) {
 		const { data: linkedRows, error: linkedError } = await admin
 			.from('professional_users')
 			.select('id, user_id')
 			.eq('business_id', businessId)
-			.eq('professional_id', professionalId)
+			.eq('professional_id', effectiveProfessionalId)
 			.limit(10);
 		if (linkedError) throw linkedError;
 		if ((linkedRows ?? []).some((row: any) => !targetUserId || String(row.user_id) !== targetUserId)) {
 			throw new Error('PROFESSIONAL_ALREADY_LINKED_TO_USER');
 		}
 	}
-
-	await enableAllowedEmail(admin, email, actorId);
 
 	if (targetUserId) {
 		const existing = currentAccess.find(
@@ -350,7 +331,7 @@ const saveRoleAccessDirect = async ({
 			if (error) throw error;
 		}
 
-		if (role === 'professional' && professionalId) {
+		if (effectiveProfessionalId) {
 			const deleteByUser = await admin
 				.from('professional_users')
 				.delete()
@@ -361,11 +342,11 @@ const saveRoleAccessDirect = async ({
 				.from('professional_users')
 				.delete()
 				.eq('business_id', businessId)
-				.eq('professional_id', professionalId);
+				.eq('professional_id', effectiveProfessionalId);
 			if (deleteByProfessional.error) throw deleteByProfessional.error;
 			const { error } = await admin.from('professional_users').insert({
 				business_id: businessId,
-				professional_id: professionalId,
+				professional_id: effectiveProfessionalId,
 				user_id: targetUserId
 			});
 			if (error) throw error;
@@ -393,8 +374,7 @@ const saveRoleAccessDirect = async ({
 
 		return {
 			status:
-				existing?.role === role &&
-				(role !== 'professional' || existing.professional_id === professionalId)
+				existing?.role === role && existing.professional_id === effectiveProfessionalId
 					? 'already_active'
 					: 'active'
 		};
@@ -408,7 +388,7 @@ const saveRoleAccessDirect = async ({
 			.from('business_user_invites')
 			.update({
 				role,
-				professional_id: professionalId,
+				professional_id: effectiveProfessionalId,
 				invited_by: actorId,
 				updated_at: new Date().toISOString()
 			})
@@ -418,7 +398,7 @@ const saveRoleAccessDirect = async ({
 		return {
 			status:
 				existingPending.role === role &&
-				(role !== 'professional' || existingPending.professional_id === professionalId)
+				existingPending.professional_id === effectiveProfessionalId
 					? 'already_pending'
 					: 'pending'
 		};
@@ -428,7 +408,7 @@ const saveRoleAccessDirect = async ({
 		business_id: businessId,
 		email,
 		role,
-		professional_id: professionalId,
+		professional_id: effectiveProfessionalId,
 		invited_by: actorId
 	});
 	if (error) throw error;
@@ -543,6 +523,7 @@ export const actions: Actions = {
 		const values = Object.fromEntries(form);
 		const email = normalizeEmail(form.get('email'));
 		const role = String(form.get('role') ?? '').trim();
+		const requestedProfessionalProfile = form.get('has_professional_profile') === 'true';
 
 		if (!EMAIL_FORMAT_REGEX.test(email)) {
 			return fail(400, { message: 'Ingresá un email válido.', values });
@@ -550,6 +531,16 @@ export const actions: Actions = {
 		if (!isBusinessRole(role)) {
 			return fail(400, { message: 'El rol seleccionado no es válido.', values });
 		}
+		if (requestedProfessionalProfile && !roleSupportsProfessionalProfile(role)) {
+			return fail(400, {
+				message: 'Solo un profesional, administrador o dueño puede tener perfil profesional.',
+				values
+			});
+		}
+		const configureProfessionalProfile = shouldConfigureProfessionalProfile({
+			role,
+			requested: requestedProfessionalProfile
+		});
 
 		const { supabase, context, currentUserId } = await getUsersPageContext({ locals, fetch, cookies });
 			if (!context.canManage) {
@@ -576,7 +567,7 @@ export const actions: Actions = {
 		let createdProfessionalId: string | null = null;
 		const createdServiceIds: string[] = [];
 
-		if (role === 'professional') {
+		if (configureProfessionalProfile) {
 			const professionalName = String(form.get('professional_name') ?? '').trim();
 			const specialty = String(form.get('professional_specialty') ?? '').trim();
 			if (!professionalName) {
@@ -655,7 +646,9 @@ export const actions: Actions = {
 					specialty: specialty || null,
 					email,
 					is_active: true,
-					is_public: true
+					// Se habilita para reservas sólo si la cuenta ya existe. Si queda una
+					// invitación pendiente, la vinculación de la cuenta la publica automáticamente.
+					is_public: false
 				})
 				.select('id')
 				.single();
@@ -755,12 +748,25 @@ export const actions: Actions = {
 				if (status === 'pending' || status === 'already_pending') {
 					return {
 						success: true,
-						openRole: 'professional',
+						openRole: role,
 						message:
-							'Profesional creado y email habilitado. Cuando la persona cree su cuenta, va a entrar con rol Profesional.'
+							`Perfil profesional configurado con rol ${roleLabel(role)}. No aparecerá en las reservas online hasta que la persona cree su cuenta con ${email}.`
 					};
 				}
-				return { success: true, openRole: 'professional', message: 'Profesional creado y rol asignado al consultorio.' };
+
+				const { error: publishError } = await admin
+					.from('professionals')
+					.update({ is_public: true, updated_at: new Date().toISOString() })
+					.eq('business_id', businessId)
+					.eq('id', professionalId)
+					.eq('is_active', true);
+				if (publishError) throw publishError;
+
+				return {
+					success: true,
+					openRole: role,
+					message: `Perfil profesional creado y rol ${roleLabel(role)} asignado al consultorio.`
+				};
 			} catch (error) {
 				await rollback(admin);
 				console.error('Error guardando alta de profesional', error);
@@ -801,7 +807,7 @@ export const actions: Actions = {
 			return {
 				success: true,
 				openRole: role,
-				message: 'Email habilitado. Cuando la persona cree su cuenta, el rol se asignará automáticamente.'
+				message: 'Acceso preparado. Cuando la persona cree su cuenta con ese correo, el rol se asignará automáticamente.'
 			};
 		}
 
@@ -814,19 +820,19 @@ export const actions: Actions = {
 		}
 
 		const form = await request.formData();
-		const targetUserId = String(form.get('user_id') ?? '').trim();
+		const targetAccessId = String(form.get('access_id') ?? '').trim();
 		const professionalName = String(form.get('name') ?? '').trim();
 
 		const { supabase, context, currentUserId } = await getUsersPageContext({ locals, fetch, cookies });
 		if (!context.canManage) {
 			return fail(403, { message: 'No tenés permisos para administrar el equipo.' });
 		}
-		if (!targetUserId) return fail(400, { message: 'Elegí a la persona del equipo.' });
+		if (!targetAccessId) return fail(400, { message: 'Elegí a la persona del equipo.' });
 		if (!professionalName) return fail(400, { message: 'El nombre profesional es obligatorio.' });
 
 		const currentAccess = await listRoleAccess(supabase, context.business.id);
-		const member = currentAccess.find((m) => m.status === 'active' && m.user_id === targetUserId);
-		if (!member) return fail(400, { message: 'No se encontró a esa persona activa en el equipo.' });
+		const member = currentAccess.find((item) => item.id === targetAccessId);
+		if (!member) return fail(400, { message: 'No se encontró a esa persona en el equipo.' });
 		if (member.role !== 'owner' && member.role !== 'admin') {
 			return fail(400, {
 				message: 'Desde acá solo se configura como atendible al dueño o a un administrador.'
@@ -848,25 +854,33 @@ export const actions: Actions = {
 		const businessId = context.business.id;
 		const admin = await createSupabaseAdminClient('odonto', fetch);
 
-		const { data: existingLink, error: existingLinkError } = await admin
-			.from('professional_users')
-			.select('id')
-			.eq('business_id', businessId)
-			.eq('user_id', targetUserId)
-			.limit(1)
-			.maybeSingle();
-		if (existingLinkError) {
-			console.error('Error verificando vínculo profesional', existingLinkError);
-			return fail(500, { message: 'No se pudo verificar el perfil profesional.' });
-		}
-		if (existingLink?.id) {
-			return fail(400, { message: 'Esa persona ya tiene un perfil profesional.' });
+		if (member.user_id) {
+			const { data: existingLink, error: existingLinkError } = await admin
+				.from('professional_users')
+				.select('id')
+				.eq('business_id', businessId)
+				.eq('user_id', member.user_id)
+				.limit(1)
+				.maybeSingle();
+			if (existingLinkError) {
+				console.error('Error verificando vínculo profesional', existingLinkError);
+				return fail(500, { message: 'No se pudo verificar el perfil profesional.' });
+			}
+			if (existingLink?.id) {
+				return fail(400, { message: 'Esa persona ya tiene un perfil profesional.' });
+			}
 		}
 
-		// Sin email: la identidad como usuario va por professional_users (evita choques de unicidad de email).
+		// Sin email en professionals: la identidad se resuelve por la invitación pendiente
+		// o por professional_users y así no se duplican identidades profesionales.
 		const { data: createdProfessional, error: createError } = await admin
 			.from('professionals')
-			.insert({ business_id: businessId, name: professionalName, is_active: true, is_public: true })
+			.insert({
+				business_id: businessId,
+				name: professionalName,
+				is_active: true,
+				is_public: member.status === 'active'
+			})
 			.select('id')
 			.single();
 		if (createError || !createdProfessional?.id) {
@@ -875,15 +889,32 @@ export const actions: Actions = {
 		}
 		const professionalId = String(createdProfessional.id);
 
-		const { error: linkError } = await admin.from('professional_users').insert({
-			business_id: businessId,
-			professional_id: professionalId,
-			user_id: targetUserId
-		});
-		if (linkError) {
+		let linkError: { message?: string } | null = null;
+		let linkCreated = false;
+		if (member.user_id) {
+			const result = await admin.from('professional_users').insert({
+				business_id: businessId,
+				professional_id: professionalId,
+				user_id: member.user_id
+			});
+			linkError = result.error;
+			linkCreated = !result.error;
+		} else {
+			const result = await admin
+				.from('business_user_invites')
+				.update({ professional_id: professionalId, updated_at: new Date().toISOString() })
+				.eq('business_id', businessId)
+				.eq('id', member.id)
+				.eq('status', 'pending')
+				.select('id')
+				.maybeSingle();
+			linkError = result.error;
+			linkCreated = Boolean(result.data?.id);
+		}
+		if (linkError || !linkCreated) {
 			await admin.from('professionals').delete().eq('business_id', businessId).eq('id', professionalId);
 			console.error('Error vinculando profesional al usuario', linkError);
-			return fail(500, { message: 'No se pudo vincular el perfil profesional a la persona.' });
+			return fail(500, { message: 'No se pudo vincular el perfil profesional a la persona del equipo.' });
 		}
 
 		try {
@@ -898,7 +929,13 @@ export const actions: Actions = {
 			action: 'professional.created_attending',
 			entityType: 'professional',
 			entityId: professionalId,
-			metadata: { user_id: targetUserId, name: professionalName }
+			metadata: {
+				user_id: member.user_id,
+				email: member.email,
+				account_status: member.status,
+				role: member.role,
+				name: professionalName
+			}
 		});
 
 		throw redirect(303, `/odonto/profesionales/${professionalId}?tab=servicios`);

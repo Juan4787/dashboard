@@ -360,7 +360,7 @@ test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 		await page.getByRole('button', { name: 'Siguiente' }).click();
 		await expect(page.getByText('Servicios incluidos')).toBeVisible();
 		await page.getByRole('button', { name: 'Guardar rol' }).click();
-		await expect(page.getByText('Profesional creado y email habilitado.')).toBeVisible();
+		await expect(page.getByText('Perfil profesional configurado con rol Profesional.')).toBeVisible();
 
 		await ensureCategoryOpen(page, /^Profesionales/);
 		await expect(page.getByText(pendingProfessionalEmail)).toBeVisible();
@@ -376,6 +376,14 @@ test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 		expect(pendingInvite?.role).toBe('professional');
 		expect(pendingInvite?.status).toBe('pending');
 		expect(pendingInvite?.professional_id).toBeTruthy();
+		const { data: hiddenPendingProfessional } = await admin
+			.from('professionals')
+			.select('is_active, is_public')
+			.eq('business_id', fixture.businessId)
+			.eq('id', pendingInvite?.professional_id)
+			.single();
+		expect(hiddenPendingProfessional?.is_active).toBe(true);
+		expect(hiddenPendingProfessional?.is_public).toBe(false);
 
 		const pendingContext = await browser.newContext();
 		const pendingPage = await pendingContext.newPage();
@@ -393,6 +401,8 @@ test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 		await expect(pendingPage).toHaveURL(/\/odonto\/mis-turnos/);
 		await expect(pendingPage.getByRole('link', { name: 'Mis turnos' })).toBeVisible();
 		await expect(pendingPage.getByRole('link', { name: 'Pacientes' })).toBeVisible();
+		await pendingPage.goto(`/odonto/profesionales/${pendingInvite?.professional_id}`);
+		await expect(pendingPage).toHaveURL(/\/odonto\/mis-turnos/);
 		await pendingContext.close();
 		// Restablece explícitamente la sesión dueña antes de continuar con las
 		// verificaciones administrativas; evita que una implementación de auth o
@@ -428,6 +438,14 @@ test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 			.eq('user_id', acceptedInvite?.accepted_user_id)
 			.single();
 		expect(acceptedProfessionalLink?.id).toBeTruthy();
+		const { data: publishedProfessional } = await admin
+			.from('professionals')
+			.select('is_active, is_public')
+			.eq('business_id', fixture.businessId)
+			.eq('id', acceptedInvite?.professional_id)
+			.single();
+		expect(publishedProfessional?.is_active).toBe(true);
+		expect(publishedProfessional?.is_public).toBe(true);
 
 		// La vista vieja de Profesionales redirige a Equipo.
 		await page.goto('/odonto/profesionales');
@@ -684,5 +702,114 @@ test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 		expect(storedRules.length).toBeGreaterThan(0);
 		expect(storedRules.every((rule) => rule.break_minutes === 23)).toBe(true);
 		expect(storedRules.every((rule) => rule.slot_interval_minutes === 15)).toBe(true);
+	});
+
+	test('vincula un administrador pendiente a su perfil y conserva libertad para configurarlo', async ({
+		page,
+		browser
+	}) => {
+		test.setTimeout(180_000);
+		if (!fixture) throw new Error('Fixture no inicializado.');
+		await login(page, fixture);
+
+		const adminEmail = `e2e-admin-prof-${fixture.suffix}@example.com`;
+		const adminProfessionalName = `E2E Administrador Profesional ${fixture.suffix}`;
+
+		await page.goto('/odonto/configuracion/usuarios');
+		await page.getByRole('button', { name: 'Agregar integrante' }).click();
+		await page.getByLabel('Email').fill(adminEmail);
+		await page.getByRole('button', { name: 'Siguiente' }).click();
+		await page
+			.getByRole('button', { name: 'Administrador Configura equipo, agenda y pacientes.' })
+			.click();
+		await page.getByRole('checkbox', { name: /También atiende pacientes/ }).check();
+		await page.getByRole('button', { name: 'Siguiente' }).click();
+		await page.getByPlaceholder('Nombre y apellido').fill(adminProfessionalName);
+		await page.getByRole('button', { name: 'Siguiente' }).click();
+		await page.getByRole('button', { name: 'Siguiente' }).click();
+		await page.getByRole('button', { name: 'Lunes a viernes' }).click();
+		await page.getByPlaceholder('9 a 13, 15 a 19').fill('13 a 17');
+		await page.getByRole('button', { name: 'Siguiente' }).click();
+		await expect(page.getByText('También atiende pacientes', { exact: true })).toBeVisible();
+		await page.getByRole('button', { name: 'Guardar rol' }).click();
+		await expect(page.getByText('Perfil profesional configurado con rol Administrador.')).toBeVisible();
+
+		await ensureCategoryOpen(page, /^Administradores/);
+		await expect(page.getByText(adminEmail)).toBeVisible();
+		await expect(page.getByText('Cuenta profesional pendiente', { exact: true })).toBeVisible();
+
+		const { data: pendingInvite, error: pendingInviteError } = await admin
+			.from('business_user_invites')
+			.select('id, professional_id, role, status')
+			.eq('business_id', fixture.businessId)
+			.eq('email', adminEmail)
+			.single();
+		if (pendingInviteError) throw pendingInviteError;
+		expect(pendingInvite?.role).toBe('admin');
+		expect(pendingInvite?.status).toBe('pending');
+		expect(pendingInvite?.professional_id).toBeTruthy();
+
+		const { data: hiddenProfile } = await admin
+			.from('professionals')
+			.select('is_active, is_public')
+			.eq('business_id', fixture.businessId)
+			.eq('id', pendingInvite?.professional_id)
+			.single();
+		expect(hiddenProfile).toMatchObject({ is_active: true, is_public: false });
+
+		const adminContext = await browser.newContext();
+		const adminPage = await adminContext.newPage();
+		await adminPage.goto('/login');
+		await adminPage.waitForLoadState('networkidle');
+		await adminPage.locator('.mb-6').getByRole('button', { name: 'Crear cuenta' }).click();
+		await adminPage.getByLabel('Correo electrónico').fill(adminEmail);
+		await adminPage.locator('input[name="password"]').fill(password);
+		await adminPage.locator('input[name="confirm_password"]').fill(password);
+		await adminPage.getByLabel(/Leí y acepto/).check();
+		await adminPage.locator('form').getByRole('button', { name: 'Crear cuenta', exact: true }).click();
+		await expect(adminPage).toHaveURL(/\/odonto\/agenda/);
+
+		const { data: acceptedInvite, error: acceptedInviteError } = await admin
+			.from('business_user_invites')
+			.select('accepted_user_id, professional_id, status')
+			.eq('id', pendingInvite?.id)
+			.single();
+		if (acceptedInviteError) throw acceptedInviteError;
+		expect(acceptedInvite?.status).toBe('accepted');
+		if (acceptedInvite?.accepted_user_id) fixture.authUserIds.push(String(acceptedInvite.accepted_user_id));
+
+		const { data: adminMembership } = await admin
+			.from('business_users')
+			.select('role, status')
+			.eq('business_id', fixture.businessId)
+			.eq('user_id', acceptedInvite?.accepted_user_id)
+			.single();
+		expect(adminMembership).toMatchObject({ role: 'admin', status: 'active' });
+
+		const { data: linkedProfile } = await admin
+			.from('professional_users')
+			.select('id')
+			.eq('business_id', fixture.businessId)
+			.eq('professional_id', acceptedInvite?.professional_id)
+			.eq('user_id', acceptedInvite?.accepted_user_id)
+			.single();
+		expect(linkedProfile?.id).toBeTruthy();
+
+		const { data: publishedProfile } = await admin
+			.from('professionals')
+			.select('is_active, is_public')
+			.eq('business_id', fixture.businessId)
+			.eq('id', acceptedInvite?.professional_id)
+			.single();
+		expect(publishedProfile).toMatchObject({ is_active: true, is_public: true });
+
+		await adminPage.goto(`/odonto/profesionales/${acceptedInvite?.professional_id}?tab=horarios`);
+		await expect(adminPage.getByRole('heading', { name: adminProfessionalName })).toBeVisible();
+		const scheduleForm = adminPage.locator('form[action="?/save_weekly_rules"]');
+		const breakInput = scheduleForm.locator('input[type="number"]').first();
+		await breakInput.fill('19');
+		await scheduleForm.getByRole('button', { name: 'Guardar sólo horarios', exact: true }).click();
+		await expect(adminPage.getByText('Horarios guardados.', { exact: true })).toBeVisible();
+		await adminContext.close();
 	});
 });

@@ -117,6 +117,7 @@
 		dependencyCountsDeferred?: boolean;
 		tab: string;
 		userId: string | null;
+		pendingAccountEmail: string | null;
 		demo: boolean;
 	};
 
@@ -229,8 +230,9 @@
 			? Boolean(exception.dateFrom.trim() || exception.dateTo.trim() || exception.reason.trim())
 			: Boolean(exception.date.trim() || exception.timeRange.trim() || exception.reason.trim());
 
-	const canOperate = $derived(data.context.canOperate && !data.demo);
+	const canOperate = $derived(data.context.canManage && !data.demo);
 	const canManage = $derived(data.context.canManage && !data.demo);
+	const accountLinkPending = $derived(Boolean(data.pendingAccountEmail));
 	const defaultServiceIdSet = $derived(new Set(data.defaultServiceIds ?? []));
 	const professional = $derived(data.professional);
 	// svelte-ignore state_referenced_locally
@@ -867,6 +869,17 @@
 			</div>
 		</div>
 
+		{#if accountLinkPending}
+			<div class="rounded-2xl border border-amber-300/25 bg-amber-300/10 px-5 py-4" role="status">
+				<p class="font-black text-amber-100">Cuenta profesional pendiente</p>
+				<p class="mt-1 text-sm text-amber-50/80">
+					Este profesional no aparecerá en las reservas online hasta que cree su cuenta con
+					<strong>{data.pendingAccountEmail}</strong>. Cuando se registre, accederá automáticamente a este
+					perfil con los servicios y horarios ya configurados.
+				</p>
+			</div>
+		{/if}
+
 		{#if form?.message}
 			<p class={form.success ? 'ux-alert ux-alert-success' : 'ux-alert'}>{form.message}</p>
 		{/if}
@@ -974,13 +987,13 @@
 			<label class={`mt-5 inline-flex items-center gap-3 rounded-2xl border bg-white/[0.04] px-4 py-3 text-sm font-bold text-white ${fieldStateClass(dirtyFields.profilePublic) || 'border-white/10'}`}>
 				<input
 					type="checkbox"
-					name="is_available"
-					value="true"
-					bind:checked={draft.isAvailable}
-					disabled={!canOperate}
-					class="accent-[#7c3aed]"
-				/>
-				Visible en reservas
+						name="is_available"
+						value="true"
+						bind:checked={draft.isAvailable}
+						disabled={!canOperate || accountLinkPending}
+						class="accent-[#7c3aed]"
+					/>
+					{accountLinkPending ? 'Visible cuando vincule su cuenta' : 'Visible en reservas'}
 				{#if dirtyFields.profilePublic}<span class="ux-inline-status ux-inline-status-warning">Sin guardar</span>{/if}
 			</label>
 		</form>

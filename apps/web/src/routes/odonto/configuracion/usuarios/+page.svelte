@@ -1,6 +1,9 @@
 <script lang="ts">
 	import type { BusinessContext, BusinessRole } from '$lib/server/business';
-	import { canConfigureAttendingProfile } from '$lib/utils/team-permissions';
+	import {
+		canConfigureAttendingProfile,
+		shouldConfigureProfessionalProfile
+	} from '$lib/utils/team-permissions';
 	import { formatPriceLabel } from '$lib/utils/money-input';
 	import { normalizeTimeRangesForCommit, normalizeTimeRangesInput, parseTimeRanges } from '$lib/utils/time-ranges';
 	import {
@@ -78,13 +81,12 @@
 
 	// ----- Configurar atendible (dueño/admin que también atiende pacientes) -----
 	let showAttendingForm = $state(false);
-	let attendingUserId = $state('');
+	let attendingAccessId = $state('');
 	let attendingName = $state('');
 	let attendingError = $state('');
 	const attendingEligible = $derived(
 		members.filter(
 			(member) =>
-				member.status === 'active' &&
 				canConfigureAttendingProfile({
 					actorRole: data.context.role,
 					targetRole: member.role,
@@ -92,7 +94,7 @@
 				})
 		)
 	);
-	const attendingPending = $derived(attendingEligible.filter((m) => !m.professional_id && m.user_id));
+	const attendingPending = $derived(attendingEligible.filter((m) => !m.professional_id));
 	const attendingActive = $derived(attendingEligible.filter((m) => m.professional_id));
 
 	// Categorías desplegables de la pantalla Equipo.
@@ -134,6 +136,7 @@
 	let stepIndex = $state(0);
 	let email = $state('');
 	let role = $state<BusinessRole>('reception');
+	let professionalProfileRequested = $state(false);
 	let professionalName = $state('');
 	let professionalSpecialty = $state('');
 	let selectedServiceIds = $state<string[]>([]);
@@ -161,8 +164,11 @@
 	let attendingSubmitting = $state(false);
 	let teamActionBusy = $state('');
 
+	const hasProfessionalProfile = $derived(
+		shouldConfigureProfessionalProfile({ role, requested: professionalProfileRequested })
+	);
 	const steps = $derived(
-		role === 'professional'
+		hasProfessionalProfile
 			? ['email', 'rol', 'datos', 'servicios', 'horarios', 'resumen']
 			: ['email', 'rol', 'resumen']
 	);
@@ -175,6 +181,7 @@
 		if (form.values.role && roles.includes(String(form.values.role) as BusinessRole)) {
 			role = String(form.values.role) as BusinessRole;
 		}
+		professionalProfileRequested = form.values.has_professional_profile === 'true';
 		if (form.values.professional_name) professionalName = String(form.values.professional_name);
 		if (form.values.professional_specialty) professionalSpecialty = String(form.values.professional_specialty);
 		if (form.values.schedule_blocks) {
@@ -249,6 +256,7 @@
 		stepIndex = 0;
 		email = '';
 		role = 'reception';
+		professionalProfileRequested = false;
 		professionalName = '';
 		professionalSpecialty = '';
 		selectedServiceIds = [];
@@ -496,14 +504,14 @@
 	const durationLabel = (minutes: number) => `${minutes} ${minutes === 1 ? 'minuto' : 'minutos'}`;
 
 	const handleWizardSubmit = (event: SubmitEvent) => {
-		if (role !== 'professional') return;
+		if (!hasProfessionalProfile) return;
 		if (validateCurrentStep()) return;
 		event.preventDefault();
 		stepIndex = steps.indexOf('horarios');
 	};
 
 	const wizardEnhance: SubmitFunction = ({ cancel }) => {
-		if (role === 'professional' && !validateCurrentStep()) {
+		if (hasProfessionalProfile && !validateCurrentStep()) {
 			stepIndex = steps.indexOf('horarios');
 			cancel();
 			return;
@@ -566,6 +574,7 @@
 
 			<input type="hidden" name="email" value={email.trim().toLowerCase()} />
 			<input type="hidden" name="role" value={role} />
+			<input type="hidden" name="has_professional_profile" value={hasProfessionalProfile ? 'true' : 'false'} />
 			<input type="hidden" name="professional_name" value={professionalName} />
 			<input type="hidden" name="professional_specialty" value={professionalSpecialty} />
 			{#each selectedServiceIds as serviceId}
@@ -622,6 +631,22 @@
 						</button>
 					{/each}
 				</div>
+				{#if role === 'admin' || role === 'owner'}
+					<label class="mt-4 flex cursor-pointer items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-4 text-white">
+						<input
+							type="checkbox"
+							bind:checked={professionalProfileRequested}
+							disabled={!canManage}
+							class="mt-1 accent-[#7c3aed]"
+						/>
+						<span>
+							<span class="block font-black">También atiende pacientes</span>
+							<span class="mt-1 block text-sm text-white/55">
+								Creá ahora su perfil profesional y dejá configurados sus servicios y horarios, aunque todavía no tenga cuenta.
+							</span>
+						</span>
+					</label>
+				{/if}
 				<div class="mt-4 flex gap-3">
 					<button type="button" class="ux-btn-secondary" onclick={previousStep}>Atrás</button>
 					<button type="button" disabled={!canManage} class="ux-btn-primary flex-1" onclick={nextStep}>Siguiente</button>
@@ -931,7 +956,11 @@
 					<p class="mt-1 text-xl font-black text-white">{email.trim().toLowerCase()}</p>
 					<p class="mt-4 text-sm font-bold text-white/45">Rol asignado</p>
 					<p class="mt-1 text-xl font-black text-white">{roleLabels[role]}</p>
-					{#if role === 'professional'}
+					{#if hasProfessionalProfile}
+						<p class="mt-4 text-sm font-bold text-white/45">Perfil profesional</p>
+						<p class="mt-1 text-xl font-black text-white">
+							{role === 'professional' ? 'Incluido por el rol Profesional' : 'También atiende pacientes'}
+						</p>
 						<p class="mt-4 text-sm font-bold text-white/45">Nombre</p>
 						<p class="mt-1 text-xl font-black text-white">{professionalName}</p>
 						{#if professionalSpecialty.trim()}
@@ -985,7 +1014,8 @@
 			<h2 class="ux-section-title">¿El dueño o un administrador también atiende pacientes?</h2>
 			<p class="mt-2 text-sm text-white/55">
 				Si una persona del equipo también atiende pacientes, creá su perfil profesional para configurar
-				horarios y servicios: así aparece en la agenda y puede recibir turnos y seguimientos. No cambia su rol.
+				horarios y servicios. Si todavía no creó su cuenta, el perfil queda preparado y oculto de las
+				reservas online hasta que se registre. No cambia su rol.
 			</p>
 
 			{#if attendingActive.length > 0}
@@ -1037,10 +1067,12 @@
 					>
 						<label class="block">
 							<span class="ux-label">Persona del equipo</span>
-							<select name="user_id" bind:value={attendingUserId} required class="ux-select">
+							<select name="access_id" bind:value={attendingAccessId} required class="ux-select">
 								<option value="" disabled>Elegí…</option>
 								{#each attendingPending as m (m.id)}
-									<option value={m.user_id}>{m.email} · {roleLabels[m.role]}</option>
+									<option value={m.id}>
+										{m.email} · {roleLabels[m.role]}{m.status === 'pending' ? ' · cuenta pendiente' : ''}
+									</option>
 								{/each}
 							</select>
 						</label>
@@ -1106,8 +1138,17 @@
 											{/if}
 										</div>
 										<p class="mt-2 text-sm text-white/55">
-											{roleLabels[member.role]} · {member.status === 'pending' ? 'habilitado el' : 'agregado el'} {formatDate(member.created_at)}
+											{roleLabels[member.role]} · {member.status === 'pending' ? 'invitado el' : 'agregado el'} {formatDate(member.created_at)}
 										</p>
+										{#if member.status === 'pending' && member.professional_id}
+											<div class="mt-3 rounded-2xl border border-amber-300/25 bg-amber-300/10 px-4 py-3" role="status">
+												<p class="font-black text-amber-100">Cuenta profesional pendiente</p>
+												<p class="mt-1 text-sm text-amber-50/80">
+													No aparecerá en las reservas online hasta que cree su cuenta con <strong>{member.email}</strong>.
+													Cuando se registre, accederá al perfil ya configurado.
+												</p>
+											</div>
+										{/if}
 									</div>
 
 									<div class="flex flex-col gap-2 sm:flex-row sm:items-center">
