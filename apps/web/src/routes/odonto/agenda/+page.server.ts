@@ -83,12 +83,17 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 	const patientId = url.searchParams.get('patient_id') ?? '';
 	const searchApplied =
 		url.searchParams.has('date') || Boolean(professionalId || status || serviceId || patientId);
-	const reminderCountPromise = countTomorrowUncovered(supabase, business.business).catch(
-		(reminderError) => {
+	const reminderCountPromise = (async () => {
+		try {
+			const pushSubscriptionsSupabase = await createSupabaseAdminClient('odonto', fetch);
+			return await countTomorrowUncovered(supabase, business.business, {
+				pushSubscriptionsSupabase
+			});
+		} catch (reminderError) {
 			console.error('Error contando recordatorios pendientes', reminderError);
 			return 0;
 		}
-	);
+	})();
 
 	let dayAppointments: any[] | null = null;
 	let appointmentsError: unknown = null;
@@ -191,8 +196,8 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 		return acc;
 	}, {});
 
-	// Aviso liviano de Recordatorios: count aproximado de mañana sin calendario
-	// registrado (el número exacto, con exclusiones de push/dispatch, vive en la sección).
+	// El aviso usa el criterio exacto de Recordatorios: sólo cuenta los turnos sin
+	// calendario, avisos activados ni cobertura automática.
 	const reminderCount = await reminderCountPromise;
 
 	if (patientId) {

@@ -1,6 +1,10 @@
 import { env } from '$env/dynamic/private';
 import { error as kitError, fail, redirect } from '@sveltejs/kit';
-import { createSupabaseServerClient, getAuthUserId } from '$lib/server/supabase';
+import {
+	createSupabaseAdminClient,
+	createSupabaseServerClient,
+	getAuthUserId
+} from '$lib/server/supabase';
 import { resolveActiveBusiness } from '$lib/server/business';
 import { writeAuditLog } from '$lib/server/audit';
 import {
@@ -58,7 +62,13 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 	const day = parseDay(url.searchParams.get('dia'));
 
 	if (env.DEMO_MODE === 'true') {
-		return { demo: true, day, candidates: demoCandidates(day), restricted: false };
+		return {
+			demo: true,
+			day,
+			candidates: demoCandidates(day),
+			restricted: false,
+			remindersUnavailable: false
+		};
 	}
 
 	const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
@@ -74,11 +84,24 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 
 	// Negocio restricted/archived: la sección no opera (§65 del documento madre).
 	const restricted = !context.access.canUseBusiness;
-	const candidates = restricted
-		? []
-		: await loadReminderCandidates(supabase, context.business, { day });
+	let candidates: ReminderCandidate[] = [];
+	let remindersUnavailable = false;
+	if (!restricted) {
+		try {
+			const pushSubscriptionsSupabase = await createSupabaseAdminClient('odonto', fetch);
+			candidates = await loadReminderCandidates(supabase, context.business, {
+				day,
+				pushSubscriptionsSupabase
+			});
+		} catch (reminderError) {
+			// Sin poder comprobar los avisos, no mostramos turnos: es preferible a
+			// abrir un WhatsApp duplicado para un paciente que ya los activó.
+			console.error('Error cargando cobertura de recordatorios', reminderError);
+			remindersUnavailable = true;
+		}
+	}
 
-	return { demo: false, day, candidates, restricted };
+	return { demo: false, day, candidates, restricted, remindersUnavailable };
 };
 
 export const actions: Actions = {

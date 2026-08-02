@@ -5,19 +5,15 @@
 // - status reserved/confirmed, dentro de la ventana Hoy/Mañana (TZ del negocio), futuro.
 // - sin acción de calendario (not_offered/offered) → "Sin calendario registrado",
 //   o reprogramado después de una acción → "Calendario pendiente de actualizar".
-// - sin suscripción push FIABLE (cobertura secundaria) y sin dispatch automático
+// - sin suscripción push activa (cobertura secundaria) y sin dispatch automático
 //   activo (pipeline Meta dormida: si algún día se prende, acá no se duplica).
 // "offered" NUNCA cuenta como cobertura: solo significa que vio la pantalla.
 //
-// Fiabilidad del push (ver isReliablyActivePushSubscription): NO alcanza con que la
-// fila exista sin revocar. `revoked_at` solo se marca cuando (a) el turno termina,
-// (b) un envío devuelve 410/404, o (c) failed_count llega al máximo. Un endpoint
-// muerto (permiso revocado / datos del sitio borrados) sigue sin revocar hasta el
-// próximo intento de envío. Por eso solo se excluye un turno de la lista manual
-// cuando la suscripción está sin revocar Y sin ningún fallo de entrega registrado.
-// Sesgo deliberado: sub-excluir (un WhatsApp de más) es inocuo; sobre-excluir deja
-// al paciente sin ningún recordatorio. Si el push de 24h falla, failed_count sube y
-// el turno reaparece acá a tiempo.
+// La exclusión representa la decisión del paciente: si activó los avisos y la
+// suscripción sigue activa, el turno no requiere refuerzo manual aunque un envío
+// transitorio haya fallado. El job de push conserva sus reintentos y revoca el
+// endpoint cuando el servicio confirma que ya no sirve; recién entonces el turno
+// puede volver a aparecer si tampoco tiene calendario.
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { formatInTimeZone } from '$lib/utils/format';
@@ -157,36 +153,39 @@ export const buildRescheduleWhatsAppMessage = (input: RescheduleMessageInput): s
 export type CoverageInput = {
 	calendar_action_status: string;
 	calendar_update_required_at: string | null;
-	has_active_push: boolean;
+	has_active_notifications: boolean;
 	has_active_dispatch: boolean;
 };
 
 export const classifyReminderCoverage = (input: CoverageInput): ReminderCoverage | null => {
-	if (input.has_active_push || input.has_active_dispatch) return null;
+	if (input.has_active_notifications || input.has_active_dispatch) return null;
 	if (input.calendar_update_required_at) return 'pendiente_actualizar';
 	if (UNCOVERED_CALENDAR_STATUSES.has(input.calendar_action_status)) return 'sin_calendario';
 	return null;
 };
 
-// Detección FIABLE de push activo (pura, testeable). Solo se considera que el turno
-// está cubierto por push cuando la suscripción no fue revocada y no acumula ningún
-// fallo de entrega: failed_count > 0 significa que el push service ya rechazó algún
-// envío, así que no podemos asegurar que el paciente vaya a recibir el recordatorio.
-export type PushSubscriptionReliabilityInput = {
+// Una suscripción activa expresa que el paciente activó avisos para este turno. Los
+// reintentos de entrega son responsabilidad del job de push y no cambian esa decisión.
+export type ActivePushSubscriptionInput = {
 	revoked_at: string | null;
-	failed_count: number | null;
 };
 
-export const isReliablyActivePushSubscription = (
-	row: PushSubscriptionReliabilityInput
-): boolean => row.revoked_at == null && Number(row.failed_count ?? 0) === 0;
+export const hasActivePushSubscription = (row: ActivePushSubscriptionInput): boolean =>
+	row.revoked_at == null;
 
 // --- Carga principal ----------------------------------------------------------
 
 export const loadReminderCandidates = async (
 	supabase: SupabaseClient,
 	business: Pick<Business, 'id' | 'name' | 'timezone' | 'address' | 'maps_url'>,
-	options: { day: ReminderDay; now?: Date }
+	options: {
+		day: ReminderDay;
+		now?: Date;
+		// push_subscriptions no otorga acceso a usuarios autenticados. El caller
+		// debe pasar un cliente service-role, después de validar el negocio y con
+		// los appointment_id ya autorizados por la consulta principal.
+		pushSubscriptionsSupabase: SupabaseClient;
+	}
 ): Promise<ReminderCandidate[]> => {
 	const now = options.now ?? new Date();
 	const { start, end } = localDayWindowUtc(now, business.timezone, options.day);
@@ -220,10 +219,10 @@ export const loadReminderCandidates = async (
 	if (appointments.length === 0) return [];
 	const ids = appointments.map((row: any) => String(row.id));
 
-	const [{ data: pushRows }, { data: dispatchRows }] = await Promise.all([
-		supabase
+	const [pushResult, dispatchResult] = await Promise.all([
+		options.pushSubscriptionsSupabase
 			.from('push_subscriptions')
-			.select('appointment_id, revoked_at, failed_count')
+			.select('appointment_id, revoked_at')
 			.eq('business_id', business.id)
 			.in('appointment_id', ids)
 			.is('revoked_at', null),
@@ -234,10 +233,14 @@ export const loadReminderCandidates = async (
 			.eq('type', 'appointment_reminder_24h')
 			.in('appointment_id', ids)
 	]);
+	if (pushResult.error) throw pushResult.error;
+	if (dispatchResult.error) throw dispatchResult.error;
+	const pushRows = pushResult.data;
+	const dispatchRows = dispatchResult.data;
 
 	const pushed = new Set(
 		(pushRows ?? [])
-			.filter((row: any) => isReliablyActivePushSubscription(row))
+			.filter((row: any) => hasActivePushSubscription(row))
 			.map((row: any) => String(row.appointment_id))
 	);
 	const dispatched = new Set(
@@ -254,7 +257,7 @@ export const loadReminderCandidates = async (
 		const coverage = classifyReminderCoverage({
 			calendar_action_status: String(row.calendar_action_status ?? 'not_offered'),
 			calendar_update_required_at: row.calendar_update_required_at ?? null,
-			has_active_push: pushed.has(String(row.id)),
+			has_active_notifications: pushed.has(String(row.id)),
 			has_active_dispatch: dispatched.has(String(row.id))
 		});
 		if (!coverage) continue;
@@ -299,22 +302,17 @@ export const loadReminderCandidates = async (
 	return candidates;
 };
 
-// Count barato para el aviso en Agenda (aproximado: no descuenta push/dispatches,
-// que son la excepción; el número exacto vive en la sección Recordatorios).
+// El aviso de Agenda usa exactamente los mismos criterios que la sección
+// Recordatorios. Así no anuncia turnos que ya tienen avisos activados.
 export const countTomorrowUncovered = async (
 	supabase: SupabaseClient,
-	business: Pick<Business, 'id' | 'timezone'>,
-	now = new Date()
-): Promise<number> => {
-	const { start, end } = localDayWindowUtc(now, business.timezone, 'manana');
-	const { count, error } = await supabase
-		.from('appointments')
-		.select('id', { count: 'exact', head: true })
-		.eq('business_id', business.id)
-		.in('status', ['reserved', 'confirmed'])
-		.or('calendar_action_status.in.(not_offered,offered),calendar_update_required_at.not.is.null')
-		.gte('starts_at', start.toISOString())
-		.lt('starts_at', end.toISOString());
-	if (error) throw error;
-	return count ?? 0;
-};
+	business: Pick<Business, 'id' | 'name' | 'timezone' | 'address' | 'maps_url'>,
+	options: { now?: Date; pushSubscriptionsSupabase: SupabaseClient }
+): Promise<number> =>
+	(
+		await loadReminderCandidates(supabase, business, {
+			day: 'manana',
+			now: options.now,
+			pushSubscriptionsSupabase: options.pushSubscriptionsSupabase
+		})
+	).length;

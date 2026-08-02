@@ -7,6 +7,7 @@
 			day: ReminderDay;
 			candidates: ReminderCandidate[];
 			restricted: boolean;
+			remindersUnavailable: boolean;
 		};
 		form?: { success?: boolean; message?: string };
 	}>();
@@ -83,7 +84,8 @@
 			<div>
 				<h1 class="ux-title">Turnos para recordar</h1>
 				<p class="ux-subtitle">
-					Pacientes con turno {dayLabel} que no registraron el turno en su calendario.
+					Pacientes con turno {dayLabel} que no registraron el turno en su calendario ni activaron
+					avisos en su teléfono.
 					Reforzá el recordatorio por WhatsApp: el mensaje ya sale escrito, solo revisás y enviás.
 				</p>
 			</div>
@@ -93,6 +95,21 @@
 			</div>
 		</div>
 	</div>
+
+	{#if !data.restricted && !data.remindersUnavailable}
+		<div class="ux-soft-card flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between">
+			<div>
+				<p class="text-sm font-bold text-white">Criterio de la lista</p>
+				<p class="mt-1 text-sm text-white/55">
+					Un turno aparece sólo si faltan ambas opciones de recordatorio.
+				</p>
+			</div>
+			<div class="flex flex-wrap gap-2 text-xs font-bold">
+				<span class="ux-badge">Sin calendario</span>
+				<span class="ux-badge">Sin avisos activados</span>
+			</div>
+		</div>
+	{/if}
 
 	{#if form?.message}
 		<p class="ux-alert">{form.message}</p>
@@ -105,11 +122,18 @@
 				están pausados.
 			</p>
 		</div>
+	{:else if data.remindersUnavailable}
+		<div class="ux-card">
+			<p class="ux-empty">
+				Ahora no pudimos comprobar qué pacientes ya activaron avisos. Para evitar recordatorios
+				duplicados, no mostramos turnos. Actualizá la página e intentá de nuevo.
+			</p>
+		</div>
 	{:else if data.candidates.length === 0}
 		<div class="ux-card">
 			<p class="ux-empty">
 				No hay recordatorios pendientes para {dayLabel}. Todos los turnos tienen calendario
-				registrado o cobertura de recordatorio.
+				registrado, avisos activados o cobertura automática.
 			</p>
 		</div>
 	{:else}
