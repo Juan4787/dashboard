@@ -47,7 +47,6 @@
 		| 'needs_device_check'
 		| 'denied'
 		| 'awaiting_permission'
-		| 'waiting_for_settings'
 		| 'error';
 	let pushState = $state<PushState>('unavailable');
 	type PushDelivery = {
@@ -79,7 +78,7 @@
 	let pollRun = 0;
 	let recoveryRun = 0;
 	let automaticRepairAttempts = 0;
-	let settingsRecoveryPending = false;
+	let settingsRecoveryPending = $state(false);
 	let settingsLaunchTimer: ReturnType<typeof setTimeout> | null = null;
 	let mounted = false;
 	let manualSettingsNeeded = $state(false);
@@ -432,7 +431,7 @@
 				settingsRecoveryPending = false;
 				manualSettingsNeeded = true;
 			}
-			if (pushState === 'denied' || pushState === 'waiting_for_settings') {
+			if (pushState === 'denied') {
 				pushState = 'awaiting_permission';
 			}
 			return;
@@ -440,11 +439,13 @@
 		if (
 			settingsRecoveryPending ||
 			pushState === 'awaiting_permission' ||
-			pushState === 'waiting_for_settings' ||
 			pushState === 'denied'
 		) {
+			const returnedFromSettings = settingsRecoveryPending;
 			settingsRecoveryPending = false;
-			manualSettingsNeeded = false;
+			// Si la prueba volviera a no verse, mostramos directamente el camino manual
+			// en lugar de mandar otra vez al mismo intent que este teléfono ya ignoró.
+			manualSettingsNeeded = returnedFromSettings;
 			automaticRepairAttempts = 0;
 			void syncPushSubscription(true, true);
 		}
@@ -452,21 +453,16 @@
 
 	const prepareDeviceSettingsRecovery = () => {
 		settingsRecoveryPending = true;
-		pushState = 'waiting_for_settings';
 		pushMessage = '';
 		if (settingsLaunchTimer) clearTimeout(settingsLaunchTimer);
 		settingsLaunchTimer = setTimeout(() => {
-			// Algunos navegadores Samsung ignoran intents hacia Ajustes. Si la página nunca
-			// perdió visibilidad, lo detectamos y mostramos el camino exacto sin repetir el intento.
-			if (
-				mounted &&
-				document.visibilityState === 'visible' &&
-				Notification.permission !== 'granted' &&
-				pushState === 'waiting_for_settings'
-			) {
+			settingsLaunchTimer = null;
+			// El permiso del sitio puede seguir en "granted" aunque Android bloquee los avisos
+			// de la app. Por eso la única evidencia de que Ajustes se abrió es que la página
+			// haya perdido visibilidad; el valor de Notification.permission no sirve acá.
+			if (mounted && document.visibilityState === 'visible' && settingsRecoveryPending) {
 				settingsRecoveryPending = false;
 				manualSettingsNeeded = true;
-				pushState = 'denied';
 			}
 		}, 1800);
 	};
@@ -500,6 +496,11 @@
 			// bloqueado: eso volvería a presentar como "verificado" un teléfono incapaz
 			// de mostrar avisos.
 			pushState = 'denied';
+		} else if (manualSettingsNeeded && Notification.permission === 'granted') {
+			// El navegador volvió por el fallback del intent: el permiso web ya estaba
+			// concedido, así que mostramos el camino de Android en vez de ocultarlo detrás
+			// de una suscripción existente que todavía no probó visibilidad real.
+			pushState = 'needs_device_check';
 		} else {
 			pushState = 'idle';
 			// Recupera una suscripción ya existente del navegador (de un turno anterior) y la
@@ -526,6 +527,10 @@
 		// recupera de un 'denied' previo si el usuario lo desbloqueó.
 		const onVisible = () => {
 			if (document.visibilityState !== 'visible' || syncing) return;
+			if (settingsLaunchTimer) {
+				clearTimeout(settingsLaunchTimer);
+				settingsLaunchTimer = null;
+			}
 			continueAfterPermissionChange();
 		};
 		document.addEventListener('visibilitychange', onVisible);
@@ -767,7 +772,7 @@
 						class={primary ? 'ux-btn-primary mt-3 block w-full text-center' : 'ux-btn-secondary mt-3 block w-full text-center'}
 						onclick={prepareDeviceSettingsRecovery}
 					>
-						Continuar en ajustes
+						{settingsRecoveryPending ? 'Abriendo ajustes…' : 'Abrir ajustes de Android'}
 					</a>
 					<p class="mt-2 text-center text-xs text-white/55">
 						Activá “Permitir notificaciones” y volvé. La prueba continuará sola.
@@ -801,39 +806,23 @@
 				>
 					Mostrar la pregunta otra vez
 				</button>
-			{:else if pushState === 'waiting_for_settings'}
-				<div class="ux-alert" aria-live="polite">
-					<p class="font-bold text-white">Continuamos cuando vuelvas</p>
-					<p class="mt-1">Al regresar de los ajustes, la prueba se enviará automáticamente.</p>
-				</div>
 			{:else if pushState === 'denied'}
 				<div class="ux-empty" aria-live="polite">
 					<p class="font-bold text-white">Un paso más para activar tus avisos</p>
-					<p class="mt-2">Habilitá las notificaciones de esta página y continuamos automáticamente.</p>
+					<p class="mt-2">Habilitá los avisos de esta página en {notificationBrowser.label}.</p>
 				</div>
-				{#if device === 'android' && androidNotificationSettingsUrl && !manualSettingsNeeded}
-					<a
-						href={androidNotificationSettingsUrl}
-						class={primary ? 'ux-btn-primary mt-3 block w-full text-center' : 'ux-btn-secondary mt-3 block w-full text-center'}
-						onclick={prepareDeviceSettingsRecovery}
-					>
-						Continuar en ajustes
-					</a>
-					<p class="mt-2 text-center text-xs text-white/55">Activá “Permitir notificaciones” y volvé. Seguimos solos.</p>
-				{:else}
-					<ol class="mt-3 space-y-2 rounded-2xl border border-white/10 bg-white/[0.035] p-4 text-left text-sm text-white/75">
-						{#if notificationBrowser.label === 'Samsung Internet'}
-							<li><strong class="text-white">1.</strong> Tocá ☰ en Samsung Internet y entrá en “Ajustes”.</li>
-							<li><strong class="text-white">2.</strong> Tocá “Sitios y descargas” → “Permisos del sitio” → “Notificaciones”.</li>
-							<li><strong class="text-white">3.</strong> Permití esta página y volvé.</li>
-						{:else}
-							<li><strong class="text-white">1.</strong> Tocá el ícono que está junto a la dirección, arriba.</li>
-							<li><strong class="text-white">2.</strong> Tocá “Permisos” → “Notificaciones”.</li>
-							<li><strong class="text-white">3.</strong> Elegí “Permitir” y volvé.</li>
-						{/if}
-					</ol>
-					<p class="mt-2 text-center text-xs text-white/55">Al volver, la prueba continuará sola.</p>
-				{/if}
+				<ol class="mt-3 space-y-2 rounded-2xl border border-white/10 bg-white/[0.035] p-4 text-left text-sm text-white/75">
+					{#if notificationBrowser.label === 'Samsung Internet'}
+						<li><strong class="text-white">1.</strong> Tocá ☰ en Samsung Internet y entrá en “Ajustes”.</li>
+						<li><strong class="text-white">2.</strong> Tocá “Sitios y descargas” → “Permisos del sitio” → “Notificaciones”.</li>
+						<li><strong class="text-white">3.</strong> Permití esta página y volvé.</li>
+					{:else}
+						<li><strong class="text-white">1.</strong> Tocá el ícono que está junto a la dirección, arriba.</li>
+						<li><strong class="text-white">2.</strong> Tocá “Permisos” → “Notificaciones”.</li>
+						<li><strong class="text-white">3.</strong> Elegí “Permitir” y volvé.</li>
+					{/if}
+				</ol>
+				<p class="mt-2 text-center text-xs text-white/55">Al volver, la prueba continuará sola.</p>
 			{:else}
 				<button
 					type="button"

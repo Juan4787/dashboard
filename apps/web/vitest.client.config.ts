@@ -4,7 +4,12 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
 	envDir: '../..',
 	plugins: [sveltekit()],
+	resolve: {
+		conditions: ['browser']
+	},
 	test: {
-		exclude: ['e2e/**', 'node_modules/**', '.svelte-kit/**', 'build/**', '**/*.client.test.ts']
+		environment: 'jsdom',
+		include: ['src/**/*.client.test.ts'],
+		exclude: ['node_modules/**', '.svelte-kit/**', 'build/**']
 	}
 });
