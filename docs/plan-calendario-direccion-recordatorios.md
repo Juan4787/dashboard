@@ -255,13 +255,21 @@ con count de mañana sin cobertura.
   de SvelteKit, que se auto-registra y cachea). Handlers `push` + `notificationclick`.
 - Opt-in en `/turno/[token]`: click → `requestPermission()` → subscribe → POST
   `/turno/[token]/push` (valida token, upsert `on conflict (appointment_id, endpoint)`).
-  Permiso JAMÁS al cargar la página.
+  Permiso JAMÁS al cargar la página. La activación envía una prueba inmediata y sólo
+  muestra "Avisos verificados" después de: aceptación del proveedor, acuse del service
+  worker, `showNotification()` resuelto y confirmación explícita de la persona.
+- `push_delivery_attempts` separa `accepted`, `received`, `displayed` y confirmación
+  humana. El secreto de acuse no se guarda en claro: persiste sólo su SHA-256.
 - Job `/internal/jobs/send-push-reminders` (cron externo ~10 min, `assertInternalJobRequest`):
   1. Revoca suscripciones de turnos terminales.
   2. `claim_due_push_reminders` → enviar → `sent_at`; fallo → limpiar claim +
      `failed_count += 1`; 404/410 → `revoked_at` por endpoint; 3 fallos → revoke.
   3. Payload neutral: título "Turno en {consultorio}", body "Te recordamos tu turno el {día}
      a las {hora}.", url `/turno/{token}`. Audit `appointment.push_sent`.
+- Reprogramación: el trigger reinicia atómicamente claims/sent de 24h y 2h, marca
+  obsoletos los intentos del horario anterior y el job vuelve a leer `starts_at` justo
+  antes de enviar. 24h, 2h y el aviso inmediato comparten un `Topic` Web Push estable
+  por turno para que el proveedor reemplace cualquier mensaje viejo todavía en cola.
 - Recordatorios excluye turnos con push activo (ya en Fase 8).
 - Salud push en Configuración → Comunicación: suscripciones activas, enviados 7 días, fallos.
 
@@ -277,6 +285,8 @@ Unitarios (Vitest, patrón de los `.test.ts` existentes):
 - `reminders.test.ts`: cada filtro de inclusión/exclusión, ventanas TZ Córdoba cruzando
   medianoche, mensaje wa.me exacto.
 - `push.test.ts` (PR 4): ventanas, idempotencia, revocación.
+- `push-sw.test.ts`: acuses received/displayed, fallo de telemetría sin bloquear el
+  aviso, reemplazo del horario visible y click con URL relativa.
 - `appointments.test.ts`: reschedule incrementa sequence y marca update_required solo si
   hubo acción.
 

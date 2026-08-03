@@ -32,22 +32,61 @@
 		| 'unavailable'
 		| 'idle'
 		| 'working'
+		| 'configured'
+		| 'test_waiting'
+		| 'test_question'
 		| 'subscribed'
+		| 'needs_device_check'
 		| 'denied'
 		| 'awaiting_permission'
 		| 'error';
 	let pushState = $state<PushState>('unavailable');
+	type PushDelivery = {
+		deliveryId: string;
+		state:
+			| 'pending'
+			| 'accepted'
+			| 'received'
+			| 'displayed'
+			| 'confirmed'
+			| 'missing'
+			| 'superseded'
+			| 'failed'
+			| 'expired';
+		kind: 'test' | '24h' | '2h' | 'reschedule';
+		createdAt: string;
+		expiresAt: string;
+	};
+	type PushResponse = {
+		ok?: boolean;
+		code?: string;
+		message?: string;
+		delivery?: PushDelivery | null;
+		verificationAvailable?: boolean;
+	};
+	let activeTestDeliveryId = $state<string | null>(null);
+	let pushMessage = $state('');
+	let pollRun = 0;
 
 	const base = $derived(appointment ? `/turno/${appointment.token}` : '');
 
-	const savePushSubscriptionForAppointment = async (subscription: PushSubscription) => {
-		if (!base) return false;
+	const savePushSubscriptionForAppointment = async (
+		subscription: PushSubscription,
+		requestTest: boolean
+	) => {
+		if (!base) return null;
 		const response = await fetch(`${base}/push`, {
 			method: 'POST',
 			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify(subscription.toJSON())
+			body: JSON.stringify({ subscription: subscription.toJSON(), test: requestTest })
 		});
-		return response.ok;
+		let body: PushResponse = {};
+		try {
+			body = await response.json();
+		} catch {
+			body = {};
+		}
+		return { response, body };
 	};
 
 	const urlBase64ToUint8Array = (base64: string) => {
@@ -60,25 +99,125 @@
 	let pushSupported = false;
 	// Candado anti-reentrada: requestPermission y visibilitychange pueden disparar el
 	// alta a la vez. El upsert del backend es idempotente, pero evitamos subscribe() dobles.
-	let syncing = false;
+	let syncing = $state(false);
+
+	const waitForPushWorkerActivation = async (registration: ServiceWorkerRegistration) => {
+		const worker = registration.installing ?? registration.waiting;
+		if (!worker || worker.state === 'activated') return;
+		await new Promise<void>((resolve) => {
+			let done = false;
+			const finish = () => {
+				if (done) return;
+				done = true;
+				clearTimeout(timeout);
+				worker.removeEventListener('statechange', onStateChange);
+				navigator.serviceWorker.removeEventListener('controllerchange', finish);
+				resolve();
+			};
+			const onStateChange = () => {
+				if (worker.state === 'activated' || worker.state === 'redundant') finish();
+			};
+			const timeout = setTimeout(finish, 5000);
+			worker.addEventListener('statechange', onStateChange);
+			navigator.serviceWorker.addEventListener('controllerchange', finish);
+			onStateChange();
+		});
+	};
+
+	const applyDelivery = (delivery: PushDelivery) => {
+		activeTestDeliveryId = delivery.deliveryId;
+		if (delivery.state === 'confirmed') {
+			pushState = 'subscribed';
+			pushMessage = '';
+			return true;
+		}
+		if (delivery.state === 'displayed') {
+			pushState = 'test_question';
+			pushMessage = '';
+			return true;
+		}
+		if (
+			delivery.state === 'missing' ||
+			delivery.state === 'superseded' ||
+			delivery.state === 'failed' ||
+			delivery.state === 'expired'
+		) {
+			pushState = 'needs_device_check';
+			pushMessage = '';
+			return true;
+		}
+		pushState = 'test_waiting';
+		return false;
+	};
+
+	const pollTestDelivery = async (deliveryId: string) => {
+		const run = ++pollRun;
+		for (let attempt = 0; attempt < 15; attempt += 1) {
+			await new Promise((resolve) => setTimeout(resolve, 1000));
+			if (run !== pollRun || !base) return;
+			try {
+				const response = await fetch(
+					`${base}/push?delivery_id=${encodeURIComponent(deliveryId)}`,
+					{ cache: 'no-store' }
+				);
+				if (!response.ok) continue;
+				const body = (await response.json()) as PushResponse;
+				if (body.delivery && applyDelivery(body.delivery)) return;
+			} catch {
+				// El sondeo es best-effort; el próximo intento puede recuperar la conexión.
+			}
+		}
+		if (run === pollRun && pushState === 'test_waiting') {
+			pushState = 'needs_device_check';
+		}
+	};
+
+	const useSaveResult = (result: Awaited<ReturnType<typeof savePushSubscriptionForAppointment>>) => {
+		if (!result?.response.ok) {
+			pushMessage = result?.body.message || 'No pudimos activar las notificaciones. Volvé a intentar.';
+			return false;
+		}
+		if (result.body.delivery) {
+			const terminal = applyDelivery(result.body.delivery);
+			if (!terminal) void pollTestDelivery(result.body.delivery.deliveryId);
+		} else {
+			activeTestDeliveryId = null;
+			pushState = 'configured';
+		}
+		return true;
+	};
 
 	// Requiere el permiso YA concedido: registra el SW, suscribe (o recupera) y guarda el
 	// endpoint contra el turno actual.
-	const syncPushSubscription = async () => {
+	const syncPushSubscription = async (requestTest: boolean) => {
 		if (!data.vapidPublicKey || syncing) return;
+		pollRun += 1;
 		syncing = true;
 		pushState = 'working';
+		pushMessage = '';
 		try {
-			const registration = await navigator.serviceWorker.register('/push-sw.js');
-			await navigator.serviceWorker.ready;
-			const subscription =
+			const registration = await navigator.serviceWorker.register('/push-sw.js', {
+				updateViaCache: 'none'
+			});
+			await Promise.all([navigator.serviceWorker.ready, waitForPushWorkerActivation(registration)]);
+			let subscription =
 				(await registration.pushManager.getSubscription()) ??
 				(await registration.pushManager.subscribe({
 					userVisibleOnly: true,
 					applicationServerKey: urlBase64ToUint8Array(data.vapidPublicKey)
 				}));
-			pushState = (await savePushSubscriptionForAppointment(subscription)) ? 'subscribed' : 'error';
+			let result = await savePushSubscriptionForAppointment(subscription, requestTest);
+			if (requestTest && result?.response.status === 410) {
+				await subscription.unsubscribe();
+				subscription = await registration.pushManager.subscribe({
+					userVisibleOnly: true,
+					applicationServerKey: urlBase64ToUint8Array(data.vapidPublicKey)
+				});
+				result = await savePushSubscriptionForAppointment(subscription, true);
+			}
+			if (!useSaveResult(result)) pushState = 'error';
 		} catch {
+			pushMessage ||= 'No pudimos activar las notificaciones. Revisá tu conexión y volvé a intentar.';
 			pushState = 'error';
 		} finally {
 			syncing = false;
@@ -88,10 +227,11 @@
 	const enablePush = async () => {
 		if (!data.vapidPublicKey || syncing) return;
 		pushState = 'working';
+		pushMessage = '';
 		try {
 			const permission = await Notification.requestPermission();
 			if (permission === 'granted') {
-				await syncPushSubscription();
+				await syncPushSubscription(true);
 			} else if (permission === 'denied') {
 				// Bloqueo real del navegador. Si lo desbloquea en Configuración y vuelve,
 				// el visibilitychange lo detecta y activa los avisos igual.
@@ -102,8 +242,40 @@
 				pushState = 'awaiting_permission';
 			}
 		} catch {
+			pushMessage = 'No pudimos pedir el permiso de notificaciones. Volvé a intentar.';
 			pushState = 'error';
 		}
+	};
+
+	const submitTestFeedback = async (visible: boolean) => {
+		if (!base || !activeTestDeliveryId || syncing) return;
+		syncing = true;
+		pushMessage = '';
+		try {
+			const response = await fetch(`${base}/push`, {
+				method: 'PATCH',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ deliveryId: activeTestDeliveryId, visible })
+			});
+			const body = (await response.json().catch(() => ({}))) as PushResponse;
+			if (!response.ok || !body.delivery) {
+				pushMessage = body.message || 'No pudimos guardar tu respuesta. Volvé a intentar.';
+				return;
+			}
+			applyDelivery(body.delivery);
+		} catch {
+			pushMessage = 'No pudimos guardar tu respuesta. Volvé a intentar.';
+		} finally {
+			syncing = false;
+		}
+	};
+
+	const retryPushTest = async () => {
+		if (Notification.permission === 'granted') {
+			await syncPushSubscription(true);
+			return;
+		}
+		await enablePush();
 	};
 
 	onMount(() => {
@@ -118,35 +290,54 @@
 		);
 		if (!pushSupported) return;
 
-		pushState = 'idle';
-		// Recupera una suscripción ya existente del navegador (de un turno anterior) y la
-		// asocia a este turno: la tabla es (appointment_id, endpoint).
-		void (async () => {
-			try {
-				const registration = await navigator.serviceWorker.getRegistration('/push-sw.js');
-				const subscription = await registration?.pushManager.getSubscription();
-				if (subscription && pushState === 'idle' && !syncing) {
-					pushState = (await savePushSubscriptionForAppointment(subscription)) ? 'subscribed' : 'error';
+		if (Notification.permission === 'denied') {
+			// No se reutiliza una suscripción histórica cuando el permiso actual está
+			// bloqueado: eso volvería a presentar como "verificado" un teléfono incapaz
+			// de mostrar avisos.
+			pushState = 'denied';
+		} else {
+			pushState = 'idle';
+			// Recupera una suscripción ya existente del navegador (de un turno anterior) y la
+			// asocia a este turno: la tabla es (appointment_id, endpoint).
+			void (async () => {
+				try {
+					const registration = await navigator.serviceWorker.getRegistration('/push-sw.js');
+					const subscription = await registration?.pushManager.getSubscription();
+					if (subscription && pushState === 'idle' && !syncing) {
+						syncing = true;
+						const result = await savePushSubscriptionForAppointment(subscription, false);
+						if (!useSaveResult(result)) pushState = 'error';
+						syncing = false;
+					}
+				} catch {
+					syncing = false;
+					// se queda en idle: el botón sigue disponible
 				}
-			} catch {
-				// se queda en idle: el botón sigue disponible
-			}
-		})();
+			})();
+		}
 
 		// Núcleo del fix de UX: al volver a la pantalla (tras conceder el permiso en
 		// Configuración) reconsultamos el estado REAL y activamos los avisos. También
 		// recupera de un 'denied' previo si el usuario lo desbloqueó.
 		const onVisible = () => {
 			if (document.visibilityState !== 'visible' || syncing) return;
-			if (pushState === 'subscribed') return;
-			if (Notification.permission === 'granted') {
-				void syncPushSubscription();
-			} else if (Notification.permission === 'denied' && pushState === 'awaiting_permission') {
+			if (Notification.permission === 'denied') {
 				pushState = 'denied';
+				return;
+			}
+			if (['subscribed', 'configured', 'test_waiting', 'test_question'].includes(pushState)) return;
+			if (
+				Notification.permission === 'granted' &&
+				(pushState === 'awaiting_permission' || pushState === 'denied')
+			) {
+				void syncPushSubscription(true);
 			}
 		};
 		document.addEventListener('visibilitychange', onVisible);
-		return () => document.removeEventListener('visibilitychange', onVisible);
+		return () => {
+			pollRun += 1;
+			document.removeEventListener('visibilitychange', onVisible);
+		};
 	});
 
 	const timezone = $derived(appointment?.business?.timezone ?? 'America/Argentina/Cordoba');
@@ -173,8 +364,8 @@
 		if (!appointment) return 'antes del turno';
 		const hoursUntil = (new Date(appointment.starts_at).getTime() - Date.now()) / 3_600_000;
 		if (hoursUntil > 24) return '24 horas y 2 horas antes del turno';
-		if (hoursUntil > 2) return '2 horas antes del turno';
-		return 'antes del turno';
+		if (hoursUntil > 2) return 'durante el día previo y 2 horas antes del turno';
+		return 'en los próximos minutos';
 	});
 
 	// En Android el aviso fuerte es el push (CTA primario); el calendario pasa a
@@ -293,8 +484,65 @@
 		<div class="mt-4">
 			{#if pushState === 'subscribed'}
 				<p class="ux-alert ux-alert-success">
-					🔔 Avisos activados en este teléfono: te avisamos {pushWindowsLabel}.
+					🔔 Avisos verificados en este teléfono: te avisamos {pushWindowsLabel}.
 				</p>
+			{:else if pushState === 'configured'}
+				<div class="ux-alert">
+					<p class="font-bold text-white">Los avisos quedaron configurados.</p>
+					<p class="mt-1">Enviá una prueba para comprobar que este teléfono puede mostrarlos.</p>
+				</div>
+				<button
+					type="button"
+					class={primary ? 'ux-btn-primary w-full mt-3' : 'ux-btn-secondary w-full mt-3'}
+					onclick={retryPushTest}
+				>
+					Enviar notificación de prueba
+				</button>
+			{:else if pushState === 'test_waiting'}
+				<div class="ux-alert" aria-live="polite">
+					<p class="font-bold text-white">Prueba enviada.</p>
+					<p class="mt-1">Estamos comprobando si llegó al navegador de este teléfono…</p>
+				</div>
+			{:else if pushState === 'test_question'}
+				<div class="ux-alert ux-alert-success" aria-live="polite">
+					<p class="font-bold text-white">El navegador informó que mostró la prueba.</p>
+					<p class="mt-1">¿La viste entre las notificaciones del teléfono?</p>
+				</div>
+				<div class="mt-3 grid grid-cols-2 gap-3">
+					<button
+						type="button"
+						class="ux-btn-primary w-full"
+						disabled={syncing}
+						onclick={() => submitTestFeedback(true)}
+					>
+						Sí, la vi
+					</button>
+					<button
+						type="button"
+						class="ux-btn-secondary w-full"
+						disabled={syncing}
+						onclick={() => submitTestFeedback(false)}
+					>
+						No apareció
+					</button>
+				</div>
+			{:else if pushState === 'needs_device_check'}
+				<div class="ux-empty" aria-live="polite">
+					<p class="font-bold text-white">El teléfono no confirmó la notificación.</p>
+					<p class="mt-2">
+						Revisá en Android los permisos de notificaciones del navegador y del sitio. Si
+						sigue sin aparecer, permití que el navegador funcione en segundo plano y sin
+						restricciones de batería.
+					</p>
+				</div>
+				<button
+					type="button"
+					class={primary ? 'ux-btn-primary w-full mt-3' : 'ux-btn-secondary w-full mt-3'}
+					disabled={syncing}
+					onclick={retryPushTest}
+				>
+					Probar nuevamente
+				</button>
 			{:else if pushState === 'awaiting_permission'}
 				<p class="ux-alert">
 					Concedé el permiso de notificaciones y volvé a esta pantalla: activamos los avisos
@@ -309,7 +557,8 @@
 				</button>
 			{:else if pushState === 'denied'}
 				<p class="ux-empty">
-					Las notificaciones están bloqueadas en este navegador. Agregá el turno al
+					Las notificaciones están bloqueadas. Habilitalas para este sitio y para la app
+					del navegador desde los ajustes del teléfono. Mientras tanto, agregá el turno al
 					calendario para no olvidarte.
 				</p>
 			{:else}
@@ -325,8 +574,13 @@
 					Te avisamos {pushWindowsLabel}, sin instalar nada.
 				</p>
 				{#if pushState === 'error'}
-					<p class="ux-empty mt-2">No se pudo activar el aviso. Agregá el turno al calendario.</p>
+					<p class="ux-empty mt-2">
+						{pushMessage || 'No pudimos activar las notificaciones. Agregá el turno al calendario y volvé a intentar.'}
+					</p>
 				{/if}
+			{/if}
+			{#if pushMessage && pushState !== 'error'}
+				<p class="ux-empty mt-2">{pushMessage}</p>
 			{/if}
 		</div>
 	{/if}

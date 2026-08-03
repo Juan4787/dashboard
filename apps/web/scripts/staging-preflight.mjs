@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import crypto from 'node:crypto';
 
 const REQUIRED_ENV = [
 	'ODONTO_SUPABASE_URL',
@@ -11,6 +12,10 @@ const REQUIRED_ENV = [
 	'PUBLIC_ODONTO_SUPABASE_ANON_KEY',
 	'PUBLIC_SITE_URL',
 	'INTERNAL_JOB_SECRET',
+	'VAPID_PUBLIC_KEY',
+	'PUBLIC_VAPID_PUBLIC_KEY',
+	'VAPID_PRIVATE_KEY',
+	'VAPID_SUBJECT',
 	'WHATSAPP_VERIFY_TOKEN',
 	'DEMO_MODE',
 	'MASTER_EMAIL',
@@ -40,6 +45,7 @@ const SECRET_KEYS = new Set([
 	'TURNSTILE_SECRET_KEY',
 	'PUBLIC_TURNSTILE_SITE_KEY',
 	'INTERNAL_JOB_SECRET',
+	'VAPID_PRIVATE_KEY',
 	'WHATSAPP_VERIFY_TOKEN',
 	'WHATSAPP_APP_SECRET',
 	'WHATSAPP_ACCESS_TOKEN',
@@ -72,8 +78,14 @@ const REQUIRED_FILES = [
 	'supabase/migrations/20260710210000_prevent_cross_business_email_association.sql',
 	'supabase/migrations/20260711010000_limit_public_bookings_by_patient_name.sql',
 	'supabase/migrations/20260711013000_restore_audit_security_event.sql',
+	'supabase/migrations/20260802235900_push_delivery_observability.sql',
 	'apps/web/src/routes/internal/jobs/generate-reminder-dispatches/+server.ts',
 	'apps/web/src/routes/internal/jobs/process-message-dispatches/+server.ts',
+	'apps/web/src/routes/internal/jobs/send-push-reminders/+server.ts',
+	'apps/web/src/routes/turno/[token]/push/+server.ts',
+	'apps/web/src/routes/turno/[token]/push/receipt/+server.ts',
+	'apps/web/src/lib/server/push.ts',
+	'apps/web/static/push-sw.js',
 	'apps/web/src/routes/odonto/configuracion/whatsapp/+page.server.ts',
 	'apps/web/src/routes/odonto/configuracion/whatsapp/+page.svelte',
 	'apps/web/src/routes/odonto/configuracion/suscripcion/+page.server.ts',
@@ -108,13 +120,18 @@ const REQUIRED_REMOTE_TABLES = [
 	'messaging_accounts',
 	'message_templates',
 	'message_dispatches',
+	'push_subscriptions',
+	'push_delivery_attempts',
 	'inbound_messages',
 	'whatsapp_webhook_events',
 	'mp_subscriptions',
 	'mp_webhook_events'
 ];
 
-const REQUIRED_REMOTE_RPCS = ['get_public_booking_active_future_count_by_name'];
+const REQUIRED_REMOTE_RPCS = [
+	'get_public_booking_active_future_count_by_name',
+	'claim_due_push_reminders'
+];
 
 const args = new Set(process.argv.slice(2));
 const shouldCheckRemote = args.has('--remote');
@@ -192,6 +209,47 @@ const validateUrl = (key, failures) => {
 	}
 };
 
+const decodeBase64Url = (value) => {
+	const padding = '='.repeat((4 - (value.length % 4)) % 4);
+	return Buffer.from((value + padding).replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+};
+
+const validateVapidPair = (failures) => {
+	const publicKeyValue = valueOf('VAPID_PUBLIC_KEY');
+	const publicBrowserValue = valueOf('PUBLIC_VAPID_PUBLIC_KEY');
+	const privateKeyValue = valueOf('VAPID_PRIVATE_KEY');
+	if (!publicKeyValue || !publicBrowserValue || !privateKeyValue) return;
+	try {
+		const publicKey = decodeBase64Url(publicKeyValue);
+		const browserPublicKey = decodeBase64Url(publicBrowserValue);
+		const privateKey = decodeBase64Url(privateKeyValue);
+		if (publicKey.length !== 65 || browserPublicKey.length !== 65 || privateKey.length !== 32) {
+			throw new Error('invalid VAPID key length');
+		}
+		if (!crypto.timingSafeEqual(publicKey, browserPublicKey)) {
+			failures.push('VAPID_PUBLIC_KEY and PUBLIC_VAPID_PUBLIC_KEY must match');
+			failLine('VAPID public keys do not match');
+			return;
+		}
+		const ecdh = crypto.createECDH('prime256v1');
+		ecdh.setPrivateKey(privateKey);
+		const derivedPublicKey = ecdh.getPublicKey();
+		if (!crypto.timingSafeEqual(publicKey, derivedPublicKey)) {
+			failures.push('VAPID public and private keys are not a cryptographic pair');
+			failLine('VAPID public/private keys do not form a pair');
+		}
+	} catch {
+		failures.push('VAPID keys are not valid P-256 base64url keys');
+		failLine('VAPID keys have an invalid format');
+	}
+
+	const subject = valueOf('VAPID_SUBJECT');
+	if (subject && !subject.startsWith('mailto:') && !subject.startsWith('https://')) {
+		failures.push('VAPID_SUBJECT must start with mailto: or https://');
+		failLine('VAPID_SUBJECT must start with mailto: or https://');
+	}
+};
+
 const main = async () => {
 	const failures = [];
 	const warnings = [];
@@ -247,6 +305,7 @@ const main = async () => {
 	validateUrl('ODONTO_SUPABASE_URL', failures);
 	validateUrl('PUBLIC_ODONTO_SUPABASE_URL', failures);
 	validateUrl('PUBLIC_SITE_URL', failures);
+	validateVapidPair(failures);
 
 	if (valueOf('DEMO_MODE') !== 'false') {
 		failures.push('DEMO_MODE must be false for staging');

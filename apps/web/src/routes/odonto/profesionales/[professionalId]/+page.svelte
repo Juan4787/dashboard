@@ -310,6 +310,7 @@
 	};
 	let saveAllForm = $state<HTMLFormElement | null>(null);
 	let scheduleError = $state('');
+	let scheduleTimeEditing = $state(false);
 	let scheduleBlockSeq = 100;
 	let allowNavigation = false;
 
@@ -607,6 +608,10 @@
 		updateScheduleBlock(block.id, { timeRanges: result.value });
 		return true;
 	};
+	const finishScheduleBlockTimeEdit = (blockId: string | undefined) => {
+		commitScheduleBlockTimeRanges(blockId);
+		scheduleTimeEditing = false;
+	};
 
 	const normalizeScheduleBeforeSubmit = (event?: SubmitEvent) => {
 		for (const block of draft.schedule.blocks) {
@@ -816,7 +821,7 @@
 
 	$effect(() => {
 		// A shorthand like 09:00-20 is equivalent to 09:00-20:00, but must stay raw while editing.
-		if (!draftReady || hasUnsavedChanges) return;
+		if (!draftReady || hasUnsavedChanges || scheduleTimeEditing) return;
 		const serverDraft = buildServerDraft(data);
 		baseline = cloneDraft(serverDraft);
 		draft = cloneDraft(serverDraft);
@@ -1361,7 +1366,8 @@
 											timeStatus === 'Necesario para recibir turnos' || timeStatus === 'Horario inválido'
 										)}`}
 										oninput={(event) => updateScheduleBlock(block.id, { timeRanges: (event.currentTarget as HTMLInputElement).value })}
-										onblur={() => commitScheduleBlockTimeRanges(block.id)}
+										onfocus={() => (scheduleTimeEditing = true)}
+										onblur={() => finishScheduleBlockTimeEdit(block.id)}
 									/>
 									{#if preview.length > 0}
 										<div class="mt-3 flex flex-wrap gap-2">

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import crypto from 'node:crypto';
 
 const envState = vi.hoisted(() => ({
 	privateEnv: {} as Record<string, string | undefined>,
@@ -16,32 +17,54 @@ vi.mock('$env/dynamic/public', () => ({ env: envState.publicEnv }));
 
 import webpush from 'web-push';
 import {
+	getPushDeliveryStatus,
+	isValidPushDeliveryId,
 	isValidSubscriptionPayload,
+	pushTopicForAppointment,
+	pushTtlUntilAppointment,
+	recordPushDeliveryReceipt,
+	recordPushTestFeedback,
 	resetPushRemindersForReschedule,
 	sendDuePushReminders,
-	sendReschedulePushNotice
+	sendReschedulePushNotice,
+	sendTestPushNotification
 } from './push';
 
 const now = new Date('2026-06-11T12:00:00.000Z');
+const subscriptionKey = crypto.createECDH('prime256v1');
+subscriptionKey.generateKeys();
+const validSubscriptionKeys = {
+	p256dh: subscriptionKey.getPublicKey().toString('base64url'),
+	auth: crypto.randomBytes(16).toString('base64url')
+};
 
 // Mock de supabase con cola de resultados por tabla: cada from(tabla) consume el
 // siguiente resultado programado; update/upsert capturan el payload.
 type Queued = { data?: unknown; error?: unknown; count?: number };
 const createSupabaseMock = (queues: Record<string, Queued[]>, rpcResult: Queued) => {
 	const updates: Array<{ table: string; payload: Record<string, unknown> }> = [];
+	const inserts: Array<{ table: string; payload: Record<string, unknown> }> = [];
+	const filters: Array<{ table: string; method: string; args: unknown[] }> = [];
 	const consume = (table: string): Queued => queues[table]?.shift() ?? { data: null, error: null };
 	const makeChain = (table: string) => {
 		const result = consume(table);
 		const chain: any = {};
-		for (const method of ['select', 'eq', 'is', 'in', 'gte', 'lt', 'order', 'limit']) {
-			chain[method] = () => chain;
+		for (const method of ['select', 'eq', 'is', 'not', 'in', 'gte', 'lt', 'order', 'limit']) {
+			chain[method] = (...args: unknown[]) => {
+				filters.push({ table, method, args });
+				return chain;
+			};
 		}
 		chain.update = (payload: Record<string, unknown>) => {
 			updates.push({ table, payload });
 			return chain;
 		};
-		chain.insert = () => chain;
+		chain.insert = (payload: Record<string, unknown>) => {
+			inserts.push({ table, payload });
+			return chain;
+		};
 		chain.upsert = () => chain;
+		chain.delete = () => chain;
 		chain.maybeSingle = async () => result;
 		chain.single = async () => result;
 		chain.then = (resolve: (value: Queued) => unknown) => Promise.resolve(result).then(resolve);
@@ -52,7 +75,9 @@ const createSupabaseMock = (queues: Record<string, Queued[]>, rpcResult: Queued)
 			from: (table: string) => makeChain(table),
 			rpc: async () => rpcResult
 		} as any,
-		updates
+		updates,
+		inserts,
+		filters
 	};
 };
 
@@ -86,16 +111,255 @@ describe('isValidSubscriptionPayload', () => {
 		expect(
 			isValidSubscriptionPayload({
 				endpoint: 'https://push.example/ep',
-				keys: { p256dh: 'a', auth: 'b' }
+				keys: validSubscriptionKeys
 			})
 		).toBe(true);
 	});
 
 	it('rechaza endpoints no https y claves faltantes', () => {
-		expect(isValidSubscriptionPayload({ endpoint: 'http://x', keys: { p256dh: 'a', auth: 'b' } })).toBe(false);
-		expect(isValidSubscriptionPayload({ endpoint: 'https://x', keys: { p256dh: '', auth: 'b' } })).toBe(false);
+		expect(
+			isValidSubscriptionPayload({ endpoint: 'http://x', keys: validSubscriptionKeys })
+		).toBe(false);
+		expect(
+			isValidSubscriptionPayload({
+				endpoint: 'https://x',
+				keys: { ...validSubscriptionKeys, p256dh: '' }
+			})
+		).toBe(false);
 		expect(isValidSubscriptionPayload(null)).toBe(false);
 		expect(isValidSubscriptionPayload({})).toBe(false);
+	});
+
+	it('rechaza valores sobredimensionados', () => {
+		expect(
+			isValidSubscriptionPayload({
+				endpoint: `https://push.example/${'x'.repeat(2048)}`,
+				keys: validSubscriptionKeys
+			})
+		).toBe(false);
+		expect(
+			isValidSubscriptionPayload({
+				endpoint: 'https://push.example/ep',
+				keys: { p256dh: 'x'.repeat(513), auth: 'b' }
+			})
+		).toBe(false);
+	});
+
+	it('rechaza destinos locales y claves que no tienen la forma de Push API', () => {
+		expect(
+			isValidSubscriptionPayload({
+				endpoint: 'https://127.0.0.1/push',
+				keys: validSubscriptionKeys
+			})
+		).toBe(false);
+		expect(
+			isValidSubscriptionPayload({
+				endpoint: 'https://push.example/ep',
+				keys: { p256dh: 'a', auth: 'b' }
+			})
+		).toBe(false);
+	});
+});
+
+describe('identificadores y vencimiento de push', () => {
+	it('valida UUID y genera topics estables, distintos para prueba y recordatorio', () => {
+		expect(isValidPushDeliveryId('8ccf23d7-5ae3-4b87-9268-d40a05d9a475')).toBe(true);
+		expect(isValidPushDeliveryId('apt-1')).toBe(false);
+
+		const reminder = pushTopicForAppointment('apt-1');
+		const sameReminder = pushTopicForAppointment('apt-1');
+		const test = pushTopicForAppointment('apt-1', 'test');
+		expect(reminder).toBe(sameReminder);
+		expect(reminder).not.toBe(test);
+		expect(reminder).toMatch(/^[A-Za-z0-9_-]{32}$/);
+		expect(test).toMatch(/^[A-Za-z0-9_-]{32}$/);
+	});
+
+	it('nunca mantiene un push en cola más allá del turno ni del máximo del kind', () => {
+		expect(pushTtlUntilAppointment(new Date(now.getTime() + 30 * 60_000), now, 7200)).toBe(
+			1800
+		);
+		expect(pushTtlUntilAppointment(new Date(now.getTime() + 30 * 60_000), now, 300)).toBe(
+			300
+		);
+		expect(pushTtlUntilAppointment(new Date(now.getTime() + 30_000), now, 7200)).toBe(30);
+		expect(pushTtlUntilAppointment(new Date(now.getTime() - 1), now, 7200)).toBe(0);
+	});
+});
+
+describe('telemetría de entrega', () => {
+	const deliveryId = '8ccf23d7-5ae3-4b87-9268-d40a05d9a475';
+	const receiptToken = 'a'.repeat(43);
+	const receiptHash = crypto.createHash('sha256').update(receiptToken).digest('hex');
+
+	it('registra recibido/mostrado sólo con el secreto correcto', async () => {
+		const { supabase, updates } = createSupabaseMock(
+			{
+				push_delivery_attempts: [
+					{
+						data: {
+							id: deliveryId,
+							receipt_token_hash: receiptHash,
+							received_at: null,
+							displayed_at: null
+						},
+						error: null
+					},
+					{ data: { id: deliveryId }, error: null }
+				]
+			},
+			{ data: null, error: null }
+		);
+
+		const recorded = await recordPushDeliveryReceipt(supabase, {
+			appointmentId: 'apt-1',
+			deliveryId,
+			receiptToken,
+			stage: 'displayed',
+			now
+		});
+		expect(recorded).toBe(true);
+		expect(updates[0]).toMatchObject({
+			table: 'push_delivery_attempts',
+			payload: {
+				received_at: now.toISOString(),
+				displayed_at: now.toISOString()
+			}
+		});
+	});
+
+	it('no modifica nada ante un secreto inválido', async () => {
+		const { supabase, updates } = createSupabaseMock(
+			{
+				push_delivery_attempts: [
+					{
+						data: {
+							id: deliveryId,
+							receipt_token_hash: receiptHash,
+							received_at: null,
+							displayed_at: null
+						},
+						error: null
+					}
+				]
+			},
+			{ data: null, error: null }
+		);
+
+		expect(
+			await recordPushDeliveryReceipt(supabase, {
+				appointmentId: 'apt-1',
+				deliveryId,
+				receiptToken: 'b'.repeat(43),
+				stage: 'received',
+				now
+			})
+		).toBe(false);
+		expect(updates).toEqual([]);
+	});
+
+	it('prioriza el estado obsoleto después de una reprogramación', async () => {
+		const { supabase } = createSupabaseMock(
+			{
+				push_delivery_attempts: [
+					{
+						data: {
+							id: deliveryId,
+							kind: '24h',
+							accepted_at: now.toISOString(),
+							received_at: now.toISOString(),
+							displayed_at: now.toISOString(),
+							user_confirmed_at: null,
+							user_reported_missing_at: null,
+							superseded_at: now.toISOString(),
+							failed_at: null,
+							expires_at: new Date(now.getTime() + 60_000).toISOString(),
+							created_at: now.toISOString()
+						},
+						error: null
+					}
+				]
+			},
+			{ data: null, error: null }
+		);
+		const status = await getPushDeliveryStatus(supabase, {
+			appointmentId: 'apt-1',
+			deliveryId,
+			now
+		});
+		expect(status?.state).toBe('superseded');
+	});
+
+	it('guarda la confirmación explícita de la persona', async () => {
+		const { supabase, updates, filters } = createSupabaseMock(
+			{ push_delivery_attempts: [{ data: { id: deliveryId }, error: null }] },
+			{ data: null, error: null }
+		);
+		expect(
+			await recordPushTestFeedback(supabase, {
+				appointmentId: 'apt-1',
+				deliveryId,
+				visible: true,
+				now
+			})
+		).toBe(true);
+		expect(updates[0].payload).toMatchObject({
+			user_confirmed_at: now.toISOString(),
+			user_reported_missing_at: null
+		});
+		expect(filters).toContainEqual({
+			table: 'push_delivery_attempts',
+			method: 'not',
+			args: ['displayed_at', 'is', null]
+		});
+	});
+});
+
+describe('sendTestPushNotification', () => {
+	it('envía una prueba rastreable sin guardar el secreto de recibo en claro', async () => {
+		const deliveryId = '8ccf23d7-5ae3-4b87-9268-d40a05d9a475';
+		vi.mocked(webpush.sendNotification).mockResolvedValue({ statusCode: 201 } as any);
+		const { supabase, inserts } = createSupabaseMock(
+			{
+				push_delivery_attempts: [
+					{ data: null, error: null },
+					{ data: { id: deliveryId }, error: null },
+					{ data: null, error: null }
+				]
+			},
+			{ data: null, error: null }
+		);
+		const appointment = {
+			id: 'apt-1',
+			token: 'tok-1',
+			business: { id: 'biz-1', name: 'Clínica Sabrina' }
+		} as any;
+
+		const result = await sendTestPushNotification(supabase, {
+			appointment,
+			subscription: {
+				id: 'sub-1',
+				endpoint: 'https://push.example/ep-1',
+				p256dh: 'p256dh-key',
+				auth: 'auth-key'
+			},
+			now
+		});
+
+		expect(result).toMatchObject({ accepted: true, deliveryId });
+		expect(webpush.sendNotification).toHaveBeenCalledTimes(1);
+		const [, rawPayload, options] = vi.mocked(webpush.sendNotification).mock.calls[0];
+		const payload = JSON.parse(rawPayload as string);
+		expect(options).toMatchObject({
+			TTL: 300,
+			topic: pushTopicForAppointment('apt-1', 'test')
+		});
+		expect(payload.delivery.id).toBe(deliveryId);
+		expect(payload.delivery.receiptUrl).toContain('/turno/tok-1/push/receipt');
+		expect(inserts[0].payload.receipt_token_hash).toBe(
+			crypto.createHash('sha256').update(payload.delivery.token).digest('hex')
+		);
+		expect(inserts[0].payload.receipt_token_hash).not.toBe(payload.delivery.token);
 	});
 });
 
@@ -119,6 +383,10 @@ describe('sendDuePushReminders', () => {
 		expect(payload.title).toBe('Turno en Clínica Sabrina');
 		expect(payload.body).toContain('a las 08:00');
 		expect(payload.url).toContain('/turno/tok-1');
+		expect(vi.mocked(webpush.sendNotification).mock.calls[0][2]).toMatchObject({
+			topic: pushTopicForAppointment('apt-1'),
+			TTL: 23 * 60 * 60
+		});
 
 		const sentUpdate = updates.find((u) => u.payload.push_24h_sent_at);
 		expect(sentUpdate).toBeTruthy();
@@ -238,6 +506,9 @@ describe('sendReschedulePushNotice', () => {
 		expect(payload.tag).toBe('turno-apt-1-24h');
 		expect(payload.group).toBe('turno-apt-1');
 		expect(payload.url).toContain('/turno/tok-1');
+		expect(vi.mocked(webpush.sendNotification).mock.calls[0][2]).toMatchObject({
+			topic: pushTopicForAppointment('apt-1')
+		});
 		// Los recordatorios del nuevo horario siguen su curso: no se marca nada.
 		expect(
 			updates.some(

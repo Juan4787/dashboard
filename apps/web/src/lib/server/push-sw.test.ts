@@ -1,0 +1,179 @@
+import { readFile } from 'node:fs/promises';
+import vm from 'node:vm';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
+
+type ServiceWorkerListeners = {
+	install?: (event: any) => void;
+	activate?: (event: any) => void;
+	push?: (event: any) => void;
+	notificationclick?: (event: any) => void;
+};
+
+let source = '';
+
+beforeAll(async () => {
+	source = await readFile(new URL('../../../static/push-sw.js', import.meta.url), 'utf8');
+});
+
+const loadWorker = (input?: {
+	fetchImpl?: ReturnType<typeof vi.fn>;
+	showNotification?: ReturnType<typeof vi.fn>;
+	shownNotifications?: Array<{ tag?: string; close: ReturnType<typeof vi.fn> }>;
+}) => {
+	const listeners: ServiceWorkerListeners = {};
+	const fetchMock = input?.fetchImpl ?? vi.fn().mockResolvedValue({ ok: true });
+	const showNotification = input?.showNotification ?? vi.fn().mockResolvedValue(undefined);
+	const shownNotifications = input?.shownNotifications ?? [];
+	const clients = {
+		matchAll: vi.fn().mockResolvedValue([]),
+		openWindow: vi.fn().mockResolvedValue(undefined),
+		claim: vi.fn().mockResolvedValue(undefined)
+	};
+	const skipWaiting = vi.fn().mockResolvedValue(undefined);
+	const self = {
+		location: { origin: 'https://turnos.example' },
+		skipWaiting,
+		registration: {
+			getNotifications: vi.fn().mockResolvedValue(shownNotifications),
+			showNotification
+		},
+		addEventListener: (name: keyof ServiceWorkerListeners, listener: (event: any) => void) => {
+			listeners[name] = listener;
+		}
+	};
+
+	vm.runInNewContext(source, {
+		self,
+		clients,
+		fetch: fetchMock,
+		URL,
+		JSON,
+		Promise
+	});
+
+	return { listeners, fetchMock, showNotification, clients, skipWaiting };
+};
+
+describe('push service worker', () => {
+	it('activa la versión nueva sin esperar al cierre de pestañas', async () => {
+		const { listeners, clients, skipWaiting } = loadWorker();
+		const work: Promise<unknown>[] = [];
+		listeners.install?.({ waitUntil: (promise: Promise<unknown>) => work.push(promise) });
+		listeners.activate?.({ waitUntil: (promise: Promise<unknown>) => work.push(promise) });
+		await Promise.all(work);
+
+		expect(skipWaiting).toHaveBeenCalledTimes(1);
+		expect(clients.claim).toHaveBeenCalledTimes(1);
+	});
+
+	it('muestra el aviso, cierra el horario viejo y confirma recibido/mostrado', async () => {
+		const oldNotification = { tag: 'turno-apt-1-2h', close: vi.fn() };
+		const { listeners, fetchMock, showNotification } = loadWorker({
+			shownNotifications: [oldNotification]
+		});
+		let work: Promise<unknown> | null = null;
+		listeners.push?.({
+			data: {
+				json: () => ({
+					title: 'Turno reprogramado',
+					body: 'Nuevo horario',
+					url: '/turno/token',
+					tag: 'turno-apt-1-24h',
+					group: 'turno-apt-1',
+					delivery: {
+						id: '8ccf23d7-5ae3-4b87-9268-d40a05d9a475',
+						token: 'a'.repeat(43),
+						receiptUrl: '/turno/token/push/receipt'
+					}
+				})
+			},
+			waitUntil: (promise: Promise<unknown>) => {
+				work = promise;
+			}
+		});
+		await work;
+
+		expect(oldNotification.close).toHaveBeenCalledTimes(1);
+		expect(showNotification).toHaveBeenCalledWith('Turno reprogramado', {
+			body: 'Nuevo horario',
+			data: { url: '/turno/token' },
+			tag: 'turno-apt-1-24h',
+			renotify: true
+		});
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(JSON.parse(fetchMock.mock.calls[0][1].body).stage).toBe('displayed');
+		expect(fetchMock.mock.calls[0][0]).toBe(
+			'https://turnos.example/turno/token/push/receipt'
+		);
+	});
+
+	it('una falla del acuse nunca impide mostrar la notificación', async () => {
+		const fetchMock = vi.fn().mockRejectedValue(new Error('sin red'));
+		const { listeners, showNotification } = loadWorker({ fetchImpl: fetchMock });
+		let work: Promise<unknown> | null = null;
+		listeners.push?.({
+			data: {
+				json: () => ({
+					title: 'Aviso',
+					delivery: {
+						id: '8ccf23d7-5ae3-4b87-9268-d40a05d9a475',
+						token: 'a'.repeat(43),
+						receiptUrl: '/turno/token/push/receipt'
+					}
+				})
+			},
+			waitUntil: (promise: Promise<unknown>) => {
+				work = promise;
+			}
+		});
+		await work;
+
+		expect(showNotification).toHaveBeenCalledTimes(1);
+	});
+
+	it('no informa displayed cuando el navegador rechaza showNotification', async () => {
+		const showNotification = vi.fn().mockRejectedValue(new Error('permiso revocado'));
+		const { listeners, fetchMock } = loadWorker({ showNotification });
+		let work: Promise<unknown> | null = null;
+		listeners.push?.({
+			data: {
+				json: () => ({
+					delivery: {
+						id: '8ccf23d7-5ae3-4b87-9268-d40a05d9a475',
+						token: 'a'.repeat(43),
+						receiptUrl: '/turno/token/push/receipt'
+					}
+				})
+			},
+			waitUntil: (promise: Promise<unknown>) => {
+				work = promise;
+			}
+		});
+		await work;
+
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(JSON.parse(fetchMock.mock.calls[0][1].body).stage).toBe('received');
+	});
+
+	it('normaliza una URL relativa antes de enfocar o abrir el turno', async () => {
+		const { listeners, clients } = loadWorker();
+		const focus = vi.fn().mockResolvedValue(undefined);
+		clients.matchAll.mockResolvedValue([
+			{ url: 'https://turnos.example/turno/token', focus }
+		] as never);
+		let work: Promise<unknown> | null = null;
+		listeners.notificationclick?.({
+			notification: {
+				data: { url: '/turno/token' },
+				close: vi.fn()
+			},
+			waitUntil: (promise: Promise<unknown>) => {
+				work = promise;
+			}
+		});
+		await work;
+
+		expect(focus).toHaveBeenCalledTimes(1);
+		expect(clients.openWindow).not.toHaveBeenCalled();
+	});
+});

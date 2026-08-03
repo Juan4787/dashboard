@@ -504,7 +504,8 @@ test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 		await page.goto(`/odonto/turnos/${appointment?.id}?from_date=${fixture.date}`);
 		await expect(page.getByRole('link', { name: 'Volver' })).toBeVisible();
 		await expect(page.getByRole('button', { name: 'Confirmar' })).toHaveCount(0);
-		await expect(page.getByRole('button', { name: 'Marcar asistió' })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Marcar asistió' })).toHaveCount(0);
+		await expect(page.getByRole('button', { name: 'Marcar no asistió' })).toHaveCount(0);
 
 		const confirmAttempt = await postAction(page, `/odonto/turnos/${appointment?.id}?/update_status`, {
 			status: 'confirmed'
