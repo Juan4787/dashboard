@@ -84,8 +84,8 @@ export const POST: RequestHandler = async ({ params, request, fetch, setHeaders 
 						ok: false,
 						code: testResult.gone ? 'subscription_expired' : 'test_not_accepted',
 						message: testResult.gone
-							? 'La suscripción del navegador venció. Volvé a activar las notificaciones.'
-							: 'No pudimos enviar la notificación de prueba. Revisá tu conexión y volvé a intentar.'
+							? 'El teléfono rechazó la configuración anterior de avisos.'
+							: 'No pudimos completar la notificación de prueba en este momento.'
 					},
 					{ status: testResult.gone ? 410 : 502 }
 				);
@@ -106,7 +106,7 @@ export const POST: RequestHandler = async ({ params, request, fetch, setHeaders 
 		return json(
 			{
 				ok: false,
-				message: 'No pudimos activar las notificaciones. Revisá tu conexión y volvé a intentar.'
+				message: 'No pudimos completar la activación en este momento.'
 			},
 			{ status: 500 }
 		);

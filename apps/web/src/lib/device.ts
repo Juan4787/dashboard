@@ -5,6 +5,85 @@
 
 export type DeviceClass = 'ios' | 'android' | 'desktop' | 'unknown';
 
+export type NotificationBrowserProfile = {
+	label: string;
+	androidPackage: string | null;
+	supportsAndroidSettingsIntent: boolean;
+};
+
+// El nombre visible permite dar instrucciones concretas sin pedirle a la persona
+// que identifique conceptos como "service worker" o "permiso del sitio". El package
+// de Android se usa únicamente para intentar abrir directamente la pantalla de
+// notificaciones de la app; siempre hay instrucciones de respaldo en la misma UI.
+export const notificationBrowserProfile = (
+	userAgent: string | null | undefined
+): NotificationBrowserProfile => {
+	const ua = userAgent ?? '';
+	if (/SamsungBrowser\//i.test(ua)) {
+		return {
+			label: 'Samsung Internet',
+			androidPackage: 'com.sec.android.app.sbrowser',
+			supportsAndroidSettingsIntent: true
+		};
+	}
+	if (/EdgA\//i.test(ua)) {
+		return {
+			label: 'Microsoft Edge',
+			androidPackage: 'com.microsoft.emmx',
+			supportsAndroidSettingsIntent: true
+		};
+	}
+	if (/OPR\//i.test(ua)) {
+		return {
+			label: 'Opera',
+			androidPackage: 'com.opera.browser',
+			supportsAndroidSettingsIntent: true
+		};
+	}
+	if (/Android/i.test(ua) && /Firefox\//i.test(ua)) {
+		return {
+			label: 'Firefox',
+			androidPackage: 'org.mozilla.firefox',
+			supportsAndroidSettingsIntent: false
+		};
+	}
+	if (/Chrome\//i.test(ua)) {
+		return {
+			label: 'Chrome',
+			androidPackage: 'com.android.chrome',
+			supportsAndroidSettingsIntent: true
+		};
+	}
+	if (/Edg\//i.test(ua)) {
+		return { label: 'Microsoft Edge', androidPackage: null, supportsAndroidSettingsIntent: false };
+	}
+	if (/Firefox\//i.test(ua)) {
+		return { label: 'Firefox', androidPackage: null, supportsAndroidSettingsIntent: false };
+	}
+	if (/Safari\//i.test(ua) && !/Chrome\//i.test(ua)) {
+		return { label: 'Safari', androidPackage: null, supportsAndroidSettingsIntent: false };
+	}
+	return { label: 'el navegador', androidPackage: null, supportsAndroidSettingsIntent: false };
+};
+
+export const androidNotificationSettingsIntent = (
+	userAgent: string | null | undefined,
+	fallbackUrl: string
+): string | null => {
+	if (!/Android/i.test(userAgent ?? '')) return null;
+	const profile = notificationBrowserProfile(userAgent);
+	if (!profile.androidPackage || !profile.supportsAndroidSettingsIntent) return null;
+	let fallback = fallbackUrl;
+	try {
+		const parsed = new URL(fallbackUrl);
+		parsed.searchParams.set('push_setup', 'manual');
+		fallback = parsed.toString();
+	} catch {
+		// El fallback original sigue siendo mejor que dejar el intent sin retorno.
+	}
+	return `intent:#Intent;action=android.settings.APP_NOTIFICATION_SETTINGS;S.android.provider.extra.APP_PACKAGE=${profile.androidPackage};S.browser_fallback_url=${encodeURIComponent(fallback)};end`;
+};
+
 export const classifyUserAgent = (userAgent: string | null | undefined): DeviceClass => {
 	if (!userAgent) return 'unknown';
 	if (/iPhone|iPad|iPod/i.test(userAgent)) return 'ios';

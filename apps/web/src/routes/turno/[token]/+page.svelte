@@ -1,7 +1,14 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { replaceState } from '$app/navigation';
 	import { formatDateTime, formatInTimeZone } from '$lib/utils/format';
-	import { refineDeviceClass, type DeviceClass } from '$lib/device';
+	import {
+		androidNotificationSettingsIntent,
+		notificationBrowserProfile,
+		refineDeviceClass,
+		type DeviceClass,
+		type NotificationBrowserProfile
+	} from '$lib/device';
 
 	let { data, form } = $props<{
 		data: {
@@ -32,6 +39,7 @@
 		| 'unavailable'
 		| 'idle'
 		| 'working'
+		| 'repairing'
 		| 'configured'
 		| 'test_waiting'
 		| 'test_question'
@@ -39,6 +47,7 @@
 		| 'needs_device_check'
 		| 'denied'
 		| 'awaiting_permission'
+		| 'waiting_for_settings'
 		| 'error';
 	let pushState = $state<PushState>('unavailable');
 	type PushDelivery = {
@@ -65,8 +74,22 @@
 		verificationAvailable?: boolean;
 	};
 	let activeTestDeliveryId = $state<string | null>(null);
+	let activeTestCreatedAt = $state<string | null>(null);
 	let pushMessage = $state('');
 	let pollRun = 0;
+	let recoveryRun = 0;
+	let automaticRepairAttempts = 0;
+	let settingsRecoveryPending = false;
+	let settingsLaunchTimer: ReturnType<typeof setTimeout> | null = null;
+	let mounted = false;
+	let manualSettingsNeeded = $state(false);
+	let notificationPermissionStatus: PermissionStatus | null = null;
+	let notificationBrowser = $state<NotificationBrowserProfile>({
+		label: 'el navegador',
+		androidPackage: null,
+		supportsAndroidSettingsIntent: false
+	});
+	let androidNotificationSettingsUrl = $state<string | null>(null);
 
 	const base = $derived(appointment ? `/turno/${appointment.token}` : '');
 
@@ -93,6 +116,15 @@
 		const padding = '='.repeat((4 - (base64.length % 4)) % 4);
 		const normalized = (base64 + padding).replace(/-/g, '+').replace(/_/g, '/');
 		return Uint8Array.from(atob(normalized), (char) => char.charCodeAt(0));
+	};
+
+	const sameApplicationServerKey = (
+		actual: ArrayBuffer | null,
+		expected: Uint8Array<ArrayBuffer>
+	) => {
+		if (!actual) return true;
+		const current = new Uint8Array(actual);
+		return current.length === expected.length && current.every((byte, index) => byte === expected[index]);
 	};
 
 	// Soporte real de push (se fija en onMount; nunca en iOS).
@@ -126,7 +158,9 @@
 
 	const applyDelivery = (delivery: PushDelivery) => {
 		activeTestDeliveryId = delivery.deliveryId;
+		activeTestCreatedAt = delivery.createdAt;
 		if (delivery.state === 'confirmed') {
+			automaticRepairAttempts = 0;
 			pushState = 'subscribed';
 			pushMessage = '';
 			return true;
@@ -150,25 +184,54 @@
 		return false;
 	};
 
+	const deliveryCanRepairAutomatically = (delivery: PushDelivery) =>
+		delivery.state === 'failed' ||
+		delivery.state === 'expired' ||
+		delivery.state === 'superseded';
+
+	const readDelivery = async (deliveryId: string) => {
+		if (!base) return null;
+		try {
+			const response = await fetch(
+				`${base}/push?delivery_id=${encodeURIComponent(deliveryId)}`,
+				{ cache: 'no-store' }
+			);
+			if (!response.ok) return null;
+			const body = (await response.json()) as PushResponse;
+			return body.delivery ?? null;
+		} catch {
+			return null;
+		}
+	};
+
 	const pollTestDelivery = async (deliveryId: string) => {
 		const run = ++pollRun;
 		for (let attempt = 0; attempt < 15; attempt += 1) {
 			await new Promise((resolve) => setTimeout(resolve, 1000));
 			if (run !== pollRun || !base) return;
 			try {
-				const response = await fetch(
-					`${base}/push?delivery_id=${encodeURIComponent(deliveryId)}`,
-					{ cache: 'no-store' }
-				);
-				if (!response.ok) continue;
-				const body = (await response.json()) as PushResponse;
-				if (body.delivery && applyDelivery(body.delivery)) return;
+				const delivery = await readDelivery(deliveryId);
+				if (delivery && applyDelivery(delivery)) {
+					if (deliveryCanRepairAutomatically(delivery)) {
+						void repairPushAutomatically(delivery, false);
+					}
+					return;
+				}
 			} catch {
 				// El sondeo es best-effort; el próximo intento puede recuperar la conexión.
 			}
 		}
 		if (run === pollRun && pushState === 'test_waiting') {
-			pushState = 'needs_device_check';
+			void repairPushAutomatically(
+				{
+					deliveryId,
+					state: 'accepted',
+					kind: 'test',
+					createdAt: activeTestCreatedAt ?? new Date().toISOString(),
+					expiresAt: new Date(Date.now() + 60_000).toISOString()
+				},
+				true
+			);
 		}
 	};
 
@@ -180,6 +243,9 @@
 		if (result.body.delivery) {
 			const terminal = applyDelivery(result.body.delivery);
 			if (!terminal) void pollTestDelivery(result.body.delivery.deliveryId);
+			else if (deliveryCanRepairAutomatically(result.body.delivery)) {
+				void repairPushAutomatically(result.body.delivery, false);
+			}
 		} else {
 			activeTestDeliveryId = null;
 			pushState = 'configured';
@@ -189,23 +255,37 @@
 
 	// Requiere el permiso YA concedido: registra el SW, suscribe (o recupera) y guarda el
 	// endpoint contra el turno actual.
-	const syncPushSubscription = async (requestTest: boolean) => {
+	const syncPushSubscription = async (requestTest: boolean, recovering = false) => {
 		if (!data.vapidPublicKey || syncing) return;
 		pollRun += 1;
 		syncing = true;
-		pushState = 'working';
+		pushState = recovering ? 'repairing' : 'working';
 		pushMessage = '';
+		let retryAutomatically = false;
 		try {
 			const registration = await navigator.serviceWorker.register('/push-sw.js', {
 				updateViaCache: 'none'
 			});
+			try {
+				await registration.update();
+			} catch {
+				// La copia activa todavía puede funcionar. El test inmediato decide el resultado.
+			}
 			await Promise.all([navigator.serviceWorker.ready, waitForPushWorkerActivation(registration)]);
-			let subscription =
-				(await registration.pushManager.getSubscription()) ??
-				(await registration.pushManager.subscribe({
+			const expectedKey = urlBase64ToUint8Array(data.vapidPublicKey);
+			let subscription = await registration.pushManager.getSubscription();
+			if (
+				subscription &&
+				!sameApplicationServerKey(subscription.options.applicationServerKey, expectedKey)
+			) {
+				// Si el servidor rotó sus claves, la suscripción anterior nunca podrá recibir.
+				await subscription.unsubscribe();
+				subscription = null;
+			}
+			subscription ??= await registration.pushManager.subscribe({
 					userVisibleOnly: true,
-					applicationServerKey: urlBase64ToUint8Array(data.vapidPublicKey)
-				}));
+					applicationServerKey: expectedKey
+				});
 			let result = await savePushSubscriptionForAppointment(subscription, requestTest);
 			if (requestTest && result?.response.status === 410) {
 				await subscription.unsubscribe();
@@ -215,17 +295,76 @@
 				});
 				result = await savePushSubscriptionForAppointment(subscription, true);
 			}
-			if (!useSaveResult(result)) pushState = 'error';
+			if (!useSaveResult(result)) {
+				if (requestTest && !recovering && automaticRepairAttempts === 0) {
+					retryAutomatically = true;
+				} else {
+					pushState = recovering ? 'needs_device_check' : 'error';
+					if (recovering) pushMessage = '';
+				}
+			}
 		} catch {
-			pushMessage ||= 'No pudimos activar las notificaciones. Revisá tu conexión y volvé a intentar.';
-			pushState = 'error';
+			pushMessage ||= 'El teléfono no pudo completar la activación.';
+			if (requestTest && !recovering && automaticRepairAttempts === 0) {
+				retryAutomatically = true;
+			} else {
+				pushState = recovering ? 'needs_device_check' : 'error';
+				if (recovering) pushMessage = '';
+			}
 		} finally {
 			syncing = false;
+			if (retryAutomatically) {
+				void repairPushAutomatically(null, false);
+			}
 		}
+	};
+
+	const repairPushAutomatically = async (
+		delivery: PushDelivery | null,
+		waitForPreviousTest: boolean
+	) => {
+		if (!mounted || Notification.permission !== 'granted') {
+			pushState = Notification.permission === 'denied' ? 'denied' : 'awaiting_permission';
+			return;
+		}
+		if (automaticRepairAttempts >= 1) {
+			pushState = 'needs_device_check';
+			pushMessage = '';
+			return;
+		}
+		automaticRepairAttempts += 1;
+		const run = ++recoveryRun;
+		pushState = 'repairing';
+		pushMessage = '';
+
+		// El servidor evita pruebas duplicadas durante 30 segundos. Esperamos ese límite
+		// sin pedir ninguna acción y comprobamos una vez más antes de reenviar.
+		const createdAt = delivery?.createdAt ? new Date(delivery.createdAt).getTime() : Date.now();
+		const delay = waitForPreviousTest
+			? Math.max(1000, 31_000 - Math.max(0, Date.now() - createdAt))
+			: 1500;
+		await new Promise((resolve) => setTimeout(resolve, delay));
+		if (run !== recoveryRun || !mounted) return;
+
+		if (delivery?.deliveryId) {
+			const latest = await readDelivery(delivery.deliveryId);
+			if (latest && ['displayed', 'confirmed'].includes(latest.state)) {
+				applyDelivery(latest);
+				return;
+			}
+			if (latest?.state === 'missing') {
+				applyDelivery(latest);
+				return;
+			}
+		}
+
+		await syncPushSubscription(true, true);
 	};
 
 	const enablePush = async () => {
 		if (!data.vapidPublicKey || syncing) return;
+		automaticRepairAttempts = 0;
+		recoveryRun += 1;
 		pushState = 'working';
 		pushMessage = '';
 		try {
@@ -271,15 +410,81 @@
 	};
 
 	const retryPushTest = async () => {
+		automaticRepairAttempts = 0;
+		recoveryRun += 1;
 		if (Notification.permission === 'granted') {
-			await syncPushSubscription(true);
+			await syncPushSubscription(true, true);
 			return;
 		}
 		await enablePush();
 	};
 
+	const continueAfterPermissionChange = () => {
+		if (!pushSupported || syncing) return;
+		if (Notification.permission === 'denied') {
+			if (settingsRecoveryPending) manualSettingsNeeded = true;
+			settingsRecoveryPending = false;
+			pushState = 'denied';
+			return;
+		}
+		if (Notification.permission === 'default') {
+			if (settingsRecoveryPending) {
+				settingsRecoveryPending = false;
+				manualSettingsNeeded = true;
+			}
+			if (pushState === 'denied' || pushState === 'waiting_for_settings') {
+				pushState = 'awaiting_permission';
+			}
+			return;
+		}
+		if (
+			settingsRecoveryPending ||
+			pushState === 'awaiting_permission' ||
+			pushState === 'waiting_for_settings' ||
+			pushState === 'denied'
+		) {
+			settingsRecoveryPending = false;
+			manualSettingsNeeded = false;
+			automaticRepairAttempts = 0;
+			void syncPushSubscription(true, true);
+		}
+	};
+
+	const prepareDeviceSettingsRecovery = () => {
+		settingsRecoveryPending = true;
+		pushState = 'waiting_for_settings';
+		pushMessage = '';
+		if (settingsLaunchTimer) clearTimeout(settingsLaunchTimer);
+		settingsLaunchTimer = setTimeout(() => {
+			// Algunos navegadores Samsung ignoran intents hacia Ajustes. Si la página nunca
+			// perdió visibilidad, lo detectamos y mostramos el camino exacto sin repetir el intento.
+			if (
+				mounted &&
+				document.visibilityState === 'visible' &&
+				Notification.permission !== 'granted' &&
+				pushState === 'waiting_for_settings'
+			) {
+				settingsRecoveryPending = false;
+				manualSettingsNeeded = true;
+				pushState = 'denied';
+			}
+		}, 1800);
+	};
+
 	onMount(() => {
+		mounted = true;
+		const currentUrl = new URL(window.location.href);
+		manualSettingsNeeded = currentUrl.searchParams.get('push_setup') === 'manual';
+		if (manualSettingsNeeded) {
+			currentUrl.searchParams.delete('push_setup');
+			replaceState(currentUrl, window.history.state ?? {});
+		}
 		refinedDevice = refineDeviceClass(data.device, navigator);
+		notificationBrowser = notificationBrowserProfile(navigator.userAgent);
+		androidNotificationSettingsUrl = androidNotificationSettingsIntent(
+			navigator.userAgent,
+			window.location.href
+		);
 		const effective = refinedDevice ?? data.device;
 		pushSupported = Boolean(
 			data.vapidPublicKey &&
@@ -321,22 +526,26 @@
 		// recupera de un 'denied' previo si el usuario lo desbloqueó.
 		const onVisible = () => {
 			if (document.visibilityState !== 'visible' || syncing) return;
-			if (Notification.permission === 'denied') {
-				pushState = 'denied';
-				return;
-			}
-			if (['subscribed', 'configured', 'test_waiting', 'test_question'].includes(pushState)) return;
-			if (
-				Notification.permission === 'granted' &&
-				(pushState === 'awaiting_permission' || pushState === 'denied')
-			) {
-				void syncPushSubscription(true);
-			}
+			continueAfterPermissionChange();
 		};
 		document.addEventListener('visibilitychange', onVisible);
+		void navigator.permissions
+			?.query({ name: 'notifications' as PermissionName })
+			.then((status) => {
+				if (!mounted) return;
+				notificationPermissionStatus = status;
+				status.addEventListener('change', continueAfterPermissionChange);
+			})
+			.catch(() => {
+				// visibilitychange mantiene el mismo comportamiento en navegadores sin Permissions API.
+			});
 		return () => {
+			mounted = false;
 			pollRun += 1;
+			recoveryRun += 1;
+			if (settingsLaunchTimer) clearTimeout(settingsLaunchTimer);
 			document.removeEventListener('visibilitychange', onVisible);
+			notificationPermissionStatus?.removeEventListener('change', continueAfterPermissionChange);
 		};
 	});
 
@@ -486,6 +695,19 @@
 				<p class="ux-alert ux-alert-success">
 					🔔 Avisos verificados en este teléfono: te avisamos {pushWindowsLabel}.
 				</p>
+			{:else if pushState === 'repairing'}
+				<div class="ux-alert" aria-live="polite">
+					<div class="flex items-start gap-3">
+						<svg viewBox="0 0 24 24" aria-hidden="true" class="mt-0.5 h-5 w-5 shrink-0 animate-spin text-[#a78bfa]">
+							<circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.5" opacity="0.25" />
+							<path d="M21 12a9 9 0 0 0-9-9" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
+						</svg>
+						<div>
+							<p class="font-bold text-white">Estamos preparando tus avisos.</p>
+							<p class="mt-1">La activación continúa automáticamente. En un momento vas a recibir la prueba.</p>
+						</div>
+					</div>
+				</div>
 			{:else if pushState === 'configured'}
 				<div class="ux-alert">
 					<p class="font-bold text-white">Los avisos quedaron configurados.</p>
@@ -528,39 +750,90 @@
 				</div>
 			{:else if pushState === 'needs_device_check'}
 				<div class="ux-empty" aria-live="polite">
-					<p class="font-bold text-white">El teléfono no confirmó la notificación.</p>
-					<p class="mt-2">
-						Revisá en Android los permisos de notificaciones del navegador y del sitio. Si
-						sigue sin aparecer, permití que el navegador funcione en segundo plano y sin
-						restricciones de batería.
-					</p>
+					<p class="font-bold text-white">Un paso más para activar tus avisos</p>
+					{#if device === 'android'}
+						<p class="mt-2">
+							{notificationBrowser.label} necesita que habilites sus avisos en Android.
+						</p>
+					{:else}
+						<p class="mt-2">
+							Habilitá los avisos de {notificationBrowser.label} para completar la activación.
+						</p>
+					{/if}
 				</div>
-				<button
-					type="button"
-					class={primary ? 'ux-btn-primary w-full mt-3' : 'ux-btn-secondary w-full mt-3'}
-					disabled={syncing}
-					onclick={retryPushTest}
-				>
-					Probar nuevamente
-				</button>
+				{#if device === 'android' && androidNotificationSettingsUrl && !manualSettingsNeeded}
+					<a
+						href={androidNotificationSettingsUrl}
+						class={primary ? 'ux-btn-primary mt-3 block w-full text-center' : 'ux-btn-secondary mt-3 block w-full text-center'}
+						onclick={prepareDeviceSettingsRecovery}
+					>
+						Continuar en ajustes
+					</a>
+					<p class="mt-2 text-center text-xs text-white/55">
+						Activá “Permitir notificaciones” y volvé. La prueba continuará sola.
+					</p>
+				{:else if device === 'android'}
+					<ol class="mt-3 space-y-2 rounded-2xl border border-white/10 bg-white/[0.035] p-4 text-sm text-white/75">
+						<li><strong class="text-white">1.</strong> Abrí “Ajustes” del teléfono.</li>
+						<li><strong class="text-white">2.</strong> Entrá en “Aplicaciones” → “{notificationBrowser.label}” → “Notificaciones”.</li>
+						<li><strong class="text-white">3.</strong> Activá “Permitir notificaciones” y volvé.</li>
+					</ol>
+					<p class="mt-2 text-center text-xs text-white/55">Al volver, la prueba continuará sola.</p>
+				{:else}
+					<button
+						type="button"
+						class={primary ? 'ux-btn-primary w-full mt-3' : 'ux-btn-secondary w-full mt-3'}
+						disabled={syncing}
+						onclick={retryPushTest}
+					>
+						Completar activación
+					</button>
+				{/if}
 			{:else if pushState === 'awaiting_permission'}
-				<p class="ux-alert">
-					Concedé el permiso de notificaciones y volvé a esta pantalla: activamos los avisos
-					automáticamente.
-				</p>
+				<div class="ux-alert" aria-live="polite">
+					<p class="font-bold text-white">Confirmá la activación</p>
+					<p class="mt-1">Cuando aparezca la pregunta de notificaciones, elegí “Permitir”. Después continuamos solos.</p>
+				</div>
 				<button
 					type="button"
 					class={primary ? 'ux-btn-primary w-full mt-3' : 'ux-btn-secondary w-full mt-3'}
 					onclick={enablePush}
 				>
-					Volver a intentar
+					Mostrar la pregunta otra vez
 				</button>
+			{:else if pushState === 'waiting_for_settings'}
+				<div class="ux-alert" aria-live="polite">
+					<p class="font-bold text-white">Continuamos cuando vuelvas</p>
+					<p class="mt-1">Al regresar de los ajustes, la prueba se enviará automáticamente.</p>
+				</div>
 			{:else if pushState === 'denied'}
-				<p class="ux-empty">
-					Las notificaciones están bloqueadas. Habilitalas para este sitio y para la app
-					del navegador desde los ajustes del teléfono. Mientras tanto, agregá el turno al
-					calendario para no olvidarte.
-				</p>
+				<div class="ux-empty" aria-live="polite">
+					<p class="font-bold text-white">Un paso más para activar tus avisos</p>
+					<p class="mt-2">Habilitá las notificaciones de esta página y continuamos automáticamente.</p>
+				</div>
+				{#if device === 'android' && androidNotificationSettingsUrl && !manualSettingsNeeded}
+					<a
+						href={androidNotificationSettingsUrl}
+						class={primary ? 'ux-btn-primary mt-3 block w-full text-center' : 'ux-btn-secondary mt-3 block w-full text-center'}
+						onclick={prepareDeviceSettingsRecovery}
+					>
+						Continuar en ajustes
+					</a>
+					<p class="mt-2 text-center text-xs text-white/55">Activá “Permitir notificaciones” y volvé. Seguimos solos.</p>
+				{:else}
+					<ol class="mt-3 space-y-2 rounded-2xl border border-white/10 bg-white/[0.035] p-4 text-left text-sm text-white/75">
+						{#if notificationBrowser.label === 'Samsung Internet'}
+							<li><strong class="text-white">1.</strong> Tocá ☰ en Samsung Internet y entrá en “Ajustes”.</li>
+							<li><strong class="text-white">2.</strong> Tocá “Sitios y descargas” → “Permisos del sitio” → “Notificaciones”.</li>
+							<li><strong class="text-white">3.</strong> Permití esta página y volvé.</li>
+						{:else}
+							<li><strong class="text-white">1.</strong> Tocá el ícono que está junto a la dirección, arriba.</li>
+							<li><strong class="text-white">2.</strong> Tocá “Permisos” → “Notificaciones”.</li>
+							<li><strong class="text-white">3.</strong> Elegí “Permitir” y volvé.</li>
+						{/if}
+					</ol>
+					<p class="mt-2 text-center text-xs text-white/55">Al volver, la prueba continuará sola.</p>
+				{/if}
 			{:else}
 				<button
 					type="button"
@@ -574,9 +847,10 @@
 					Te avisamos {pushWindowsLabel}, sin instalar nada.
 				</p>
 				{#if pushState === 'error'}
-					<p class="ux-empty mt-2">
-						{pushMessage || 'No pudimos activar las notificaciones. Agregá el turno al calendario y volvé a intentar.'}
-					</p>
+					<div class="ux-empty mt-2">
+						<p class="font-bold text-white">Tu turno ya está guardado.</p>
+						<p class="mt-1">Podés activar los avisos desde este mismo botón cuando quieras.</p>
+					</div>
 				{/if}
 			{/if}
 			{#if pushMessage && pushState !== 'error'}

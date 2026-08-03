@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+	androidNotificationSettingsIntent,
 	classifyUserAgent,
 	isLikelyBotUserAgent,
+	notificationBrowserProfile,
 	refineDeviceClass,
 	supportsAndroidCalendarIntent
 } from './device';
@@ -13,6 +15,8 @@ const UA = {
 		'Mozilla/5.0 (iPad; CPU OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
 	android:
 		'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36',
+	androidEdge:
+		'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36 EdgA/125.0.0.0',
 	macSafari:
 		'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15',
 	windowsChrome:
@@ -28,6 +32,47 @@ const UA = {
 	firefoxAndroid:
 		'Mozilla/5.0 (Android 14; Mobile; rv:126.0) Gecko/126.0 Firefox/126.0'
 };
+
+describe('notificationBrowserProfile', () => {
+	it('identifica el navegador Android antes de Chrome embebido en su UA', () => {
+		expect(notificationBrowserProfile(UA.android)).toMatchObject({
+			label: 'Chrome',
+			androidPackage: 'com.android.chrome'
+		});
+		expect(notificationBrowserProfile(UA.samsungInternet)).toMatchObject({
+			label: 'Samsung Internet',
+			androidPackage: 'com.sec.android.app.sbrowser'
+		});
+		expect(notificationBrowserProfile(UA.androidEdge)).toMatchObject({
+			label: 'Microsoft Edge',
+			androidPackage: 'com.microsoft.emmx'
+		});
+	});
+
+	it('no promete un acceso directo cuando el navegador no admite intent de Chromium', () => {
+		expect(notificationBrowserProfile(UA.firefoxAndroid)).toMatchObject({
+			label: 'Firefox',
+			supportsAndroidSettingsIntent: false
+		});
+		expect(androidNotificationSettingsIntent(UA.firefoxAndroid, 'https://turnos.test/turno/1')).toBeNull();
+	});
+});
+
+describe('androidNotificationSettingsIntent', () => {
+	it('apunta a las notificaciones de la app correcta y conserva un retorno seguro', () => {
+		const fallback = 'https://turnos.test/turno/token?desde=mensaje';
+		const intent = androidNotificationSettingsIntent(UA.android, fallback);
+		expect(intent).toContain('action=android.settings.APP_NOTIFICATION_SETTINGS');
+		expect(intent).toContain('S.android.provider.extra.APP_PACKAGE=com.android.chrome');
+		expect(intent).toContain(
+			`S.browser_fallback_url=${encodeURIComponent('https://turnos.test/turno/token?desde=mensaje&push_setup=manual')}`
+		);
+	});
+
+	it('no genera enlaces Android en escritorio', () => {
+		expect(androidNotificationSettingsIntent(UA.windowsChrome, 'https://turnos.test')).toBeNull();
+	});
+});
 
 describe('classifyUserAgent', () => {
 	it('clasifica iPhone y iPad como ios', () => {
