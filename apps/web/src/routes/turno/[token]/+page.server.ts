@@ -25,6 +25,7 @@ import { publicAppointmentUrl } from '$lib/server/messaging';
 import {
 	classifyUserAgent,
 	isLikelyBotUserAgent,
+	notificationBrowserProfile,
 	supportsAndroidCalendarIntent,
 	type DeviceClass
 } from '$lib/device';
@@ -88,6 +89,8 @@ export const load: PageServerLoad = async ({ params, fetch, url, request, setHea
 	const device = classifyUserAgent(userAgent);
 	const vapidPublicKey = publicEnv.PUBLIC_VAPID_PUBLIC_KEY?.trim() || env.VAPID_PUBLIC_KEY?.trim() || null;
 	const publicSiteUrl = getPublicSiteUrl();
+	const pushSetupManual = url.searchParams.get('push_setup') === 'manual';
+	const notificationBrowser = notificationBrowserProfile(userAgent);
 
 	if (env.DEMO_MODE === 'true') {
 		const appointment = demoPublicAppointment(params.token);
@@ -101,6 +104,8 @@ export const load: PageServerLoad = async ({ params, fetch, url, request, setHea
 			isSoon: false,
 			vapidPublicKey,
 			publicSiteUrl,
+			pushSetupManual,
+			notificationBrowser,
 			androidCalendarIntent: androidCalendarIntentFor(appointment, device, userAgent, url)
 		};
 	}
@@ -129,6 +134,8 @@ export const load: PageServerLoad = async ({ params, fetch, url, request, setHea
 			isSoon: appointment ? isStartingSoon(appointment, now) : false,
 			vapidPublicKey,
 			publicSiteUrl,
+			pushSetupManual,
+			notificationBrowser,
 			androidCalendarIntent: androidCalendarIntentFor(appointment, device, userAgent, url)
 		};
 	} catch (error) {
@@ -143,6 +150,8 @@ export const load: PageServerLoad = async ({ params, fetch, url, request, setHea
 			isSoon: false,
 			vapidPublicKey,
 			publicSiteUrl,
+			pushSetupManual,
+			notificationBrowser,
 			androidCalendarIntent: null
 		};
 	}

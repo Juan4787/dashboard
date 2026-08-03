@@ -6,8 +6,6 @@ import { tick } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Page from './+page.svelte';
 
-vi.mock('$app/navigation', () => ({ replaceState: vi.fn() }));
-
 const SAMSUNG_USER_AGENT =
 	'Mozilla/5.0 (Linux; Android 14; SAMSUNG SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/23.0 Chrome/115.0.0.0 Mobile Safari/537.36';
 
@@ -47,6 +45,12 @@ const pageData = {
 	isSoon: false,
 	vapidPublicKey: 'AQIDBA',
 	publicSiteUrl: 'https://turnos.test',
+	pushSetupManual: false,
+	notificationBrowser: {
+		label: 'Samsung Internet',
+		androidPackage: 'com.sec.android.app.sbrowser',
+		supportsAndroidSettingsIntent: true
+	},
 	androidCalendarIntent: null
 };
 
@@ -163,7 +167,7 @@ describe('activación de notificaciones en Android', () => {
 
 			await vi.advanceTimersByTimeAsync(1_800);
 			await tick();
-			expect(screen.getByText(/entr[aá] en “Aplicaciones”/i)).toBeInTheDocument();
+			expect(screen.getByText(/notificaciones de aplicaciones/i)).toBeInTheDocument();
 			expect(screen.getByText(/activ[aá] “Permitir notificaciones”/i)).toBeInTheDocument();
 		} finally {
 			document.removeEventListener('click', preventIntentNavigation, true);
@@ -206,9 +210,37 @@ describe('activación de notificaciones en Android', () => {
 	it('conserva el camino manual si el navegador vuelve por el fallback del intent', async () => {
 		window.history.replaceState({}, '', '/turno/public-token?push_setup=manual');
 		installNotificationEnvironment(['missing']);
-		render(Page, { data: pageData });
+		render(Page, { data: { ...pageData, pushSetupManual: true } });
 
-		expect(await screen.findByText(/entr[aá] en “Aplicaciones”/i)).toBeInTheDocument();
+		expect(await screen.findByText(/notificaciones de aplicaciones/i)).toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: /activar avisos/i })).not.toBeInTheDocument();
+	});
+
+	it('reanuda la prueba al volver de la configuracion tras una navegacion completa', async () => {
+		window.history.replaceState({}, '', '/turno/public-token?push_setup=manual');
+		const environment = installNotificationEnvironment(['confirmed']);
+		render(Page, { data: { ...pageData, pushSetupManual: true } });
+
+		expect(await screen.findByText(/notificaciones de aplicaciones/i)).toBeInTheDocument();
+		environment.setVisibility('hidden');
+		environment.setVisibility('visible');
+
+		await waitFor(() => {
+			expect(screen.getByText(/avisos verificados en este tel[eé]fono/i)).toBeInTheDocument();
+		});
+		expect(environment.postRequests()).toBe(1);
+	});
+
+	it('no oculta la recuperacion si el nuevo contexto no expone Push API', async () => {
+		window.history.replaceState({}, '', '/turno/public-token?push_setup=manual');
+		Object.defineProperty(window, 'Notification', { configurable: true, value: undefined });
+		Object.defineProperty(window, 'PushManager', { configurable: true, value: undefined });
+		Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: undefined });
+		Object.defineProperty(navigator, 'userAgent', { configurable: true, value: SAMSUNG_USER_AGENT });
+
+		render(Page, { data: { ...pageData, pushSetupManual: true } });
+
+		expect(screen.getByText(/abr[ií] este turno en el navegador/i)).toBeInTheDocument();
 		expect(screen.queryByRole('button', { name: /activar avisos/i })).not.toBeInTheDocument();
 	});
 });

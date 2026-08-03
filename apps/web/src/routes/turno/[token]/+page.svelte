@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { replaceState } from '$app/navigation';
 	import { formatDateTime, formatInTimeZone } from '$lib/utils/format';
 	import {
 		androidNotificationSettingsIntent,
@@ -21,6 +20,8 @@
 			isSoon: boolean;
 			vapidPublicKey: string | null;
 			publicSiteUrl: string;
+			pushSetupManual: boolean;
+			notificationBrowser: NotificationBrowserProfile;
 			androidCalendarIntent: { url: string; variant: 'data' | 'type' } | null;
 		};
 		form?: { success?: boolean; message?: string };
@@ -37,6 +38,7 @@
 	// app en el home), y el permiso se pide recién al tocar el botón.
 	type PushState =
 		| 'unavailable'
+		| 'unsupported'
 		| 'idle'
 		| 'working'
 		| 'repairing'
@@ -49,6 +51,14 @@
 		| 'awaiting_permission'
 		| 'error';
 	let pushState = $state<PushState>('unavailable');
+	// El fallback del intent hace una navegacion completa. El servidor conserva un
+	// estado visible desde el primer HTML para que una hidratacion tardia o fallida
+	// nunca vuelva a borrar toda la accion de notificaciones en Android.
+	const renderedPushState = $derived<PushState>(
+		pushState === 'unavailable' && data.device === 'android' && data.pushSetupManual
+			? 'needs_device_check'
+			: pushState
+	);
 	type PushDelivery = {
 		deliveryId: string;
 		state:
@@ -82,12 +92,10 @@
 	let settingsLaunchTimer: ReturnType<typeof setTimeout> | null = null;
 	let mounted = false;
 	let manualSettingsNeeded = $state(false);
+	const showManualSettings = $derived(manualSettingsNeeded || data.pushSetupManual);
 	let notificationPermissionStatus: PermissionStatus | null = null;
-	let notificationBrowser = $state<NotificationBrowserProfile>({
-		label: 'el navegador',
-		androidPackage: null,
-		supportsAndroidSettingsIntent: false
-	});
+	let refinedNotificationBrowser = $state<NotificationBrowserProfile | null>(null);
+	const notificationBrowser = $derived(refinedNotificationBrowser ?? data.notificationBrowser);
 	let androidNotificationSettingsUrl = $state<string | null>(null);
 
 	const base = $derived(appointment ? `/turno/${appointment.token}` : '');
@@ -127,7 +135,7 @@
 	};
 
 	// Soporte real de push (se fija en onMount; nunca en iOS).
-	let pushSupported = false;
+	let pushSupported = $state(false);
 	// Candado anti-reentrada: requestPermission y visibilitychange pueden disparar el
 	// alta a la vez. El upsert del backend es idempotente, pero evitamos subscribe() dobles.
 	let syncing = $state(false);
@@ -436,16 +444,19 @@
 			}
 			return;
 		}
+		const returnedFromManualSetup =
+			manualSettingsNeeded && pushState === 'needs_device_check';
 		if (
 			settingsRecoveryPending ||
 			pushState === 'awaiting_permission' ||
-			pushState === 'denied'
+			pushState === 'denied' ||
+			returnedFromManualSetup
 		) {
 			const returnedFromSettings = settingsRecoveryPending;
 			settingsRecoveryPending = false;
 			// Si la prueba volviera a no verse, mostramos directamente el camino manual
 			// en lugar de mandar otra vez al mismo intent que este teléfono ya ignoró.
-			manualSettingsNeeded = returnedFromSettings;
+			manualSettingsNeeded = returnedFromSettings || returnedFromManualSetup;
 			automaticRepairAttempts = 0;
 			void syncPushSubscription(true, true);
 		}
@@ -469,14 +480,9 @@
 
 	onMount(() => {
 		mounted = true;
-		const currentUrl = new URL(window.location.href);
-		manualSettingsNeeded = currentUrl.searchParams.get('push_setup') === 'manual';
-		if (manualSettingsNeeded) {
-			currentUrl.searchParams.delete('push_setup');
-			replaceState(currentUrl, window.history.state ?? {});
-		}
+		manualSettingsNeeded = data.pushSetupManual;
 		refinedDevice = refineDeviceClass(data.device, navigator);
-		notificationBrowser = notificationBrowserProfile(navigator.userAgent);
+		refinedNotificationBrowser = notificationBrowserProfile(navigator.userAgent);
 		androidNotificationSettingsUrl = androidNotificationSettingsIntent(
 			navigator.userAgent,
 			window.location.href
@@ -485,11 +491,14 @@
 		pushSupported = Boolean(
 			data.vapidPublicKey &&
 				effective !== 'ios' &&
-				'serviceWorker' in navigator &&
-				'PushManager' in window &&
-				'Notification' in window
+				typeof navigator.serviceWorker !== 'undefined' &&
+				typeof window.PushManager !== 'undefined' &&
+				typeof window.Notification !== 'undefined'
 		);
-		if (!pushSupported) return;
+		if (!pushSupported) {
+			if (effective === 'android') pushState = 'unsupported';
+			return;
+		}
 
 		if (Notification.permission === 'denied') {
 			// No se reutiliza una suscripción histórica cuando el permiso actual está
@@ -694,13 +703,13 @@
 </script>
 
 {#snippet pushBlock(primary: boolean)}
-	{#if pushState !== 'unavailable'}
+	{#if renderedPushState !== 'unavailable'}
 		<div class="mt-4">
-			{#if pushState === 'subscribed'}
+			{#if renderedPushState === 'subscribed'}
 				<p class="ux-alert ux-alert-success">
 					🔔 Avisos verificados en este teléfono: te avisamos {pushWindowsLabel}.
 				</p>
-			{:else if pushState === 'repairing'}
+			{:else if renderedPushState === 'repairing'}
 				<div class="ux-alert" aria-live="polite">
 					<div class="flex items-start gap-3">
 						<svg viewBox="0 0 24 24" aria-hidden="true" class="mt-0.5 h-5 w-5 shrink-0 animate-spin text-[#a78bfa]">
@@ -713,7 +722,7 @@
 						</div>
 					</div>
 				</div>
-			{:else if pushState === 'configured'}
+			{:else if renderedPushState === 'configured'}
 				<div class="ux-alert">
 					<p class="font-bold text-white">Los avisos quedaron configurados.</p>
 					<p class="mt-1">Enviá una prueba para comprobar que este teléfono puede mostrarlos.</p>
@@ -725,12 +734,12 @@
 				>
 					Enviar notificación de prueba
 				</button>
-			{:else if pushState === 'test_waiting'}
+			{:else if renderedPushState === 'test_waiting'}
 				<div class="ux-alert" aria-live="polite">
 					<p class="font-bold text-white">Prueba enviada.</p>
 					<p class="mt-1">Estamos comprobando si llegó al navegador de este teléfono…</p>
 				</div>
-			{:else if pushState === 'test_question'}
+			{:else if renderedPushState === 'test_question'}
 				<div class="ux-alert ux-alert-success" aria-live="polite">
 					<p class="font-bold text-white">El navegador informó que mostró la prueba.</p>
 					<p class="mt-1">¿La viste entre las notificaciones del teléfono?</p>
@@ -753,7 +762,15 @@
 						No apareció
 					</button>
 				</div>
-			{:else if pushState === 'needs_device_check'}
+			{:else if renderedPushState === 'unsupported'}
+				<div class="ux-empty" aria-live="polite">
+					<p class="font-bold text-white">Abrí este turno en el navegador del teléfono</p>
+					<p class="mt-2">
+						En el menú de esta pantalla, elegí “Abrir en Samsung Internet” o “Abrir en Chrome”.
+						El botón para activar los avisos va a aparecer allí.
+					</p>
+				</div>
+			{:else if renderedPushState === 'needs_device_check'}
 				<div class="ux-empty" aria-live="polite">
 					<p class="font-bold text-white">Un paso más para activar tus avisos</p>
 					{#if device === 'android'}
@@ -766,7 +783,7 @@
 						</p>
 					{/if}
 				</div>
-				{#if device === 'android' && androidNotificationSettingsUrl && !manualSettingsNeeded}
+				{#if device === 'android' && androidNotificationSettingsUrl && !showManualSettings}
 					<a
 						href={androidNotificationSettingsUrl}
 						class={primary ? 'ux-btn-primary mt-3 block w-full text-center' : 'ux-btn-secondary mt-3 block w-full text-center'}
@@ -779,11 +796,21 @@
 					</p>
 				{:else if device === 'android'}
 					<ol class="mt-3 space-y-2 rounded-2xl border border-white/10 bg-white/[0.035] p-4 text-sm text-white/75">
-						<li><strong class="text-white">1.</strong> Abrí “Ajustes” del teléfono.</li>
-						<li><strong class="text-white">2.</strong> Entrá en “Aplicaciones” → “{notificationBrowser.label}” → “Notificaciones”.</li>
+						<li><strong class="text-white">1.</strong> Abrí “Ajustes” → “Notificaciones” → “Notificaciones de aplicaciones”.</li>
+						<li><strong class="text-white">2.</strong> Elegí “{notificationBrowser.label}”.</li>
 						<li><strong class="text-white">3.</strong> Activá “Permitir notificaciones” y volvé.</li>
 					</ol>
 					<p class="mt-2 text-center text-xs text-white/55">Al volver, la prueba continuará sola.</p>
+					{#if pushSupported}
+						<button
+							type="button"
+							class={primary ? 'ux-btn-primary w-full mt-3' : 'ux-btn-secondary w-full mt-3'}
+							disabled={syncing}
+							onclick={retryPushTest}
+						>
+							Probar avisos ahora
+						</button>
+					{/if}
 				{:else}
 					<button
 						type="button"
@@ -794,7 +821,7 @@
 						Completar activación
 					</button>
 				{/if}
-			{:else if pushState === 'awaiting_permission'}
+			{:else if renderedPushState === 'awaiting_permission'}
 				<div class="ux-alert" aria-live="polite">
 					<p class="font-bold text-white">Confirmá la activación</p>
 					<p class="mt-1">Cuando aparezca la pregunta de notificaciones, elegí “Permitir”. Después continuamos solos.</p>
@@ -806,7 +833,7 @@
 				>
 					Mostrar la pregunta otra vez
 				</button>
-			{:else if pushState === 'denied'}
+			{:else if renderedPushState === 'denied'}
 				<div class="ux-empty" aria-live="polite">
 					<p class="font-bold text-white">Un paso más para activar tus avisos</p>
 					<p class="mt-2">Habilitá los avisos de esta página en {notificationBrowser.label}.</p>
@@ -827,22 +854,22 @@
 				<button
 					type="button"
 					class={primary ? 'ux-btn-primary ux-btn-cta w-full' : 'ux-btn-secondary w-full'}
-					disabled={pushState === 'working'}
+					disabled={renderedPushState === 'working'}
 					onclick={enablePush}
 				>
-					{pushState === 'working' ? 'Activando…' : '🔔 Activar avisos en este teléfono'}
+					{renderedPushState === 'working' ? 'Activando…' : '🔔 Activar avisos en este teléfono'}
 				</button>
 				<p class="mt-2 text-center text-xs text-white/45">
 					Te avisamos {pushWindowsLabel}, sin instalar nada.
 				</p>
-				{#if pushState === 'error'}
+				{#if renderedPushState === 'error'}
 					<div class="ux-empty mt-2">
 						<p class="font-bold text-white">Tu turno ya está guardado.</p>
 						<p class="mt-1">Podés activar los avisos desde este mismo botón cuando quieras.</p>
 					</div>
 				{/if}
 			{/if}
-			{#if pushMessage && pushState !== 'error'}
+			{#if pushMessage && renderedPushState !== 'error'}
 				<p class="ux-empty mt-2">{pushMessage}</p>
 			{/if}
 		</div>
@@ -907,7 +934,7 @@
 					<p class="mt-4 text-xs text-white/45">
 						El evento guarda la dirección y este enlace; los avisos dependen de los
 						recordatorios habituales de tu calendario.
-						{#if pushState !== 'unavailable'}
+						{#if renderedPushState !== 'unavailable'}
 							Para avisos {pushWindowsLabel}, activá los avisos en este teléfono.
 						{/if}
 					</p>
