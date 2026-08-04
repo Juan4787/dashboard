@@ -10,6 +10,7 @@ import {
 } from '$lib/server/appointments';
 import { getOdontoContext } from '$lib/server/odonto-context';
 import { createSupabaseAdminClient } from '$lib/server/supabase';
+import { processAppointmentGoogleCalendarSync } from '$lib/server/google-calendar';
 import { resetPushRemindersForReschedule, sendReschedulePushNotice } from '$lib/server/push';
 import { buildRescheduleWhatsAppMessage, buildWaMeUrl } from '$lib/server/reminders';
 import { publicRescheduleUrl } from '$lib/server/messaging';
@@ -225,6 +226,22 @@ export const actions: Actions = {
 			return fail(400, { message: getHumanAppointmentErrorMessage(error) });
 		}
 
+		if (status === 'cancelled') {
+			try {
+				const admin = await createSupabaseAdminClient('odonto', fetch);
+				await processAppointmentGoogleCalendarSync(admin, params.appointmentId, fetch);
+			} catch (calendarError) {
+				// El trigger ya dejó el borrado en la cola durable.
+				console.error('Error sincronizando Google Calendar tras cancelar turno', {
+					appointmentId: params.appointmentId,
+					code:
+						calendarError instanceof Error
+							? calendarError.message.slice(0, 120)
+							: 'unknown'
+				});
+			}
+		}
+
 		return { success: true, message: 'Turno actualizado.' };
 	},
 	reschedule: async ({ request, params, locals, fetch, cookies }) => {
@@ -352,6 +369,20 @@ export const actions: Actions = {
 			});
 		} catch (pushError) {
 			console.error('Error notificando avisos push tras reprogramar', pushError);
+		}
+
+		try {
+			const admin = await createSupabaseAdminClient('odonto', fetch);
+			await processAppointmentGoogleCalendarSync(admin, params.appointmentId, fetch);
+		} catch (calendarError) {
+			// La reprogramacion ya quedó confirmada y la cola reintentará sin intervención.
+			console.error('Error sincronizando Google Calendar tras reprogramar', {
+				appointmentId: params.appointmentId,
+				code:
+					calendarError instanceof Error
+						? calendarError.message.slice(0, 120)
+						: 'unknown'
+			});
 		}
 
 		throw redirect(

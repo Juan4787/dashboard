@@ -16,6 +16,7 @@ import {
 import { getOdontoContext } from '$lib/server/odonto-context';
 import { countTomorrowUncovered } from '$lib/server/reminders';
 import { createSupabaseAdminClient } from '$lib/server/supabase';
+import { processAppointmentGoogleCalendarSync } from '$lib/server/google-calendar';
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -411,6 +412,22 @@ export const actions: Actions = {
 		} catch (error: any) {
 			console.error('Error actualizando turno', error);
 			return fail(400, { message: getHumanAppointmentErrorMessage(error) });
+		}
+
+		if (status === 'cancelled') {
+			try {
+				const admin = await createSupabaseAdminClient('odonto', fetch);
+				await processAppointmentGoogleCalendarSync(admin, appointmentId, fetch);
+			} catch (calendarError) {
+				// El borrado remoto ya quedó encolado por el trigger transaccional.
+				console.error('Error sincronizando Google Calendar tras cancelar desde agenda', {
+					appointmentId,
+					code:
+						calendarError instanceof Error
+							? calendarError.message.slice(0, 120)
+							: 'unknown'
+				});
+			}
 		}
 
 		const params = new URLSearchParams({ date });

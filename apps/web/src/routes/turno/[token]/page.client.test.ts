@@ -2,7 +2,6 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import '@testing-library/jest-dom/vitest';
-import { tick } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Page from './+page.svelte';
 
@@ -51,10 +50,17 @@ const pageData = {
 		androidPackage: 'com.sec.android.app.sbrowser',
 		supportsAndroidSettingsIntent: true
 	},
-	androidCalendarIntent: null
+	androidCalendarIntent: null,
+	googleCalendar: {
+		available: false,
+		state: 'none' as const,
+		current: false,
+		reminderLabel: '24 horas y 2 horas antes'
+	},
+	calendarMessage: null
 };
 
-const delivery = (state: 'missing' | 'confirmed', id: string) => ({
+const delivery = (state: 'accepted' | 'displayed' | 'missing' | 'confirmed', id: string) => ({
 	deliveryId: id,
 	state,
 	kind: 'test' as const,
@@ -69,11 +75,14 @@ const jsonResponse = (body: unknown) =>
 	});
 
 const installNotificationEnvironment = (
-	states: Array<'missing' | 'confirmed'>,
-	initialPermission: NotificationPermission = 'granted'
+	states: Array<'accepted' | 'displayed' | 'missing' | 'confirmed'>,
+	initialPermission: NotificationPermission = 'granted',
+	requestedPermission: NotificationPermission = 'granted'
 ) => {
 	let visibilityState: DocumentVisibilityState = 'visible';
 	let postCount = 0;
+	let permission = initialPermission;
+	let lastDelivery = delivery('displayed', 'delivery-0');
 	const subscription = {
 		options: { applicationServerKey: null },
 		toJSON: () => ({
@@ -100,8 +109,13 @@ const installNotificationEnvironment = (
 		removeEventListener: vi.fn()
 	};
 	const notification = {
-		permission: initialPermission,
-		requestPermission: vi.fn().mockResolvedValue('granted' as NotificationPermission)
+		get permission() {
+			return permission;
+		},
+		requestPermission: vi.fn(async () => {
+			permission = requestedPermission;
+			return requestedPermission;
+		})
 	};
 
 	Object.defineProperty(window, 'Notification', { configurable: true, value: notification });
@@ -122,9 +136,15 @@ const installNotificationEnvironment = (
 		if (init?.method === 'POST') {
 			const state = states[Math.min(postCount, states.length - 1)];
 			postCount += 1;
-			return jsonResponse({ ok: true, delivery: delivery(state, `delivery-${postCount}`) });
+			lastDelivery = delivery(state ?? 'missing', `delivery-${postCount}`);
+			return jsonResponse({ ok: true, delivery: lastDelivery });
 		}
-		return jsonResponse({ ok: true, delivery: null });
+		if (init?.method === 'PATCH') {
+			const visible = JSON.parse(String(init.body ?? '{}')).visible === true;
+			lastDelivery = delivery(visible ? 'confirmed' : 'missing', lastDelivery.deliveryId);
+			return jsonResponse({ ok: true, delivery: lastDelivery });
+		}
+		return jsonResponse({ ok: true, delivery: lastDelivery });
 	}));
 
 	return {
@@ -132,7 +152,8 @@ const installNotificationEnvironment = (
 			visibilityState = next;
 			document.dispatchEvent(new Event('visibilitychange'));
 		},
-		postRequests: () => postCount
+		postRequests: () => postCount,
+		requestPermission: notification.requestPermission
 	};
 };
 
@@ -147,100 +168,221 @@ describe('activación de notificaciones en Android', () => {
 		vi.unstubAllGlobals();
 	});
 
-	it('mantiene una salida visible cuando Samsung ignora el acceso a Ajustes', async () => {
-		installNotificationEnvironment(['missing']);
-		const preventIntentNavigation = (event: Event) => {
-			const anchor = (event.target as Element | null)?.closest?.('a');
-			if (anchor?.getAttribute('href')?.startsWith('intent:')) event.preventDefault();
-		};
-		document.addEventListener('click', preventIntentNavigation, true);
+	it('muestra al principio solamente el recordatorio y envía una prueba real al tocarlo', async () => {
+		const environment = installNotificationEnvironment(['displayed'], 'default');
+		render(Page, {
+			data: {
+				...pageData,
+				created: true,
+				googleCalendar: { ...pageData.googleCalendar, available: true }
+			}
+		});
 
-		try {
-			render(Page, { data: pageData });
-			await fireEvent.click(await screen.findByRole('button', { name: /activar avisos/i }));
-			const settingsLink = await screen.findByRole('link', { name: /abrir ajustes de android/i });
+		expect(screen.getByRole('heading', { name: 'Tu turno quedó reservado' })).toBeInTheDocument();
+		expect(
+			screen.getByRole('heading', { name: 'Último paso: activá el recordatorio' })
+		).toBeInTheDocument();
+		expect(screen.queryByRole('link', { name: 'Agregar a Calendario Samsung' })).not.toBeInTheDocument();
+		expect(screen.queryByRole('link', { name: 'Agregar a Google Calendar' })).not.toBeInTheDocument();
 
-			vi.useFakeTimers();
-			await fireEvent.click(settingsLink);
-			await tick();
-			expect(screen.getByRole('link', { name: /abriendo ajustes/i })).toBeInTheDocument();
-
-			await vi.advanceTimersByTimeAsync(1_800);
-			await tick();
-			expect(screen.getByText(/notificaciones de aplicaciones/i)).toBeInTheDocument();
-			expect(screen.getByText(/activ[aá] “Permitir notificaciones”/i)).toBeInTheDocument();
-		} finally {
-			document.removeEventListener('click', preventIntentNavigation, true);
-		}
-	});
-
-	it('retoma la prueba automáticamente cuando el usuario vuelve de Ajustes', async () => {
-		const environment = installNotificationEnvironment(['missing', 'confirmed']);
-		const preventIntentNavigation = (event: Event) => {
-			const anchor = (event.target as Element | null)?.closest?.('a');
-			if (anchor?.getAttribute('href')?.startsWith('intent:')) event.preventDefault();
-		};
-		document.addEventListener('click', preventIntentNavigation, true);
-
-		try {
-			render(Page, { data: pageData });
-			await fireEvent.click(await screen.findByRole('button', { name: /activar avisos/i }));
-			await fireEvent.click(await screen.findByRole('link', { name: /abrir ajustes de android/i }));
-
-			environment.setVisibility('hidden');
-			environment.setVisibility('visible');
-
-			await waitFor(() => {
-				expect(screen.getByText(/avisos verificados en este tel[eé]fono/i)).toBeInTheDocument();
-			});
-			expect(environment.postRequests()).toBe(2);
-		} finally {
-			document.removeEventListener('click', preventIntentNavigation, true);
-		}
-	});
-
-	it('mantiene separados el permiso del sitio y el permiso general de Android', async () => {
-		installNotificationEnvironment(['missing'], 'denied');
-		render(Page, { data: pageData });
-
-		expect(await screen.findByText(/sitios y descargas/i)).toBeInTheDocument();
-		expect(screen.queryByRole('link', { name: /abrir ajustes de android/i })).not.toBeInTheDocument();
-	});
-
-	it('conserva el camino manual si el navegador vuelve por el fallback del intent', async () => {
-		window.history.replaceState({}, '', '/turno/public-token?push_setup=manual');
-		installNotificationEnvironment(['missing']);
-		render(Page, { data: { ...pageData, pushSetupManual: true } });
-
-		expect(await screen.findByText(/notificaciones de aplicaciones/i)).toBeInTheDocument();
-		expect(screen.queryByRole('button', { name: /activar avisos/i })).not.toBeInTheDocument();
-	});
-
-	it('reanuda la prueba al volver de la configuracion tras una navegacion completa', async () => {
-		window.history.replaceState({}, '', '/turno/public-token?push_setup=manual');
-		const environment = installNotificationEnvironment(['confirmed']);
-		render(Page, { data: { ...pageData, pushSetupManual: true } });
-
-		expect(await screen.findByText(/notificaciones de aplicaciones/i)).toBeInTheDocument();
-		environment.setVisibility('hidden');
-		environment.setVisibility('visible');
+		await fireEvent.click(screen.getByRole('button', { name: '🔔 Activar recordatorio' }));
 
 		await waitFor(() => {
-			expect(screen.getByText(/avisos verificados en este tel[eé]fono/i)).toBeInTheDocument();
+			expect(screen.getByText('¿Recibiste la notificación de prueba?')).toBeInTheDocument();
 		});
+		expect(environment.requestPermission).toHaveBeenCalledOnce();
 		expect(environment.postRequests()).toBe(1);
+		expect(screen.queryByRole('link', { name: 'Agregar a Calendario Samsung' })).not.toBeInTheDocument();
 	});
 
-	it('no oculta la recuperacion si el nuevo contexto no expone Push API', async () => {
-		window.history.replaceState({}, '', '/turno/public-token?push_setup=manual');
+	it('pregunta si llegó aunque Android no informe automáticamente que la mostró', async () => {
+		vi.useFakeTimers();
+		installNotificationEnvironment(['accepted']);
+		render(Page, {
+			data: {
+				...pageData,
+				googleCalendar: { ...pageData.googleCalendar, available: true }
+			}
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: '🔔 Activar recordatorio' }));
+		await vi.advanceTimersByTimeAsync(5_100);
+
+		expect(screen.getByText('¿Recibiste la notificación de prueba?')).toBeInTheDocument();
+		expect(screen.queryByRole('link', { name: 'Agregar a Calendario Samsung' })).not.toBeInTheDocument();
+	});
+
+	it('finaliza el proceso sin mostrar calendarios cuando la persona confirma la prueba', async () => {
+		installNotificationEnvironment(['displayed']);
+		render(Page, {
+			data: {
+				...pageData,
+				googleCalendar: { ...pageData.googleCalendar, available: true }
+			}
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: '🔔 Activar recordatorio' }));
+		await fireEvent.click(await screen.findByRole('button', { name: 'Sí, la recibí' }));
+
+		expect(await screen.findByText('Recordatorio activado')).toBeInTheDocument();
+		expect(screen.queryByRole('link', { name: 'Agregar a Calendario Samsung' })).not.toBeInTheDocument();
+		expect(screen.queryByRole('link', { name: 'Agregar a Google Calendar' })).not.toBeInTheDocument();
+	});
+
+	it('muestra Samsung primero y Google después si la prueba no llegó', async () => {
+		installNotificationEnvironment(['displayed']);
+		render(Page, {
+			data: {
+				...pageData,
+				googleCalendar: { ...pageData.googleCalendar, available: true }
+			}
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: '🔔 Activar recordatorio' }));
+		await fireEvent.click(await screen.findByRole('button', { name: 'No la recibí' }));
+
+		const samsung = await screen.findByRole('link', { name: 'Agregar a Calendario Samsung' });
+		const google = screen.getByRole('link', { name: 'Agregar a Google Calendar' });
+		expect(samsung).toHaveAttribute(
+			'href',
+			'/turno/public-token/google-calendar/connect?target=samsung'
+		);
+		expect(google).toHaveAttribute(
+			'href',
+			'/turno/public-token/google-calendar/connect?target=google'
+		);
+		expect(samsung.compareDocumentPosition(google) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+	});
+
+	it('pasa directamente a los calendarios cuando se rechaza el permiso', async () => {
+		installNotificationEnvironment(['displayed'], 'default', 'denied');
+		render(Page, {
+			data: {
+				...pageData,
+				googleCalendar: { ...pageData.googleCalendar, available: true }
+			}
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: '🔔 Activar recordatorio' }));
+
+		expect(await screen.findByRole('link', { name: 'Agregar a Calendario Samsung' })).toBeInTheDocument();
+		expect(screen.queryByText(/ajustes|permisos del sitio/i)).not.toBeInTheDocument();
+	});
+
+	it('muestra los calendarios si el navegador no admite notificaciones', async () => {
 		Object.defineProperty(window, 'Notification', { configurable: true, value: undefined });
 		Object.defineProperty(window, 'PushManager', { configurable: true, value: undefined });
 		Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: undefined });
 		Object.defineProperty(navigator, 'userAgent', { configurable: true, value: SAMSUNG_USER_AGENT });
 
-		render(Page, { data: { ...pageData, pushSetupManual: true } });
+		render(Page, {
+			data: {
+				...pageData,
+				googleCalendar: { ...pageData.googleCalendar, available: true }
+			}
+		});
 
-		expect(screen.getByText(/abr[ií] este turno en el navegador/i)).toBeInTheDocument();
-		expect(screen.queryByRole('button', { name: /activar avisos/i })).not.toBeInTheDocument();
+		expect(await screen.findByRole('link', { name: 'Agregar a Calendario Samsung' })).toBeInTheDocument();
+		expect(screen.queryByText(/abr[ií] este turno en el navegador/i)).not.toBeInTheDocument();
+	});
+});
+
+describe('Google Calendar administrado en Android', () => {
+	afterEach(() => {
+		cleanup();
+		vi.unstubAllGlobals();
+	});
+
+	it('ofrece Samsung y Google cuando las notificaciones no están configuradas', () => {
+		render(Page, {
+			data: {
+				...pageData,
+				vapidPublicKey: null,
+				googleCalendar: { ...pageData.googleCalendar, available: true }
+			}
+		});
+
+		expect(screen.getByRole('link', { name: 'Agregar a Calendario Samsung' })).toHaveAttribute(
+			'href',
+			'/turno/public-token/google-calendar/connect?target=samsung'
+		);
+		expect(screen.getByRole('link', { name: 'Agregar a Google Calendar' })).toHaveAttribute(
+			'href',
+			'/turno/public-token/google-calendar/connect?target=google'
+		);
+	});
+
+	it('confirma la cobertura verificada y explica la actualización automática', () => {
+		render(Page, {
+			data: {
+				...pageData,
+				vapidPublicKey: null,
+				googleCalendar: {
+					available: true,
+					state: 'active' as const,
+					current: true,
+					reminderLabel: '24 horas y 2 horas antes'
+				}
+			}
+		});
+
+		expect(screen.getByText('Recordatorio guardado en tu calendario')).toBeInTheDocument();
+		expect(screen.getByText(/actualizamos el mismo evento autom[aá]ticamente/i)).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: /quitar de mi cuenta google/i })).toBeInTheDocument();
+	});
+
+	it('durante una reprogramación no pide volver a agregar el evento', () => {
+		render(Page, {
+			data: {
+				...pageData,
+				appointment: {
+					...pageData.appointment,
+					calendar_update_required_at: '2026-08-04T12:00:00.000Z'
+				},
+				vapidPublicKey: null,
+				googleCalendar: {
+					available: true,
+					state: 'updating' as const,
+					current: false,
+					reminderLabel: '24 horas y 2 horas antes'
+				}
+			}
+		});
+
+		expect(screen.getByText('Actualizando tu recordatorio')).toBeInTheDocument();
+		expect(screen.getByText(/no ten[eé]s que volver a agregarlo/i)).toBeInTheDocument();
+		expect(
+			screen.queryByRole('link', { name: 'Agregar a Google Calendar' })
+		).not.toBeInTheDocument();
+	});
+});
+
+describe('calendario en iPhone', () => {
+	afterEach(() => {
+		cleanup();
+		vi.unstubAllGlobals();
+	});
+
+	it('mantiene una acción directa y no muestra notificaciones ni opciones Android', () => {
+		render(Page, {
+			data: {
+				...pageData,
+				created: true,
+				device: 'ios' as const,
+				googleCalendar: { ...pageData.googleCalendar, available: true }
+			}
+		});
+
+		expect(screen.getByRole('heading', { name: 'Tu turno quedó reservado' })).toBeInTheDocument();
+		expect(
+			screen.getByRole('heading', { name: 'Último paso: activá el recordatorio' })
+		).toBeInTheDocument();
+		expect(screen.getByRole('link', { name: '📅 Agregar al calendario' })).toHaveAttribute(
+			'href',
+			'/turno/public-token/calendario.ics?p=phone'
+		);
+		expect(screen.queryByRole('button', { name: /activar recordatorio/i })).not.toBeInTheDocument();
+		expect(screen.queryByText(/Calendario Samsung/i)).not.toBeInTheDocument();
+		expect(screen.queryByRole('link', { name: 'Agregar a Google Calendar' })).not.toBeInTheDocument();
 	});
 });

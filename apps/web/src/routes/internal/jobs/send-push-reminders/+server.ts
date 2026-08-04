@@ -2,6 +2,7 @@
 // de dispatches). Idempotente: claim atómico en la RPC + sent_at tras envío exitoso.
 
 import { assertInternalJobRequest } from '$lib/server/internal-jobs';
+import { processGoogleCalendarSyncJobs } from '$lib/server/google-calendar';
 import { sendDuePushReminders } from '$lib/server/push';
 import { createSupabaseAdminClient } from '$lib/server/supabase';
 import { json } from '@sveltejs/kit';
@@ -12,8 +13,36 @@ export const POST: RequestHandler = async ({ request, fetch, url }) => {
 	if (unauthorized) return unauthorized;
 
 	const supabase = await createSupabaseAdminClient('odonto', fetch);
-	const result = await sendDuePushReminders(supabase, {
-		limit: Number(url.searchParams.get('limit') ?? 50)
-	});
-	return json(result);
+	let push: Awaited<ReturnType<typeof sendDuePushReminders>> | null = null;
+	let googleCalendar: Awaited<ReturnType<typeof processGoogleCalendarSyncJobs>> | null = null;
+	let failed = false;
+
+	try {
+		push = await sendDuePushReminders(supabase, {
+			limit: Number(url.searchParams.get('limit') ?? 50)
+		});
+	} catch (error) {
+		failed = true;
+		console.error('Error procesando recordatorios push', {
+			code: error instanceof Error ? error.message.slice(0, 120) : 'unknown'
+		});
+	}
+
+	// Aprovecha el job ya programado cada ~10 minutos. Se ejecuta aun si el
+	// pipeline push tuvo un problema, y viceversa: son coberturas independientes.
+	try {
+		googleCalendar = await processGoogleCalendarSyncJobs(supabase, fetch, {
+			limit: Number(url.searchParams.get('calendar_limit') ?? 20)
+		});
+	} catch (error) {
+		failed = true;
+		console.error('Error procesando sincronizaciones Google Calendar', {
+			code: error instanceof Error ? error.message.slice(0, 120) : 'unknown'
+		});
+	}
+
+	return json(
+		{ ok: !failed, push, googleCalendar },
+		{ status: failed ? 500 : 200 }
+	);
 };

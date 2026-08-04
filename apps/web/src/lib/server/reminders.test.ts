@@ -69,20 +69,61 @@ describe('classifyReminderCoverage', () => {
 			})
 		).toBeNull();
 	});
+
+	it('solo acepta Google Calendar cuando confirmó la sequence actual', () => {
+		expect(
+			classifyReminderCoverage({
+				...base,
+				calendar_action_status: 'synced_google',
+				google_calendar_sync_status: 'active',
+				has_current_google_calendar_event: true
+			})
+		).toBeNull();
+		expect(
+			classifyReminderCoverage({
+				...base,
+				calendar_action_status: 'synced_google',
+				google_calendar_sync_status: 'active',
+				has_current_google_calendar_event: false
+			})
+		).toBe('pendiente_actualizar');
+	});
+
+	it('no oculta una sincronización fallida ni un indicador Google huérfano', () => {
+		expect(
+			classifyReminderCoverage({
+				...base,
+				calendar_action_status: 'synced_google',
+				google_calendar_sync_status: 'needs_reconnect'
+			})
+		).toBe('sin_calendario');
+		expect(
+			classifyReminderCoverage({ ...base, calendar_action_status: 'synced_google' })
+		).toBe('sin_calendario');
+	});
 });
 
 describe('hasActivePushSubscription', () => {
-	it('activa: sin revocar', () => {
-		expect(hasActivePushSubscription({ revoked_at: null })).toBe(true);
+	it('activa: confirmada y sin revocar', () => {
+		expect(
+			hasActivePushSubscription({
+				revoked_at: null,
+				verified_at: '2026-06-11T10:00:00.000Z'
+			})
+		).toBe(true);
 	});
 
 	it('inactiva: revocada (endpoint muerto / turno terminal)', () => {
-		expect(hasActivePushSubscription({ revoked_at: '2026-06-11T10:00:00.000Z' })).toBe(false);
+		expect(
+			hasActivePushSubscription({
+				revoked_at: '2026-06-11T10:00:00.000Z',
+				verified_at: '2026-06-11T09:00:00.000Z'
+			})
+		).toBe(false);
 	});
 
-	it('tolera undefined legado como activa', () => {
-		// revoked_at undefined (legado) se trata como no revocada
-		expect(hasActivePushSubscription({ revoked_at: undefined as unknown as string | null })).toBe(true);
+	it('inactiva: el endpoint existe pero la prueba no fue confirmada', () => {
+		expect(hasActivePushSubscription({ revoked_at: null, verified_at: null })).toBe(false);
 	});
 });
 
@@ -143,6 +184,7 @@ describe('loadReminderCandidates · exclusión por avisos activados', () => {
 		professional_name_snapshot: 'Dra. Lopez',
 		confirmation_token: `tok-${id}`,
 		calendar_action_status: 'not_offered',
+		calendar_sequence: 0,
 		calendar_update_required_at: null,
 		whatsapp_reminder_opened_at: null,
 		whatsapp_reminder_marked_sent_at: null,
@@ -156,21 +198,21 @@ describe('loadReminderCandidates · exclusión por avisos activados', () => {
 		const chainFor = (table: string) => {
 			const result = consume(table);
 			const chain: any = {};
-			for (const m of ['select', 'eq', 'is', 'in', 'gte', 'lt', 'order']) chain[m] = () => chain;
+			for (const m of ['select', 'eq', 'is', 'not', 'in', 'gte', 'lt', 'order']) chain[m] = () => chain;
 			chain.then = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve);
 			return chain;
 		};
 		return { from: (table: string) => chainFor(table) } as any;
 	};
 
-	it('excluye toda suscripción activa, incluso si tuvo un fallo transitorio', async () => {
+	it('excluye toda suscripción verificada, incluso si tuvo un fallo transitorio', async () => {
 		const supabase = makeSupabase({
 			appointments: [{ data: [appointmentRow('a'), appointmentRow('b'), appointmentRow('c')], error: null }],
 			push_subscriptions: [
 				{
 					data: [
-						{ appointment_id: 'a', revoked_at: null, failed_count: 0 },
-						{ appointment_id: 'b', revoked_at: null, failed_count: 2 }
+						{ appointment_id: 'a', revoked_at: null, verified_at: now.toISOString(), failed_count: 0 },
+						{ appointment_id: 'b', revoked_at: null, verified_at: now.toISOString(), failed_count: 2 }
 						// 'c' no tiene suscripción → NO excluido
 					],
 					error: null
@@ -188,14 +230,31 @@ describe('loadReminderCandidates · exclusión por avisos activados', () => {
 		expect(ids).toEqual(['c']);
 	});
 
+	it('mantiene visible el turno mientras la prueba no fue confirmada', async () => {
+		const supabase = makeSupabase({
+			appointments: [{ data: [appointmentRow('a')], error: null }],
+			push_subscriptions: [
+				{ data: [{ appointment_id: 'a', revoked_at: null, verified_at: null }], error: null }
+			],
+			message_dispatches: [{ data: [], error: null }]
+		});
+
+		const candidates = await loadReminderCandidates(supabase, business, {
+			day: 'manana',
+			now,
+			pushSubscriptionsSupabase: supabase
+		});
+		expect(candidates.map((candidate) => candidate.appointment_id)).toEqual(['a']);
+	});
+
 	it('una suscripción activa basta para excluir aunque coexista una revocada', async () => {
 		const supabase = makeSupabase({
 			appointments: [{ data: [appointmentRow('a')], error: null }],
 			push_subscriptions: [
 				{
 					data: [
-						{ appointment_id: 'a', revoked_at: '2026-06-11T10:00:00.000Z' },
-						{ appointment_id: 'a', revoked_at: null }
+						{ appointment_id: 'a', revoked_at: '2026-06-11T10:00:00.000Z', verified_at: now.toISOString() },
+						{ appointment_id: 'a', revoked_at: null, verified_at: now.toISOString() }
 					],
 					error: null
 				}
@@ -215,7 +274,7 @@ describe('loadReminderCandidates · exclusión por avisos activados', () => {
 		const supabase = makeSupabase({
 			appointments: [{ data: [appointmentRow('a')], error: null }],
 			push_subscriptions: [
-				{ data: [{ appointment_id: 'a', revoked_at: '2026-06-11T10:00:00.000Z' }], error: null }
+				{ data: [{ appointment_id: 'a', revoked_at: '2026-06-11T10:00:00.000Z', verified_at: now.toISOString() }], error: null }
 			],
 			message_dispatches: [{ data: [], error: null }]
 		});
@@ -234,8 +293,8 @@ describe('loadReminderCandidates · exclusión por avisos activados', () => {
 			push_subscriptions: [
 				{
 					data: [
-						{ appointment_id: 'a', revoked_at: null, failed_count: 1 },
-						{ appointment_id: 'b', revoked_at: '2026-06-11T10:00:00.000Z' }
+						{ appointment_id: 'a', revoked_at: null, verified_at: now.toISOString(), failed_count: 1 },
+						{ appointment_id: 'b', revoked_at: '2026-06-11T10:00:00.000Z', verified_at: now.toISOString() }
 					],
 					error: null
 				}
@@ -248,13 +307,49 @@ describe('loadReminderCandidates · exclusión por avisos activados', () => {
 		).resolves.toBe(1);
 	});
 
+	it('excluye un evento Google únicamente cuando la versión vigente fue confirmada', async () => {
+		const synced = { ...appointmentRow('a'), calendar_action_status: 'synced_google' };
+		const stale = {
+			...appointmentRow('b'),
+			calendar_action_status: 'synced_google',
+			calendar_sequence: 2,
+			calendar_update_required_at: '2026-06-11T11:00:00.000Z'
+		};
+		const supabase = makeSupabase({
+			appointments: [{ data: [synced, stale], error: null }],
+			push_subscriptions: [{ data: [], error: null }],
+			message_dispatches: [{ data: [], error: null }],
+			appointment_google_calendar_events: [
+				{
+					data: [
+						{ appointment_id: 'a', sync_status: 'active', synced_sequence: 0 },
+						{ appointment_id: 'b', sync_status: 'pending_update', synced_sequence: 1 }
+					],
+					error: null
+				}
+			]
+		});
+
+		const candidates = await loadReminderCandidates(supabase, business, {
+			day: 'manana',
+			now,
+			pushSubscriptionsSupabase: supabase
+		});
+		expect(candidates.map((candidate) => [candidate.appointment_id, candidate.coverage])).toEqual([
+			['b', 'pendiente_actualizar']
+		]);
+	});
+
 	it('consulta las notificaciones con el cliente privilegiado, no con la sesión del usuario', async () => {
 		const userSupabase = makeSupabase({
 			appointments: [{ data: [appointmentRow('a')], error: null }],
 			message_dispatches: [{ data: [], error: null }]
 		});
 		const pushSubscriptionsSupabase = makeSupabase({
-			push_subscriptions: [{ data: [{ appointment_id: 'a', revoked_at: null }], error: null }]
+			push_subscriptions: [
+				{ data: [{ appointment_id: 'a', revoked_at: null, verified_at: now.toISOString() }], error: null }
+			],
+			appointment_google_calendar_events: [{ data: [], error: null }]
 		});
 
 		const candidates = await loadReminderCandidates(userSupabase, business, {
@@ -264,6 +359,27 @@ describe('loadReminderCandidates · exclusión por avisos activados', () => {
 		});
 
 		expect(candidates).toEqual([]);
+	});
+
+	it('falla de forma segura si no puede verificar la versión de Google Calendar', async () => {
+		const userSupabase = makeSupabase({
+			appointments: [{ data: [appointmentRow('a')], error: null }],
+			message_dispatches: [{ data: [], error: null }]
+		});
+		const privilegedSupabase = makeSupabase({
+			push_subscriptions: [{ data: [], error: null }],
+			appointment_google_calendar_events: [
+				{ data: null, error: new Error('calendar inaccessible') }
+			]
+		});
+
+		await expect(
+			loadReminderCandidates(userSupabase, business, {
+				day: 'manana',
+				now,
+				pushSubscriptionsSupabase: privilegedSupabase
+			})
+		).rejects.toThrow('calendar inaccessible');
 	});
 
 	it('falla de forma segura si no se puede leer el estado de los avisos', async () => {

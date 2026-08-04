@@ -155,23 +155,46 @@ export type CoverageInput = {
 	calendar_update_required_at: string | null;
 	has_active_notifications: boolean;
 	has_active_dispatch: boolean;
+	google_calendar_sync_status?: string | null;
+	has_current_google_calendar_event?: boolean;
 };
 
 export const classifyReminderCoverage = (input: CoverageInput): ReminderCoverage | null => {
 	if (input.has_active_notifications || input.has_active_dispatch) return null;
+	if (input.has_current_google_calendar_event) return null;
+
+	// Si existe un vínculo administrado, manda el estado confirmado por Google y
+	// no un click histórico. Solo active + la sequence actual es cobertura real.
+	if (input.google_calendar_sync_status) {
+		if (
+			input.google_calendar_sync_status === 'pending_update' ||
+			input.google_calendar_sync_status === 'active' ||
+			input.calendar_update_required_at
+		) {
+			return 'pendiente_actualizar';
+		}
+		return 'sin_calendario';
+	}
+
+	// synced_google sin su vínculo verificable es una inconsistencia segura: el
+	// turno vuelve a la lista en vez de ocultarse por un indicador huérfano.
+	if (input.calendar_action_status === 'synced_google') {
+		return input.calendar_update_required_at ? 'pendiente_actualizar' : 'sin_calendario';
+	}
 	if (input.calendar_update_required_at) return 'pendiente_actualizar';
 	if (UNCOVERED_CALENDAR_STATUSES.has(input.calendar_action_status)) return 'sin_calendario';
 	return null;
 };
 
-// Una suscripción activa expresa que el paciente activó avisos para este turno. Los
-// reintentos de entrega son responsabilidad del job de push y no cambian esa decisión.
+// Una suscripción sólo cubre el turno después de una prueba aceptada y confirmada
+// por la persona. Guardar un endpoint o recibir un 201 del proveedor no alcanza.
 export type ActivePushSubscriptionInput = {
 	revoked_at: string | null;
+	verified_at: string | null;
 };
 
 export const hasActivePushSubscription = (row: ActivePushSubscriptionInput): boolean =>
-	row.revoked_at == null;
+	row.revoked_at == null && Boolean(row.verified_at);
 
 // --- Carga principal ----------------------------------------------------------
 
@@ -202,6 +225,7 @@ export const loadReminderCandidates = async (
 			professional_name_snapshot,
 			confirmation_token,
 			calendar_action_status,
+			calendar_sequence,
 			calendar_update_required_at,
 			whatsapp_reminder_opened_at,
 			whatsapp_reminder_marked_sent_at,
@@ -219,24 +243,32 @@ export const loadReminderCandidates = async (
 	if (appointments.length === 0) return [];
 	const ids = appointments.map((row: any) => String(row.id));
 
-	const [pushResult, dispatchResult] = await Promise.all([
+	const [pushResult, dispatchResult, googleCalendarResult] = await Promise.all([
 		options.pushSubscriptionsSupabase
 			.from('push_subscriptions')
-			.select('appointment_id, revoked_at')
+			.select('appointment_id, revoked_at, verified_at')
 			.eq('business_id', business.id)
 			.in('appointment_id', ids)
-			.is('revoked_at', null),
+			.is('revoked_at', null)
+			.not('verified_at', 'is', null),
 		supabase
 			.from('message_dispatches')
 			.select('appointment_id, status')
 			.eq('business_id', business.id)
 			.eq('type', 'appointment_reminder_24h')
+			.in('appointment_id', ids),
+		options.pushSubscriptionsSupabase
+			.from('appointment_google_calendar_events')
+			.select('appointment_id, sync_status, synced_sequence')
+			.eq('business_id', business.id)
 			.in('appointment_id', ids)
 	]);
 	if (pushResult.error) throw pushResult.error;
 	if (dispatchResult.error) throw dispatchResult.error;
+	if (googleCalendarResult.error) throw googleCalendarResult.error;
 	const pushRows = pushResult.data;
 	const dispatchRows = dispatchResult.data;
+	const googleCalendarRows = googleCalendarResult.data;
 
 	const pushed = new Set(
 		(pushRows ?? [])
@@ -248,17 +280,27 @@ export const loadReminderCandidates = async (
 			.filter((row: any) => ACTIVE_DISPATCH_STATUSES.includes(String(row.status)))
 			.map((row: any) => String(row.appointment_id))
 	);
+	const googleCalendarByAppointment = new Map(
+		(googleCalendarRows ?? []).map((row: any) => [String(row.appointment_id), row])
+	);
 	const mapsLink = resolveMapsUrl({ address: business.address, maps_url: business.maps_url });
 
 	const candidates: ReminderCandidate[] = [];
 	for (const row of appointments as any[]) {
 		const patient = row.patients;
 		if (patient?.blocked) continue;
+		const googleCalendar = googleCalendarByAppointment.get(String(row.id)) as any;
 		const coverage = classifyReminderCoverage({
 			calendar_action_status: String(row.calendar_action_status ?? 'not_offered'),
 			calendar_update_required_at: row.calendar_update_required_at ?? null,
 			has_active_notifications: pushed.has(String(row.id)),
-			has_active_dispatch: dispatched.has(String(row.id))
+			has_active_dispatch: dispatched.has(String(row.id)),
+			google_calendar_sync_status: googleCalendar?.sync_status
+				? String(googleCalendar.sync_status)
+				: null,
+			has_current_google_calendar_event:
+				String(googleCalendar?.sync_status ?? '') === 'active' &&
+				Number(googleCalendar?.synced_sequence) === Number(row.calendar_sequence ?? 0)
 		});
 		if (!coverage) continue;
 

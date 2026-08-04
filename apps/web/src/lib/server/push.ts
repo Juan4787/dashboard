@@ -121,6 +121,21 @@ export const saveAppointmentPushSubscription = async (
 	userAgent: string | null
 ) => {
 	const now = new Date().toISOString();
+	const { data: existing, error: existingError } = await supabase
+		.from('push_subscriptions')
+		.select('id, p256dh, auth, revoked_at, verified_at')
+		.eq('appointment_id', appointment.id)
+		.eq('endpoint', payload.endpoint)
+		.maybeSingle();
+	if (existingError) throw existingError;
+	// Una recarga sana conserva la verificación. Una suscripción revocada o con
+	// claves nuevas debe volver a pasar por la prueba: no se "resucita" cobertura.
+	const verifiedAt =
+		existing?.revoked_at == null &&
+		String(existing?.p256dh ?? '') === payload.keys.p256dh &&
+		String(existing?.auth ?? '') === payload.keys.auth
+			? (existing?.verified_at ?? null)
+			: null;
 	const { data, error } = await supabase
 		.from('push_subscriptions')
 		.upsert(
@@ -133,6 +148,7 @@ export const saveAppointmentPushSubscription = async (
 				user_agent: userAgent,
 				failed_count: 0,
 				revoked_at: null,
+				verified_at: verifiedAt,
 				updated_at: now
 			},
 			{ onConflict: 'appointment_id,endpoint' }
@@ -273,12 +289,33 @@ export const recordPushTestFeedback = async (
 		.eq('id', input.deliveryId)
 		.eq('appointment_id', input.appointmentId)
 		.eq('kind', 'test')
-		// La UI sólo puede declarar "verificado" tras un acuse real de showNotification.
-		.not('displayed_at', 'is', null)
-		.select('id')
+		// La persona puede confirmar aunque Android omita el recibo "displayed". Sí
+		// exigimos que el proveedor haya aceptado una prueba real y que no haya fallado.
+		.not('accepted_at', 'is', null)
+		.is('failed_at', null)
+		.is('superseded_at', null)
+		.select('id, subscription_id')
 		.maybeSingle();
 	if (error) throw error;
-	return Boolean(data?.id);
+	if (!data?.id || !data.subscription_id) return false;
+
+	const subscriptionUpdate = input.visible
+		? {
+				verified_at: now,
+				revoked_at: null,
+				failed_count: 0,
+				updated_at: now
+			}
+		: { verified_at: null, revoked_at: now, updated_at: now };
+	const { data: subscription, error: subscriptionError } = await supabase
+		.from('push_subscriptions')
+		.update(subscriptionUpdate)
+		.eq('id', String(data.subscription_id))
+		.eq('appointment_id', input.appointmentId)
+		.select('id')
+		.maybeSingle();
+	if (subscriptionError) throw subscriptionError;
+	return Boolean(subscription?.id);
 };
 
 type TrackedPushTarget = {
@@ -530,7 +567,8 @@ export const sendReschedulePushNotice = async (
 		.select('id, endpoint, p256dh, auth')
 		.eq('business_id', input.businessId)
 		.eq('appointment_id', input.appointmentId)
-		.is('revoked_at', null);
+		.is('revoked_at', null)
+		.not('verified_at', 'is', null);
 	if (subscriptionsError) throw subscriptionsError;
 	if (!subscriptions || subscriptions.length === 0) {
 		return { configured: true, sent: 0, failed: 0, revoked: 0 };

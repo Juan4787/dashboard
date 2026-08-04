@@ -25,6 +25,7 @@ import {
 	recordPushDeliveryReceipt,
 	recordPushTestFeedback,
 	resetPushRemindersForReschedule,
+	saveAppointmentPushSubscription,
 	sendDuePushReminders,
 	sendReschedulePushNotice,
 	sendTestPushNotification
@@ -44,6 +45,7 @@ type Queued = { data?: unknown; error?: unknown; count?: number };
 const createSupabaseMock = (queues: Record<string, Queued[]>, rpcResult: Queued) => {
 	const updates: Array<{ table: string; payload: Record<string, unknown> }> = [];
 	const inserts: Array<{ table: string; payload: Record<string, unknown> }> = [];
+	const upserts: Array<{ table: string; payload: Record<string, unknown> }> = [];
 	const filters: Array<{ table: string; method: string; args: unknown[] }> = [];
 	const consume = (table: string): Queued => queues[table]?.shift() ?? { data: null, error: null };
 	const makeChain = (table: string) => {
@@ -63,7 +65,10 @@ const createSupabaseMock = (queues: Record<string, Queued[]>, rpcResult: Queued)
 			inserts.push({ table, payload });
 			return chain;
 		};
-		chain.upsert = () => chain;
+		chain.upsert = (payload: Record<string, unknown>) => {
+			upserts.push({ table, payload });
+			return chain;
+		};
 		chain.delete = () => chain;
 		chain.maybeSingle = async () => result;
 		chain.single = async () => result;
@@ -77,6 +82,7 @@ const createSupabaseMock = (queues: Record<string, Queued[]>, rpcResult: Queued)
 		} as any,
 		updates,
 		inserts,
+		upserts,
 		filters
 	};
 };
@@ -187,6 +193,66 @@ describe('identificadores y vencimiento de push', () => {
 	});
 });
 
+describe('persistencia de la suscripción', () => {
+	const appointment = {
+		id: 'apt-1',
+		business: { id: 'biz-1' }
+	} as any;
+	const payload = {
+		endpoint: 'https://push.example/ep',
+		keys: validSubscriptionKeys
+	};
+
+	it('conserva la verificación al recargar la misma suscripción sana', async () => {
+		const verifiedAt = '2026-06-11T11:00:00.000Z';
+		const { supabase, upserts } = createSupabaseMock(
+			{
+				push_subscriptions: [
+					{
+						data: {
+							id: 'sub-1',
+							p256dh: payload.keys.p256dh,
+							auth: payload.keys.auth,
+							revoked_at: null,
+							verified_at: verifiedAt
+						},
+						error: null
+					},
+					{ data: { id: 'sub-1', endpoint: payload.endpoint }, error: null }
+				]
+			},
+			{ data: null, error: null }
+		);
+
+		await saveAppointmentPushSubscription(supabase, appointment, payload, 'Android');
+		expect(upserts[0].payload.verified_at).toBe(verifiedAt);
+	});
+
+	it('exige otra prueba si la suscripción estaba revocada', async () => {
+		const { supabase, upserts } = createSupabaseMock(
+			{
+				push_subscriptions: [
+					{
+						data: {
+							id: 'sub-1',
+							p256dh: payload.keys.p256dh,
+							auth: payload.keys.auth,
+							revoked_at: '2026-06-11T11:00:00.000Z',
+							verified_at: '2026-06-11T10:00:00.000Z'
+						},
+						error: null
+					},
+					{ data: { id: 'sub-1', endpoint: payload.endpoint }, error: null }
+				]
+			},
+			{ data: null, error: null }
+		);
+
+		await saveAppointmentPushSubscription(supabase, appointment, payload, 'Android');
+		expect(upserts[0].payload.verified_at).toBeNull();
+	});
+});
+
 describe('telemetría de entrega', () => {
 	const deliveryId = '8ccf23d7-5ae3-4b87-9268-d40a05d9a475';
 	const receiptToken = 'a'.repeat(43);
@@ -292,7 +358,12 @@ describe('telemetría de entrega', () => {
 
 	it('guarda la confirmación explícita de la persona', async () => {
 		const { supabase, updates, filters } = createSupabaseMock(
-			{ push_delivery_attempts: [{ data: { id: deliveryId }, error: null }] },
+			{
+				push_delivery_attempts: [
+					{ data: { id: deliveryId, subscription_id: 'sub-1' }, error: null }
+				],
+				push_subscriptions: [{ data: { id: 'sub-1' }, error: null }]
+			},
 			{ data: null, error: null }
 		);
 		expect(
@@ -310,7 +381,43 @@ describe('telemetría de entrega', () => {
 		expect(filters).toContainEqual({
 			table: 'push_delivery_attempts',
 			method: 'not',
-			args: ['displayed_at', 'is', null]
+			args: ['accepted_at', 'is', null]
+		});
+		expect(updates[1]).toMatchObject({
+			table: 'push_subscriptions',
+			payload: {
+				verified_at: now.toISOString(),
+				revoked_at: null,
+				failed_count: 0
+			}
+		});
+	});
+
+	it('revoca la cobertura del turno cuando la persona informa que no llegó', async () => {
+		const { supabase, updates } = createSupabaseMock(
+			{
+				push_delivery_attempts: [
+					{ data: { id: deliveryId, subscription_id: 'sub-1' }, error: null }
+				],
+				push_subscriptions: [{ data: { id: 'sub-1' }, error: null }]
+			},
+			{ data: null, error: null }
+		);
+
+		expect(
+			await recordPushTestFeedback(supabase, {
+				appointmentId: 'apt-1',
+				deliveryId,
+				visible: false,
+				now
+			})
+		).toBe(true);
+		expect(updates[1]).toMatchObject({
+			table: 'push_subscriptions',
+			payload: {
+				verified_at: null,
+				revoked_at: now.toISOString()
+			}
 		});
 	});
 });
@@ -483,7 +590,7 @@ describe('sendReschedulePushNotice', () => {
 
 	it('envía el aviso con el tag del recordatorio de 24h y sin tocar flags sent/claimed', async () => {
 		vi.mocked(webpush.sendNotification).mockResolvedValue({} as any);
-		const { supabase, updates } = createSupabaseMock(
+		const { supabase, updates, filters } = createSupabaseMock(
 			{
 				appointments: [{ data: liveAppointment, error: null }],
 				push_subscriptions: [{ data: [subscriptionRow], error: null }]
@@ -508,6 +615,11 @@ describe('sendReschedulePushNotice', () => {
 		expect(payload.url).toContain('/turno/tok-1');
 		expect(vi.mocked(webpush.sendNotification).mock.calls[0][2]).toMatchObject({
 			topic: pushTopicForAppointment('apt-1')
+		});
+		expect(filters).toContainEqual({
+			table: 'push_subscriptions',
+			method: 'not',
+			args: ['verified_at', 'is', null]
 		});
 		// Los recordatorios del nuevo horario siguen su curso: no se marca nada.
 		expect(

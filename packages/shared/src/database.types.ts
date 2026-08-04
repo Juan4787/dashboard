@@ -2107,6 +2107,7 @@ export type Database = {
           revoked_at: string | null
           updated_at: string
           user_agent: string | null
+          verified_at: string | null
         }
         Insert: {
           appointment_id: string
@@ -2124,6 +2125,7 @@ export type Database = {
           revoked_at?: string | null
           updated_at?: string
           user_agent?: string | null
+          verified_at?: string | null
         }
         Update: {
           appointment_id?: string
@@ -2141,6 +2143,7 @@ export type Database = {
           revoked_at?: string | null
           updated_at?: string
           user_agent?: string | null
+          verified_at?: string | null
         }
         Relationships: [
           {

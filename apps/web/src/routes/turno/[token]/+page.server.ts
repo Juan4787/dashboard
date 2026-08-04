@@ -12,6 +12,13 @@ import {
 } from '$lib/server/public-appointments';
 import { canRegisterCalendarAction, markCalendarOffered } from '$lib/server/calendar-tracking';
 import {
+	getGoogleCalendarPublicMessage,
+	loadGoogleCalendarUiState,
+	processAppointmentGoogleCalendarSync,
+	requestGoogleCalendarEventDeletion,
+	type GoogleCalendarUiState
+} from '$lib/server/google-calendar';
+import {
 	buildAndroidCalendarIntentUrl,
 	isAndroidCalendarIntentVariant,
 	type AndroidCalendarIntentVariant
@@ -33,6 +40,13 @@ import { fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
 const SOON_WINDOW_MS = 2 * 60 * 60 * 1000;
+
+const unavailableGoogleCalendarState = (): GoogleCalendarUiState => ({
+	available: false,
+	state: 'none',
+	current: false,
+	reminderLabel: 'antes del turno'
+});
 
 const isStartingSoon = (appointment: PublicAppointmentView, now: Date) => {
 	const remaining = new Date(appointment.starts_at).getTime() - now.getTime();
@@ -84,7 +98,7 @@ const androidCalendarIntentFor = (
 
 export const load: PageServerLoad = async ({ params, fetch, url, request, setHeaders }) => {
 	// La página expone datos del turno detrás del token: nunca debe quedar cacheada.
-	setHeaders({ 'cache-control': 'no-store' });
+	setHeaders({ 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' });
 	const userAgent = request.headers.get('user-agent');
 	const device = classifyUserAgent(userAgent);
 	const vapidPublicKey = publicEnv.PUBLIC_VAPID_PUBLIC_KEY?.trim() || env.VAPID_PUBLIC_KEY?.trim() || null;
@@ -106,7 +120,9 @@ export const load: PageServerLoad = async ({ params, fetch, url, request, setHea
 			publicSiteUrl,
 			pushSetupManual,
 			notificationBrowser,
-			androidCalendarIntent: androidCalendarIntentFor(appointment, device, userAgent, url)
+			androidCalendarIntent: androidCalendarIntentFor(appointment, device, userAgent, url),
+			googleCalendar: unavailableGoogleCalendarState(),
+			calendarMessage: getGoogleCalendarPublicMessage(url.searchParams.get('calendar'))
 		};
 	}
 
@@ -114,6 +130,22 @@ export const load: PageServerLoad = async ({ params, fetch, url, request, setHea
 		const supabase = await createSupabaseAdminClient('odonto', fetch);
 		const now = new Date();
 		const appointment = await loadPublicAppointmentByToken(supabase, params.token, now);
+		let googleCalendar = unavailableGoogleCalendarState();
+		if (appointment) {
+			try {
+				googleCalendar = await loadGoogleCalendarUiState(supabase, appointment, now);
+			} catch (calendarError) {
+				// La reserva sigue siendo util aunque el estado auxiliar no pueda cargarse.
+				// La opcion administrada se oculta para no prometer una accion incierta.
+				console.error('Error cargando estado Google Calendar', {
+					appointmentId: appointment.id,
+					code:
+						calendarError instanceof Error
+							? calendarError.message.slice(0, 120)
+							: 'unknown'
+				});
+			}
+		}
 		if (
 			appointment &&
 			appointment.calendar_action_status === 'not_offered' &&
@@ -136,7 +168,9 @@ export const load: PageServerLoad = async ({ params, fetch, url, request, setHea
 			publicSiteUrl,
 			pushSetupManual,
 			notificationBrowser,
-			androidCalendarIntent: androidCalendarIntentFor(appointment, device, userAgent, url)
+			androidCalendarIntent: androidCalendarIntentFor(appointment, device, userAgent, url),
+			googleCalendar,
+			calendarMessage: getGoogleCalendarPublicMessage(url.searchParams.get('calendar'))
 		};
 	} catch (error) {
 		console.error('Error cargando turno publico', error);
@@ -152,7 +186,9 @@ export const load: PageServerLoad = async ({ params, fetch, url, request, setHea
 			publicSiteUrl,
 			pushSetupManual,
 			notificationBrowser,
-			androidCalendarIntent: null
+			androidCalendarIntent: null,
+			googleCalendar: unavailableGoogleCalendarState(),
+			calendarMessage: null
 		};
 	}
 };
@@ -182,13 +218,27 @@ export const actions: Actions = {
 		}
 		try {
 			const supabase = await createSupabaseAdminClient('odonto', fetch);
-			await applyPublicAppointmentAction(supabase, {
+			const result = await applyPublicAppointmentAction(supabase, {
 				token: params.token,
 				action: 'cancel',
 				note: String(form.get('note') ?? '').trim() || null,
 				ip: getClientAddress(),
 				userAgent: request.headers.get('user-agent')
 			});
+			if (result.changed) {
+				try {
+					await processAppointmentGoogleCalendarSync(supabase, result.appointment.id, fetch);
+				} catch (calendarError) {
+					// La cola durable conserva el borrado para el próximo reintento.
+					console.error('Error sincronizando Google Calendar tras cancelar', {
+						appointmentId: result.appointment.id,
+						code:
+							calendarError instanceof Error
+								? calendarError.message.slice(0, 120)
+								: 'unknown'
+					});
+				}
+			}
 			return { success: true, message: 'Turno cancelado.' };
 		} catch (error) {
 			console.error('Error cancelando turno publico', error);
@@ -211,6 +261,39 @@ export const actions: Actions = {
 		} catch (error) {
 			console.error('Error solicitando reprogramacion publica', error);
 			return fail(400, { message: getPublicTokenErrorMessage(error) });
+		}
+	},
+	remove_google_calendar: async ({ params, fetch }) => {
+		if (env.DEMO_MODE === 'true') {
+			return { success: true, message: 'El turno se quitó de tu cuenta Google.' };
+		}
+		try {
+			const supabase = await createSupabaseAdminClient('odonto', fetch);
+			const appointment = await loadPublicAppointmentByToken(supabase, params.token);
+			if (!appointment) {
+				return fail(404, { message: 'Este enlace ya no está disponible.' });
+			}
+			const result = await requestGoogleCalendarEventDeletion(
+				supabase,
+				appointment.id,
+				fetch
+			);
+			if (result.status === 'deleted') {
+				return { success: true, message: 'El turno se quitó de tu cuenta Google.' };
+			}
+			if (result.status === 'pending_delete') {
+				return { success: true, message: 'Estamos terminando de quitar el turno de tu cuenta Google.' };
+			}
+			return fail(409, {
+				message: 'Elegí nuevamente tu cuenta Google para terminar de quitar el turno.'
+			});
+		} catch (error) {
+			console.error('Error quitando turno de Google Calendar', {
+				code: error instanceof Error ? error.message.slice(0, 120) : 'unknown'
+			});
+			return fail(400, {
+				message: 'No pudimos quitarlo en este momento. Volvé a intentar desde este mismo turno.'
+			});
 		}
 	}
 };

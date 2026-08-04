@@ -12,7 +12,7 @@
 			<BackLink href="/login" label="Volver al ingreso" />
 			<h1 class="mt-2 text-2xl font-semibold">Politica de privacidad</h1>
 			<p class="mt-1 text-xs text-neutral-500 dark:text-neutral-300">
-				Ultima actualizacion: 2025-12-31
+				Ultima actualizacion: 2026-08-04
 			</p>
 
 			<section class="mt-6 space-y-3 text-sm leading-relaxed text-neutral-700 dark:text-neutral-200">
@@ -51,6 +51,24 @@
 					La app solicita permisos para crear y guardar archivos en tu Google Drive usando el
 					alcance <span class="font-semibold">drive.file</span>. No accede a tu Drive completo.
 					Podes revocar el acceso en cualquier momento desde tu cuenta de Google.
+				</p>
+			</section>
+
+			<section class="mt-6 space-y-3">
+				<h2 class="text-lg font-semibold">Google Calendar</h2>
+				<p class="text-sm text-neutral-700 dark:text-neutral-200">
+					Si el paciente elige guardar su turno con avisos, la app solicita el alcance
+					<span class="font-semibold">calendar.events.owned</span>. Google describe este permiso
+					como la posibilidad de ver, crear, cambiar y borrar eventos en calendarios propios de la
+					cuenta. Cita Suite limita su uso a crear y operar los eventos vinculados a turnos que la
+					propia app generó; no enumera ni sincroniza los demás eventos del usuario.
+				</p>
+				<p class="text-sm text-neutral-700 dark:text-neutral-200">
+					Se conserva un identificador técnico de la cuenta, el vínculo entre el turno y el evento,
+					y una autorización cifrada para mantener la fecha y la hora actualizadas sin pedir una
+					nueva acción en cada reprogramación. El evento usa texto neutral y no incluye el nombre
+					del paciente ni el servicio reservado. El paciente puede quitar el evento desde la página
+					del turno o revocar el acceso desde su cuenta de Google.
 				</p>
 			</section>
 
