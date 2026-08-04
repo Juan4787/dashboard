@@ -17,6 +17,7 @@
 			isSoon: boolean;
 			vapidPublicKey: string | null;
 			publicSiteUrl: string;
+			androidCalendarShareIcs: string | null;
 			googleCalendar: {
 				available: boolean;
 				state:
@@ -275,6 +276,18 @@
 	// endpoint contra el turno actual.
 	const syncPushSubscription = async (requestTest: boolean, recovering = false) => {
 		if (!data.vapidPublicKey || syncing) return;
+		// Defensa en profundidad: ningún caller puede registrar, suscribir ni pedir una
+		// prueba hasta que el navegador refleje el permiso como efectivamente concedido.
+		// No alcanza con confiar en el valor devuelto por requestPermission(): algunos
+		// Android actualizan Notification.permission un instante después.
+		if (typeof window.Notification === 'undefined' || Notification.permission !== 'granted') {
+			pushState =
+				typeof window.Notification !== 'undefined' && Notification.permission === 'denied'
+					? 'denied'
+					: 'awaiting_permission';
+			pushMessage = '';
+			return;
+		}
 		pollRun += 1;
 		syncing = true;
 		pushState = recovering ? 'repairing' : 'working';
@@ -386,16 +399,19 @@
 		pushState = 'working';
 		pushMessage = '';
 		try {
-			const permission = await Notification.requestPermission();
-			if (permission === 'granted') {
+			await Notification.requestPermission();
+			// La propiedad efectiva es la única fuente de verdad para habilitar el envío.
+			// Si todavía figura en default, el botón queda disponible para reintentar y el
+			// listener de permisos continúa observando el cambio sin enviar nada antes.
+			if (Notification.permission === 'granted') {
 				await syncPushSubscription(true);
-			} else if (permission === 'denied') {
+			} else if (Notification.permission === 'denied') {
 				// Bloqueo real del navegador. Si lo desbloquea en Configuración y vuelve,
 				// el visibilitychange lo detecta y activa los avisos igual.
 				pushState = 'denied';
 			} else {
-				// 'default': no resolvió acá (p. ej. Android lo derivó a Configuración).
-				// NO es un bloqueo: esperamos a que vuelva a la pantalla.
+				// 'default': no hubo concesión efectiva. No se envía ninguna prueba y se
+				// conserva la acción principal para que pueda volver a intentarlo.
 				pushState = 'awaiting_permission';
 			}
 		} catch {
@@ -485,7 +501,12 @@
 				try {
 					const registration = await navigator.serviceWorker.getRegistration('/push-sw.js');
 					const subscription = await registration?.pushManager.getSubscription();
-					if (subscription && pushState === 'idle' && !syncing) {
+					if (
+						subscription &&
+						Notification.permission === 'granted' &&
+						pushState === 'idle' &&
+						!syncing
+					) {
 						syncing = true;
 						const result = await savePushSubscriptionForAppointment(subscription, false);
 						if (!useSaveResult(result)) pushState = 'error';
@@ -554,7 +575,7 @@
 	const showAndroidCalendarFallback = $derived(
 		device === 'android' &&
 		(
-			['unsupported', 'needs_device_check', 'denied', 'awaiting_permission', 'error'].includes(
+			['unsupported', 'needs_device_check', 'denied', 'error'].includes(
 				renderedPushState
 			) ||
 			data.googleCalendar.state === 'needs_reconnect' ||
@@ -670,6 +691,50 @@
 			copied = false;
 		}
 	};
+
+	type CalendarShareState = 'idle' | 'sharing' | 'unsupported' | 'error';
+	let calendarShareState = $state<CalendarShareState>('idle');
+
+	const shareWithSamsungCalendar = async () => {
+		if (
+			!base ||
+			!data.androidCalendarShareIcs ||
+			typeof File === 'undefined' ||
+			typeof navigator.share !== 'function'
+		) {
+			calendarShareState = 'unsupported';
+			return;
+		}
+
+		const calendarFile = new File([data.androidCalendarShareIcs], 'turno.ics', {
+			type: 'text/calendar'
+		});
+		const shareData: ShareData = {
+			files: [calendarFile],
+			title: 'Turno reservado'
+		};
+		if (typeof navigator.canShare === 'function' && !navigator.canShare(shareData)) {
+			calendarShareState = 'unsupported';
+			return;
+		}
+
+		calendarShareState = 'sharing';
+		try {
+			// Se llama sin ninguna espera previa para conservar la activación transitoria
+			// del toque: Android recibe el .ics en memoria y abre su selector nativo.
+			await navigator.share(shareData);
+			calendarShareState = 'idle';
+			// El tracking ocurre después de que Android aceptó compartir. fetch consume la
+			// respuesta en memoria: no navega ni crea una descarga visible.
+			void fetch(`${base}/calendario.ics?p=phone`, { cache: 'no-store' }).catch(() => undefined);
+		} catch (error) {
+			if (error && typeof error === 'object' && 'name' in error && error.name === 'AbortError') {
+				calendarShareState = 'idle';
+				return;
+			}
+			calendarShareState = 'error';
+		}
+	};
 </script>
 
 {#snippet pushBlock(primary: boolean)}
@@ -732,7 +797,18 @@
 						No la recibí
 					</button>
 				</div>
-			{:else if ['unsupported', 'needs_device_check', 'denied', 'awaiting_permission', 'error'].includes(renderedPushState)}
+			{:else if renderedPushState === 'awaiting_permission'}
+				<button
+					type="button"
+					class={primary ? 'ux-btn-primary ux-btn-cta w-full whitespace-nowrap px-3 text-[1.075rem] font-extrabold' : 'ux-btn-secondary w-full whitespace-nowrap px-3 text-[1.075rem] font-extrabold'}
+					onclick={enablePush}
+				>
+					🔔 Activar recordatorio
+				</button>
+				<p class="mt-3 text-center text-xs leading-relaxed text-white/45">
+					El permiso todavía no se activó. Tocá nuevamente para continuar.
+				</p>
+			{:else if ['unsupported', 'needs_device_check', 'denied', 'error'].includes(renderedPushState)}
 				<p class="sr-only" aria-live="polite">
 					La activación continúa con las opciones de calendario disponibles a continuación.
 				</p>
@@ -807,45 +883,57 @@
 {#snippet androidCalendarFallback()}
 	{#if showAndroidCalendarFallback}
 		<div class="mt-5 space-y-4" aria-live="polite">
-			{#if managedGoogleCalendar}
-				<div class="rounded-2xl border border-violet-400/25 bg-violet-400/[0.055] p-5">
-					<p class="text-base font-extrabold text-white">¿Tu teléfono es Samsung?</p>
+			<div class="rounded-2xl border border-violet-400/25 bg-violet-400/[0.055] p-5">
+				<p class="text-base font-extrabold text-white">¿Tu teléfono es Samsung?</p>
+				{#if data.googleCalendar.available}
 					<a
 						href={googleCalendarConnectHref('samsung')}
 						class="ux-btn-primary mt-4 block w-full px-2 text-center text-sm font-extrabold leading-tight"
 					>
 						Agregar a Calendario Samsung
 					</a>
-					<p class="mt-3 text-center text-xs leading-relaxed text-white/50">
-						Lo guardamos con avisos en la cuenta Google que Calendario Samsung sincroniza.
-					</p>
-				</div>
-
-				<div class="rounded-2xl border border-white/10 bg-white/[0.025] p-5">
-					<p class="text-base font-extrabold text-white">¿Usás otro teléfono Android?</p>
-					<a
-						href={googleCalendarConnectHref('google')}
-						class="ux-btn-secondary mt-4 block w-full px-2 text-center text-sm font-extrabold leading-tight"
+				{:else}
+					<button
+						type="button"
+						class="ux-btn-primary mt-4 w-full px-2 text-center text-sm font-extrabold leading-tight"
+						disabled={calendarShareState === 'sharing'}
+						onclick={shareWithSamsungCalendar}
 					>
-						Agregar a Google Calendar
-					</a>
-					<p class="mt-3 text-center text-xs leading-relaxed text-white/50">
-						Queda guardado con avisos y se actualiza solo si cambia el turno.
+						{calendarShareState === 'sharing' ? 'Abriendo calendario…' : 'Agregar a Calendario Samsung'}
+					</button>
+				{/if}
+				<p class="mt-3 text-center text-xs leading-relaxed text-white/50">
+					{data.googleCalendar.available
+						? 'Lo guardamos con avisos en la cuenta Google que Calendario Samsung sincroniza.'
+						: 'Android abre el selector del teléfono con el turno y sus avisos preparados.'}
+				</p>
+				{#if calendarShareState === 'unsupported' || calendarShareState === 'error'}
+					<p class="mt-3 text-center text-xs leading-relaxed text-amber-200/80" aria-live="polite">
+						Este teléfono no pudo abrir Calendario Samsung desde el navegador. Podés usar Google Calendar.
 					</p>
-				</div>
+				{/if}
+			</div>
+
+			<div class="rounded-2xl border border-white/10 bg-white/[0.025] p-5">
+				<p class="text-base font-extrabold text-white">¿Usás otro teléfono Android?</p>
+				<a
+					href={data.googleCalendar.available
+						? googleCalendarConnectHref('google')
+						: `${base}/ir/google`}
+					class="ux-btn-secondary mt-4 block w-full px-2 text-center text-sm font-extrabold leading-tight"
+				>
+					Agregar a Google Calendar
+				</a>
+				<p class="mt-3 text-center text-xs leading-relaxed text-white/50">
+					{data.googleCalendar.available
+						? 'Queda guardado con avisos y se actualiza solo si cambia el turno.'
+						: 'Abrimos Google Calendar con el turno preparado para guardar.'}
+				</p>
+			</div>
+			{#if data.googleCalendar.available}
 				<p class="text-center text-xs text-white/40">
 					<a href="/privacidad" target="_blank" rel="noreferrer" class="underline">Cómo usamos Google Calendar</a>
 				</p>
-			{:else}
-				<div class="rounded-2xl border border-white/10 bg-white/[0.025] p-4">
-					<p class="text-base font-extrabold text-white">¿Usás Google Calendar?</p>
-					<a
-						href={`${base}/ir/google`}
-						class="ux-btn-secondary mt-3 block w-full text-center font-extrabold"
-					>
-						Agregar a Google Calendar
-					</a>
-				</div>
 			{/if}
 		</div>
 	{/if}

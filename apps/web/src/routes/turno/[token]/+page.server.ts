@@ -26,7 +26,8 @@ import {
 import {
 	calendarDescriptionFor,
 	calendarLocationFor,
-	calendarSummaryFor
+	calendarSummaryFor,
+	icsForAppointment
 } from '$lib/server/calendar-content';
 import { publicAppointmentUrl } from '$lib/server/messaging';
 import {
@@ -96,6 +97,17 @@ const androidCalendarIntentFor = (
 	};
 };
 
+// Fallback real para Android cuando OAuth administrado todavía no está disponible:
+// el archivo se entrega dentro del HTML y el cliente lo comparte en memoria. No se
+// crea una descarga ni se pierde el turno en la carpeta Descargas.
+const androidCalendarShareIcsFor = (
+	appointment: PublicAppointmentView | null,
+	device: DeviceClass
+): string | null =>
+	appointment && device === 'android'
+		? icsForAppointment(appointment)
+		: null;
+
 export const load: PageServerLoad = async ({ params, fetch, url, request, setHeaders }) => {
 	// La página expone datos del turno detrás del token: nunca debe quedar cacheada.
 	setHeaders({ 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' });
@@ -121,6 +133,7 @@ export const load: PageServerLoad = async ({ params, fetch, url, request, setHea
 			pushSetupManual,
 			notificationBrowser,
 			androidCalendarIntent: androidCalendarIntentFor(appointment, device, userAgent, url),
+			androidCalendarShareIcs: androidCalendarShareIcsFor(appointment, device),
 			googleCalendar: unavailableGoogleCalendarState(),
 			calendarMessage: getGoogleCalendarPublicMessage(url.searchParams.get('calendar'))
 		};
@@ -169,6 +182,7 @@ export const load: PageServerLoad = async ({ params, fetch, url, request, setHea
 			pushSetupManual,
 			notificationBrowser,
 			androidCalendarIntent: androidCalendarIntentFor(appointment, device, userAgent, url),
+			androidCalendarShareIcs: androidCalendarShareIcsFor(appointment, device),
 			googleCalendar,
 			calendarMessage: getGoogleCalendarPublicMessage(url.searchParams.get('calendar'))
 		};
@@ -187,6 +201,7 @@ export const load: PageServerLoad = async ({ params, fetch, url, request, setHea
 			pushSetupManual,
 			notificationBrowser,
 			androidCalendarIntent: null,
+			androidCalendarShareIcs: null,
 			googleCalendar: unavailableGoogleCalendarState(),
 			calendarMessage: null
 		};

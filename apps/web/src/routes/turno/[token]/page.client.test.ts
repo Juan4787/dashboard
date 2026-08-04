@@ -44,6 +44,7 @@ const pageData = {
 	isSoon: false,
 	vapidPublicKey: 'AQIDBA',
 	publicSiteUrl: 'https://turnos.test',
+	androidCalendarShareIcs: 'BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n',
 	pushSetupManual: false,
 	notificationBrowser: {
 		label: 'Samsung Internet',
@@ -77,11 +78,13 @@ const jsonResponse = (body: unknown) =>
 const installNotificationEnvironment = (
 	states: Array<'accepted' | 'displayed' | 'missing' | 'confirmed'>,
 	initialPermission: NotificationPermission = 'granted',
-	requestedPermission: NotificationPermission = 'granted'
+	requestedPermission: NotificationPermission = 'granted',
+	persistRequestedPermission = true
 ) => {
 	let visibilityState: DocumentVisibilityState = 'visible';
 	let postCount = 0;
 	let permission = initialPermission;
+	const actionOrder: string[] = [];
 	let lastDelivery = delivery('displayed', 'delivery-0');
 	const subscription = {
 		options: { applicationServerKey: null },
@@ -113,7 +116,9 @@ const installNotificationEnvironment = (
 			return permission;
 		},
 		requestPermission: vi.fn(async () => {
-			permission = requestedPermission;
+			actionOrder.push('permission-requested');
+			if (persistRequestedPermission) permission = requestedPermission;
+			actionOrder.push(`permission-result:${requestedPermission}`);
 			return requestedPermission;
 		})
 	};
@@ -134,6 +139,7 @@ const installNotificationEnvironment = (
 	});
 	vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
 		if (init?.method === 'POST') {
+			actionOrder.push(`test-post:${permission}`);
 			const state = states[Math.min(postCount, states.length - 1)];
 			postCount += 1;
 			lastDelivery = delivery(state ?? 'missing', `delivery-${postCount}`);
@@ -153,6 +159,7 @@ const installNotificationEnvironment = (
 			document.dispatchEvent(new Event('visibilitychange'));
 		},
 		postRequests: () => postCount,
+		actionOrder: () => [...actionOrder],
 		requestPermission: notification.requestPermission
 	};
 };
@@ -166,6 +173,8 @@ describe('activación de notificaciones en Android', () => {
 		cleanup();
 		vi.useRealTimers();
 		vi.unstubAllGlobals();
+		Object.defineProperty(navigator, 'share', { configurable: true, value: undefined });
+		Object.defineProperty(navigator, 'canShare', { configurable: true, value: undefined });
 	});
 
 	it('muestra al principio solamente el recordatorio y envía una prueba real al tocarlo', async () => {
@@ -192,6 +201,30 @@ describe('activación de notificaciones en Android', () => {
 		});
 		expect(environment.requestPermission).toHaveBeenCalledOnce();
 		expect(environment.postRequests()).toBe(1);
+		expect(environment.actionOrder()).toEqual([
+			'permission-requested',
+			'permission-result:granted',
+			'test-post:granted'
+		]);
+		expect(screen.queryByRole('link', { name: 'Agregar a Calendario Samsung' })).not.toBeInTheDocument();
+	});
+
+	it('no envía la prueba mientras el permiso efectivo todavía no esté concedido', async () => {
+		const environment = installNotificationEnvironment(['displayed'], 'default', 'granted', false);
+		render(Page, {
+			data: {
+				...pageData,
+				googleCalendar: { ...pageData.googleCalendar, available: true }
+			}
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: '🔔 Activar recordatorio' }));
+
+		expect(environment.requestPermission).toHaveBeenCalledOnce();
+		expect(environment.postRequests()).toBe(0);
+		expect(
+			await screen.findByRole('button', { name: '🔔 Activar recordatorio' })
+		).toBeInTheDocument();
 		expect(screen.queryByRole('link', { name: 'Agregar a Calendario Samsung' })).not.toBeInTheDocument();
 	});
 
@@ -252,6 +285,32 @@ describe('activación de notificaciones en Android', () => {
 			'/turno/public-token/google-calendar/connect?target=google'
 		);
 		expect(samsung.compareDocumentPosition(google) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+	});
+
+	it('mantiene Samsung primero y Google después con un selector en memoria si OAuth no está disponible', async () => {
+		const share = vi.fn().mockResolvedValue(undefined);
+		const canShare = vi.fn().mockReturnValue(true);
+		Object.defineProperty(navigator, 'share', { configurable: true, value: share });
+		Object.defineProperty(navigator, 'canShare', { configurable: true, value: canShare });
+		installNotificationEnvironment(['displayed']);
+		render(Page, { data: pageData });
+
+		await fireEvent.click(screen.getByRole('button', { name: '🔔 Activar recordatorio' }));
+		await fireEvent.click(await screen.findByRole('button', { name: 'No la recibí' }));
+
+		const samsung = await screen.findByRole('button', { name: 'Agregar a Calendario Samsung' });
+		const google = screen.getByRole('link', { name: 'Agregar a Google Calendar' });
+		expect(google).toHaveAttribute('href', '/turno/public-token/ir/google');
+		expect(samsung.compareDocumentPosition(google) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+		await fireEvent.click(samsung);
+
+		expect(canShare).toHaveBeenCalledOnce();
+		expect(share).toHaveBeenCalledOnce();
+		const sharedFile = share.mock.calls[0]?.[0]?.files?.[0] as File;
+		expect(sharedFile).toBeInstanceOf(File);
+		expect(sharedFile.name).toBe('turno.ics');
+		expect(sharedFile.type).toBe('text/calendar');
 	});
 
 	it('pasa directamente a los calendarios cuando se rechaza el permiso', async () => {
