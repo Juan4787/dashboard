@@ -1,4 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const googleCalendarFlag = vi.hoisted(() => ({ enabled: false }));
+vi.mock('./google-calendar', () => ({
+	isManagedGoogleCalendarEnabled: () => googleCalendarFlag.enabled
+}));
 import {
 	buildReminderWhatsAppMessage,
 	buildRescheduleWhatsAppMessage,
@@ -12,6 +17,10 @@ import {
 import { publicRescheduleUrl } from './messaging';
 
 const CORDOBA = 'America/Argentina/Cordoba'; // UTC-3, sin DST
+
+beforeEach(() => {
+	googleCalendarFlag.enabled = false;
+});
 
 describe('localDayWindowUtc', () => {
 	// 2026-06-11 02:00 UTC = 2026-06-10 23:00 en Córdoba: el día local NO es el día UTC.
@@ -43,9 +52,17 @@ describe('classifyReminderCoverage', () => {
 		expect(classifyReminderCoverage({ ...base, calendar_action_status: 'offered' })).toBe('sin_calendario');
 	});
 
-	it('acción registrada: cubierto (no aparece)', () => {
-		expect(classifyReminderCoverage({ ...base, calendar_action_status: 'clicked_google' })).toBeNull();
+	it('una acción de calendario verificable queda cubierta', () => {
 		expect(classifyReminderCoverage({ ...base, calendar_action_status: 'downloaded_ics' })).toBeNull();
+	});
+
+	it('un click directo en Google nunca se confunde con un evento guardado', () => {
+		expect(
+			classifyReminderCoverage({
+				...base,
+				calendar_action_status: 'clicked_google'
+			})
+		).toBe('sin_calendario');
 	});
 
 	it('reprogramado tras acción: pendiente_actualizar aunque haya acción previa', () => {
@@ -247,6 +264,22 @@ describe('loadReminderCandidates · exclusión por avisos activados', () => {
 		expect(candidates.map((candidate) => candidate.appointment_id)).toEqual(['a']);
 	});
 
+	it('mantiene visible el turno si sólo se abrió el editor directo de Google', async () => {
+		const row = { ...appointmentRow('a'), calendar_action_status: 'clicked_google' };
+		const supabase = makeSupabase({
+			appointments: [{ data: [row], error: null }],
+			push_subscriptions: [{ data: [], error: null }],
+			message_dispatches: [{ data: [], error: null }]
+		});
+
+		const candidates = await loadReminderCandidates(supabase, business, {
+			day: 'manana',
+			now,
+			pushSubscriptionsSupabase: supabase
+		});
+		expect(candidates.map((candidate) => candidate.appointment_id)).toEqual(['a']);
+	});
+
 	it('una suscripción activa basta para excluir aunque coexista una revocada', async () => {
 		const supabase = makeSupabase({
 			appointments: [{ data: [appointmentRow('a')], error: null }],
@@ -308,6 +341,7 @@ describe('loadReminderCandidates · exclusión por avisos activados', () => {
 	});
 
 	it('excluye un evento Google únicamente cuando la versión vigente fue confirmada', async () => {
+		googleCalendarFlag.enabled = true;
 		const synced = { ...appointmentRow('a'), calendar_action_status: 'synced_google' };
 		const stale = {
 			...appointmentRow('b'),
@@ -341,6 +375,7 @@ describe('loadReminderCandidates · exclusión por avisos activados', () => {
 	});
 
 	it('consulta las notificaciones con el cliente privilegiado, no con la sesión del usuario', async () => {
+		googleCalendarFlag.enabled = true;
 		const userSupabase = makeSupabase({
 			appointments: [{ data: [appointmentRow('a')], error: null }],
 			message_dispatches: [{ data: [], error: null }]
@@ -362,6 +397,7 @@ describe('loadReminderCandidates · exclusión por avisos activados', () => {
 	});
 
 	it('falla de forma segura si no puede verificar la versión de Google Calendar', async () => {
+		googleCalendarFlag.enabled = true;
 		const userSupabase = makeSupabase({
 			appointments: [{ data: [appointmentRow('a')], error: null }],
 			message_dispatches: [{ data: [], error: null }]

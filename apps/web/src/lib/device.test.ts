@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
-	androidNotificationSettingsIntent,
 	classifyUserAgent,
 	isLikelyBotUserAgent,
 	notificationBrowserProfile,
 	refineDeviceClass,
+	samsungAppNotificationToggleStep,
 	supportsAndroidCalendarIntent
 } from './device';
 
@@ -17,6 +17,8 @@ const UA = {
 		'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36',
 	androidEdge:
 		'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36 EdgA/125.0.0.0',
+	androidOpera:
+		'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36 OPR/85.0.0.0',
 	macSafari:
 		'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15',
 	windowsChrome:
@@ -36,41 +38,105 @@ const UA = {
 describe('notificationBrowserProfile', () => {
 	it('identifica el navegador Android antes de Chrome embebido en su UA', () => {
 		expect(notificationBrowserProfile(UA.android)).toMatchObject({
+			id: 'chrome',
 			label: 'Chrome',
-			androidPackage: 'com.android.chrome'
+			samsungExclusive: false
 		});
 		expect(notificationBrowserProfile(UA.samsungInternet)).toMatchObject({
-			label: 'Samsung Internet',
-			androidPackage: 'com.sec.android.app.sbrowser'
+			id: 'samsung_browser',
+			label: 'Samsung Browser',
+			samsungExclusive: true
 		});
 		expect(notificationBrowserProfile(UA.androidEdge)).toMatchObject({
+			id: 'edge',
 			label: 'Microsoft Edge',
-			androidPackage: 'com.microsoft.emmx'
+			sitePermissionGuide: null
 		});
-	});
-
-	it('no promete un acceso directo cuando el navegador no admite intent de Chromium', () => {
-		expect(notificationBrowserProfile(UA.firefoxAndroid)).toMatchObject({
-			label: 'Firefox',
-			supportsAndroidSettingsIntent: false
-		});
-		expect(androidNotificationSettingsIntent(UA.firefoxAndroid, 'https://turnos.test/turno/1')).toBeNull();
-	});
-});
-
-describe('androidNotificationSettingsIntent', () => {
-	it('apunta a las notificaciones de la app correcta y conserva un retorno seguro', () => {
-		const fallback = 'https://turnos.test/turno/token?desde=mensaje';
-		const intent = androidNotificationSettingsIntent(UA.android, fallback);
-		expect(intent).toContain('action=android.settings.APP_NOTIFICATION_SETTINGS');
-		expect(intent).toContain('S.android.provider.extra.APP_PACKAGE=com.android.chrome');
-		expect(intent).toContain(
-			`S.browser_fallback_url=${encodeURIComponent('https://turnos.test/turno/token?desde=mensaje&push_setup=manual')}`
+		expect(notificationBrowserProfile(UA.samsungInternet).phoneNotificationGuide?.steps).toContain(
+			'{{app_notification_toggle}}'
+		);
+		expect(notificationBrowserProfile(UA.samsungInternet).phoneNotificationGuide?.steps).toContain(
+			'Tocá “Aplicaciones”.'
+		);
+		expect(notificationBrowserProfile(UA.samsungInternet).sitePermissionGuide?.steps).toEqual([
+			'Tocá “Herramientas” en la esquina inferior derecha.',
+			'Tocá “Ajustes”.',
+			'Tocá “Sitios web y descargas”.',
+			'Tocá “Notificaciones del sitio”.',
+			'Tocá “Más opciones”.',
+			'Tocá “Permitir o bloquear sitios web”.',
+			'Activá {{site}}.',
+			'Volvé a este turno.'
+		]);
+		expect(notificationBrowserProfile(UA.android).sitePermissionGuide?.steps[0]).toBe(
+			'Si no ves la dirección, deslizá la página apenas hacia abajo para mostrarla.'
+		);
+		expect(notificationBrowserProfile(UA.android).sitePermissionGuide?.steps[1]).toBe(
+			'Tocá el ícono situado a la izquierda de la dirección.'
+		);
+		expect(notificationBrowserProfile(UA.android).sitePermissionGuide?.steps).toContain(
+			'{{app_notification_toggle}}'
 		);
 	});
 
-	it('no genera enlaces Android en escritorio', () => {
-		expect(androidNotificationSettingsIntent(UA.windowsChrome, 'https://turnos.test')).toBeNull();
+	it('entrega una guía propia para Firefox en vez de reutilizar Chrome', () => {
+		expect(notificationBrowserProfile(UA.firefoxAndroid)).toMatchObject({
+			id: 'firefox',
+			label: 'Firefox'
+		});
+		expect(notificationBrowserProfile(UA.firefoxAndroid).sitePermissionGuide?.steps).toEqual([
+			'Tocá el ícono situado a la izquierda de la dirección.',
+			'En “Permisos”, tocá “Bloqueado” junto a “Notificación”.',
+			'Comprobá que ahora diga “Permitido”.',
+			'Cerrá el panel para volver al turno.'
+		]);
+	});
+
+	it('usa en Opera los nombres publicados para su menú de Android', () => {
+		expect(notificationBrowserProfile(UA.androidOpera).sitePermissionGuide?.steps).toEqual([
+			'Tocá el botón de Opera.',
+			'Tocá “Configuración”.',
+			'Bajá hasta “Privacidad”.',
+			'Tocá “Configuración del sitio”.',
+			'Tocá “Notificaciones”.',
+			'Eliminá {{site}} de la lista.',
+			'Volvé a este turno y tocá “Activar recordatorio”.',
+			'Elegí “Permitir” cuando aparezca la pregunta.'
+		]);
+	});
+
+	it('no confunde un WebView de una aplicación con Chrome', () => {
+		expect(notificationBrowserProfile(UA.androidWebView)).toMatchObject({
+			id: 'embedded',
+			label: null,
+			sitePermissionGuide: null
+		});
+		expect(notificationBrowserProfile(UA.instagramInApp)).toMatchObject({ id: 'embedded' });
+	});
+});
+
+describe('samsungAppNotificationToggleStep', () => {
+	it('usa la etiqueta observada en One UI sobre Android 12 o anterior', () => {
+		expect(samsungAppNotificationToggleStep('11.0.0')).toBe(
+			'Activá “Mostrar notificaciones”.'
+		);
+		expect(samsungAppNotificationToggleStep('12')).toBe('Activá “Mostrar notificaciones”.');
+	});
+
+	it('usa la etiqueta vigente desde Android 13 cuando la versión está disponible', () => {
+		expect(samsungAppNotificationToggleStep('13.0.0')).toBe(
+			'Activá “Permitir notificaciones”.'
+		);
+		expect(samsungAppNotificationToggleStep('15')).toBe('Activá “Permitir notificaciones”.');
+	});
+
+	it('no inventa un nombre de pantalla si el navegador oculta la versión', () => {
+		expect(samsungAppNotificationToggleStep(null)).toBe(
+			'Activá el interruptor principal de notificaciones, en la parte superior.'
+		);
+		expect(samsungAppNotificationToggleStep('')).toBe(
+			'Activá el interruptor principal de notificaciones, en la parte superior.'
+		);
 	});
 });
 

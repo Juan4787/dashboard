@@ -19,6 +19,7 @@ import webpush from 'web-push';
 import {
 	getPushDeliveryStatus,
 	isValidPushDeliveryId,
+	isValidPushTestRequestKey,
 	isValidSubscriptionPayload,
 	pushTopicForAppointment,
 	pushTtlUntilAppointment,
@@ -179,6 +180,9 @@ describe('identificadores y vencimiento de push', () => {
 		expect(reminder).not.toBe(test);
 		expect(reminder).toMatch(/^[A-Za-z0-9_-]{32}$/);
 		expect(test).toMatch(/^[A-Za-z0-9_-]{32}$/);
+		expect(isValidPushTestRequestKey('push:session-1234567890:initial')).toBe(true);
+		expect(isValidPushTestRequestKey('corta')).toBe(false);
+		expect(isValidPushTestRequestKey('push:clave con espacios:initial')).toBe(false);
 	});
 
 	it('nunca mantiene un push en cola más allá del turno ni del máximo del kind', () => {
@@ -218,14 +222,15 @@ describe('persistencia de la suscripción', () => {
 						},
 						error: null
 					},
-					{ data: { id: 'sub-1', endpoint: payload.endpoint }, error: null }
+					{ data: { id: 'sub-1', endpoint: payload.endpoint, verified_at: verifiedAt }, error: null }
 				]
 			},
 			{ data: null, error: null }
 		);
 
-		await saveAppointmentPushSubscription(supabase, appointment, payload, 'Android');
+		const saved = await saveAppointmentPushSubscription(supabase, appointment, payload, 'Android');
 		expect(upserts[0].payload.verified_at).toBe(verifiedAt);
+		expect(saved.verifiedAt).toBe(verifiedAt);
 	});
 
 	it('exige otra prueba si la suscripción estaba revocada', async () => {
@@ -242,7 +247,7 @@ describe('persistencia de la suscripción', () => {
 						},
 						error: null
 					},
-					{ data: { id: 'sub-1', endpoint: payload.endpoint }, error: null }
+					{ data: { id: 'sub-1', endpoint: payload.endpoint, verified_at: null }, error: null }
 				]
 			},
 			{ data: null, error: null }
@@ -393,7 +398,7 @@ describe('telemetría de entrega', () => {
 		});
 	});
 
-	it('revoca la cobertura del turno cuando la persona informa que no llegó', async () => {
+	it('quita la verificación sin revocar el endpoint cuando la persona informa que no llegó', async () => {
 		const { supabase, updates } = createSupabaseMock(
 			{
 				push_delivery_attempts: [
@@ -415,10 +420,10 @@ describe('telemetría de entrega', () => {
 		expect(updates[1]).toMatchObject({
 			table: 'push_subscriptions',
 			payload: {
-				verified_at: null,
-				revoked_at: now.toISOString()
+				verified_at: null
 			}
 		});
+		expect(updates[1].payload).not.toHaveProperty('revoked_at');
 	});
 });
 
@@ -442,8 +447,10 @@ describe('sendTestPushNotification', () => {
 			business: { id: 'biz-1', name: 'Clínica Sabrina' }
 		} as any;
 
+		const requestKey = 'push:session-1234567890:initial';
 		const result = await sendTestPushNotification(supabase, {
 			appointment,
+			requestKey,
 			subscription: {
 				id: 'sub-1',
 				endpoint: 'https://push.example/ep-1',
@@ -467,6 +474,133 @@ describe('sendTestPushNotification', () => {
 			crypto.createHash('sha256').update(payload.delivery.token).digest('hex')
 		);
 		expect(inserts[0].payload.receipt_token_hash).not.toBe(payload.delivery.token);
+		expect(inserts[0].payload.request_key_hash).toBe(
+			crypto.createHash('sha256').update(requestKey).digest('hex')
+		);
+	});
+
+	it('recupera la misma prueba ante una clave repetida y no vuelve a enviarla', async () => {
+		const deliveryId = '8ccf23d7-5ae3-4b87-9268-d40a05d9a475';
+		const { supabase } = createSupabaseMock(
+			{
+				push_delivery_attempts: [
+					{ data: null, error: null },
+					{ data: null, error: { code: '23505' } },
+					{ data: { id: deliveryId, push_service_status: 201 }, error: null }
+				]
+			},
+			{ data: null, error: null }
+		);
+		const appointment = {
+			id: 'apt-1',
+			token: 'tok-1',
+			business: { id: 'biz-1', name: 'Clínica Sabrina' }
+		} as any;
+
+		const result = await sendTestPushNotification(supabase, {
+			appointment,
+			requestKey: 'push:session-1234567890:recovery',
+			subscription: {
+				id: 'sub-1',
+				endpoint: 'https://push.example/ep-1',
+				p256dh: 'p256dh-key',
+				auth: 'auth-key'
+			},
+			now
+		});
+
+		expect(result).toMatchObject({ accepted: true, deliveryId });
+		expect(webpush.sendNotification).not.toHaveBeenCalled();
+	});
+
+	it('reutiliza una prueba reciente aunque otra pestaña llegue con otra clave', async () => {
+		const deliveryId = '8ccf23d7-5ae3-4b87-9268-d40a05d9a475';
+		const { supabase, inserts } = createSupabaseMock(
+			{
+				push_delivery_attempts: [
+					{
+						data: {
+							id: deliveryId,
+							kind: 'test',
+							accepted_at: now.toISOString(),
+							received_at: null,
+							displayed_at: null,
+							user_confirmed_at: null,
+							user_reported_missing_at: null,
+							superseded_at: null,
+							failed_at: null,
+							expires_at: new Date(now.getTime() + 60_000).toISOString(),
+							created_at: new Date(now.getTime() - 2_000).toISOString()
+						},
+						error: null
+					}
+				]
+			},
+			{ data: null, error: null }
+		);
+		const appointment = {
+			id: 'apt-1',
+			token: 'tok-1',
+			business: { id: 'biz-1', name: 'Clínica Sabrina' }
+		} as any;
+
+		const result = await sendTestPushNotification(supabase, {
+			appointment,
+			requestKey: 'push:other-tab-1234567890:initial',
+			subscription: {
+				id: 'sub-1',
+				endpoint: 'https://push.example/ep-1',
+				p256dh: 'p256dh-key',
+				auth: 'auth-key'
+			},
+			now
+		});
+
+		expect(result).toMatchObject({ accepted: true, deliveryId });
+		expect(inserts).toHaveLength(0);
+		expect(webpush.sendNotification).not.toHaveBeenCalled();
+	});
+
+	it('no presenta como aceptada una prueba idempotente que ya había fallado', async () => {
+		const deliveryId = '8ccf23d7-5ae3-4b87-9268-d40a05d9a475';
+		const { supabase } = createSupabaseMock(
+			{
+				push_delivery_attempts: [
+					{ data: null, error: null },
+					{ data: null, error: { code: '23505' } },
+					{
+						data: {
+							id: deliveryId,
+							push_service_status: 503,
+							failed_at: now.toISOString(),
+							failure_kind: 'transient'
+						},
+						error: null
+					}
+				]
+			},
+			{ data: null, error: null }
+		);
+		const appointment = {
+			id: 'apt-1',
+			token: 'tok-1',
+			business: { id: 'biz-1', name: 'Clínica Sabrina' }
+		} as any;
+
+		const result = await sendTestPushNotification(supabase, {
+			appointment,
+			requestKey: 'push:session-1234567890:initial',
+			subscription: {
+				id: 'sub-1',
+				endpoint: 'https://push.example/ep-1',
+				p256dh: 'p256dh-key',
+				auth: 'auth-key'
+			},
+			now
+		});
+
+		expect(result).toMatchObject({ accepted: false, deliveryId, gone: false });
+		expect(webpush.sendNotification).not.toHaveBeenCalled();
 	});
 });
 

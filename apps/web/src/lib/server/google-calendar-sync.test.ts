@@ -120,6 +120,7 @@ const makeSupabase = (
 beforeEach(() => {
 	for (const key of Object.keys(testState.privateEnv)) delete testState.privateEnv[key];
 	for (const key of Object.keys(testState.publicEnv)) delete testState.publicEnv[key];
+	testState.privateEnv.GOOGLE_CALENDAR_MANAGED_ENABLED = 'true';
 	testState.privateEnv.GOOGLE_CALENDAR_CLIENT_ID = 'calendar-client.apps.googleusercontent.com';
 	testState.privateEnv.GOOGLE_CALENDAR_CLIENT_SECRET = 'secret';
 	testState.privateEnv.GOOGLE_CALENDAR_TOKEN_ENCRYPTION_KEY = Buffer.alloc(32, 3).toString('base64');

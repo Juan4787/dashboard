@@ -3,7 +3,10 @@
 	import { formatDateTime, formatInTimeZone } from '$lib/utils/format';
 	import {
 		refineDeviceClass,
-		type DeviceClass
+		samsungAppNotificationToggleStep,
+		type DeviceClass,
+		type NotificationBrowserProfile,
+		type NotificationGuide
 	} from '$lib/device';
 
 	let { data, form } = $props<{
@@ -17,7 +20,7 @@
 			isSoon: boolean;
 			vapidPublicKey: string | null;
 			publicSiteUrl: string;
-			androidCalendarShareIcs: string | null;
+			notificationBrowser: NotificationBrowserProfile;
 			googleCalendar: {
 				available: boolean;
 				state:
@@ -44,15 +47,14 @@
 	let refinedDevice = $state<DeviceClass | null>(null);
 	const device = $derived(refinedDevice ?? data.device);
 
-	// Push secundario: solo con soporte real, nunca en iOS (requeriría instalar la web
-	// app en el home), y el permiso se pide recién al tocar el botón.
+	// En iOS el flujo es el calendario. En los demás dispositivos, el permiso sólo se
+	// solicita con un toque cuando aún está sin decidir; si ya estaba concedido, el
+	// alta se recupera automáticamente sin volver a interrumpir.
 	type PushState =
 		| 'unavailable'
 		| 'unsupported'
 		| 'idle'
 		| 'working'
-		| 'repairing'
-		| 'configured'
 		| 'test_waiting'
 		| 'test_question'
 		| 'subscribed'
@@ -90,29 +92,195 @@
 		ok?: boolean;
 		code?: string;
 		message?: string;
+		verified?: boolean;
 		delivery?: PushDelivery | null;
 		verificationAvailable?: boolean;
 	};
+	type TestPhase = 'initial' | 'recovery';
 	let activeTestDeliveryId = $state<string | null>(null);
-	let activeTestCreatedAt = $state<string | null>(null);
+	let activeTestPhase: TestPhase | null = null;
 	let pushMessage = $state('');
 	let pollRun = 0;
-	let recoveryRun = 0;
-	let automaticRepairAttempts = 0;
 	let mounted = false;
 	let notificationPermissionStatus: PermissionStatus | null = null;
+	let recoveryTripArmed = false;
+	let returnCheckQueued = false;
+	let showSamsungPhoneGuide = $state(false);
+	let androidPlatformVersion = $state<string | null>(null);
+	let currentSiteOrigin = $state<string | null>(null);
+	type PermissionRecoveryTarget = 'phone' | 'site';
+	// Chrome devuelve el mismo `denied` cuando Android bloquea los avisos de la
+	// aplicación y cuando la persona bloquea sólo este sitio; la Web API no expone
+	// cuál de las dos capas lo produjo. Por eso Chrome empieza por el ajuste del
+	// teléfono (el recorrido siempre existe) y permite pasar, sin mezclarlos, al
+	// ajuste exacto del sitio cuando el primero ya estaba activo.
+	let permissionRecoveryTarget = $state<PermissionRecoveryTarget>('site');
+	type DeviceCheckReason = 'test_missing' | 'permission_not_granted';
+	let deviceCheckReason = $state<DeviceCheckReason>('test_missing');
+	let inMemoryPushSessionId = '';
+	const testRetrySequence: Record<TestPhase, number> = { initial: 0, recovery: 0 };
 
 	const base = $derived(appointment ? `/turno/${appointment.token}` : '');
+	const siteLabel = $derived.by(() => {
+		try {
+			// El permiso pertenece al origen que está abierto, no necesariamente al
+			// dominio canónico configurado (por ejemplo, una vista previa o un dominio
+			// propio). El valor real se completa al hidratar.
+			const site = new URL(currentSiteOrigin ?? data.publicSiteUrl);
+			// Samsung Browser muestra el origen completo (incluye protocolo y, en
+			// desarrollo, puerto) dentro de “Permitir o bloquear sitios web”.
+			return data.notificationBrowser.id === 'samsung_browser' ? site.origin : site.hostname;
+		} catch {
+			return 'este sitio';
+		}
+	});
+	const resolveGuide = (guide: NotificationGuide | null): NotificationGuide | null =>
+		guide
+			? {
+					title: guide.title,
+					steps: guide.steps.map((step) =>
+						step
+							.replaceAll('{{site}}', `“${siteLabel}”`)
+							.replaceAll(
+								'{{app_notification_toggle}}',
+								samsungAppNotificationToggleStep(androidPlatformVersion)
+							)
+					)
+				}
+			: null;
+	const sitePermissionGuide = $derived(resolveGuide(data.notificationBrowser.sitePermissionGuide));
+	const phoneNotificationGuide = $derived(
+		resolveGuide(data.notificationBrowser.phoneNotificationGuide)
+	);
+	const deniedPermissionGuide = $derived(
+		permissionRecoveryTarget === 'site'
+			? (sitePermissionGuide ?? phoneNotificationGuide)
+			: (phoneNotificationGuide ?? sitePermissionGuide)
+	);
+	const permissionChoiceLabel = $derived(
+		data.notificationBrowser.id === 'firefox' ? 'Siempre' : 'Permitir'
+	);
+
+	const pushSessionStorageKey = () =>
+		appointment ? `cita-suite:push-session:${appointment.token}` : 'cita-suite:push-session';
+	const recoveryPendingStorageKey = () => `${pushSessionStorageKey()}:recovery-pending`;
+	const permissionRecoveryStorageKey = () =>
+		`${pushSessionStorageKey()}:permission-recovery`;
+	const recoveryRetryStorageKey = () => `${pushSessionStorageKey()}:recovery-retry`;
+	const rememberPermissionRecoveryTarget = (target: PermissionRecoveryTarget) => {
+		permissionRecoveryTarget = target;
+		try {
+			localStorage.setItem(permissionRecoveryStorageKey(), target);
+		} catch {
+			// El estado reactivo alcanza mientras esta página permanezca abierta.
+		}
+	};
+	const clearPermissionRecoveryTarget = () => {
+		try {
+			localStorage.removeItem(permissionRecoveryStorageKey());
+		} catch {
+			// El permiso efectivo sigue siendo la fuente de verdad.
+		}
+	};
+	const stablePushSessionId = () => {
+		if (inMemoryPushSessionId) return inMemoryPushSessionId;
+		try {
+			// localStorage hace que dos pestañas del mismo turno compartan la misma
+			// acción lógica. Sin esto, ambas podían volver de un permiso concedido y
+			// solicitar dos pruebas distintas para el mismo teléfono.
+			const stored = localStorage.getItem(pushSessionStorageKey());
+			if (stored && /^[A-Za-z0-9_-]{16,120}$/.test(stored)) {
+				inMemoryPushSessionId = stored;
+				return stored;
+			}
+			// Migra sin cortar una activación que hubiese empezado con una versión
+			// anterior, cuando el identificador todavía vivía sólo en sessionStorage.
+			const legacy = sessionStorage.getItem(pushSessionStorageKey());
+			if (legacy && /^[A-Za-z0-9_-]{16,120}$/.test(legacy)) {
+				localStorage.setItem(pushSessionStorageKey(), legacy);
+				inMemoryPushSessionId = legacy;
+				return legacy;
+			}
+		} catch {
+			// El identificador en memoria mantiene la idempotencia durante esta carga.
+		}
+		const created =
+			typeof crypto.randomUUID === 'function'
+				? crypto.randomUUID()
+				: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+		inMemoryPushSessionId = created;
+		try {
+			localStorage.setItem(pushSessionStorageKey(), created);
+		} catch {
+			// localStorage puede estar deshabilitado; el valor en memoria sigue vigente.
+		}
+		return created;
+	};
+	const retrySequenceFor = (phase: TestPhase) => {
+		if (phase === 'initial') return testRetrySequence.initial;
+		try {
+			const stored = localStorage.getItem(recoveryRetryStorageKey());
+			if (stored && /^\d{1,4}$/.test(stored)) {
+				testRetrySequence.recovery = Math.max(testRetrySequence.recovery, Number(stored));
+			}
+		} catch {
+			// El contador en memoria conserva el flujo durante esta visita.
+		}
+		return testRetrySequence.recovery;
+	};
+	const advanceTestRetrySequence = (phase: TestPhase) => {
+		testRetrySequence[phase] = Math.min(9999, retrySequenceFor(phase) + 1);
+		if (phase === 'recovery') {
+			try {
+				// Sólo las recuperaciones se persisten: evita repetir automáticamente una
+				// prueba inicial al recargar, pero permite una nueva salida deliberada a Ajustes.
+				localStorage.setItem(recoveryRetryStorageKey(), String(testRetrySequence.recovery));
+			} catch {
+				// Sin almacenamiento, la deduplicación de base de datos sigue vigente.
+			}
+		}
+	};
+	const testRequestKeyFor = (phase: TestPhase, refreshed = false) => {
+		const retry = retrySequenceFor(phase);
+		return `push:${stablePushSessionId()}:${phase}${refreshed ? ':refresh' : ''}${retry > 0 ? `:retry${retry}` : ''}`;
+	};
+	const markRecoveryTrip = () => {
+		recoveryTripArmed = true;
+		try {
+			sessionStorage.setItem(recoveryPendingStorageKey(), '1');
+		} catch {
+			// La marca en memoria basta mientras la página siga abierta.
+		}
+	};
+	const consumeRecoveryTrip = () => {
+		let pending = recoveryTripArmed;
+		recoveryTripArmed = false;
+		try {
+			pending ||= sessionStorage.getItem(recoveryPendingStorageKey()) === '1';
+			sessionStorage.removeItem(recoveryPendingStorageKey());
+		} catch {
+			// Sin almacenamiento, se conserva el valor capturado en memoria.
+		}
+		return pending;
+	};
 
 	const savePushSubscriptionForAppointment = async (
 		subscription: PushSubscription,
-		requestTest: boolean
+		requestTest: boolean,
+		phase: TestPhase,
+		refreshed = false
 	) => {
 		if (!base) return null;
 		const response = await fetch(`${base}/push`, {
 			method: 'POST',
 			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ subscription: subscription.toJSON(), test: requestTest })
+			body: JSON.stringify({
+				subscription: subscription.toJSON(),
+				test: requestTest,
+				...(requestTest
+					? { testRequestKey: testRequestKeyFor(phase, refreshed) }
+					: {})
+			})
 		});
 		let body: PushResponse = {};
 		try {
@@ -140,9 +308,19 @@
 
 	// Soporte real de push (se fija en onMount; nunca en iOS).
 	let pushSupported = $state(false);
+	const readNotificationPermission = (): NotificationPermission =>
+		window.Notification.permission;
 	// Candado anti-reentrada: requestPermission y visibilitychange pueden disparar el
 	// alta a la vez. El upsert del backend es idempotente, pero evitamos subscribe() dobles.
 	let syncing = $state(false);
+
+	const runWithPhonePushLock = async (operation: () => Promise<void>): Promise<void> => {
+		const locks = navigator.locks;
+		if (!locks?.request || !appointment?.id) return operation();
+		// PushManager pertenece al origen, no a una pestaña. Serializar este tramo
+		// impide que dos vistas desuscriban/reemplacen el mismo endpoint a la vez.
+		return locks.request(`cita-suite:push-sync:${appointment.id}`, operation);
+	};
 
 	const waitForPushWorkerActivation = async (registration: ServiceWorkerRegistration) => {
 		const worker = registration.installing ?? registration.waiting;
@@ -169,9 +347,8 @@
 
 	const applyDelivery = (delivery: PushDelivery) => {
 		activeTestDeliveryId = delivery.deliveryId;
-		activeTestCreatedAt = delivery.createdAt;
 		if (delivery.state === 'confirmed') {
-			automaticRepairAttempts = 0;
+			activeTestPhase = null;
 			pushState = 'subscribed';
 			pushMessage = '';
 			return true;
@@ -187,6 +364,7 @@
 			delivery.state === 'failed' ||
 			delivery.state === 'expired'
 		) {
+			deviceCheckReason = 'test_missing';
 			pushState = 'needs_device_check';
 			pushMessage = '';
 			return true;
@@ -194,11 +372,6 @@
 		pushState = 'test_waiting';
 		return false;
 	};
-
-	const deliveryCanRepairAutomatically = (delivery: PushDelivery) =>
-		delivery.state === 'failed' ||
-		delivery.state === 'expired' ||
-		delivery.state === 'superseded';
 
 	const readDelivery = async (deliveryId: string) => {
 		if (!base) return null;
@@ -217,21 +390,16 @@
 
 	const pollTestDelivery = async (deliveryId: string) => {
 		const run = ++pollRun;
-		for (let attempt = 0; attempt < 15; attempt += 1) {
+		for (let attempt = 0; attempt < 5; attempt += 1) {
 			await new Promise((resolve) => setTimeout(resolve, 1000));
 			if (run !== pollRun || !base) return;
 			try {
 				const delivery = await readDelivery(deliveryId);
-				if (delivery && applyDelivery(delivery)) {
-					if (deliveryCanRepairAutomatically(delivery)) {
-						void repairPushAutomatically(delivery, false);
-					}
-					return;
-				}
+				if (delivery && applyDelivery(delivery)) return;
 				// El recibo automático mejora la observabilidad, pero no debe retener a la
 				// persona: después de unos segundos le preguntamos directamente si vio la
 				// prueba, aunque Android no haya informado el evento "displayed".
-				if (attempt >= 4 && activeTestDeliveryId === deliveryId) {
+				if (attempt === 4 && activeTestDeliveryId === deliveryId) {
 					pushState = 'test_question';
 					pushMessage = '';
 					return;
@@ -240,49 +408,64 @@
 				// El sondeo es best-effort; el próximo intento puede recuperar la conexión.
 			}
 		}
-		if (run === pollRun && pushState === 'test_waiting') {
-			void repairPushAutomatically(
-				{
-					deliveryId,
-					state: 'accepted',
-					kind: 'test',
-					createdAt: activeTestCreatedAt ?? new Date().toISOString(),
-					expiresAt: new Date(Date.now() + 60_000).toISOString()
-				},
-				true
-			);
-		}
 	};
 
-	const useSaveResult = (result: Awaited<ReturnType<typeof savePushSubscriptionForAppointment>>) => {
+	const useSaveResult = (
+		result: Awaited<ReturnType<typeof savePushSubscriptionForAppointment>>,
+		requestTest: boolean,
+		phase: TestPhase
+	) => {
 		if (!result?.response.ok) {
+			// Una respuesta explícita del proveedor prueba que esta tentativa terminó.
+			// El próximo toque manual usa otra clave; una pérdida de red conserva la
+			// misma clave y recupera el resultado sin arriesgar un envío duplicado.
+			if (
+				result?.body.code === 'test_not_accepted' ||
+				result?.body.code === 'subscription_expired'
+			) {
+				// Sólo una respuesta explícita habilita una clave nueva. Si se perdió la
+				// respuesta de red, conservamos la misma y el backend recupera el intento
+				// anterior sin duplicarlo. Esto vale también para una recuperación posterior.
+				advanceTestRetrySequence(phase);
+			}
 			pushMessage = result?.body.message || 'No pudimos activar las notificaciones. Volvé a intentar.';
 			return false;
 		}
+		if (result.body.verified) {
+			activeTestDeliveryId = null;
+			activeTestPhase = null;
+			pushState = 'subscribed';
+			pushMessage = '';
+			return true;
+		}
 		if (result.body.delivery) {
+			activeTestPhase = phase;
 			const terminal = applyDelivery(result.body.delivery);
 			if (!terminal) void pollTestDelivery(result.body.delivery.deliveryId);
-			else if (deliveryCanRepairAutomatically(result.body.delivery)) {
-				void repairPushAutomatically(result.body.delivery, false);
-			}
+		} else if (requestTest) {
+			pushMessage = 'No pudimos comprobar la notificación de prueba.';
+			return false;
 		} else {
 			activeTestDeliveryId = null;
-			pushState = 'configured';
+			pushState = 'idle';
 		}
 		return true;
 	};
 
 	// Requiere el permiso YA concedido: registra el SW, suscribe (o recupera) y guarda el
 	// endpoint contra el turno actual.
-	const syncPushSubscription = async (requestTest: boolean, recovering = false) => {
+	const syncPushSubscription = async (
+		requestTest: boolean,
+		phase: TestPhase = 'initial'
+	) => {
 		if (!data.vapidPublicKey || syncing) return;
 		// Defensa en profundidad: ningún caller puede registrar, suscribir ni pedir una
 		// prueba hasta que el navegador refleje el permiso como efectivamente concedido.
 		// No alcanza con confiar en el valor devuelto por requestPermission(): algunos
 		// Android actualizan Notification.permission un instante después.
-		if (typeof window.Notification === 'undefined' || Notification.permission !== 'granted') {
+		if (typeof window.Notification === 'undefined' || readNotificationPermission() !== 'granted') {
 			pushState =
-				typeof window.Notification !== 'undefined' && Notification.permission === 'denied'
+				typeof window.Notification !== 'undefined' && readNotificationPermission() === 'denied'
 					? 'denied'
 					: 'awaiting_permission';
 			pushMessage = '';
@@ -290,129 +473,110 @@
 		}
 		pollRun += 1;
 		syncing = true;
-		pushState = recovering ? 'repairing' : 'working';
+		pushState = 'working';
 		pushMessage = '';
-		let retryAutomatically = false;
 		try {
-			const registration = await navigator.serviceWorker.register('/push-sw.js', {
-				updateViaCache: 'none'
-			});
-			try {
-				await registration.update();
-			} catch {
-				// La copia activa todavía puede funcionar. El test inmediato decide el resultado.
-			}
-			await Promise.all([navigator.serviceWorker.ready, waitForPushWorkerActivation(registration)]);
-			const expectedKey = urlBase64ToUint8Array(data.vapidPublicKey);
-			let subscription = await registration.pushManager.getSubscription();
-			if (
-				subscription &&
-				!sameApplicationServerKey(subscription.options.applicationServerKey, expectedKey)
-			) {
-				// Si el servidor rotó sus claves, la suscripción anterior nunca podrá recibir.
-				await subscription.unsubscribe();
-				subscription = null;
-			}
-			subscription ??= await registration.pushManager.subscribe({
-					userVisibleOnly: true,
-					applicationServerKey: expectedKey
-				});
-			let result = await savePushSubscriptionForAppointment(subscription, requestTest);
-			if (requestTest && result?.response.status === 410) {
-				await subscription.unsubscribe();
-				subscription = await registration.pushManager.subscribe({
-					userVisibleOnly: true,
-					applicationServerKey: urlBase64ToUint8Array(data.vapidPublicKey)
-				});
-				result = await savePushSubscriptionForAppointment(subscription, true);
-			}
-			if (!useSaveResult(result)) {
-				if (requestTest && !recovering && automaticRepairAttempts === 0) {
-					retryAutomatically = true;
-				} else {
-					pushState = recovering ? 'needs_device_check' : 'error';
-					if (recovering) pushMessage = '';
+			await runWithPhonePushLock(async () => {
+				// El permiso pudo cambiar mientras esta pestaña esperaba a otra. Se
+				// comprueba de nuevo antes de tocar la suscripción compartida.
+				if (readNotificationPermission() !== 'granted') {
+					pushState = readNotificationPermission() === 'denied' ? 'denied' : 'awaiting_permission';
+					return;
 				}
-			}
+				const registration = await navigator.serviceWorker.register('/push-sw.js', {
+					updateViaCache: 'none'
+				});
+				try {
+					await registration.update();
+				} catch {
+					// La copia activa todavía puede funcionar. El test inmediato decide el resultado.
+				}
+				await Promise.all([
+					navigator.serviceWorker.ready,
+					waitForPushWorkerActivation(registration)
+				]);
+				const expectedKey = urlBase64ToUint8Array(data.vapidPublicKey);
+				let subscription = await registration.pushManager.getSubscription();
+				if (
+					subscription &&
+					!sameApplicationServerKey(subscription.options.applicationServerKey, expectedKey)
+				) {
+					// Si el servidor rotó sus claves, la suscripción anterior nunca podrá recibir.
+					await subscription.unsubscribe();
+					subscription = null;
+				}
+				subscription ??= await registration.pushManager.subscribe({
+						userVisibleOnly: true,
+						applicationServerKey: expectedKey
+					});
+				let result = await savePushSubscriptionForAppointment(
+					subscription,
+					requestTest,
+					phase
+				);
+				if (requestTest && result?.response.status === 410) {
+					await subscription.unsubscribe();
+					subscription = await registration.pushManager.subscribe({
+						userVisibleOnly: true,
+						applicationServerKey: urlBase64ToUint8Array(data.vapidPublicKey)
+					});
+					result = await savePushSubscriptionForAppointment(subscription, true, phase, true);
+				}
+				if (!useSaveResult(result, requestTest, phase)) {
+					pushState = phase === 'recovery' ? 'needs_device_check' : 'error';
+				}
+			});
 		} catch {
 			pushMessage ||= 'El teléfono no pudo completar la activación.';
-			if (requestTest && !recovering && automaticRepairAttempts === 0) {
-				retryAutomatically = true;
-			} else {
-				pushState = recovering ? 'needs_device_check' : 'error';
-				if (recovering) pushMessage = '';
-			}
+			pushState = phase === 'recovery' ? 'needs_device_check' : 'error';
 		} finally {
 			syncing = false;
-			if (retryAutomatically) {
-				void repairPushAutomatically(null, false);
+			if (returnCheckQueued) {
+				returnCheckQueued = false;
+				queueMicrotask(continueAfterPermissionChange);
 			}
 		}
-	};
-
-	const repairPushAutomatically = async (
-		delivery: PushDelivery | null,
-		waitForPreviousTest: boolean
-	) => {
-		if (!mounted || Notification.permission !== 'granted') {
-			pushState = Notification.permission === 'denied' ? 'denied' : 'awaiting_permission';
-			return;
-		}
-		if (automaticRepairAttempts >= 1) {
-			pushState = 'needs_device_check';
-			pushMessage = '';
-			return;
-		}
-		automaticRepairAttempts += 1;
-		const run = ++recoveryRun;
-		pushState = 'repairing';
-		pushMessage = '';
-
-		// El servidor evita pruebas duplicadas durante 30 segundos. Esperamos ese límite
-		// sin pedir ninguna acción y comprobamos una vez más antes de reenviar.
-		const createdAt = delivery?.createdAt ? new Date(delivery.createdAt).getTime() : Date.now();
-		const delay = waitForPreviousTest
-			? Math.max(1000, 31_000 - Math.max(0, Date.now() - createdAt))
-			: 1500;
-		await new Promise((resolve) => setTimeout(resolve, delay));
-		if (run !== recoveryRun || !mounted) return;
-
-		if (delivery?.deliveryId) {
-			const latest = await readDelivery(delivery.deliveryId);
-			if (latest && ['displayed', 'confirmed'].includes(latest.state)) {
-				applyDelivery(latest);
-				return;
-			}
-			if (latest?.state === 'missing') {
-				applyDelivery(latest);
-				return;
-			}
-		}
-
-		await syncPushSubscription(true, true);
 	};
 
 	const enablePush = async () => {
 		if (!data.vapidPublicKey || syncing) return;
-		automaticRepairAttempts = 0;
-		recoveryRun += 1;
-		pushState = 'working';
+		const phase: TestPhase = pushState === 'needs_device_check' ? 'recovery' : 'initial';
+		if (phase === 'recovery') consumeRecoveryTrip();
 		pushMessage = '';
+		if (readNotificationPermission() === 'granted') {
+			await syncPushSubscription(true, phase);
+			return;
+		}
+		if (readNotificationPermission() === 'denied') {
+			pushState = 'denied';
+			return;
+		}
+		pushState = 'working';
 		try {
 			await Notification.requestPermission();
 			// La propiedad efectiva es la única fuente de verdad para habilitar el envío.
 			// Si todavía figura en default, el botón queda disponible para reintentar y el
 			// listener de permisos continúa observando el cambio sin enviar nada antes.
-			if (Notification.permission === 'granted') {
-				await syncPushSubscription(true);
-			} else if (Notification.permission === 'denied') {
-				// Bloqueo real del navegador. Si lo desbloquea en Configuración y vuelve,
-				// el visibilitychange lo detecta y activa los avisos igual.
+			if (readNotificationPermission() === 'granted') {
+				clearPermissionRecoveryTarget();
+				await syncPushSubscription(true, phase);
+			} else if (readNotificationPermission() === 'denied') {
+				// Chrome no informa qué capa rechazó. Su recorrido general va primero y
+				// ofrece pasar explícitamente al del sitio si ya estaba habilitado.
+				rememberPermissionRecoveryTarget(
+					data.notificationBrowser.id === 'chrome' && phoneNotificationGuide ? 'phone' : 'site'
+				);
 				pushState = 'denied';
 			} else {
-				// 'default': no hubo concesión efectiva. No se envía ninguna prueba y se
-				// conserva la acción principal para que pueda volver a intentarlo.
-				pushState = 'awaiting_permission';
+				// Samsung Browser conserva `default` si sus notificaciones están apagadas
+				// en el teléfono, incluso después de tocar “Permitir”. No se envía ninguna
+				// prueba: mostramos la ruta exacta del sistema y una acción final con gesto.
+				if (data.notificationBrowser.samsungExclusive) {
+					deviceCheckReason = 'permission_not_granted';
+					pushState = 'needs_device_check';
+				} else {
+					pushState = 'awaiting_permission';
+				}
 			}
 		} catch {
 			pushMessage = 'No pudimos pedir el permiso de notificaciones. Volvé a intentar.';
@@ -435,45 +599,82 @@
 				pushMessage = body.message || 'No pudimos guardar tu respuesta. Volvé a intentar.';
 				return;
 			}
+			const feedbackPhase = activeTestPhase;
 			applyDelivery(body.delivery);
+			if (!visible) {
+				if (feedbackPhase === 'recovery') advanceTestRetrySequence('recovery');
+				activeTestPhase = null;
+			}
 		} catch {
 			pushMessage = 'No pudimos guardar tu respuesta. Volvé a intentar.';
 		} finally {
 			syncing = false;
+			if (returnCheckQueued) {
+				returnCheckQueued = false;
+				queueMicrotask(continueAfterPermissionChange);
+			}
 		}
-	};
-
-	const retryPushTest = async () => {
-		automaticRepairAttempts = 0;
-		recoveryRun += 1;
-		if (Notification.permission === 'granted') {
-			await syncPushSubscription(true, true);
-			return;
-		}
-		await enablePush();
 	};
 
 	const continueAfterPermissionChange = () => {
-		if (!pushSupported || syncing) return;
-		if (Notification.permission === 'denied') {
+		if (!pushSupported) return;
+		if (syncing) {
+			returnCheckQueued = true;
+			return;
+		}
+		if (readNotificationPermission() === 'denied') {
 			pushState = 'denied';
 			return;
 		}
-		if (Notification.permission === 'default') {
+		if (readNotificationPermission() === 'default') {
+			clearPermissionRecoveryTarget();
 			if (pushState === 'denied') pushState = 'awaiting_permission';
 			return;
 		}
-		if (
-			pushState === 'awaiting_permission' ||
-			pushState === 'denied'
-		) {
-			automaticRepairAttempts = 0;
-			void syncPushSubscription(true, true);
+		clearPermissionRecoveryTarget();
+		if (pushState === 'needs_device_check' && consumeRecoveryTrip()) {
+			void syncPushSubscription(true, 'recovery');
+			return;
+		}
+		if (pushState === 'awaiting_permission' || pushState === 'denied' || pushState === 'idle') {
+			void syncPushSubscription(true, 'initial');
 		}
 	};
 
 	onMount(() => {
 		mounted = true;
+		currentSiteOrigin = window.location.origin;
+		showSamsungPhoneGuide = data.notificationBrowser.samsungExclusive;
+		try {
+			const storedRecoveryTarget = localStorage.getItem(permissionRecoveryStorageKey());
+			if (storedRecoveryTarget === 'phone' || storedRecoveryTarget === 'site') {
+				permissionRecoveryTarget = storedRecoveryTarget;
+			} else {
+				permissionRecoveryTarget = data.notificationBrowser.id === 'chrome' ? 'phone' : 'site';
+			}
+		} catch {
+			permissionRecoveryTarget = data.notificationBrowser.id === 'chrome' ? 'phone' : 'site';
+		}
+		type NavigatorWithUserAgentData = Navigator & {
+			userAgentData?: {
+				getHighEntropyValues: (
+					hints: string[]
+				) => Promise<{ platformVersion?: string }>;
+			};
+		};
+		const userAgentData = (navigator as NavigatorWithUserAgentData).userAgentData;
+		if (userAgentData) {
+			void userAgentData
+				.getHighEntropyValues(['platformVersion'])
+				.then((values) => {
+					if (mounted && typeof values.platformVersion === 'string') {
+						androidPlatformVersion = values.platformVersion;
+					}
+				})
+				.catch(() => {
+					// La guía conserva una instrucción exacta sin adivinar la etiqueta.
+				});
+		}
 		refinedDevice = refineDeviceClass(data.device, navigator);
 		const effective = refinedDevice ?? data.device;
 		pushSupported = Boolean(
@@ -488,45 +689,41 @@
 			return;
 		}
 
-		if (Notification.permission === 'denied') {
+		if (readNotificationPermission() === 'denied') {
 			// No se reutiliza una suscripción histórica cuando el permiso actual está
 			// bloqueado: eso volvería a presentar como "verificado" un teléfono incapaz
 			// de mostrar avisos.
 			pushState = 'denied';
-		} else {
+		} else if (readNotificationPermission() === 'default') {
+			clearPermissionRecoveryTarget();
 			pushState = 'idle';
-			// Recupera una suscripción ya existente del navegador (de un turno anterior) y la
-			// asocia a este turno: la tabla es (appointment_id, endpoint).
-			void (async () => {
-				try {
-					const registration = await navigator.serviceWorker.getRegistration('/push-sw.js');
-					const subscription = await registration?.pushManager.getSubscription();
-					if (
-						subscription &&
-						Notification.permission === 'granted' &&
-						pushState === 'idle' &&
-						!syncing
-					) {
-						syncing = true;
-						const result = await savePushSubscriptionForAppointment(subscription, false);
-						if (!useSaveResult(result)) pushState = 'error';
-						syncing = false;
-					}
-				} catch {
-					syncing = false;
-					// se queda en idle: el botón sigue disponible
-				}
-			})();
+		} else {
+			clearPermissionRecoveryTarget();
+			// Si el permiso ya estaba concedido, no se vuelve a pedir ni se espera un
+			// toque: se crea o recupera la suscripción y el servidor evita repetir una
+			// prueba que ya haya sido confirmada.
+			const phase: TestPhase = consumeRecoveryTrip() ? 'recovery' : 'initial';
+			void syncPushSubscription(true, phase);
 		}
 
 		// Núcleo del fix de UX: al volver a la pantalla (tras conceder el permiso en
 		// Configuración) reconsultamos el estado REAL y activamos los avisos. También
 		// recupera de un 'denied' previo si el usuario lo desbloqueó.
-		const onVisible = () => {
-			if (document.visibilityState !== 'visible' || syncing) return;
+		const onVisibilityChange = () => {
+			if (document.visibilityState === 'hidden') {
+				if (
+					pushState === 'needs_device_check' &&
+					(data.notificationBrowser.samsungExclusive || showSamsungPhoneGuide)
+				) {
+					markRecoveryTrip();
+				}
+				return;
+			}
 			continueAfterPermissionChange();
 		};
-		document.addEventListener('visibilitychange', onVisible);
+		const onFocus = () => continueAfterPermissionChange();
+		document.addEventListener('visibilitychange', onVisibilityChange);
+		window.addEventListener('focus', onFocus);
 		void navigator.permissions
 			?.query({ name: 'notifications' as PermissionName })
 			.then((status) => {
@@ -540,8 +737,8 @@
 		return () => {
 			mounted = false;
 			pollRun += 1;
-			recoveryRun += 1;
-			document.removeEventListener('visibilitychange', onVisible);
+			document.removeEventListener('visibilitychange', onVisibilityChange);
+			window.removeEventListener('focus', onFocus);
 			notificationPermissionStatus?.removeEventListener('change', continueAfterPermissionChange);
 		};
 	});
@@ -575,18 +772,12 @@
 	const showAndroidCalendarFallback = $derived(
 		device === 'android' &&
 		(
-			['unsupported', 'needs_device_check', 'denied', 'error'].includes(
-				renderedPushState
-			) ||
+			['unsupported', 'needs_device_check'].includes(renderedPushState) ||
+			(renderedPushState === 'denied' && !sitePermissionGuide) ||
 			data.googleCalendar.state === 'needs_reconnect' ||
 			data.googleCalendar.state === 'failed'
 		)
 	);
-	const googleCalendarConnectHref = (target: 'samsung' | 'google') => {
-		const query = new URLSearchParams({ target });
-		if (data.googleCalendar.state === 'needs_reconnect') query.set('reauthorize', '1');
-		return `${base}/google-calendar/connect?${query.toString()}`;
-	};
 	const needsCalendarUpdate = $derived(
 		Boolean(appointment?.calendar_update_required_at) &&
 		!googleCalendarIsUpdating &&
@@ -627,8 +818,20 @@
 						? 'Elegí nuevamente tu cuenta Google para mantener el turno y sus avisos actualizados.'
 						: needsCalendarUpdate
 							? 'El turno cambió de fecha. Actualizá el calendario para conservar el horario correcto.'
-						: showAndroidCalendarFallback
-							? 'Elegí el calendario que usa tu teléfono y dejamos el turno guardado con sus avisos.'
+						: renderedPushState === 'denied' && deniedPermissionGuide
+							? permissionRecoveryTarget === 'phone'
+								? `Para enviarte los recordatorios, necesitamos que ${data.notificationBrowser.label ?? 'la aplicación que muestra esta página'} pueda mostrar avisos en el teléfono.`
+								: 'Para enviarte los recordatorios, necesitamos que permitas los avisos de este turno.'
+						: renderedPushState === 'awaiting_permission'
+							? 'Para enviarte los recordatorios, necesitamos que permitas los avisos. Tocá el botón y elegí la opción indicada.'
+						: renderedPushState === 'needs_device_check'
+								? deviceCheckReason === 'permission_not_granted'
+									? `${data.notificationBrowser.label ?? 'La aplicación que muestra esta página'} todavía no pudo habilitar los avisos. Revisá sus notificaciones en el teléfono y completá la activación al volver.`
+									: `Los avisos de este turno ya están permitidos. Ahora falta que ${data.notificationBrowser.label ?? 'la aplicación que muestra esta página'} pueda mostrarlos en el teléfono.`
+								: showAndroidCalendarFallback
+									? renderedPushState === 'unsupported' && data.notificationBrowser.samsungExclusive
+										? 'Conservá este enlace: desde acá siempre podés consultar la fecha y la hora del turno.'
+										: 'Elegí la opción que corresponde a tu teléfono para terminar de guardar el recordatorio.'
 							: device === 'android'
 								? 'Activá el recordatorio y comprobamos ahora mismo que este teléfono pueda avisarte.'
 								: device === 'ios'
@@ -692,60 +895,31 @@
 		}
 	};
 
-	type CalendarShareState = 'idle' | 'sharing' | 'unsupported' | 'error';
-	let calendarShareState = $state<CalendarShareState>('idle');
-
-	const shareWithSamsungCalendar = async () => {
-		if (
-			!base ||
-			!data.androidCalendarShareIcs ||
-			typeof File === 'undefined' ||
-			typeof navigator.share !== 'function'
-		) {
-			calendarShareState = 'unsupported';
-			return;
-		}
-
-		const calendarFile = new File([data.androidCalendarShareIcs], 'turno.ics', {
-			type: 'text/calendar'
-		});
-		const shareData: ShareData = {
-			files: [calendarFile],
-			title: 'Turno reservado'
-		};
-		if (typeof navigator.canShare === 'function' && !navigator.canShare(shareData)) {
-			calendarShareState = 'unsupported';
-			return;
-		}
-
-		calendarShareState = 'sharing';
-		try {
-			// Se llama sin ninguna espera previa para conservar la activación transitoria
-			// del toque: Android recibe el .ics en memoria y abre su selector nativo.
-			await navigator.share(shareData);
-			calendarShareState = 'idle';
-			// El tracking ocurre después de que Android aceptó compartir. fetch consume la
-			// respuesta en memoria: no navega ni crea una descarga visible.
-			void fetch(`${base}/calendario.ics?p=phone`, { cache: 'no-store' }).catch(() => undefined);
-		} catch (error) {
-			if (error && typeof error === 'object' && 'name' in error && error.name === 'AbortError') {
-				calendarShareState = 'idle';
-				return;
-			}
-			calendarShareState = 'error';
-		}
-	};
 </script>
+
+{#snippet instructionList(guide: NotificationGuide)}
+	<h3 class="text-lg font-extrabold leading-snug text-white">{guide.title}</h3>
+	<ol class="mt-4 space-y-3 text-sm leading-relaxed text-white/80">
+		{#each guide.steps as step, index}
+			<li class="flex gap-3">
+				<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-violet-400/15 text-xs font-extrabold text-violet-200">
+					{index + 1}
+				</span>
+				<span class="pt-0.5">{step}</span>
+			</li>
+		{/each}
+	</ol>
+{/snippet}
 
 {#snippet pushBlock(primary: boolean)}
 	{#if renderedPushState !== 'unavailable'}
 		<div class="mt-5">
 			{#if renderedPushState === 'subscribed'}
 				<div class="ux-alert ux-alert-success" aria-live="polite">
-					<p class="font-extrabold text-white">Notificación confirmada</p>
-					<p class="mt-1">La notificación de prueba llegó. Te avisamos {pushWindowsLabel}.</p>
+					<p class="font-extrabold text-white">Recordatorio activado</p>
+					<p class="mt-1">Este teléfono va a avisarte {pushWindowsLabel}.</p>
 				</div>
-			{:else if renderedPushState === 'repairing'}
+			{:else if renderedPushState === 'working'}
 				<div class="ux-alert" aria-live="polite">
 					<div class="flex items-start gap-3">
 						<svg viewBox="0 0 24 24" aria-hidden="true" class="mt-0.5 h-5 w-5 shrink-0 animate-spin text-[#a78bfa]">
@@ -753,22 +927,11 @@
 							<path d="M21 12a9 9 0 0 0-9-9" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
 						</svg>
 						<div>
-							<p class="font-bold text-white">Estamos preparando tu recordatorio.</p>
-							<p class="mt-1">La activación continúa automáticamente. En un momento vas a recibir la prueba.</p>
+							<p class="font-bold text-white">Activando el recordatorio</p>
+							<p class="mt-1">En un momento vas a recibir la notificación de prueba.</p>
 						</div>
 					</div>
 				</div>
-			{:else if renderedPushState === 'configured'}
-				<button
-					type="button"
-					class={primary ? 'ux-btn-primary ux-btn-cta w-full whitespace-nowrap px-3 text-[1.075rem] font-extrabold' : 'ux-btn-secondary w-full whitespace-nowrap px-3 text-[1.075rem] font-extrabold'}
-					onclick={retryPushTest}
-				>
-					🔔 Activar recordatorio
-				</button>
-				<p class="mt-3 text-center text-xs leading-relaxed text-white/45">
-					Enviamos una prueba real para confirmar que el teléfono pueda avisarte.
-				</p>
 			{:else if renderedPushState === 'test_waiting'}
 				<div class="ux-alert" aria-live="polite">
 					<p class="font-bold text-white">Notificación de prueba enviada</p>
@@ -780,22 +943,35 @@
 					<p class="mt-1">Revisá las notificaciones del teléfono y confirmalo acá.</p>
 				</div>
 				<div class="mt-3 grid grid-cols-2 gap-3">
-					<button
-						type="button"
-						class="ux-btn-primary w-full"
-						disabled={syncing}
-						onclick={() => submitTestFeedback(true)}
-					>
+					<button type="button" class="ux-btn-primary w-full" disabled={syncing} onclick={() => submitTestFeedback(true)}>
 						Sí, la recibí
 					</button>
-					<button
-						type="button"
-						class="ux-btn-secondary w-full"
-						disabled={syncing}
-						onclick={() => submitTestFeedback(false)}
-					>
+					<button type="button" class="ux-btn-secondary w-full" disabled={syncing} onclick={() => submitTestFeedback(false)}>
 						No la recibí
 					</button>
+				</div>
+			{:else if renderedPushState === 'denied' && deniedPermissionGuide}
+				<div class="rounded-2xl border border-amber-300/20 bg-amber-300/[0.055] p-5" aria-live="polite">
+					{@render instructionList(deniedPermissionGuide)}
+					{#if permissionRecoveryTarget === 'phone' && sitePermissionGuide}
+						<p class="mt-4 text-sm leading-relaxed text-white/65">
+							Si “Permitir notificaciones” ya estaba activado, falta revisar el permiso de este turno.
+						</p>
+						<button
+							type="button"
+							class="ux-btn-secondary mt-4 w-full"
+							onclick={() => rememberPermissionRecoveryTarget('site')}
+						>
+							Ya estaba activado
+						</button>
+					{:else}
+						<button type="button" class="ux-btn-secondary mt-5 w-full" onclick={enablePush}>
+							Ya lo permití
+						</button>
+						<p class="mt-3 text-center text-xs leading-relaxed text-white/50">
+							Al volver, lo comprobamos automáticamente. El botón queda disponible por si la pantalla no se actualiza sola.
+						</p>
+					{/if}
 				</div>
 			{:else if renderedPushState === 'awaiting_permission'}
 				<button
@@ -805,28 +981,31 @@
 				>
 					🔔 Activar recordatorio
 				</button>
-				<p class="mt-3 text-center text-xs leading-relaxed text-white/45">
-					El permiso todavía no se activó. Tocá nuevamente para continuar.
+				<p class="mt-3 text-center text-xs leading-relaxed text-white/55">
+					Cuando aparezca la pregunta, elegí “{permissionChoiceLabel}”.
 				</p>
-			{:else if ['unsupported', 'needs_device_check', 'denied', 'error'].includes(renderedPushState)}
-				<p class="sr-only" aria-live="polite">
-					La activación continúa con las opciones de calendario disponibles a continuación.
-				</p>
+			{:else if renderedPushState === 'error'}
+				{#if pushMessage}
+					<p class="ux-alert" aria-live="polite">{pushMessage}</p>
+				{/if}
+				<button type="button" class="ux-btn-secondary mt-3 w-full" disabled={syncing} onclick={enablePush}>
+					Volver a intentar
+				</button>
+			{:else if ['unsupported', 'needs_device_check', 'denied'].includes(renderedPushState)}
+				{#if pushMessage}
+					<p class="ux-alert" aria-live="polite">{pushMessage}</p>
+				{/if}
 			{:else}
 				<button
 					type="button"
 					class={primary ? 'ux-btn-primary ux-btn-cta w-full whitespace-nowrap px-3 text-[1.075rem] font-extrabold' : 'ux-btn-secondary w-full whitespace-nowrap px-3 text-[1.075rem] font-extrabold'}
-					disabled={renderedPushState === 'working'}
 					onclick={enablePush}
 				>
-					{renderedPushState === 'working' ? 'Activando…' : '🔔 Activar recordatorio'}
+					🔔 Activar recordatorio
 				</button>
 				<p class="mt-3 text-center text-xs leading-relaxed text-white/45">
-					Enviamos una prueba real antes de dejarlo activado.
+					Primero te pedimos permiso y después enviamos una prueba real.
 				</p>
-			{/if}
-			{#if pushMessage && !['error', 'denied', 'awaiting_permission'].includes(renderedPushState)}
-				<p class="ux-empty mt-2">{pushMessage}</p>
 			{/if}
 		</div>
 	{/if}
@@ -881,59 +1060,58 @@
 {/snippet}
 
 {#snippet androidCalendarFallback()}
-	{#if showAndroidCalendarFallback}
+	{#if showAndroidCalendarFallback && ((renderedPushState === 'needs_device_check' && phoneNotificationGuide) || !data.notificationBrowser.samsungExclusive)}
 		<div class="mt-5 space-y-4" aria-live="polite">
-			<div class="rounded-2xl border border-violet-400/25 bg-violet-400/[0.055] p-5">
-				<p class="text-base font-extrabold text-white">¿Tu teléfono es Samsung?</p>
-				{#if data.googleCalendar.available}
-					<a
-						href={googleCalendarConnectHref('samsung')}
-						class="ux-btn-primary mt-4 block w-full px-2 text-center text-sm font-extrabold leading-tight"
-					>
-						Agregar a Calendario Samsung
-					</a>
-				{:else}
-					<button
-						type="button"
-						class="ux-btn-primary mt-4 w-full px-2 text-center text-sm font-extrabold leading-tight"
-						disabled={calendarShareState === 'sharing'}
-						onclick={shareWithSamsungCalendar}
-					>
-						{calendarShareState === 'sharing' ? 'Abriendo calendario…' : 'Agregar a Calendario Samsung'}
-					</button>
-				{/if}
-				<p class="mt-3 text-center text-xs leading-relaxed text-white/50">
-					{data.googleCalendar.available
-						? 'Lo guardamos con avisos en la cuenta Google que Calendario Samsung sincroniza.'
-						: 'Android abre el selector del teléfono con el turno y sus avisos preparados.'}
-				</p>
-				{#if calendarShareState === 'unsupported' || calendarShareState === 'error'}
-					<p class="mt-3 text-center text-xs leading-relaxed text-amber-200/80" aria-live="polite">
-						Este teléfono no pudo abrir Calendario Samsung desde el navegador. Podés usar Google Calendar.
-					</p>
-				{/if}
-			</div>
-
-			<div class="rounded-2xl border border-white/10 bg-white/[0.025] p-5">
-				<p class="text-base font-extrabold text-white">¿Usás otro teléfono Android?</p>
-				<a
-					href={data.googleCalendar.available
-						? googleCalendarConnectHref('google')
-						: `${base}/ir/google`}
-					class="ux-btn-secondary mt-4 block w-full px-2 text-center text-sm font-extrabold leading-tight"
+			{#if renderedPushState === 'needs_device_check' && phoneNotificationGuide}
+				<details
+					class="group overflow-hidden rounded-2xl border border-violet-300/30 bg-violet-400/[0.07] shadow-[0_12px_30px_rgba(76,29,149,0.12)]"
+					bind:open={showSamsungPhoneGuide}
 				>
-					Agregar a Google Calendar
+					<summary class="flex min-h-[5.75rem] cursor-pointer list-none items-center justify-between gap-4 px-5 py-4">
+						<span>
+							<span class="block text-base font-extrabold leading-snug text-white">¿Tu teléfono es Samsung?</span>
+							<span class="mt-1.5 block text-sm font-bold text-violet-200">Configurar el recordatorio</span>
+						</span>
+						<svg viewBox="0 0 20 20" aria-hidden="true" class="h-5 w-5 shrink-0 text-violet-200/75 transition-transform group-open:rotate-180">
+							<path d="m5.75 7.75 4.25 4.25 4.25-4.25" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+						</svg>
+					</summary>
+					<div class="border-t border-violet-200/15 px-5 pb-5 pt-5">
+						{@render instructionList(phoneNotificationGuide)}
+						{#if deviceCheckReason === 'permission_not_granted'}
+							<p class="mt-4 text-xs leading-relaxed text-white/60">
+								Después de activar ese ajuste, usá el botón de abajo y elegí “Permitir”.
+							</p>
+							<button
+								type="button"
+								class="ux-btn-primary ux-btn-cta mt-4 w-full whitespace-nowrap px-3 text-[1.075rem] font-extrabold"
+								disabled={syncing}
+								onclick={enablePush}
+							>
+								🔔 Activar recordatorio
+							</button>
+						{:else}
+							<p class="mt-4 text-xs leading-relaxed text-white/55">
+								Cuando vuelvas, enviamos una sola prueba para comprobar el cambio.
+							</p>
+						{/if}
+					</div>
+				</details>
+			{/if}
+
+			{#if !data.notificationBrowser.samsungExclusive}
+				<a
+					href={`${base}/ir/google`}
+					class="flex min-h-[5.75rem] items-center justify-between gap-4 rounded-2xl border border-violet-300/30 bg-violet-400/[0.07] px-5 py-4 shadow-[0_12px_30px_rgba(76,29,149,0.12)] transition hover:border-violet-300/45 hover:bg-violet-400/[0.1]"
+				>
+					<span>
+						<span class="block text-base font-extrabold leading-snug text-white">¿Tu teléfono es de otra marca?</span>
+						<span class="mt-1.5 block text-sm font-bold text-violet-200">Agregar a Google Calendar</span>
+					</span>
+					<svg viewBox="0 0 20 20" aria-hidden="true" class="h-5 w-5 shrink-0 text-violet-200/75">
+						<path d="m7.75 5.75 4.25 4.25-4.25 4.25" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+					</svg>
 				</a>
-				<p class="mt-3 text-center text-xs leading-relaxed text-white/50">
-					{data.googleCalendar.available
-						? 'Queda guardado con avisos y se actualiza solo si cambia el turno.'
-						: 'Abrimos Google Calendar con el turno preparado para guardar.'}
-				</p>
-			</div>
-			{#if data.googleCalendar.available}
-				<p class="text-center text-xs text-white/40">
-					<a href="/privacidad" target="_blank" rel="noreferrer" class="underline">Cómo usamos Google Calendar</a>
-				</p>
 			{/if}
 		</div>
 	{/if}

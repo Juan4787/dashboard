@@ -31,6 +31,14 @@ describe('formatInTimeZone', () => {
 		expect(labels.timeLabel).toBe('21:30');
 		expect(labels.full).toBe(`${labels.dateLabel} a las ${labels.timeLabel}`);
 	});
+
+	it('representa la medianoche como 00:00 y nunca como 24:00', () => {
+		const midnight = '2026-08-15T03:00:00.000Z';
+		const labels = formatInTimeZone(midnight, 'America/Argentina/Cordoba');
+		expect(labels.timeLabel).toBe('00:00');
+		expect(labels.full).not.toContain('24:00');
+		expect(formatDateTime(midnight, 'America/Argentina/Cordoba')).toContain('00:00');
+	});
 });
 
 describe('formatAccessRemaining', () => {

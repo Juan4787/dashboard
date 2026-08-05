@@ -124,6 +124,9 @@ class GoogleCalendarRemoteError extends Error {
 
 const trimmed = (value?: string | null) => value?.trim() || null;
 
+export const isManagedGoogleCalendarEnabled = (): boolean =>
+	env.GOOGLE_CALENDAR_MANAGED_ENABLED === 'true';
+
 export const parseGoogleCalendarEncryptionKey = (raw: string): Buffer => {
 	const value = raw.trim();
 	let key: Buffer;
@@ -141,6 +144,7 @@ export const parseGoogleCalendarEncryptionKey = (raw: string): Buffer => {
 };
 
 const readGoogleCalendarConfig = (): GoogleCalendarConfig | null => {
+	if (!isManagedGoogleCalendarEnabled()) return null;
 	// Cliente dedicado: no se reutiliza el OAuth público de Drive. Así una
 	// revocación del calendario nunca corta el acceso del consultorio a archivos.
 	const clientId = trimmed(env.GOOGLE_CALENDAR_CLIENT_ID);
@@ -297,6 +301,9 @@ export const consumeGoogleCalendarOAuthAttempt = async (
 	state: string,
 	now = new Date()
 ): Promise<OAuthAttempt> => {
+	// Impide que un callback histórico reactive el flujo mientras el producto lo
+	// mantiene fuera de servicio. Las tablas y el código quedan intactos.
+	requireGoogleCalendarConfig();
 	if (!isValidOAuthState(state)) throw new Error('GOOGLE_CALENDAR_OAUTH_STATE_INVALID');
 	const { data, error } = await supabase.rpc('consume_google_calendar_oauth_attempt', {
 		p_state_hash: stateHash(state),
@@ -939,6 +946,9 @@ export const loadGoogleCalendarUiState = async (
 ): Promise<GoogleCalendarUiState> => {
 	const available = isGoogleCalendarConfigured();
 	const reminderLabel = googleCalendarReminderLabel(new Date(appointment.starts_at), now);
+	if (!available) {
+		return { available: false, state: 'none', current: false, reminderLabel };
+	}
 	const { data, error } = await supabase
 		.from('appointment_google_calendar_events')
 		.select('sync_status, synced_sequence')
@@ -968,6 +978,10 @@ export const requestGoogleCalendarEventDeletion = async (
 	appointmentId: string,
 	fetchFn: typeof fetch
 ) => {
+	// El código administrado se conserva, pero el interruptor debe bloquear también
+	// acciones residuales enviadas a mano o desde una pestaña antigua. No mutar la
+	// cola mientras la función está deshabilitada.
+	if (!isGoogleCalendarConfigured()) return { status: 'not_configured' };
 	const now = new Date();
 	const { data, error } = await supabase.rpc('request_google_calendar_event_deletion', {
 		p_appointment_id: appointmentId,

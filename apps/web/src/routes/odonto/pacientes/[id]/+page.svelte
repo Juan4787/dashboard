@@ -170,7 +170,7 @@
 		new Intl.DateTimeFormat('es-AR', {
 			hour: '2-digit',
 			minute: '2-digit',
-			hour12: false
+			hourCycle: 'h23'
 		}).format(new Date(dateStr));
 	const mainTitle = (entry: any) => entry.title ?? entry.description ?? entry.entry_type;
 	const isDuplicateDescription = (entry: any) =>

@@ -171,5 +171,11 @@ describe('account assistance view state', () => {
 				'America/Argentina/Buenos_Aires'
 			)
 		).toBe('18:45');
+		expect(
+			formatAccountAssistanceLocalTime(
+				'2026-07-09T03:00:00.000Z',
+				'America/Argentina/Buenos_Aires'
+			)
+		).toBe('00:00');
 	});
 });

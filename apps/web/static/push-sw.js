@@ -91,11 +91,42 @@ self.addEventListener('notificationclick', (event) => {
 	if (!url) return;
 	event.waitUntil(
 		clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
-			const targetUrl = new URL(url, self.location.origin).href;
+			const targetUrl = new URL(url, self.location.origin);
+			// Algunos navegadores Android (Samsung Browser incluido) consideran
+			// `navigate()` a la misma URL una navegación vacía y conservan el HTML
+			// anterior. Un parámetro efímero fuerza una nueva lectura del turno al
+			// servidor; la ruta pública lo ignora y siempre devuelve los datos vigentes.
+			const refreshUrl = new URL(targetUrl.href);
+			refreshUrl.searchParams.set('_aviso', String(Date.now()));
 			for (const client of windowClients) {
-				if (client.url === targetUrl && 'focus' in client) return client.focus();
+				let clientUrl;
+				try {
+					clientUrl = new URL(client.url);
+				} catch {
+					continue;
+				}
+				if (
+					clientUrl.origin === targetUrl.origin &&
+					clientUrl.pathname === targetUrl.pathname &&
+					'focus' in client
+				) {
+					// El turno puede haberse reprogramado mientras esta pestaña quedó abierta.
+					// Enfocarla sin navegar deja a la vista la fecha anterior; WindowClient.navigate
+					// vuelve a pedir la ruta al servidor y conserva una sola pestaña.
+					if ('navigate' in client) {
+						return client
+							.navigate(refreshUrl.href)
+							.then((navigatedClient) =>
+								navigatedClient && 'focus' in navigatedClient
+									? navigatedClient.focus()
+									: client.focus()
+							)
+							.catch(() => client.focus());
+					}
+					return client.focus();
+				}
 			}
-			return clients.openWindow(targetUrl);
+			return clients.openWindow(targetUrl.href);
 		})
 	);
 });

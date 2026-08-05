@@ -1,4 +1,4 @@
-// Recordatorios Web Push (secundarios al calendario; nunca en iOS).
+// Recordatorios Web Push para navegadores compatibles (este flujo nunca se ofrece en iOS).
 //
 // Confiabilidad del envío: claim atómico vía RPC claim_due_push_reminders
 // (FOR UPDATE SKIP LOCKED + reclaim a los 10 min si el proceso murió entre claim y
@@ -67,6 +67,9 @@ export const isValidPushDeliveryId = (value: string) =>
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
 		value
 	);
+
+export const isValidPushTestRequestKey = (value: string) =>
+	/^[A-Za-z0-9:_-]{16,180}$/.test(value);
 
 export const isValidSubscriptionPayload = (raw: unknown): raw is PushSubscriptionPayload => {
 	const candidate = raw as PushSubscriptionPayload | null;
@@ -153,7 +156,7 @@ export const saveAppointmentPushSubscription = async (
 			},
 			{ onConflict: 'appointment_id,endpoint' }
 		)
-		.select('id, endpoint')
+		.select('id, endpoint, verified_at')
 		.single();
 	if (error) throw error;
 	if (!data?.id) throw new Error('PUSH_SUBSCRIPTION_NOT_SAVED');
@@ -167,7 +170,11 @@ export const saveAppointmentPushSubscription = async (
 		metadata: { endpoint_host: new URL(payload.endpoint).hostname }
 	});
 
-	return { id: String(data.id), endpoint: String(data.endpoint) };
+	return {
+		id: String(data.id),
+		endpoint: String(data.endpoint),
+		verifiedAt: data.verified_at ? String(data.verified_at) : null
+	};
 };
 
 const hashReceiptToken = (token: string) =>
@@ -306,7 +313,10 @@ export const recordPushTestFeedback = async (
 				failed_count: 0,
 				updated_at: now
 			}
-		: { verified_at: null, revoked_at: now, updated_at: now };
+		// No recibir una prueba no demuestra que el endpoint haya vencido. Se quita
+		// la cobertura verificada, pero se conserva la suscripción para poder hacer
+		// una única prueba de recuperación cuando la persona vuelva de Ajustes.
+		: { verified_at: null, updated_at: now };
 	const { data: subscription, error: subscriptionError } = await supabase
 		.from('push_subscriptions')
 		.update(subscriptionUpdate)
@@ -339,7 +349,12 @@ export const pushTopicForAppointment = (
 		.slice(0, 32);
 
 type TrackedPushResult =
-	| { ok: true; deliveryId: string | null; pushServiceStatus: number | null }
+	| {
+			ok: true;
+			deliveryId: string | null;
+			pushServiceStatus: number | null;
+			reused?: boolean;
+	  }
 	| { ok: false; deliveryId: string | null; error: unknown };
 
 const failureKindFor = (error: unknown): 'gone' | 'rejected' | 'transient' => {
@@ -361,14 +376,17 @@ const sendTrackedPush = async (
 		ttlSeconds: number;
 		topic: string;
 		now: Date;
+		requestKeyHash?: string | null;
+		requireTracking?: boolean;
 	}
 ): Promise<TrackedPushResult> => {
 	const receiptToken = crypto.randomBytes(32).toString('base64url');
 	const expiresAt = new Date(input.now.getTime() + input.ttlSeconds * 1000).toISOString();
 	let deliveryId: string | null = null;
 
-	// La telemetria nunca debe impedir el recordatorio. Si este insert falla, el push
-	// igual se envia, pero la UI lo tratara honestamente como no verificable.
+	// La telemetría no debe impedir los recordatorios programados. La prueba visible,
+	// en cambio, exige una fila durable: sin ella no podríamos garantizar que dos
+	// eventos de foco representen una sola entrega lógica.
 	try {
 		const { data, error } = await supabase
 			.from('push_delivery_attempts')
@@ -377,6 +395,7 @@ const sendTrackedPush = async (
 				appointment_id: input.appointmentId,
 				subscription_id: input.target.id,
 				kind: input.kind,
+				request_key_hash: input.requestKeyHash ?? null,
 				receipt_token_hash: hashReceiptToken(receiptToken),
 				expires_at: expiresAt,
 				created_at: input.now.toISOString(),
@@ -387,7 +406,44 @@ const sendTrackedPush = async (
 		if (error) throw error;
 		deliveryId = data?.id ? String(data.id) : null;
 	} catch (trackingError) {
+		const errorCode = String((trackingError as { code?: string })?.code ?? '');
+		if (input.requestKeyHash && errorCode === '23505') {
+			try {
+				const { data: existing, error: existingError } = await supabase
+					.from('push_delivery_attempts')
+					.select('id, push_service_status, failed_at, failure_kind')
+					.eq('subscription_id', input.target.id)
+					.eq('request_key_hash', input.requestKeyHash)
+					.eq('kind', input.kind)
+					.maybeSingle();
+				if (existingError) throw existingError;
+				if (existing?.id) {
+					if (existing.failed_at) {
+						return {
+							ok: false,
+							deliveryId: String(existing.id),
+							error: {
+								statusCode: existing.failure_kind === 'gone' ? 410 : 503,
+								code: `PUSH_TEST_${String(existing.failure_kind ?? 'FAILED').toUpperCase()}`
+							}
+						};
+					}
+					return {
+						ok: true,
+						deliveryId: String(existing.id),
+						pushServiceStatus:
+							Number(existing.push_service_status ?? 0) || null,
+						reused: true
+					};
+				}
+			} catch (lookupError) {
+				console.error('Error recuperando prueba push idempotente', lookupError);
+			}
+		}
 		console.error('Error creando seguimiento de push', trackingError);
+		if (input.requireTracking) {
+			return { ok: false, deliveryId: null, error: trackingError };
+		}
 	}
 
 	const delivery = deliveryId
@@ -453,6 +509,7 @@ export const sendTestPushNotification = async (
 	input: {
 		appointment: PublicAppointmentView;
 		subscription: TrackedPushTarget;
+		requestKey?: string;
 		now?: Date;
 	}
 ) => {
@@ -469,6 +526,9 @@ export const sendTestPushNotification = async (
 			now.getTime() - new Date(latest.createdAt).getTime() < 30_000 &&
 			['pending', 'accepted', 'received', 'displayed', 'confirmed'].includes(latest.state)
 		) {
+			// Una segunda pestaña puede traer otra clave lógica, pero si apunta a la
+			// misma suscripción y ya hay una prueba viva, debe observar esa entrega en
+			// vez de generar otra. Los estados missing/failed/expired sí habilitan retry.
 			return { configured: true, accepted: true, deliveryId: latest.deliveryId, gone: false };
 		}
 	} catch (trackingError) {
@@ -490,7 +550,11 @@ export const sendTestPushNotification = async (
 		},
 		ttlSeconds: TEST_PUSH_TTL_SECONDS,
 		topic: pushTopicForAppointment(input.appointment.id, 'test'),
-		now
+		now,
+		requestKeyHash: input.requestKey
+			? crypto.createHash('sha256').update(input.requestKey).digest('hex')
+			: null,
+		requireTracking: Boolean(input.requestKey)
 	});
 	if (!result.ok && isGoneError(result.error)) {
 		await revokeEndpoint(supabase, input.subscription.endpoint, now);

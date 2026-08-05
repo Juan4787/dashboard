@@ -85,7 +85,7 @@ export const formatAccountAssistanceLocalTime = (value: string, timeZone: string
 		timeZone,
 		hour: '2-digit',
 		minute: '2-digit',
-		hour12: false
+		hourCycle: 'h23'
 	}).format(new Date(value));
 
 const addHours = (date: Date, hours: number) => new Date(date.getTime() + hours * 60 * 60 * 1000);

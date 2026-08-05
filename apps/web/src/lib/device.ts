@@ -5,83 +5,198 @@
 
 export type DeviceClass = 'ios' | 'android' | 'desktop' | 'unknown';
 
-export type NotificationBrowserProfile = {
-	label: string;
-	androidPackage: string | null;
-	supportsAndroidSettingsIntent: boolean;
+export type NotificationBrowserId =
+	| 'samsung_browser'
+	| 'chrome'
+	| 'firefox'
+	| 'edge'
+	| 'opera'
+	| 'embedded'
+	| 'unknown';
+
+export type NotificationGuide = {
+	title: string;
+	steps: string[];
 };
 
-// El nombre visible permite dar instrucciones concretas sin pedirle a la persona
-// que identifique conceptos como "service worker" o "permiso del sitio". El package
-// de Android se usa únicamente para intentar abrir directamente la pantalla de
-// notificaciones de la app; siempre hay instrucciones de respaldo en la misma UI.
+export type NotificationBrowserProfile = {
+	id: NotificationBrowserId;
+	label: string | null;
+	samsungExclusive: boolean;
+	sitePermissionGuide: NotificationGuide | null;
+	phoneNotificationGuide: NotificationGuide | null;
+};
+
+const chromeSitePermissionGuide = (): NotificationGuide => ({
+	title: 'Permití los avisos de este turno en Chrome',
+	steps: [
+		'Si no ves la dirección, deslizá la página apenas hacia abajo para mostrarla.',
+		'Tocá el ícono situado a la izquierda de la dirección.',
+		'Tocá “Permisos”.',
+		'Tocá “Notificaciones”.',
+		'{{app_notification_toggle}}',
+		'Volvé a este turno.'
+	]
+});
+
+const phoneNotificationGuide = (label: string): NotificationGuide => ({
+	title: `Permití que ${label} muestre los avisos`,
+	steps: [
+		'Abrí “Ajustes” en tu teléfono.',
+		'Tocá “Aplicaciones”.',
+		'Tocá la lupa.',
+		`Escribí “${label}”.`,
+		`Tocá “${label}”.`,
+		'Tocá “Notificaciones”.',
+		'{{app_notification_toggle}}',
+		'Volvé a este turno.'
+	]
+});
+
+// En Galaxy, One UI cambió el nombre del interruptor principal. Los navegadores
+// Chromium reducen el User-Agent a "Android 10" incluso en otras versiones, por
+// eso el cliente usa platformVersion de User-Agent Client Hints cuando existe.
+// Si el navegador no lo informa, evitamos inventar una etiqueta de pantalla.
+export const samsungAppNotificationToggleStep = (
+	platformVersion: string | null | undefined
+): string => {
+	const major = Number.parseInt(platformVersion ?? '', 10);
+	if (Number.isInteger(major) && major > 0 && major <= 12) {
+		return 'Activá “Mostrar notificaciones”.';
+	}
+	if (Number.isInteger(major) && major >= 13) {
+		return 'Activá “Permitir notificaciones”.';
+	}
+	return 'Activá el interruptor principal de notificaciones, en la parte superior.';
+};
+
+// Se conservan sólo rutas con etiquetas contrastadas en documentación vigente.
+// Ante un WebView o un navegador que no podemos identificar, no se muestra una
+// secuencia genérica: una indicación aproximada sería contraproducente.
 export const notificationBrowserProfile = (
 	userAgent: string | null | undefined
 ): NotificationBrowserProfile => {
 	const ua = userAgent ?? '';
+	if (/;\s*wv\)|FBAN|FBAV|Instagram|Line\//i.test(ua)) {
+		return {
+			id: 'embedded',
+			label: null,
+			samsungExclusive: false,
+			sitePermissionGuide: null,
+			phoneNotificationGuide: null
+		};
+	}
 	if (/SamsungBrowser\//i.test(ua)) {
 		return {
-			label: 'Samsung Internet',
-			androidPackage: 'com.sec.android.app.sbrowser',
-			supportsAndroidSettingsIntent: true
+			id: 'samsung_browser',
+			label: 'Samsung Browser',
+			samsungExclusive: true,
+			sitePermissionGuide: {
+				title: 'Permití los avisos de este turno en Samsung Browser',
+				steps: [
+					'Tocá “Herramientas” en la esquina inferior derecha.',
+					'Tocá “Ajustes”.',
+					'Tocá “Sitios web y descargas”.',
+					'Tocá “Notificaciones del sitio”.',
+					'Tocá “Más opciones”.',
+					'Tocá “Permitir o bloquear sitios web”.',
+					'Activá {{site}}.',
+					'Volvé a este turno.'
+				]
+			},
+			phoneNotificationGuide: phoneNotificationGuide('Samsung Browser')
 		};
 	}
 	if (/EdgA\//i.test(ua)) {
 		return {
+			id: 'edge',
 			label: 'Microsoft Edge',
-			androidPackage: 'com.microsoft.emmx',
-			supportsAndroidSettingsIntent: true
+			samsungExclusive: false,
+			sitePermissionGuide: null,
+			phoneNotificationGuide: phoneNotificationGuide('Microsoft Edge')
 		};
 	}
 	if (/OPR\//i.test(ua)) {
 		return {
+			id: 'opera',
 			label: 'Opera',
-			androidPackage: 'com.opera.browser',
-			supportsAndroidSettingsIntent: true
+			samsungExclusive: false,
+			sitePermissionGuide: {
+				title: 'Permití los avisos de este turno en Opera',
+				steps: [
+					'Tocá el botón de Opera.',
+					'Tocá “Configuración”.',
+					'Bajá hasta “Privacidad”.',
+					'Tocá “Configuración del sitio”.',
+					'Tocá “Notificaciones”.',
+					'Eliminá {{site}} de la lista.',
+					'Volvé a este turno y tocá “Activar recordatorio”.',
+					'Elegí “Permitir” cuando aparezca la pregunta.'
+				]
+			},
+			phoneNotificationGuide: phoneNotificationGuide('Opera')
 		};
 	}
 	if (/Android/i.test(ua) && /Firefox\//i.test(ua)) {
 		return {
+			id: 'firefox',
 			label: 'Firefox',
-			androidPackage: 'org.mozilla.firefox',
-			supportsAndroidSettingsIntent: false
+			samsungExclusive: false,
+			sitePermissionGuide: {
+				title: 'Permití los avisos de este turno en Firefox',
+				steps: [
+					'Tocá el ícono situado a la izquierda de la dirección.',
+					'En “Permisos”, tocá “Bloqueado” junto a “Notificación”.',
+					'Comprobá que ahora diga “Permitido”.',
+					'Cerrá el panel para volver al turno.'
+				]
+			},
+			phoneNotificationGuide: phoneNotificationGuide('Firefox')
 		};
 	}
 	if (/Chrome\//i.test(ua)) {
 		return {
+			id: 'chrome',
 			label: 'Chrome',
-			androidPackage: 'com.android.chrome',
-			supportsAndroidSettingsIntent: true
+			samsungExclusive: false,
+			sitePermissionGuide: chromeSitePermissionGuide(),
+			phoneNotificationGuide: phoneNotificationGuide('Chrome')
 		};
 	}
 	if (/Edg\//i.test(ua)) {
-		return { label: 'Microsoft Edge', androidPackage: null, supportsAndroidSettingsIntent: false };
+		return {
+			id: 'edge',
+			label: 'Microsoft Edge',
+			samsungExclusive: false,
+			sitePermissionGuide: null,
+			phoneNotificationGuide: null
+		};
 	}
 	if (/Firefox\//i.test(ua)) {
-		return { label: 'Firefox', androidPackage: null, supportsAndroidSettingsIntent: false };
+		return {
+			id: 'firefox',
+			label: 'Firefox',
+			samsungExclusive: false,
+			sitePermissionGuide: null,
+			phoneNotificationGuide: null
+		};
 	}
 	if (/Safari\//i.test(ua) && !/Chrome\//i.test(ua)) {
-		return { label: 'Safari', androidPackage: null, supportsAndroidSettingsIntent: false };
+		return {
+			id: 'unknown',
+			label: 'Safari',
+			samsungExclusive: false,
+			sitePermissionGuide: null,
+			phoneNotificationGuide: null
+		};
 	}
-	return { label: 'el navegador', androidPackage: null, supportsAndroidSettingsIntent: false };
-};
-
-export const androidNotificationSettingsIntent = (
-	userAgent: string | null | undefined,
-	fallbackUrl: string
-): string | null => {
-	if (!/Android/i.test(userAgent ?? '')) return null;
-	const profile = notificationBrowserProfile(userAgent);
-	if (!profile.androidPackage || !profile.supportsAndroidSettingsIntent) return null;
-	let fallback = fallbackUrl;
-	try {
-		const parsed = new URL(fallbackUrl);
-		parsed.searchParams.set('push_setup', 'manual');
-		fallback = parsed.toString();
-	} catch {
-		// El fallback original sigue siendo mejor que dejar el intent sin retorno.
-	}
-	return `intent:#Intent;action=android.settings.APP_NOTIFICATION_SETTINGS;S.android.provider.extra.APP_PACKAGE=${profile.androidPackage};S.browser_fallback_url=${encodeURIComponent(fallback)};end`;
+	return {
+		id: 'unknown',
+		label: null,
+		samsungExclusive: false,
+		sitePermissionGuide: null,
+		phoneNotificationGuide: null
+	};
 };
 
 export const classifyUserAgent = (userAgent: string | null | undefined): DeviceClass => {

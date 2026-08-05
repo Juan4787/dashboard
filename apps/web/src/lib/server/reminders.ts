@@ -21,6 +21,7 @@ import { publicAppointmentUrl } from './messaging';
 import { resolveMapsUrl } from './location';
 import { isLikelyPhoneE164 } from './phone';
 import type { Business } from './business';
+import { isManagedGoogleCalendarEnabled } from './google-calendar';
 
 const ACTIVE_DISPATCH_STATUSES = ['scheduled', 'queued', 'sending', 'sent', 'delivered', 'read'];
 const UNCOVERED_CALENDAR_STATUSES = new Set(['not_offered', 'offered']);
@@ -182,6 +183,12 @@ export const classifyReminderCoverage = (input: CoverageInput): ReminderCoverage
 		return input.calendar_update_required_at ? 'pendiente_actualizar' : 'sin_calendario';
 	}
 	if (input.calendar_update_required_at) return 'pendiente_actualizar';
+	// El enlace directo sólo abre el editor de Google: no confirma que la persona
+	// haya guardado el evento. Si existe una sincronización administrada vigente,
+	// ya quedó resuelta por `has_current_google_calendar_event` más arriba.
+	if (input.calendar_action_status === 'clicked_google') {
+		return 'sin_calendario';
+	}
 	if (UNCOVERED_CALENDAR_STATUSES.has(input.calendar_action_status)) return 'sin_calendario';
 	return null;
 };
@@ -242,6 +249,7 @@ export const loadReminderCandidates = async (
 	const appointments = rows ?? [];
 	if (appointments.length === 0) return [];
 	const ids = appointments.map((row: any) => String(row.id));
+	const managedGoogleCalendarEnabled = isManagedGoogleCalendarEnabled();
 
 	const [pushResult, dispatchResult, googleCalendarResult] = await Promise.all([
 		options.pushSubscriptionsSupabase
@@ -257,11 +265,13 @@ export const loadReminderCandidates = async (
 			.eq('business_id', business.id)
 			.eq('type', 'appointment_reminder_24h')
 			.in('appointment_id', ids),
-		options.pushSubscriptionsSupabase
-			.from('appointment_google_calendar_events')
-			.select('appointment_id, sync_status, synced_sequence')
-			.eq('business_id', business.id)
-			.in('appointment_id', ids)
+		managedGoogleCalendarEnabled
+			? options.pushSubscriptionsSupabase
+					.from('appointment_google_calendar_events')
+					.select('appointment_id, sync_status, synced_sequence')
+					.eq('business_id', business.id)
+					.in('appointment_id', ids)
+			: Promise.resolve({ data: [], error: null })
 	]);
 	if (pushResult.error) throw pushResult.error;
 	if (dispatchResult.error) throw dispatchResult.error;

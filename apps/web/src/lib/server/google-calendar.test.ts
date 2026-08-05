@@ -10,6 +10,7 @@ vi.mock('$env/dynamic/public', () => ({ env: envState.publicEnv }));
 
 import {
 	authorizeGoogleCalendarAppointment,
+	consumeGoogleCalendarOAuthAttempt,
 	createGoogleCalendarAuthorizationUrl,
 	decryptGoogleCalendarSecret,
 	deterministicGoogleCalendarEventId,
@@ -17,7 +18,9 @@ import {
 	googleCalendarEventResource,
 	googleCalendarReminderMinutes,
 	isGoogleCalendarConfigured,
-	parseGoogleCalendarEncryptionKey
+	loadGoogleCalendarUiState,
+	parseGoogleCalendarEncryptionKey,
+	requestGoogleCalendarEventDeletion
 } from './google-calendar';
 import type { PublicAppointmentView } from './public-appointments';
 
@@ -65,6 +68,7 @@ const appointment = (overrides: Partial<PublicAppointmentView> = {}): PublicAppo
 beforeEach(() => {
 	for (const key of Object.keys(envState.privateEnv)) delete envState.privateEnv[key];
 	for (const key of Object.keys(envState.publicEnv)) delete envState.publicEnv[key];
+	envState.privateEnv.GOOGLE_CALENDAR_MANAGED_ENABLED = 'true';
 	envState.privateEnv.GOOGLE_CALENDAR_CLIENT_ID = 'calendar-client.apps.googleusercontent.com';
 	envState.privateEnv.GOOGLE_CALENDAR_CLIENT_SECRET = 'server-secret';
 	envState.privateEnv.GOOGLE_CALENDAR_TOKEN_ENCRYPTION_KEY = KEY.toString('base64');
@@ -82,7 +86,9 @@ describe('secretos Google Calendar', () => {
 		expect(() => decryptGoogleCalendarSecret(ciphertext, KEY, 'oauth_verifier')).toThrow(
 			'GOOGLE_CALENDAR_SECRET_INVALID'
 		);
-		const tampered = `${ciphertext.slice(0, -1)}${ciphertext.endsWith('A') ? 'B' : 'A'}`;
+		const tamperedParts = ciphertext.split('.');
+		tamperedParts[3] = `${tamperedParts[3]?.startsWith('A') ? 'B' : 'A'}${tamperedParts[3]?.slice(1)}`;
+		const tampered = tamperedParts.join('.');
 		expect(() => decryptGoogleCalendarSecret(tampered, KEY)).toThrow(
 			'GOOGLE_CALENDAR_SECRET_INVALID'
 		);
@@ -96,6 +102,35 @@ describe('secretos Google Calendar', () => {
 		delete envState.privateEnv.GOOGLE_CALENDAR_CLIENT_ID;
 		envState.publicEnv.PUBLIC_GOOGLE_CLIENT_ID = 'drive-client.apps.googleusercontent.com';
 		expect(isGoogleCalendarConfigured()).toBe(false);
+	});
+
+	it('queda deshabilitado por defecto aunque las credenciales sigan disponibles', async () => {
+		envState.privateEnv.GOOGLE_CALENDAR_CLIENT_ID = 'calendar-client.apps.googleusercontent.com';
+		envState.privateEnv.GOOGLE_CALENDAR_MANAGED_ENABLED = 'false';
+		expect(isGoogleCalendarConfigured()).toBe(false);
+		const from = vi.fn(() => {
+			throw new Error('no debe consultar vínculos mientras está apagado');
+		});
+		await expect(loadGoogleCalendarUiState({ from } as any, appointment())).resolves.toMatchObject({
+			available: false,
+			state: 'none',
+			current: false
+		});
+		expect(from).not.toHaveBeenCalled();
+
+		const rpc = vi.fn();
+		await expect(
+			consumeGoogleCalendarOAuthAttempt(
+				{ rpc } as any,
+				'state-abcdefghijklmnopqrstuvwxyz-123456'
+			)
+		).rejects.toThrow('GOOGLE_CALENDAR_NOT_CONFIGURED');
+		expect(rpc).not.toHaveBeenCalled();
+
+		await expect(
+			requestGoogleCalendarEventDeletion({ rpc } as any, appointment().id, fetch)
+		).resolves.toEqual({ status: 'not_configured' });
+		expect(rpc).not.toHaveBeenCalled();
 	});
 });
 

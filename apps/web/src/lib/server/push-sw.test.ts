@@ -155,11 +155,13 @@ describe('push service worker', () => {
 		expect(JSON.parse(fetchMock.mock.calls[0][1].body).stage).toBe('received');
 	});
 
-	it('normaliza una URL relativa antes de enfocar o abrir el turno', async () => {
+	it('recarga y enfoca un turno ya abierto para no mostrar el horario anterior', async () => {
 		const { listeners, clients } = loadWorker();
 		const focus = vi.fn().mockResolvedValue(undefined);
+		const refreshedFocus = vi.fn().mockResolvedValue(undefined);
+		const navigate = vi.fn().mockResolvedValue({ focus: refreshedFocus });
 		clients.matchAll.mockResolvedValue([
-			{ url: 'https://turnos.example/turno/token', focus }
+			{ url: 'https://turnos.example/turno/token?creado=1', focus, navigate }
 		] as never);
 		let work: Promise<unknown> | null = null;
 		listeners.notificationclick?.({
@@ -173,6 +175,37 @@ describe('push service worker', () => {
 		});
 		await work;
 
+		expect(navigate).toHaveBeenCalledTimes(1);
+		const refreshUrl = new URL(navigate.mock.calls[0][0]);
+		expect(refreshUrl.origin + refreshUrl.pathname).toBe(
+			'https://turnos.example/turno/token'
+		);
+		expect(refreshUrl.searchParams.get('_aviso')).toMatch(/^\d+$/);
+		expect(refreshedFocus).toHaveBeenCalledTimes(1);
+		expect(focus).not.toHaveBeenCalled();
+		expect(clients.openWindow).not.toHaveBeenCalled();
+	});
+
+	it('enfoca la pestaña existente si el navegador no puede recargarla', async () => {
+		const { listeners, clients } = loadWorker();
+		const focus = vi.fn().mockResolvedValue(undefined);
+		const navigate = vi.fn().mockRejectedValue(new Error('navegación no disponible'));
+		clients.matchAll.mockResolvedValue([
+			{ url: 'https://turnos.example/turno/token', focus, navigate }
+		] as never);
+		let work: Promise<unknown> | null = null;
+		listeners.notificationclick?.({
+			notification: {
+				data: { url: '/turno/token' },
+				close: vi.fn()
+			},
+			waitUntil: (promise: Promise<unknown>) => {
+				work = promise;
+			}
+		});
+		await work;
+
+		expect(navigate).toHaveBeenCalledTimes(1);
 		expect(focus).toHaveBeenCalledTimes(1);
 		expect(clients.openWindow).not.toHaveBeenCalled();
 	});

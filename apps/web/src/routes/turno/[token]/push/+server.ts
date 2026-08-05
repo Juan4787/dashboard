@@ -1,5 +1,6 @@
-// Alta de suscripción push para un turno. El permiso se pidió en el navegador DESPUÉS
-// de que el paciente tocó "Recibir recordatorio" (nunca al cargar la página).
+// Alta de suscripción push para un turno. Si el permiso todavía está sin decidir,
+// el cliente lo pide únicamente después del toque. Si ya estaba concedido, recupera
+// la suscripción automáticamente sin volver a interrumpir a la persona.
 
 import { env } from '$env/dynamic/private';
 import { json } from '@sveltejs/kit';
@@ -9,6 +10,7 @@ import {
 	getPushDeliveryStatus,
 	isPushConfigured,
 	isValidPushDeliveryId,
+	isValidPushTestRequestKey,
 	isValidSubscriptionPayload,
 	recordPushTestFeedback,
 	saveAppointmentPushSubscription,
@@ -45,18 +47,27 @@ export const POST: RequestHandler = async ({ params, request, fetch, setHeaders 
 		raw = JSON.parse(body);
 	} catch {
 		return json(
-			{ ok: false, message: 'No pudimos leer la configuración del navegador.' },
+			{ ok: false, message: 'No pudimos leer los datos necesarios para activar el recordatorio.' },
 			{ status: 400 }
 		);
 	}
-	const wrapped = raw as { subscription?: unknown; test?: unknown } | null;
+	const wrapped = raw as {
+		subscription?: unknown;
+		test?: unknown;
+		testRequestKey?: unknown;
+	} | null;
 	const payload = wrapped?.subscription ?? raw;
 	// Compatibilidad con clientes anteriores: el body crudo sólo guarda. La prueba
 	// inmediata se dispara únicamente con el contrato nuevo `{ subscription, test }`.
 	const requestTest = Boolean(wrapped?.subscription && wrapped.test === true);
+	const testRequestKey =
+		typeof wrapped?.testRequestKey === 'string' ? wrapped.testRequestKey.trim() : '';
+	if (requestTest && testRequestKey && !isValidPushTestRequestKey(testRequestKey)) {
+		return json({ ok: false, message: 'No pudimos preparar la prueba.' }, { status: 400 });
+	}
 	if (!isValidSubscriptionPayload(payload)) {
 		return json(
-			{ ok: false, message: 'El navegador no entregó una configuración de notificaciones válida.' },
+			{ ok: false, message: 'No pudimos preparar el recordatorio en este teléfono.' },
 			{ status: 400 }
 		);
 	}
@@ -68,9 +79,15 @@ export const POST: RequestHandler = async ({ params, request, fetch, setHeaders 
 			payload,
 			request.headers.get('user-agent')
 		);
+		// Una suscripción que ya fue confirmada para este turno se reutiliza sin
+		// interrumpir ni volver a mandar la prueba.
+		if (saved.verifiedAt) {
+			return json({ ok: true, verified: true, delivery: null, verificationAvailable: true });
+		}
 		if (requestTest) {
 			const testResult = await sendTestPushNotification(supabase, {
 				appointment,
+				...(testRequestKey ? { requestKey: testRequestKey } : {}),
 				subscription: {
 					id: saved.id,
 					endpoint: payload.endpoint,
@@ -96,11 +113,21 @@ export const POST: RequestHandler = async ({ params, request, fetch, setHeaders 
 						deliveryId: testResult.deliveryId
 					})
 				: null;
-			return json({ ok: true, delivery, verificationAvailable: Boolean(delivery) });
+			return json({
+				ok: true,
+				verified: false,
+				delivery,
+				verificationAvailable: Boolean(delivery)
+			});
 		}
 
 		const delivery = await getLatestPushTestStatus(supabase, { subscriptionId: saved.id });
-		return json({ ok: true, delivery, verificationAvailable: Boolean(delivery) });
+		return json({
+			ok: true,
+			verified: false,
+			delivery,
+			verificationAvailable: Boolean(delivery)
+		});
 	} catch (error) {
 		console.error('Error guardando suscripción push', error);
 		return json(

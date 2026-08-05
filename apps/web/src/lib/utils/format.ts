@@ -38,7 +38,7 @@ export const formatDateTime = (value?: string | null, timeZone?: string) => {
 			year: 'numeric',
 			hour: '2-digit',
 			minute: '2-digit',
-			hour12: false
+			hourCycle: 'h23'
 		},
 		timeZone
 	).format(new Date(value));
@@ -59,7 +59,9 @@ export const formatInTimeZone = (value: string | Date, timeZone: string): ZonedD
 	).format(date);
 	const timeLabel = formatterFor(
 		timeFormatters,
-		{ hour: '2-digit', minute: '2-digit', hour12: false },
+		// h23 representa medianoche como 00:00. `hour12: false` elige h24 en
+		// es-AR dentro de Node/Netlify y producía el ambiguo “24:00”.
+		{ hour: '2-digit', minute: '2-digit', hourCycle: 'h23' },
 		timeZone
 	).format(date);
 	return { dateLabel, timeLabel, full: `${dateLabel} a las ${timeLabel}` };
