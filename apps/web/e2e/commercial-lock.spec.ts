@@ -132,6 +132,10 @@ const cleanupFixture = async (admin: SupabaseClient, target: Fixture | null) => 
 
 test.describe('Acceso comercial bloqueado', () => {
 	test.skip(
+		process.env.DEMO_MODE === 'true',
+		'El modo demo no autentica la cuenta bloqueada ni debe crear fixtures comerciales reales.'
+	);
+	test.skip(
 		!canCreateFixture && (!expiredEmail || !expiredPassword),
 		'Definí ODONTO_SUPABASE_URL + ODONTO_SUPABASE_SERVICE_ROLE_KEY o E2E_EXPIRED_EMAIL/E2E_EXPIRED_PASSWORD.'
 	);

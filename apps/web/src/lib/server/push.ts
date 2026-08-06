@@ -601,7 +601,9 @@ export const resetPushRemindersForReschedule = async (
 // que el recordatorio de 24h, así pisa la notificación vieja (horario viejo) aun en
 // service workers sin la lógica de `group`, e informa el horario nuevo. No toca los
 // flags sent/claimed: los recordatorios de 24h/2h del nuevo horario siguen su curso.
-// Requiere cliente service-role (push_subscriptions tiene RLS sin policies).
+// Requiere cliente service-role (push_subscriptions tiene RLS sin policies). Se
+// intenta en toda suscripción vigente: responder la pregunta de prueba sólo afecta
+// el refuerzo manual y nunca habilita ni bloquea estas entregas reales.
 export const sendReschedulePushNotice = async (
 	supabase: SupabaseClient,
 	input: { businessId: string; appointmentId: string; now?: Date }
@@ -631,8 +633,7 @@ export const sendReschedulePushNotice = async (
 		.select('id, endpoint, p256dh, auth')
 		.eq('business_id', input.businessId)
 		.eq('appointment_id', input.appointmentId)
-		.is('revoked_at', null)
-		.not('verified_at', 'is', null);
+		.is('revoked_at', null);
 	if (subscriptionsError) throw subscriptionsError;
 	if (!subscriptions || subscriptions.length === 0) {
 		return { configured: true, sent: 0, failed: 0, revoked: 0 };

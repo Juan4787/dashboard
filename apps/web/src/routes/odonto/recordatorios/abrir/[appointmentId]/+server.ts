@@ -8,7 +8,7 @@ import { createSupabaseServerClient, getAuthUserId } from '$lib/server/supabase'
 import { resolveActiveBusiness } from '$lib/server/business';
 import { writeAuditLog } from '$lib/server/audit';
 import { resolveMapsUrl } from '$lib/server/location';
-import { isLikelyPhoneE164 } from '$lib/server/phone';
+import { normalizeArgentineWhatsAppPhone } from '$lib/server/phone';
 import { buildReminderWhatsAppMessage, buildWaMeUrl } from '$lib/server/reminders';
 import type { RequestHandler } from './$types';
 
@@ -38,10 +38,10 @@ export const GET: RequestHandler = async ({ params, locals, fetch, cookies, url 
 		.maybeSingle();
 
 	const patient = (appointment as any)?.patients;
+	const phone = normalizeArgentineWhatsAppPhone(patient?.phone_e164);
 	if (
 		!appointment ||
-		!patient?.phone_e164 ||
-		!isLikelyPhoneE164(String(patient.phone_e164)) ||
+		!phone ||
 		patient.blocked ||
 		!['reserved', 'confirmed'].includes(String(appointment.status))
 	) {
@@ -92,7 +92,7 @@ export const GET: RequestHandler = async ({ params, locals, fetch, cookies, url 
 	return new Response(null, {
 		status: 302,
 		headers: {
-			location: buildWaMeUrl(String(patient.phone_e164), message),
+			location: buildWaMeUrl(phone, message),
 			'cache-control': 'no-store'
 		}
 	});

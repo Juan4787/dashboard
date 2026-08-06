@@ -12,9 +12,13 @@ import { getOdontoContext } from '$lib/server/odonto-context';
 import { createSupabaseAdminClient } from '$lib/server/supabase';
 import { processAppointmentGoogleCalendarSync } from '$lib/server/google-calendar';
 import { resetPushRemindersForReschedule, sendReschedulePushNotice } from '$lib/server/push';
-import { buildRescheduleWhatsAppMessage, buildWaMeUrl } from '$lib/server/reminders';
+import {
+	buildAppointmentActivationDelivery,
+	buildArgentineWaMeUrl,
+	buildRescheduleWhatsAppMessage
+} from '$lib/server/reminders';
 import { publicRescheduleUrl } from '$lib/server/messaging';
-import { isLikelyPhoneE164 } from '$lib/server/phone';
+import { shouldOfferCreatedAppointmentActivation } from '$lib/server/agenda-navigation';
 import { error as kitError, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -61,6 +65,9 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 			reprogramSlotsLoaded: true,
 			fromDate: '',
 			justRescheduled: false,
+			justCreated: false,
+			activationWhatsAppUrl: null,
+			activationPublicUrl: null,
 			rescheduleWhatsAppUrl: null,
 			reschedulePublicUrl: null,
 			demo: true
@@ -136,17 +143,14 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 	// teléfono E.164 plausible y un token. El enlace privado muestra SOLO el aviso de
 	// reprogramación. El texto va precargado y neutral (sin datos clínicos).
 	const patient = (data as any).patients;
-	const phone =
-		patient?.phone_e164 && isLikelyPhoneE164(String(patient.phone_e164))
-			? String(patient.phone_e164)
-			: null;
+	const phone = patient?.phone_e164 ? String(patient.phone_e164) : null;
 	const token = (data as any).confirmation_token ? String((data as any).confirmation_token) : null;
 	const canNotifyReschedule = ['reserved', 'confirmed', 'reschedule_requested'].includes(data.status);
 	let rescheduleWhatsAppUrl: string | null = null;
 	let reschedulePublicUrl: string | null = null;
-	if (canNotifyReschedule && phone && token) {
+	if (canNotifyReschedule && token) {
 		reschedulePublicUrl = publicRescheduleUrl(token);
-		rescheduleWhatsAppUrl = buildWaMeUrl(
+		rescheduleWhatsAppUrl = buildArgentineWaMeUrl(
 			phone,
 			buildRescheduleWhatsAppMessage({
 				patientName: String(patient?.full_name ?? 'Paciente'),
@@ -157,6 +161,17 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 			})
 		);
 	}
+
+	const justCreated = shouldOfferCreatedAppointmentActivation({
+		requested: url.searchParams.get('created') === '1',
+		source: String(data.source),
+		status: String(data.status),
+		startsAt: String(data.starts_at),
+		token
+	});
+	const activation = justCreated && token
+		? buildAppointmentActivationDelivery(phone, token)
+		: null;
 
 	return {
 		context: business,
@@ -184,6 +199,9 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 		reprogramSlotsLoaded: false,
 		fromDate,
 		justRescheduled: url.searchParams.get('rescheduled') === '1',
+		justCreated,
+		activationWhatsAppUrl: activation?.whatsappUrl ?? null,
+		activationPublicUrl: activation?.publicUrl ?? null,
 		rescheduleWhatsAppUrl,
 		reschedulePublicUrl,
 		demo: false
@@ -359,16 +377,26 @@ export const actions: Actions = {
 		// quedó reprogramado, así que un fallo acá no debe abortar la acción.
 		try {
 			const admin = await createSupabaseAdminClient('odonto', fetch);
-			await resetPushRemindersForReschedule(admin, {
-				businessId: business.business.id,
-				appointmentId: params.appointmentId
-			});
-			await sendReschedulePushNotice(admin, {
-				businessId: business.business.id,
-				appointmentId: params.appointmentId
-			});
-		} catch (pushError) {
-			console.error('Error notificando avisos push tras reprogramar', pushError);
+			// El trigger de base de datos ya hace este reseteo dentro de la transacción.
+			// Este refuerzo no puede bloquear el aviso inmediato si falla por separado.
+			try {
+				await resetPushRemindersForReschedule(admin, {
+					businessId: business.business.id,
+					appointmentId: params.appointmentId
+				});
+			} catch (resetError) {
+				console.error('Error reforzando el reseteo de avisos tras reprogramar', resetError);
+			}
+			try {
+				await sendReschedulePushNotice(admin, {
+					businessId: business.business.id,
+					appointmentId: params.appointmentId
+				});
+			} catch (noticeError) {
+				console.error('Error enviando el aviso inmediato tras reprogramar', noticeError);
+			}
+		} catch (pushSetupError) {
+			console.error('Error preparando avisos push tras reprogramar', pushSetupError);
 		}
 
 		try {

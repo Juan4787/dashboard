@@ -17,6 +17,7 @@ import { getOdontoContext } from '$lib/server/odonto-context';
 import { countTomorrowUncovered } from '$lib/server/reminders';
 import { createSupabaseAdminClient } from '$lib/server/supabase';
 import { processAppointmentGoogleCalendarSync } from '$lib/server/google-calendar';
+import { createdAppointmentDetailUrl } from '$lib/server/agenda-navigation';
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -370,7 +371,7 @@ export const actions: Actions = {
 							...commonInput,
 							professionalId
 						});
-			throw redirect(303, `/odonto/turnos/${created.id}`);
+			throw redirect(303, createdAppointmentDetailUrl(created.id, date));
 		} catch (error: any) {
 			if (error?.status && error?.location) throw error;
 			console.error('Error creando turno', error);

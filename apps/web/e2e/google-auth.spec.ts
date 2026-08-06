@@ -5,7 +5,10 @@ const isLocalSupabase =
 	supabaseUrl.startsWith('http://127.0.0.1') || supabaseUrl.startsWith('http://localhost');
 
 test.describe('Google Auth', () => {
-	test.skip(isLocalSupabase, 'Supabase local no tiene configurado el proveedor OAuth de Google.');
+	test.skip(
+		isLocalSupabase || process.env.DEMO_MODE === 'true',
+		'Este entorno no debe iniciar el proveedor OAuth real de Google.'
+	);
 
 	test('el botón de Google inicia OAuth contra Google', async ({ page }) => {
 		await page.goto('/login');

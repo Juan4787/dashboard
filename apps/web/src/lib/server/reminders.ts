@@ -3,28 +3,37 @@
 //
 // Criterios de inclusión (ver plan, Fase 8):
 // - status reserved/confirmed, dentro de la ventana Hoy/Mañana (TZ del negocio), futuro.
-// - sin acción de calendario (not_offered/offered) → "Sin calendario registrado",
+// - sin acción de calendario (not_offered/offered) → "Sin recordatorio confirmado",
 //   o reprogramado después de una acción → "Calendario pendiente de actualizar".
-// - sin suscripción push activa (cobertura secundaria) y sin dispatch automático
-//   activo (pipeline Meta dormida: si algún día se prende, acá no se duplica).
+// - sin notificación confirmada por la persona y sin dispatch automático activo
+//   (pipeline Meta dormida: si algún día se prende, acá no se duplica).
 // "offered" NUNCA cuenta como cobertura: solo significa que vio la pantalla.
 //
-// La exclusión representa la decisión del paciente: si activó los avisos y la
-// suscripción sigue activa, el turno no requiere refuerzo manual aunque un envío
-// transitorio haya fallado. El job de push conserva sus reintentos y revoca el
-// endpoint cuando el servicio confirma que ya no sirve; recién entonces el turno
-// puede volver a aparecer si tampoco tiene calendario.
+// La cobertura push exige el respaldo explícito "Sí, la recibí". `displayed_at` es
+// telemetría útil, pero una web no puede comprobar si Android bloqueó globalmente
+// las notificaciones del navegador después del handoff; tampoco alcanzan el permiso,
+// guardar un endpoint ni recibir un 201 del proveedor. Para los calendarios, la señal
+// observable y suficiente es haber iniciado la entrega o la salida hacia la opción
+// elegida: no afirmamos ni intentamos comprobar el guardado dentro de una aplicación
+// externa.
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { formatInTimeZone } from '$lib/utils/format';
 import { publicAppointmentUrl } from './messaging';
 import { resolveMapsUrl } from './location';
-import { isLikelyPhoneE164 } from './phone';
+import { normalizeArgentineWhatsAppPhone } from './phone';
 import type { Business } from './business';
 import { isManagedGoogleCalendarEnabled } from './google-calendar';
 
 const ACTIVE_DISPATCH_STATUSES = ['scheduled', 'queued', 'sending', 'sent', 'delivered', 'read'];
 const UNCOVERED_CALENDAR_STATUSES = new Set(['not_offered', 'offered']);
+const CALENDAR_HANDOFF_STATUSES = new Set([
+	'clicked_google',
+	'clicked_ics',
+	'downloaded_ics',
+	'clicked_outlook',
+	'clicked_phone_calendar'
+]);
 
 export type ReminderDay = 'hoy' | 'manana';
 
@@ -32,6 +41,7 @@ export type ReminderCoverage = 'sin_calendario' | 'pendiente_actualizar';
 
 export type ReminderCandidate = {
 	appointment_id: string;
+	patient_id: string;
 	starts_at: string;
 	time_label: string;
 	status: string;
@@ -129,6 +139,40 @@ export const buildReminderWhatsAppMessage = (input: ReminderMessageInput): strin
 export const buildWaMeUrl = (phoneE164: string, message: string): string =>
 	`https://wa.me/${phoneE164.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
 
+export const buildArgentineWaMeUrl = (
+	phone: string | null | undefined,
+	message: string
+): string | null => {
+	const phoneE164 = normalizeArgentineWhatsAppPhone(phone);
+	return phoneE164 ? buildWaMeUrl(phoneE164, message) : null;
+};
+
+export type AppointmentActivationDelivery = {
+	publicUrl: string;
+	message: string;
+	phoneE164: string | null;
+	whatsappUrl: string | null;
+};
+
+export const buildAppointmentActivationDelivery = (
+	phone: string | null | undefined,
+	token: string
+): AppointmentActivationDelivery => {
+	const publicUrl = `${publicAppointmentUrl(token)}?creado=1`;
+	const message = [
+		'Tu turno quedó reservado.',
+		'Activá acá el recordatorio:',
+		publicUrl
+	].join('\n');
+	const phoneE164 = normalizeArgentineWhatsAppPhone(phone);
+	return {
+		publicUrl,
+		message,
+		phoneE164,
+		whatsappUrl: phoneE164 ? buildWaMeUrl(phoneE164, message) : null
+	};
+};
+
 // --- Mensaje manual de WhatsApp para reprogramación (§48: neutral) -----------
 
 export type RescheduleMessageInput = {
@@ -154,14 +198,14 @@ export const buildRescheduleWhatsAppMessage = (input: RescheduleMessageInput): s
 export type CoverageInput = {
 	calendar_action_status: string;
 	calendar_update_required_at: string | null;
-	has_active_notifications: boolean;
+	has_confirmed_notifications: boolean;
 	has_active_dispatch: boolean;
 	google_calendar_sync_status?: string | null;
 	has_current_google_calendar_event?: boolean;
 };
 
 export const classifyReminderCoverage = (input: CoverageInput): ReminderCoverage | null => {
-	if (input.has_active_notifications || input.has_active_dispatch) return null;
+	if (input.has_confirmed_notifications || input.has_active_dispatch) return null;
 	if (input.has_current_google_calendar_event) return null;
 
 	// Si existe un vínculo administrado, manda el estado confirmado por Google y
@@ -183,24 +227,23 @@ export const classifyReminderCoverage = (input: CoverageInput): ReminderCoverage
 		return input.calendar_update_required_at ? 'pendiente_actualizar' : 'sin_calendario';
 	}
 	if (input.calendar_update_required_at) return 'pendiente_actualizar';
-	// El enlace directo sólo abre el editor de Google: no confirma que la persona
-	// haya guardado el evento. Si existe una sincronización administrada vigente,
-	// ya quedó resuelta por `has_current_google_calendar_event` más arriba.
-	if (input.calendar_action_status === 'clicked_google') {
-		return 'sin_calendario';
-	}
 	if (UNCOVERED_CALENDAR_STATUSES.has(input.calendar_action_status)) return 'sin_calendario';
-	return null;
+	// Para Google, iPhone/ICS y Outlook alcanza con que nuestra ruta haya iniciado
+	// la entrega del evento o la salida al editor prearmado. Es la última señal que
+	// la web puede observar sin afirmar que la persona tocó "Guardar" afuera.
+	if (CALENDAR_HANDOFF_STATUSES.has(input.calendar_action_status)) return null;
+	// Un estado futuro o inválido nunca debe ocultar silenciosamente un turno.
+	return 'sin_calendario';
 };
 
-// Una suscripción sólo cubre el turno después de una prueba aceptada y confirmada
-// por la persona. Guardar un endpoint o recibir un 201 del proveedor no alcanza.
-export type ActivePushSubscriptionInput = {
+export type ConfirmedPushSubscriptionInput = {
 	revoked_at: string | null;
 	verified_at: string | null;
 };
 
-export const hasActivePushSubscription = (row: ActivePushSubscriptionInput): boolean =>
+// `verified_at` conserva una semántica estricta: la persona respondió "Sí, la
+// recibí". No se usa para decidir si el sistema debe ENVIAR recordatorios.
+export const hasConfirmedPushSubscription = (row: ConfirmedPushSubscriptionInput): boolean =>
 	row.revoked_at == null && Boolean(row.verified_at);
 
 // --- Carga principal ----------------------------------------------------------
@@ -280,9 +323,9 @@ export const loadReminderCandidates = async (
 	const dispatchRows = dispatchResult.data;
 	const googleCalendarRows = googleCalendarResult.data;
 
-	const pushed = new Set(
+	const confirmedPushAppointments = new Set(
 		(pushRows ?? [])
-			.filter((row: any) => hasActivePushSubscription(row))
+			.filter((row: any) => hasConfirmedPushSubscription(row))
 			.map((row: any) => String(row.appointment_id))
 	);
 	const dispatched = new Set(
@@ -303,7 +346,7 @@ export const loadReminderCandidates = async (
 		const coverage = classifyReminderCoverage({
 			calendar_action_status: String(row.calendar_action_status ?? 'not_offered'),
 			calendar_update_required_at: row.calendar_update_required_at ?? null,
-			has_active_notifications: pushed.has(String(row.id)),
+			has_confirmed_notifications: confirmedPushAppointments.has(String(row.id)),
 			has_active_dispatch: dispatched.has(String(row.id)),
 			google_calendar_sync_status: googleCalendar?.sync_status
 				? String(googleCalendar.sync_status)
@@ -314,12 +357,9 @@ export const loadReminderCandidates = async (
 		});
 		if (!coverage) continue;
 
-		// Solo se ofrece el botón con un E.164 plausible: un valor legado malformado
-		// generaría un wa.me roto ("Sin teléfono válido" es más honesto).
-		const phone =
-			patient?.phone_e164 && isLikelyPhoneE164(String(patient.phone_e164))
-				? String(patient.phone_e164)
-				: null;
+		// WhatsApp recibe siempre el móvil argentino canónico. Se recuperan formatos
+		// locales 0/15 y valores legados; si falta información no se inventa un wa.me.
+		const phone = normalizeArgentineWhatsAppPhone(patient?.phone_e164);
 		const patientName = String(patient?.full_name ?? 'Paciente');
 		const whatsappUrl = phone
 			? buildWaMeUrl(
@@ -338,6 +378,7 @@ export const loadReminderCandidates = async (
 
 		candidates.push({
 			appointment_id: String(row.id),
+			patient_id: String(patient.id),
 			starts_at: String(row.starts_at),
 			time_label: formatInTimeZone(String(row.starts_at), business.timezone).timeLabel,
 			status: String(row.status),
@@ -355,7 +396,7 @@ export const loadReminderCandidates = async (
 };
 
 // El aviso de Agenda usa exactamente los mismos criterios que la sección
-// Recordatorios. Así no anuncia turnos que ya tienen avisos activados.
+// Recordatorios. Así no anuncia turnos que ya tienen recordatorio confirmado.
 export const countTomorrowUncovered = async (
 	supabase: SupabaseClient,
 	business: Pick<Business, 'id' | 'name' | 'timezone' | 'address' | 'maps_url'>,

@@ -314,6 +314,9 @@ describe('activación de notificaciones en el teléfono', () => {
 		expect(
 			screen.getByRole('button', { name: '🔔 Activar recordatorio' })
 		).toBeInTheDocument();
+		expect(
+			screen.queryByRole('button', { name: 'Enviar otra notificación de prueba' })
+		).not.toBeInTheDocument();
 		expect(screen.queryByRole('link', { name: /Google Calendar/i })).not.toBeInTheDocument();
 	});
 
@@ -412,6 +415,20 @@ describe('activación de notificaciones en el teléfono', () => {
 		expect(await screen.findByText('¿Tu teléfono es Samsung?')).toBeInTheDocument();
 		expect(screen.getByText('Permití que Samsung Browser muestre los avisos')).toBeInTheDocument();
 		expect(screen.getByText('Activá “Permitir notificaciones”.')).toBeInTheDocument();
+		const retryButton = screen.getByRole('button', {
+			name: 'Enviar otra notificación de prueba'
+		});
+		const guideTitle = screen.getByText('Permití que Samsung Browser muestre los avisos');
+		expect(retryButton.className).toContain('ux-btn-primary');
+		expect(retryButton.className).toContain('ux-btn-cta');
+		expect(
+			retryButton.compareDocumentPosition(guideTitle) & Node.DOCUMENT_POSITION_FOLLOWING
+		).toBeTruthy();
+		expect(
+			screen.queryByText('Podés volver a consultar esta guía las veces que necesites.')
+		).not.toBeInTheDocument();
+		expect(screen.queryByText('Cuando termines los pasos')).not.toBeInTheDocument();
+		expect(screen.queryByText('Volver sólo para releer no envía otra prueba.')).not.toBeInTheDocument();
 		expect(screen.queryByText('¿Tu teléfono es de otra marca?')).not.toBeInTheDocument();
 		expect(screen.queryByRole('link', { name: /Google Calendar/i })).not.toBeInTheDocument();
 	});
@@ -437,7 +454,7 @@ describe('activación de notificaciones en el teléfono', () => {
 		expect(screen.queryByText(/otro Android/i)).not.toBeInTheDocument();
 	});
 
-	it('al volver de Ajustes envía una sola prueba de recuperación aunque haya varios eventos', async () => {
+	it('volver sólo para consultar los pasos no envía nada hasta tocar la acción principal', async () => {
 		const environment = installNotificationEnvironment({ states: ['displayed', 'displayed'] });
 		render(Page, { data: pageData });
 
@@ -449,6 +466,13 @@ describe('activación de notificaciones en el teléfono', () => {
 		window.dispatchEvent(new Event('focus'));
 		window.dispatchEvent(new Event('focus'));
 
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(environment.postRequests()).toBe(1);
+		const retryButton = screen.getByRole('button', {
+			name: 'Enviar otra notificación de prueba'
+		});
+		await clickWhenEnabled(retryButton);
+
 		await waitFor(() => expect(environment.postRequests()).toBe(2));
 		expect(environment.postBodies()[0]?.testRequestKey).toMatch(/:initial$/);
 		expect(environment.postBodies()[1]?.testRequestKey).toMatch(/:recovery$/);
@@ -457,7 +481,7 @@ describe('activación de notificaciones en el teléfono', () => {
 		expect(await screen.findByText('¿Recibiste la notificación de prueba?')).toBeInTheDocument();
 	});
 
-	it('una nueva visita a Ajustes puede probar otra vez si la recuperación tampoco llegó', async () => {
+	it('cada nueva prueba posterior exige otro toque explícito y usa otra clave lógica', async () => {
 		const environment = installNotificationEnvironment({
 			states: ['displayed', 'displayed', 'displayed']
 		});
@@ -469,6 +493,11 @@ describe('activación de notificaciones en el teléfono', () => {
 
 		environment.setVisibility('hidden');
 		environment.setVisibility('visible');
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(environment.postRequests()).toBe(1);
+		await clickWhenEnabled(
+			screen.getByRole('button', { name: 'Enviar otra notificación de prueba' })
+		);
 		await waitFor(() => expect(environment.postRequests()).toBe(2));
 		expect(environment.postBodies()[1]?.testRequestKey).toMatch(/:recovery$/);
 		await clickWhenEnabled(await screen.findByRole('button', { name: 'No la recibí' }));
@@ -476,12 +505,17 @@ describe('activación de notificaciones en el teléfono', () => {
 
 		environment.setVisibility('hidden');
 		environment.setVisibility('visible');
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(environment.postRequests()).toBe(2);
+		await clickWhenEnabled(
+			screen.getByRole('button', { name: 'Enviar otra notificación de prueba' })
+		);
 		await waitFor(() => expect(environment.postRequests()).toBe(3));
 		expect(environment.postBodies()[2]?.testRequestKey).toMatch(/:recovery:retry1$/);
 		expect(await screen.findByText('¿Recibiste la notificación de prueba?')).toBeInTheDocument();
 	});
 
-	it('una recuperación rechazada sólo se reintenta tras una nueva salida deliberada a Ajustes', async () => {
+	it('una recuperación rechazada no se repite por foco y requiere otro toque explícito', async () => {
 		const environment = installNotificationEnvironment({
 			postResponses: [
 				{
@@ -508,8 +542,9 @@ describe('activación de notificaciones en el teléfono', () => {
 		await clickWhenEnabled(await screen.findByRole('button', { name: 'No la recibí' }));
 		await screen.findByText('Permití que Samsung Browser muestre los avisos');
 
-		environment.setVisibility('hidden');
-		environment.setVisibility('visible');
+		await clickWhenEnabled(
+			screen.getByRole('button', { name: 'Enviar otra notificación de prueba' })
+		);
 		await waitFor(() => expect(environment.postRequests()).toBe(2));
 		expect(environment.postBodies()[1]?.testRequestKey).toMatch(/:recovery$/);
 
@@ -519,11 +554,59 @@ describe('activación de notificaciones en el teléfono', () => {
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		expect(environment.postRequests()).toBe(2);
 
-		// Una nueva salida consciente permite otro intento, con otra clave lógica.
+		// Volver a consultar la guía tampoco debe convertir el foco en un envío.
 		environment.setVisibility('hidden');
 		environment.setVisibility('visible');
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(environment.postRequests()).toBe(2);
+
+		// Sólo un nuevo toque consciente permite otro intento, con otra clave lógica.
+		await clickWhenEnabled(
+			screen.getByRole('button', { name: 'Enviar otra notificación de prueba' })
+		);
 		await waitFor(() => expect(environment.postRequests()).toBe(3));
 		expect(environment.postBodies()[2]?.testRequestKey).toMatch(/:recovery:retry1$/);
+		expect(await screen.findByText('¿Recibiste la notificación de prueba?')).toBeInTheDocument();
+	});
+
+	it('si el permiso efectivo cambia a concedido conserva la activación automática', async () => {
+		const environment = installNotificationEnvironment({
+			persistRequestedPermission: false,
+			states: ['displayed']
+		});
+		render(Page, { data: pageData });
+
+		await fireEvent.click(screen.getByRole('button', { name: '🔔 Activar recordatorio' }));
+		await screen.findByText('Permití que Samsung Browser muestre los avisos');
+		expect(environment.postRequests()).toBe(0);
+
+		environment.setPermission('granted');
+		environment.setVisibility('hidden');
+		environment.setVisibility('visible');
+
+		await waitFor(() => expect(environment.postRequests()).toBe(1));
+		expect(environment.postBodies()[0]?.testRequestKey).toMatch(/:initial$/);
+		expect(await screen.findByText('¿Recibiste la notificación de prueba?')).toBeInTheDocument();
+	});
+
+	it('si el permiso cambia después de una prueba perdida, la recuperación automática usa una clave nueva', async () => {
+		const environment = installNotificationEnvironment({ states: ['displayed', 'displayed'] });
+		render(Page, { data: pageData });
+
+		await fireEvent.click(screen.getByRole('button', { name: '🔔 Activar recordatorio' }));
+		await clickWhenEnabled(await screen.findByRole('button', { name: 'No la recibí' }));
+		expect(environment.postRequests()).toBe(1);
+
+		environment.setPermission('denied');
+		window.dispatchEvent(new Event('focus'));
+		await screen.findByText('Permití los avisos de este turno en Samsung Browser');
+
+		environment.setPermission('granted');
+		environment.setVisibility('hidden');
+		environment.setVisibility('visible');
+
+		await waitFor(() => expect(environment.postRequests()).toBe(2));
+		expect(environment.postBodies()[1]?.testRequestKey).toMatch(/:recovery$/);
 		expect(await screen.findByText('¿Recibiste la notificación de prueba?')).toBeInTheDocument();
 	});
 

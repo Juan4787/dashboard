@@ -28,6 +28,7 @@ const demoCandidates = (day: ReminderDay): ReminderCandidate[] => {
 	return [
 		{
 			appointment_id: 'demo-reminder-1',
+			patient_id: 'demo-patient-1',
 			starts_at: at(15),
 			time_label: '15:30',
 			status: 'reserved',
@@ -42,6 +43,7 @@ const demoCandidates = (day: ReminderDay): ReminderCandidate[] => {
 		},
 		{
 			appointment_id: 'demo-reminder-2',
+			patient_id: 'demo-patient-2',
 			starts_at: at(16),
 			time_label: '16:00',
 			status: 'confirmed',
@@ -94,8 +96,8 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 				pushSubscriptionsSupabase
 			});
 		} catch (reminderError) {
-			// Sin poder comprobar los avisos, no mostramos turnos: es preferible a
-			// abrir un WhatsApp duplicado para un paciente que ya los activó.
+			// Sin poder comprobar la cobertura de notificaciones y calendarios, no
+			// mostramos turnos: es preferible a abrir un WhatsApp duplicado.
 			console.error('Error cargando cobertura de recordatorios', reminderError);
 			remindersUnavailable = true;
 		}

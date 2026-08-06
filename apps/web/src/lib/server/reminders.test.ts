@@ -5,12 +5,14 @@ vi.mock('./google-calendar', () => ({
 	isManagedGoogleCalendarEnabled: () => googleCalendarFlag.enabled
 }));
 import {
+	buildAppointmentActivationDelivery,
+	buildArgentineWaMeUrl,
 	buildReminderWhatsAppMessage,
 	buildRescheduleWhatsAppMessage,
 	buildWaMeUrl,
 	classifyReminderCoverage,
 	countTomorrowUncovered,
-	hasActivePushSubscription,
+	hasConfirmedPushSubscription,
 	loadReminderCandidates,
 	localDayWindowUtc
 } from './reminders';
@@ -43,7 +45,7 @@ describe('classifyReminderCoverage', () => {
 	const base = {
 		calendar_action_status: 'not_offered',
 		calendar_update_required_at: null,
-		has_active_notifications: false,
+		has_confirmed_notifications: false,
 		has_active_dispatch: false
 	};
 
@@ -52,17 +54,16 @@ describe('classifyReminderCoverage', () => {
 		expect(classifyReminderCoverage({ ...base, calendar_action_status: 'offered' })).toBe('sin_calendario');
 	});
 
-	it('una acción de calendario verificable queda cubierta', () => {
-		expect(classifyReminderCoverage({ ...base, calendar_action_status: 'downloaded_ics' })).toBeNull();
-	});
-
-	it('un click directo en Google nunca se confunde con un evento guardado', () => {
-		expect(
-			classifyReminderCoverage({
-				...base,
-				calendar_action_status: 'clicked_google'
-			})
-		).toBe('sin_calendario');
+	it('iniciar Google, el calendario del teléfono o un ICS cuenta sin afirmar que se guardó', () => {
+		for (const calendar_action_status of [
+			'clicked_google',
+			'clicked_phone_calendar',
+			'clicked_ics',
+			'downloaded_ics',
+			'clicked_outlook'
+		]) {
+			expect(classifyReminderCoverage({ ...base, calendar_action_status })).toBeNull();
+		}
 	});
 
 	it('reprogramado tras acción: pendiente_actualizar aunque haya acción previa', () => {
@@ -75,14 +76,14 @@ describe('classifyReminderCoverage', () => {
 		).toBe('pendiente_actualizar');
 	});
 
-	it('avisos activados o dispatch automático activo: cubierto', () => {
-		expect(classifyReminderCoverage({ ...base, has_active_notifications: true })).toBeNull();
+	it('notificación confirmada o dispatch automático activo: cubierto', () => {
+		expect(classifyReminderCoverage({ ...base, has_confirmed_notifications: true })).toBeNull();
 		expect(classifyReminderCoverage({ ...base, has_active_dispatch: true })).toBeNull();
 		expect(
 			classifyReminderCoverage({
 				...base,
 				calendar_action_status: 'clicked_google',
-				has_active_notifications: true
+				has_confirmed_notifications: true
 			})
 		).toBeNull();
 	});
@@ -118,12 +119,18 @@ describe('classifyReminderCoverage', () => {
 			classifyReminderCoverage({ ...base, calendar_action_status: 'synced_google' })
 		).toBe('sin_calendario');
 	});
+
+	it('un estado de calendario desconocido no oculta el turno', () => {
+		expect(
+			classifyReminderCoverage({ ...base, calendar_action_status: 'future_unknown_status' })
+		).toBe('sin_calendario');
+	});
 });
 
-describe('hasActivePushSubscription', () => {
+describe('hasConfirmedPushSubscription', () => {
 	it('activa: confirmada y sin revocar', () => {
 		expect(
-			hasActivePushSubscription({
+			hasConfirmedPushSubscription({
 				revoked_at: null,
 				verified_at: '2026-06-11T10:00:00.000Z'
 			})
@@ -132,7 +139,7 @@ describe('hasActivePushSubscription', () => {
 
 	it('inactiva: revocada (endpoint muerto / turno terminal)', () => {
 		expect(
-			hasActivePushSubscription({
+			hasConfirmedPushSubscription({
 				revoked_at: '2026-06-11T10:00:00.000Z',
 				verified_at: '2026-06-11T09:00:00.000Z'
 			})
@@ -140,7 +147,7 @@ describe('hasActivePushSubscription', () => {
 	});
 
 	it('inactiva: el endpoint existe pero la prueba no fue confirmada', () => {
-		expect(hasActivePushSubscription({ revoked_at: null, verified_at: null })).toBe(false);
+		expect(hasConfirmedPushSubscription({ revoked_at: null, verified_at: null })).toBe(false);
 	});
 });
 
@@ -178,6 +185,36 @@ describe('buildReminderWhatsAppMessage', () => {
 		expect(message).not.toContain('Dirección:');
 		expect(message).not.toContain('Cómo llegar:');
 		expect(message).toContain('Ver turno: ');
+	});
+});
+
+describe('enlace de activación para un turno creado desde Agenda', () => {
+	it('prepara un mensaje neutral y el wa.me con el número argentino normalizado', () => {
+		const delivery = buildAppointmentActivationDelivery('0351 15 123-4567', 'tok-activation');
+
+		expect(delivery.phoneE164).toBe('+5493511234567');
+		expect(delivery.publicUrl).toMatch(/\/turno\/tok-activation\?creado=1$/);
+		expect(delivery.message).toBe(
+			`Tu turno quedó reservado.\nActivá acá el recordatorio:\n${delivery.publicUrl}`
+		);
+		expect(delivery.whatsappUrl).toBe(
+			`https://wa.me/5493511234567?text=${encodeURIComponent(delivery.message)}`
+		);
+		expect(delivery.message).not.toMatch(/consulta|profesional|diagn|tratamiento/i);
+	});
+
+	it('conserva el enlace público pero no inventa un destinatario si el teléfono no es seguro', () => {
+		const delivery = buildAppointmentActivationDelivery('15 1234567', 'tok-activation');
+
+		expect(delivery.publicUrl).toMatch(/\/turno\/tok-activation\?creado=1$/);
+		expect(delivery.phoneE164).toBeNull();
+		expect(delivery.whatsappUrl).toBeNull();
+	});
+
+	it('normaliza también el destinatario de los recordatorios manuales', () => {
+		const url = buildArgentineWaMeUrl('011 15 1234-5678', 'Recordatorio');
+		expect(url).toBe(`https://wa.me/5491112345678?text=${encodeURIComponent('Recordatorio')}`);
+		expect(buildArgentineWaMeUrl('+598 99 123 456', 'Recordatorio')).toBeNull();
 	});
 });
 
@@ -247,11 +284,17 @@ describe('loadReminderCandidates · exclusión por avisos activados', () => {
 		expect(ids).toEqual(['c']);
 	});
 
-	it('mantiene visible el turno mientras la prueba no fue confirmada', async () => {
+	it('mantiene visible el turno sin confirmación aunque exista telemetría displayed', async () => {
 		const supabase = makeSupabase({
 			appointments: [{ data: [appointmentRow('a')], error: null }],
 			push_subscriptions: [
-				{ data: [{ appointment_id: 'a', revoked_at: null, verified_at: null }], error: null }
+				{ data: [{ id: 'sub-a', appointment_id: 'a', revoked_at: null, verified_at: null }], error: null }
+			],
+			push_delivery_attempts: [
+				{
+					data: [{ subscription_id: 'sub-a', displayed_at: '2026-06-11T11:00:00.000Z' }],
+					error: null
+				}
 			],
 			message_dispatches: [{ data: [], error: null }]
 		});
@@ -264,7 +307,7 @@ describe('loadReminderCandidates · exclusión por avisos activados', () => {
 		expect(candidates.map((candidate) => candidate.appointment_id)).toEqual(['a']);
 	});
 
-	it('mantiene visible el turno si sólo se abrió el editor directo de Google', async () => {
+	it('excluye el turno cuando Cita Suite inició la salida al editor directo de Google', async () => {
 		const row = { ...appointmentRow('a'), calendar_action_status: 'clicked_google' };
 		const supabase = makeSupabase({
 			appointments: [{ data: [row], error: null }],
@@ -277,7 +320,91 @@ describe('loadReminderCandidates · exclusión por avisos activados', () => {
 			now,
 			pushSubscriptionsSupabase: supabase
 		});
+		expect(candidates).toEqual([]);
+	});
+
+	it('excluye el turno cuando Cita Suite entregó el evento al calendario de iPhone', async () => {
+		const row = { ...appointmentRow('a'), calendar_action_status: 'clicked_phone_calendar' };
+		const supabase = makeSupabase({
+			appointments: [{ data: [row], error: null }],
+			push_subscriptions: [{ data: [], error: null }],
+			message_dispatches: [{ data: [], error: null }]
+		});
+
+		const candidates = await loadReminderCandidates(supabase, business, {
+			day: 'manana',
+			now,
+			pushSubscriptionsSupabase: supabase
+		});
+		expect(candidates).toEqual([]);
+	});
+
+	it('normaliza 0/15 antes de preparar WhatsApp y conserva la ficha para corregirla', async () => {
+		const row = {
+			...appointmentRow('a'),
+			patients: {
+				...appointmentRow('a').patients,
+				phone_e164: '+0351151234567'
+			}
+		};
+		const supabase = makeSupabase({
+			appointments: [{ data: [row], error: null }],
+			push_subscriptions: [{ data: [], error: null }],
+			message_dispatches: [{ data: [], error: null }]
+		});
+
+		const [candidate] = await loadReminderCandidates(supabase, business, {
+			day: 'manana',
+			now,
+			pushSubscriptionsSupabase: supabase
+		});
+		expect(candidate.patient_id).toBe('pat-a');
+		expect(candidate.phone_e164).toBe('+5493511234567');
+		expect(candidate.whatsapp_url).toMatch(/^https:\/\/wa\.me\/5493511234567\?text=/);
+	});
+
+	it('no fabrica un wa.me si falta el código de área argentino', async () => {
+		const row = {
+			...appointmentRow('a'),
+			patients: {
+				...appointmentRow('a').patients,
+				phone_e164: '15 1234567'
+			}
+		};
+		const supabase = makeSupabase({
+			appointments: [{ data: [row], error: null }],
+			push_subscriptions: [{ data: [], error: null }],
+			message_dispatches: [{ data: [], error: null }]
+		});
+
+		const [candidate] = await loadReminderCandidates(supabase, business, {
+			day: 'manana',
+			now,
+			pushSubscriptionsSupabase: supabase
+		});
+		expect(candidate.patient_id).toBe('pat-a');
+		expect(candidate.phone_e164).toBeNull();
+		expect(candidate.whatsapp_url).toBeNull();
+	});
+
+	it('abrir WhatsApp desde el panel no cuenta como cobertura del paciente', async () => {
+		const row = {
+			...appointmentRow('a'),
+			whatsapp_reminder_opened_at: '2026-06-11T11:30:00.000Z'
+		};
+		const supabase = makeSupabase({
+			appointments: [{ data: [row], error: null }],
+			push_subscriptions: [{ data: [], error: null }],
+			message_dispatches: [{ data: [], error: null }]
+		});
+
+		const candidates = await loadReminderCandidates(supabase, business, {
+			day: 'manana',
+			now,
+			pushSubscriptionsSupabase: supabase
+		});
 		expect(candidates.map((candidate) => candidate.appointment_id)).toEqual(['a']);
+		expect(candidates[0].whatsapp_opened_at).toBe('2026-06-11T11:30:00.000Z');
 	});
 
 	it('una suscripción activa basta para excluir aunque coexista una revocada', async () => {
@@ -338,6 +465,80 @@ describe('loadReminderCandidates · exclusión por avisos activados', () => {
 		await expect(
 			countTomorrowUncovered(supabase, business, { now, pushSubscriptionsSupabase: supabase })
 		).resolves.toBe(1);
+	});
+
+	it('lista y contador exigen confirmación aunque la telemetría diga displayed', async () => {
+		const rows = [
+			appointmentRow('sin-cobertura'),
+			{ ...appointmentRow('google'), calendar_action_status: 'clicked_google' },
+			{ ...appointmentRow('iphone'), calendar_action_status: 'clicked_phone_calendar' },
+			appointmentRow('push-confirmado'),
+			appointmentRow('push-displayed-sin-confirmar'),
+			appointmentRow('push-sin-confirmar')
+		];
+		const queues = () => ({
+			appointments: [{ data: rows, error: null }],
+			push_subscriptions: [
+				{
+					data: [
+						{
+							id: 'sub-confirmado',
+							appointment_id: 'push-confirmado',
+							revoked_at: null,
+							verified_at: now.toISOString()
+						},
+						{
+							id: 'sub-auto',
+							appointment_id: 'push-displayed-sin-confirmar',
+							revoked_at: null,
+							verified_at: null
+						},
+						{
+							id: 'sub-sin-confirmar',
+							appointment_id: 'push-sin-confirmar',
+							revoked_at: null,
+							verified_at: null
+						}
+					],
+					error: null
+				}
+			],
+			push_delivery_attempts: [
+				{
+					data: [
+						{
+							subscription_id: 'sub-auto',
+							displayed_at: '2026-06-11T11:00:00.000Z',
+							user_reported_missing_at: null,
+							failed_at: null,
+							superseded_at: null,
+							created_at: '2026-06-11T11:00:00.000Z'
+						}
+					],
+					error: null
+				}
+			],
+			message_dispatches: [{ data: [], error: null }]
+		});
+
+		const candidates = await loadReminderCandidates(makeSupabase(queues()), business, {
+			day: 'manana',
+			now,
+			pushSubscriptionsSupabase: makeSupabase(queues())
+		});
+		expect(candidates.map((candidate) => candidate.appointment_id)).toEqual([
+			'sin-cobertura',
+			'push-displayed-sin-confirmar',
+			'push-sin-confirmar'
+		]);
+
+		const countSupabase = makeSupabase(queues());
+		await expect(
+			countTomorrowUncovered(countSupabase, business, {
+				now,
+				pushSubscriptionsSupabase: countSupabase
+			})
+		).resolves.toBe(3);
 	});
 
 	it('excluye un evento Google únicamente cuando la versión vigente fue confirmada', async () => {
@@ -435,6 +636,7 @@ describe('loadReminderCandidates · exclusión por avisos activados', () => {
 			})
 		).rejects.toThrow('push inaccesible');
 	});
+
 });
 
 describe('buildRescheduleWhatsAppMessage', () => {

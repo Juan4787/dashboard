@@ -457,8 +457,8 @@
 		<div class="ux-alert ux-alert-warning">
 			📋 {data.reminderCount}{' '}
 			{data.reminderCount === 1
-				? 'turno de mañana sin calendario ni avisos activados'
-				: 'turnos de mañana sin calendario ni avisos activados'}.
+				? 'turno de mañana sin calendario iniciado ni notificación confirmada'
+				: 'turnos de mañana sin calendario iniciado ni notificación confirmada'}.
 			<a href="/odonto/recordatorios" class="font-bold underline">Ver turnos para recordar</a>
 		</div>
 	{/if}

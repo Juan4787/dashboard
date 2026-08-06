@@ -103,7 +103,8 @@
 	let pollRun = 0;
 	let mounted = false;
 	let notificationPermissionStatus: PermissionStatus | null = null;
-	let recoveryTripArmed = false;
+	let lastObservedNotificationPermission: NotificationPermission | null = null;
+	let pendingTestPhase = $state<TestPhase | null>(null);
 	let returnCheckQueued = false;
 	let showSamsungPhoneGuide = $state(false);
 	let androidPlatformVersion = $state<string | null>(null);
@@ -119,6 +120,8 @@
 	let deviceCheckReason = $state<DeviceCheckReason>('test_missing');
 	let inMemoryPushSessionId = '';
 	const testRetrySequence: Record<TestPhase, number> = { initial: 0, recovery: 0 };
+	const nextTestPhase = (): TestPhase =>
+		deviceCheckReason === 'test_missing' && activeTestDeliveryId ? 'recovery' : 'initial';
 
 	const base = $derived(appointment ? `/turno/${appointment.token}` : '');
 	const siteLabel = $derived.by(() => {
@@ -163,7 +166,6 @@
 
 	const pushSessionStorageKey = () =>
 		appointment ? `cita-suite:push-session:${appointment.token}` : 'cita-suite:push-session';
-	const recoveryPendingStorageKey = () => `${pushSessionStorageKey()}:recovery-pending`;
 	const permissionRecoveryStorageKey = () =>
 		`${pushSessionStorageKey()}:permission-recovery`;
 	const recoveryRetryStorageKey = () => `${pushSessionStorageKey()}:recovery-retry`;
@@ -243,25 +245,6 @@
 	const testRequestKeyFor = (phase: TestPhase, refreshed = false) => {
 		const retry = retrySequenceFor(phase);
 		return `push:${stablePushSessionId()}:${phase}${refreshed ? ':refresh' : ''}${retry > 0 ? `:retry${retry}` : ''}`;
-	};
-	const markRecoveryTrip = () => {
-		recoveryTripArmed = true;
-		try {
-			sessionStorage.setItem(recoveryPendingStorageKey(), '1');
-		} catch {
-			// La marca en memoria basta mientras la página siga abierta.
-		}
-	};
-	const consumeRecoveryTrip = () => {
-		let pending = recoveryTripArmed;
-		recoveryTripArmed = false;
-		try {
-			pending ||= sessionStorage.getItem(recoveryPendingStorageKey()) === '1';
-			sessionStorage.removeItem(recoveryPendingStorageKey());
-		} catch {
-			// Sin almacenamiento, se conserva el valor capturado en memoria.
-		}
-		return pending;
 	};
 
 	const savePushSubscriptionForAppointment = async (
@@ -473,6 +456,7 @@
 		}
 		pollRun += 1;
 		syncing = true;
+		pendingTestPhase = requestTest ? phase : null;
 		pushState = 'working';
 		pushMessage = '';
 		try {
@@ -531,6 +515,7 @@
 			pushState = phase === 'recovery' ? 'needs_device_check' : 'error';
 		} finally {
 			syncing = false;
+			pendingTestPhase = null;
 			if (returnCheckQueued) {
 				returnCheckQueued = false;
 				queueMicrotask(continueAfterPermissionChange);
@@ -540,27 +525,30 @@
 
 	const enablePush = async () => {
 		if (!data.vapidPublicKey || syncing) return;
-		const phase: TestPhase = pushState === 'needs_device_check' ? 'recovery' : 'initial';
-		if (phase === 'recovery') consumeRecoveryTrip();
+		const phase = nextTestPhase();
 		pushMessage = '';
-		if (readNotificationPermission() === 'granted') {
+		const currentPermission = readNotificationPermission();
+		lastObservedNotificationPermission = currentPermission;
+		if (currentPermission === 'granted') {
 			await syncPushSubscription(true, phase);
 			return;
 		}
-		if (readNotificationPermission() === 'denied') {
+		if (currentPermission === 'denied') {
 			pushState = 'denied';
 			return;
 		}
 		pushState = 'working';
 		try {
 			await Notification.requestPermission();
+			const effectivePermission = readNotificationPermission();
+			lastObservedNotificationPermission = effectivePermission;
 			// La propiedad efectiva es la única fuente de verdad para habilitar el envío.
 			// Si todavía figura en default, el botón queda disponible para reintentar y el
 			// listener de permisos continúa observando el cambio sin enviar nada antes.
-			if (readNotificationPermission() === 'granted') {
+			if (effectivePermission === 'granted') {
 				clearPermissionRecoveryTarget();
 				await syncPushSubscription(true, phase);
-			} else if (readNotificationPermission() === 'denied') {
+			} else if (effectivePermission === 'denied') {
 				// Chrome no informa qué capa rechazó. Su recorrido general va primero y
 				// ofrece pasar explícitamente al del sitio si ya estaba habilitado.
 				rememberPermissionRecoveryTarget(
@@ -622,22 +610,29 @@
 			returnCheckQueued = true;
 			return;
 		}
-		if (readNotificationPermission() === 'denied') {
+		const currentPermission = readNotificationPermission();
+		const previousPermission = lastObservedNotificationPermission;
+		lastObservedNotificationPermission = currentPermission;
+		if (currentPermission === 'denied') {
 			pushState = 'denied';
 			return;
 		}
-		if (readNotificationPermission() === 'default') {
+		if (currentPermission === 'default') {
 			clearPermissionRecoveryTarget();
 			if (pushState === 'denied') pushState = 'awaiting_permission';
 			return;
 		}
 		clearPermissionRecoveryTarget();
-		if (pushState === 'needs_device_check' && consumeRecoveryTrip()) {
-			void syncPushSubscription(true, 'recovery');
-			return;
-		}
-		if (pushState === 'awaiting_permission' || pushState === 'denied' || pushState === 'idle') {
-			void syncPushSubscription(true, 'initial');
+		// Volver a la página sólo para releer una guía no demuestra que el ajuste haya
+		// cambiado. La recuperación automática se conserva exclusivamente cuando la
+		// Web API pasa de default/denied a granted. Si ya era granted, una nueva prueba
+		// requiere el CTA explícito que se muestra junto a los pasos.
+		if (
+			previousPermission !== null &&
+			previousPermission !== 'granted' &&
+			['awaiting_permission', 'denied', 'idle', 'needs_device_check'].includes(pushState)
+		) {
+			void syncPushSubscription(true, nextTestPhase());
 		}
 	};
 
@@ -689,12 +684,14 @@
 			return;
 		}
 
-		if (readNotificationPermission() === 'denied') {
+		const initialPermission = readNotificationPermission();
+		lastObservedNotificationPermission = initialPermission;
+		if (initialPermission === 'denied') {
 			// No se reutiliza una suscripción histórica cuando el permiso actual está
 			// bloqueado: eso volvería a presentar como "verificado" un teléfono incapaz
 			// de mostrar avisos.
 			pushState = 'denied';
-		} else if (readNotificationPermission() === 'default') {
+		} else if (initialPermission === 'default') {
 			clearPermissionRecoveryTarget();
 			pushState = 'idle';
 		} else {
@@ -702,23 +699,14 @@
 			// Si el permiso ya estaba concedido, no se vuelve a pedir ni se espera un
 			// toque: se crea o recupera la suscripción y el servidor evita repetir una
 			// prueba que ya haya sido confirmada.
-			const phase: TestPhase = consumeRecoveryTrip() ? 'recovery' : 'initial';
-			void syncPushSubscription(true, phase);
+			void syncPushSubscription(true, 'initial');
 		}
 
 		// Núcleo del fix de UX: al volver a la pantalla (tras conceder el permiso en
 		// Configuración) reconsultamos el estado REAL y activamos los avisos. También
 		// recupera de un 'denied' previo si el usuario lo desbloqueó.
 		const onVisibilityChange = () => {
-			if (document.visibilityState === 'hidden') {
-				if (
-					pushState === 'needs_device_check' &&
-					(data.notificationBrowser.samsungExclusive || showSamsungPhoneGuide)
-				) {
-					markRecoveryTrip();
-				}
-				return;
-			}
+			if (document.visibilityState === 'hidden') return;
 			continueAfterPermissionChange();
 		};
 		const onFocus = () => continueAfterPermissionChange();
@@ -915,9 +903,14 @@
 	{#if renderedPushState !== 'unavailable'}
 		<div class="mt-5">
 			{#if renderedPushState === 'subscribed'}
-				<div class="ux-alert ux-alert-success" aria-live="polite">
-					<p class="font-extrabold text-white">Recordatorio activado</p>
-					<p class="mt-1">Este teléfono va a avisarte {pushWindowsLabel}.</p>
+				<div
+					class="inline-flex items-center gap-2 rounded-full border border-emerald-300/25 bg-emerald-300/[0.08] px-4 py-2 text-sm font-extrabold text-emerald-100"
+					aria-live="polite"
+				>
+					<svg viewBox="0 0 20 20" aria-hidden="true" class="h-4 w-4 shrink-0">
+						<path d="m5.5 10 3 3 6-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+					</svg>
+					<span>Listo para este turno</span>
 				</div>
 			{:else if renderedPushState === 'working'}
 				<div class="ux-alert" aria-live="polite">
@@ -927,8 +920,14 @@
 							<path d="M21 12a9 9 0 0 0-9-9" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
 						</svg>
 						<div>
-							<p class="font-bold text-white">Activando el recordatorio</p>
-							<p class="mt-1">En un momento vas a recibir la notificación de prueba.</p>
+							<p class="font-bold text-white">
+								{pendingTestPhase === 'recovery' ? 'Enviando otra prueba' : 'Activando el recordatorio'}
+							</p>
+							<p class="mt-1">
+								{pendingTestPhase === 'recovery'
+									? 'En un momento vas a recibir una nueva notificación.'
+									: 'En un momento vas a recibir la notificación de prueba.'}
+							</p>
 						</div>
 					</div>
 				</div>
@@ -1077,6 +1076,18 @@
 						</svg>
 					</summary>
 					<div class="border-t border-violet-200/15 px-5 pb-5 pt-5">
+						{#if deviceCheckReason === 'test_missing'}
+							<button
+								type="button"
+								aria-label="Enviar otra notificación de prueba"
+								class="ux-btn-primary ux-btn-cta mb-5 min-h-[4.25rem] w-full px-5 py-4 text-center text-[1.075rem] font-extrabold leading-snug ring-2 ring-violet-300/30"
+								disabled={syncing}
+								onclick={enablePush}
+							>
+								<span aria-hidden="true">🔔</span>
+								<span>Enviar otra prueba</span>
+							</button>
+						{/if}
 						{@render instructionList(phoneNotificationGuide)}
 						{#if deviceCheckReason === 'permission_not_granted'}
 							<p class="mt-4 text-xs leading-relaxed text-white/60">
@@ -1090,10 +1101,6 @@
 							>
 								🔔 Activar recordatorio
 							</button>
-						{:else}
-							<p class="mt-4 text-xs leading-relaxed text-white/55">
-								Cuando vuelvas, enviamos una sola prueba para comprobar el cambio.
-							</p>
 						{/if}
 					</div>
 				</details>

@@ -256,6 +256,38 @@ describe('persistencia de la suscripción', () => {
 		await saveAppointmentPushSubscription(supabase, appointment, payload, 'Android');
 		expect(upserts[0].payload.verified_at).toBeNull();
 	});
+
+	it('asocia el mismo endpoint a un turno nuevo aunque la confirmación pertenezca al turno anterior', async () => {
+		const newAppointment = {
+			id: 'apt-2',
+			business: { id: 'biz-1' }
+		} as any;
+		const { supabase, upserts } = createSupabaseMock(
+			{
+				push_subscriptions: [
+					{ data: null, error: null },
+					{ data: { id: 'sub-2', endpoint: payload.endpoint, verified_at: null }, error: null }
+				]
+			},
+			{ data: null, error: null }
+		);
+
+		const saved = await saveAppointmentPushSubscription(
+			supabase,
+			newAppointment,
+			payload,
+			'Android'
+		);
+
+		expect(upserts[0].payload).toMatchObject({
+			business_id: 'biz-1',
+			appointment_id: 'apt-2',
+			endpoint: payload.endpoint,
+			verified_at: null,
+			revoked_at: null
+		});
+		expect(saved).toMatchObject({ id: 'sub-2', verifiedAt: null });
+	});
 });
 
 describe('telemetría de entrega', () => {
@@ -722,7 +754,7 @@ describe('sendReschedulePushNotice', () => {
 		auth: 'auth-key'
 	};
 
-	it('envía el aviso con el tag del recordatorio de 24h y sin tocar flags sent/claimed', async () => {
+	it('envía aunque falte confirmar la prueba, sin tocar flags sent/claimed', async () => {
 		vi.mocked(webpush.sendNotification).mockResolvedValue({} as any);
 		const { supabase, updates, filters } = createSupabaseMock(
 			{
@@ -750,7 +782,7 @@ describe('sendReschedulePushNotice', () => {
 		expect(vi.mocked(webpush.sendNotification).mock.calls[0][2]).toMatchObject({
 			topic: pushTopicForAppointment('apt-1')
 		});
-		expect(filters).toContainEqual({
+		expect(filters).not.toContainEqual({
 			table: 'push_subscriptions',
 			method: 'not',
 			args: ['verified_at', 'is', null]

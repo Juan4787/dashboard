@@ -10,10 +10,9 @@ const migration = readFileSync(
 );
 
 describe('contrato de la migración Google Calendar', () => {
-	it('sólo habilita recordatorios push después de una prueba confirmada', () => {
+	it('guarda la confirmación explícita para distinguir la cobertura manual', () => {
 		expect(migration).toContain('add column if not exists verified_at timestamptz');
 		expect(migration).toContain('max(user_confirmed_at) as last_confirmed_at');
-		expect(migration.match(/ps\.verified_at is not null/g)).toHaveLength(2);
 		expect(migration).toContain('idx_push_subscriptions_verified_appointment');
 	});
 

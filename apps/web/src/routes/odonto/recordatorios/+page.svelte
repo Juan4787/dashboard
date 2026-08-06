@@ -42,7 +42,7 @@
 				<p class="mt-2 text-sm font-bold {candidate.coverage === 'pendiente_actualizar' ? 'text-amber-300' : 'text-white/70'}">
 					{candidate.coverage === 'pendiente_actualizar'
 						? '⚠ Calendario pendiente de actualizar'
-						: '○ Sin calendario registrado'}
+						: '○ Sin recordatorio confirmado'}
 				</p>
 				{#if candidate.whatsapp_marked_sent_at}
 					<p class="mt-2 text-sm font-bold text-emerald-300">✓ Enviado {relativeTime(candidate.whatsapp_marked_sent_at)}</p>
@@ -52,7 +52,13 @@
 			</div>
 			<div class="flex shrink-0 flex-col gap-2 sm:items-end">
 				{#if !candidate.phone_e164}
-					<span class="ux-badge ux-badge-warning">Sin teléfono válido</span>
+					<span class="ux-badge ux-badge-warning">Revisar teléfono</span>
+					<p class="max-w-60 text-right text-xs leading-relaxed text-white/50">
+						Falta un número argentino completo con código de área.
+					</p>
+					<a href={`/odonto/pacientes/${candidate.patient_id}`} class="ux-btn-secondary">
+						Corregir número
+					</a>
 				{:else if candidate.whatsapp_marked_sent_at}
 					<a href={openHref(candidate, true)} target="_blank" rel="noreferrer" class="ux-btn-secondary">
 						Abrir de nuevo
@@ -84,9 +90,9 @@
 			<div>
 				<h1 class="ux-title">Turnos para recordar</h1>
 				<p class="ux-subtitle">
-					Pacientes con turno {dayLabel} que no registraron el turno en su calendario ni activaron
-					avisos en su teléfono.
-					Reforzá el recordatorio por WhatsApp: el mensaje ya sale escrito, solo revisás y enviás.
+					Pacientes con turno {dayLabel} sin una opción de calendario iniciada ni una notificación
+					confirmada. Reforzá el recordatorio por WhatsApp: el mensaje ya sale escrito, solo
+					revisás y enviás.
 				</p>
 			</div>
 			<div class="flex gap-2">
@@ -101,12 +107,12 @@
 			<div>
 				<p class="text-sm font-bold text-white">Criterio de la lista</p>
 				<p class="mt-1 text-sm text-white/55">
-					Un turno aparece sólo si faltan ambas opciones de recordatorio.
+					Un turno aparece si no tiene un calendario iniciado ni una notificación confirmada.
 				</p>
 			</div>
 			<div class="flex flex-wrap gap-2 text-xs font-bold">
-				<span class="ux-badge">Sin calendario</span>
-				<span class="ux-badge">Sin avisos activados</span>
+				<span class="ux-badge">Sin calendario iniciado</span>
+				<span class="ux-badge">Sin notificación confirmada</span>
 			</div>
 		</div>
 	{/if}
@@ -125,15 +131,15 @@
 	{:else if data.remindersUnavailable}
 		<div class="ux-card">
 			<p class="ux-empty">
-				Ahora no pudimos comprobar qué pacientes ya activaron avisos. Para evitar recordatorios
+				Ahora no pudimos comprobar qué pacientes ya tienen un recordatorio. Para evitar envíos
 				duplicados, no mostramos turnos. Actualizá la página e intentá de nuevo.
 			</p>
 		</div>
 	{:else if data.candidates.length === 0}
 		<div class="ux-card">
 			<p class="ux-empty">
-				No hay recordatorios pendientes para {dayLabel}. Todos los turnos tienen calendario
-				registrado, avisos activados o cobertura automática.
+				No hay recordatorios pendientes para {dayLabel}. Todos los turnos tienen un calendario
+				iniciado, una notificación confirmada o cobertura automática.
 			</p>
 		</div>
 	{:else}
@@ -154,7 +160,7 @@
 
 		{#if uncovered.length > 0}
 			<div class="ux-card">
-				<h2 class="ux-section-title">Sin calendario registrado</h2>
+				<h2 class="ux-section-title">Sin recordatorio confirmado</h2>
 				<div class="mt-5 grid gap-3">
 					{#each uncovered as candidate (candidate.appointment_id)}
 						{@render reminderRow(candidate)}
