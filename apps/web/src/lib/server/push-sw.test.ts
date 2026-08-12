@@ -96,7 +96,14 @@ describe('push service worker', () => {
 		expect(oldNotification.close).toHaveBeenCalledTimes(1);
 		expect(showNotification).toHaveBeenCalledWith('Turno reprogramado', {
 			body: 'Nuevo horario',
-			data: { url: '/turno/token' },
+			data: {
+				url: '/turno/token',
+				delivery: {
+					id: '8ccf23d7-5ae3-4b87-9268-d40a05d9a475',
+					token: 'a'.repeat(43),
+					receiptUrl: '/turno/token/push/receipt'
+				}
+			},
 			tag: 'turno-apt-1-24h',
 			renotify: true
 		});
@@ -156,7 +163,7 @@ describe('push service worker', () => {
 	});
 
 	it('recarga y enfoca un turno ya abierto para no mostrar el horario anterior', async () => {
-		const { listeners, clients } = loadWorker();
+		const { listeners, clients, fetchMock } = loadWorker();
 		const focus = vi.fn().mockResolvedValue(undefined);
 		const refreshedFocus = vi.fn().mockResolvedValue(undefined);
 		const navigate = vi.fn().mockResolvedValue({ focus: refreshedFocus });
@@ -166,7 +173,14 @@ describe('push service worker', () => {
 		let work: Promise<unknown> | null = null;
 		listeners.notificationclick?.({
 			notification: {
-				data: { url: '/turno/token' },
+				data: {
+					url: '/turno/token',
+					delivery: {
+						id: '8ccf23d7-5ae3-4b87-9268-d40a05d9a475',
+						token: 'a'.repeat(43),
+						receiptUrl: '/turno/token/push/receipt'
+					}
+				},
 				close: vi.fn()
 			},
 			waitUntil: (promise: Promise<unknown>) => {
@@ -184,6 +198,43 @@ describe('push service worker', () => {
 		expect(refreshedFocus).toHaveBeenCalledTimes(1);
 		expect(focus).not.toHaveBeenCalled();
 		expect(clients.openWindow).not.toHaveBeenCalled();
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
+			deliveryId: '8ccf23d7-5ae3-4b87-9268-d40a05d9a475',
+			receiptToken: 'a'.repeat(43),
+			stage: 'clicked'
+		});
+	});
+
+	it('abre el turno aunque falle el acuse del clic', async () => {
+		const fetchMock = vi.fn().mockRejectedValue(new Error('sin red'));
+		const { listeners, clients } = loadWorker({ fetchImpl: fetchMock });
+		let work: Promise<unknown> | null = null;
+		listeners.notificationclick?.({
+			notification: {
+				data: {
+					url: '/turno/token',
+					delivery: {
+						id: '8ccf23d7-5ae3-4b87-9268-d40a05d9a475',
+						token: 'a'.repeat(43),
+						receiptUrl: '/turno/token/push/receipt'
+					}
+				},
+				close: vi.fn()
+			},
+			waitUntil: (promise: Promise<unknown>) => {
+				work = promise;
+			}
+		});
+		await work;
+
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(clients.openWindow).toHaveBeenCalledTimes(1);
+		const openedUrl = new URL(clients.openWindow.mock.calls[0][0]);
+		expect(openedUrl.origin + openedUrl.pathname).toBe(
+			'https://turnos.example/turno/token'
+		);
+		expect(openedUrl.searchParams.get('_aviso')).toMatch(/^\d+$/);
 	});
 
 	it('enfoca la pestaña existente si el navegador no puede recargarla', async () => {

@@ -60,7 +60,7 @@ const pageData = {
 	calendarMessage: null
 };
 
-type DeliveryState = 'accepted' | 'displayed' | 'missing' | 'confirmed' | 'failed';
+type DeliveryState = 'accepted' | 'displayed' | 'clicked' | 'missing' | 'confirmed' | 'failed';
 const delivery = (state: DeliveryState, id: string) => ({
 	deliveryId: id,
 	state,
@@ -78,6 +78,10 @@ const jsonResponse = (body: unknown, status = 200) =>
 const clickWhenEnabled = async (button: HTMLElement) => {
 	await waitFor(() => expect(button).toBeEnabled());
 	await fireEvent.click(button);
+};
+
+const preventLinkNavigation = (link: HTMLElement) => {
+	link.addEventListener('click', (event) => event.preventDefault());
 };
 
 const installNotificationEnvironment = (options: {
@@ -257,6 +261,21 @@ describe('activación de notificaciones en el teléfono', () => {
 		const environment = installNotificationEnvironment({
 			initialPermission: 'granted',
 			verified: true
+		});
+		render(Page, { data: pageData });
+
+		expect(
+			await screen.findByRole('heading', { name: 'Recordatorio activado' })
+		).toBeInTheDocument();
+		expect(screen.queryByText('¿Recibiste la notificación de prueba?')).not.toBeInTheDocument();
+		expect(environment.requestPermission).not.toHaveBeenCalled();
+		expect(environment.postRequests()).toBe(1);
+	});
+
+	it('trata el clic comprobado en la notificación como activación completa', async () => {
+		const environment = installNotificationEnvironment({
+			initialPermission: 'granted',
+			states: ['clicked']
 		});
 		render(Page, { data: pageData });
 
@@ -454,6 +473,88 @@ describe('activación de notificaciones en el teléfono', () => {
 		expect(screen.queryByText(/otro Android/i)).not.toBeInTheDocument();
 	});
 
+	it('muestra la pregunta al volver de Google Calendar sin recargar la página', async () => {
+		const environment = installNotificationEnvironment();
+		render(Page, {
+			data: {
+				...pageData,
+				notificationBrowser: notificationBrowserProfile(USER_AGENT.chrome)
+			}
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: '🔔 Activar recordatorio' }));
+		await clickWhenEnabled(await screen.findByRole('button', { name: 'No la recibí' }));
+		const googleLink = await screen.findByRole('link', {
+			name: /¿Tu teléfono es de otra marca\?.*Agregar a Google Calendar/i
+		});
+		preventLinkNavigation(googleLink);
+		await fireEvent.click(googleLink);
+		expect(
+			screen.queryByText('¿Pudiste guardar el turno en tu calendario?')
+		).not.toBeInTheDocument();
+
+		environment.setVisibility('hidden');
+		environment.setVisibility('visible');
+
+		expect(
+			await screen.findByText('¿Pudiste guardar el turno en tu calendario?')
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole('heading', { name: 'Último paso: confirmá el calendario' })
+		).toBeInTheDocument();
+		expect(screen.queryByText('¿Tu teléfono es Samsung?')).not.toBeInTheDocument();
+		expect(screen.queryByRole('link', { name: /Agregar a Google Calendar/i })).not.toBeInTheDocument();
+		const requestsBeforeAnswer = vi.mocked(fetch).mock.calls.length;
+		await fireEvent.click(screen.getByRole('button', { name: 'Sí, quedó guardado' }));
+
+		expect(
+			await screen.findByRole('heading', { name: 'Turno guardado en tu calendario' })
+		).toBeInTheDocument();
+		expect(screen.getByText('Listo, quedó guardado')).toBeInTheDocument();
+		expect(screen.getByText('Tu calendario podrá avisarte antes de la cita.')).toBeInTheDocument();
+		expect(vi.mocked(fetch).mock.calls).toHaveLength(requestsBeforeAnswer);
+		expect(environment.postRequests()).toBe(1);
+	});
+
+	it('reabre Google Calendar sólo al tocar No y vuelve a preguntar al regresar', async () => {
+		const environment = installNotificationEnvironment();
+		render(Page, {
+			data: {
+				...pageData,
+				notificationBrowser: notificationBrowserProfile(USER_AGENT.chrome)
+			}
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: '🔔 Activar recordatorio' }));
+		await clickWhenEnabled(await screen.findByRole('button', { name: 'No la recibí' }));
+		const googleLink = await screen.findByRole('link', { name: /Agregar a Google Calendar/i });
+		preventLinkNavigation(googleLink);
+		await fireEvent.click(googleLink);
+		environment.setVisibility('hidden');
+		environment.setVisibility('visible');
+		await screen.findByText('¿Pudiste guardar el turno en tu calendario?');
+
+		const retryLink = screen.getByRole('link', { name: 'No, volver a intentarlo' });
+		expect(retryLink).toHaveAttribute('href', '/turno/public-token/ir/google');
+		preventLinkNavigation(retryLink);
+		const requestsBeforeRetry = vi.mocked(fetch).mock.calls.length;
+		await fireEvent.click(retryLink);
+		expect(
+			screen.queryByText('¿Pudiste guardar el turno en tu calendario?')
+		).not.toBeInTheDocument();
+		expect(vi.mocked(fetch).mock.calls).toHaveLength(requestsBeforeRetry);
+
+		environment.setVisibility('hidden');
+		environment.setVisibility('visible');
+		expect(
+			await screen.findByText('¿Pudiste guardar el turno en tu calendario?')
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole('heading', { name: 'Último paso: confirmá el calendario' })
+		).toBeInTheDocument();
+		expect(environment.postRequests()).toBe(1);
+	});
+
 	it('volver sólo para consultar los pasos no envía nada hasta tocar la acción principal', async () => {
 		const environment = installNotificationEnvironment({ states: ['displayed', 'displayed'] });
 		render(Page, { data: pageData });
@@ -627,8 +728,16 @@ describe('activación de notificaciones en el teléfono', () => {
 });
 
 describe('calendario en iPhone', () => {
+	beforeEach(() => {
+		window.history.replaceState({}, '', '/turno/public-token');
+		sessionStorage.clear();
+		localStorage.clear();
+		vi.stubGlobal('fetch', vi.fn());
+	});
+
 	afterEach(() => {
 		cleanup();
+		vi.useRealTimers();
 		vi.unstubAllGlobals();
 	});
 
@@ -647,5 +756,112 @@ describe('calendario en iPhone', () => {
 		);
 		expect(screen.queryByRole('button', { name: /activar recordatorio/i })).not.toBeInTheDocument();
 		expect(screen.queryByText(/Samsung/i)).not.toBeInTheDocument();
+	});
+
+	it('pregunta al recuperar el foco desde el calendario y confirma sin escribir al servidor', async () => {
+		render(Page, {
+			data: { ...pageData, created: true, device: 'ios' as const }
+		});
+
+		const calendarLink = screen.getByRole('link', { name: '📅 Agregar al calendario' });
+		preventLinkNavigation(calendarLink);
+		await fireEvent.click(calendarLink);
+		expect(
+			screen.queryByText('¿Pudiste guardar el turno en tu calendario?')
+		).not.toBeInTheDocument();
+
+		window.dispatchEvent(new Event('blur'));
+		window.dispatchEvent(new Event('focus'));
+
+		expect(
+			await screen.findByText('¿Pudiste guardar el turno en tu calendario?')
+		).toBeInTheDocument();
+		await fireEvent.click(screen.getByRole('button', { name: 'Sí, quedó guardado' }));
+		expect(
+			await screen.findByRole('heading', { name: 'Turno guardado en tu calendario' })
+		).toBeInTheDocument();
+		expect(screen.getByText('Listo, quedó guardado')).toBeInTheDocument();
+		expect(screen.queryByRole('link', { name: '📅 Agregar al calendario' })).not.toBeInTheDocument();
+		expect(fetch).not.toHaveBeenCalled();
+	});
+
+	it('usa pageshow al volver del calendario y reentrega el evento sólo por decisión del usuario', async () => {
+		render(Page, {
+			data: { ...pageData, created: true, device: 'ios' as const }
+		});
+
+		const calendarLink = screen.getByRole('link', { name: '📅 Agregar al calendario' });
+		preventLinkNavigation(calendarLink);
+		await fireEvent.click(calendarLink);
+		window.dispatchEvent(new PageTransitionEvent('pagehide'));
+		window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+
+		expect(
+			await screen.findByText('¿Pudiste guardar el turno en tu calendario?')
+		).toBeInTheDocument();
+		const retryLink = screen.getByRole('link', { name: 'No, volver a intentarlo' });
+		expect(retryLink).toHaveAttribute(
+			'href',
+			'/turno/public-token/calendario.ics?p=phone'
+		);
+		preventLinkNavigation(retryLink);
+		await fireEvent.click(retryLink);
+		expect(
+			screen.queryByText('¿Pudiste guardar el turno en tu calendario?')
+		).not.toBeInTheDocument();
+		expect(fetch).not.toHaveBeenCalled();
+	});
+
+	it('recupera la pregunta al volver aunque el navegador reconstruya la página', async () => {
+		const firstVisit = render(Page, {
+			data: { ...pageData, created: true, device: 'ios' as const }
+		});
+		const calendarLink = screen.getByRole('link', { name: '📅 Agregar al calendario' });
+		preventLinkNavigation(calendarLink);
+		await fireEvent.click(calendarLink);
+		window.dispatchEvent(new PageTransitionEvent('pagehide'));
+		firstVisit.unmount();
+
+		render(Page, {
+			data: { ...pageData, created: true, device: 'ios' as const }
+		});
+
+		expect(
+			await screen.findByText('¿Pudiste guardar el turno en tu calendario?')
+		).toBeInTheDocument();
+		expect(fetch).not.toHaveBeenCalled();
+	});
+
+	it('no conserva una confirmación local después de una reprogramación', async () => {
+		const firstVisit = render(Page, {
+			data: { ...pageData, created: true, device: 'ios' as const }
+		});
+		const calendarLink = screen.getByRole('link', { name: '📅 Agregar al calendario' });
+		preventLinkNavigation(calendarLink);
+		await fireEvent.click(calendarLink);
+		window.dispatchEvent(new Event('blur'));
+		window.dispatchEvent(new Event('focus'));
+		await fireEvent.click(await screen.findByRole('button', { name: 'Sí, quedó guardado' }));
+		await screen.findByRole('heading', { name: 'Turno guardado en tu calendario' });
+		firstVisit.unmount();
+
+		render(Page, {
+			data: {
+				...pageData,
+				created: false,
+				device: 'ios' as const,
+				appointment: {
+					...appointment,
+					starts_at: '2026-08-12T18:00:00.000Z',
+					ends_at: '2026-08-12T18:30:00.000Z'
+				}
+			}
+		});
+
+		expect(
+			screen.queryByRole('heading', { name: 'Turno guardado en tu calendario' })
+		).not.toBeInTheDocument();
+		expect(screen.getByRole('link', { name: '📅 Agregar al calendario' })).toBeInTheDocument();
+		expect(fetch).not.toHaveBeenCalled();
 	});
 });

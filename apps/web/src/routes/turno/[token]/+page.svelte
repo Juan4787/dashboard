@@ -79,6 +79,7 @@
 			| 'accepted'
 			| 'received'
 			| 'displayed'
+			| 'clicked'
 			| 'confirmed'
 			| 'missing'
 			| 'superseded'
@@ -124,6 +125,184 @@
 		deviceCheckReason === 'test_missing' && activeTestDeliveryId ? 'recovery' : 'initial';
 
 	const base = $derived(appointment ? `/turno/${appointment.token}` : '');
+	type CalendarHandoffProvider = 'google' | 'iphone';
+	type CalendarHandoffStage = 'idle' | 'waiting' | 'asking' | 'saved';
+	type StoredCalendarHandoff = {
+		version: 1;
+		provider: CalendarHandoffProvider;
+		stage: Exclude<CalendarHandoffStage, 'idle'>;
+		updatedAt: number;
+		away: boolean;
+	};
+	const CALENDAR_HANDOFF_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+	let calendarHandoffStage = $state<CalendarHandoffStage>('idle');
+	let calendarHandoffProvider = $state<CalendarHandoffProvider | null>(null);
+	let calendarHandoffWasAway = false;
+	let calendarHandoffRevealTimer: ReturnType<typeof setTimeout> | null = null;
+	let calendarHandoffMounted = false;
+	let activeCalendarHandoffStorageKey = '';
+	const calendarHandoffAllowed = $derived(
+		device === 'ios' || (device === 'android' && !data.notificationBrowser.samsungExclusive)
+	);
+	const calendarHandoffRetryHref = $derived(
+		calendarHandoffProvider === 'iphone'
+			? `${base}/calendario.ics?p=phone`
+			: `${base}/ir/google`
+	);
+	const calendarHandoffStorageKey = () =>
+		appointment
+			? `cita-suite:calendar-handoff:${appointment.token}:${appointment.starts_at}`
+			: 'cita-suite:calendar-handoff';
+	const clearCalendarHandoffRevealTimer = () => {
+		if (calendarHandoffRevealTimer === null) return;
+		clearTimeout(calendarHandoffRevealTimer);
+		calendarHandoffRevealTimer = null;
+	};
+	const readStoredCalendarHandoff = (): StoredCalendarHandoff | null => {
+		try {
+			const raw = sessionStorage.getItem(calendarHandoffStorageKey());
+			if (!raw) return null;
+			const stored = JSON.parse(raw) as Partial<StoredCalendarHandoff>;
+			const provider = stored.provider;
+			const stage = stored.stage;
+			const updatedAt = stored.updatedAt;
+			const validProvider = provider === 'google' || provider === 'iphone';
+			const validStage = stage === 'waiting' || stage === 'asking' || stage === 'saved';
+			const validTime = typeof updatedAt === 'number' && Number.isFinite(updatedAt);
+			if (!validProvider || !validStage || !validTime || stored.version !== 1) {
+				sessionStorage.removeItem(calendarHandoffStorageKey());
+				return null;
+			}
+			if (
+				Date.now() - updatedAt > CALENDAR_HANDOFF_MAX_AGE_MS ||
+				updatedAt - Date.now() > 5 * 60 * 1000
+			) {
+				sessionStorage.removeItem(calendarHandoffStorageKey());
+				return null;
+			}
+			return {
+				version: 1,
+				provider,
+				stage,
+				updatedAt,
+				away: stored.away === true
+			};
+		} catch {
+			return null;
+		}
+	};
+	const persistCalendarHandoff = (
+		stage: Exclude<CalendarHandoffStage, 'idle'>,
+		provider: CalendarHandoffProvider,
+		away: boolean
+	) => {
+		calendarHandoffStage = stage;
+		calendarHandoffProvider = provider;
+		try {
+			const stored: StoredCalendarHandoff = {
+				version: 1,
+				provider,
+				stage,
+				updatedAt: Date.now(),
+				away
+			};
+			sessionStorage.setItem(calendarHandoffStorageKey(), JSON.stringify(stored));
+		} catch {
+			// La pregunta sigue funcionando durante esta carga aunque el almacenamiento esté bloqueado.
+		}
+	};
+	const showCalendarHandoffQuestion = () => {
+		if (calendarHandoffStage !== 'waiting' || !calendarHandoffProvider) return;
+		clearCalendarHandoffRevealTimer();
+		calendarHandoffWasAway = false;
+		persistCalendarHandoff('asking', calendarHandoffProvider, false);
+	};
+	const scheduleCalendarHandoffQuestion = () => {
+		clearCalendarHandoffRevealTimer();
+		calendarHandoffRevealTimer = setTimeout(() => {
+			calendarHandoffRevealTimer = null;
+			if (document.visibilityState === 'visible') showCalendarHandoffQuestion();
+		}, 1500);
+	};
+	const beginCalendarHandoff = (provider: CalendarHandoffProvider) => {
+		calendarHandoffWasAway = false;
+		persistCalendarHandoff('waiting', provider, false);
+		// Si el sistema abre una hoja nativa sin ocultar formalmente el navegador, la
+		// pregunta queda preparada detrás y se ve al cerrar esa hoja. Una navegación
+		// normal cancela este temporizador al descargar el documento.
+		scheduleCalendarHandoffQuestion();
+	};
+	const markCalendarHandoffAway = () => {
+		if (calendarHandoffStage !== 'waiting' || !calendarHandoffProvider) return;
+		calendarHandoffWasAway = true;
+		persistCalendarHandoff('waiting', calendarHandoffProvider, true);
+	};
+	const continueAfterCalendarHandoff = () => {
+		if (calendarHandoffStage !== 'waiting') return;
+		const stored = readStoredCalendarHandoff();
+		if (calendarHandoffWasAway || stored?.away) showCalendarHandoffQuestion();
+	};
+	const confirmCalendarSaved = () => {
+		if (calendarHandoffStage !== 'asking' || !calendarHandoffProvider) return;
+		// Estado deliberadamente local: esta respuesta orienta la UI y jamás se usa
+		// para incluir o excluir el turno de “Turnos para recordar”.
+		persistCalendarHandoff('saved', calendarHandoffProvider, false);
+	};
+	const restoreCalendarHandoff = () => {
+		clearCalendarHandoffRevealTimer();
+		const stored = readStoredCalendarHandoff();
+		if (!stored) {
+			calendarHandoffStage = 'idle';
+			calendarHandoffProvider = null;
+			calendarHandoffWasAway = false;
+			return;
+		}
+		calendarHandoffStage = stored.stage;
+		calendarHandoffProvider = stored.provider;
+		calendarHandoffWasAway = stored.away;
+		if (stored.stage === 'waiting') {
+			if (stored.away) queueMicrotask(showCalendarHandoffQuestion);
+			else scheduleCalendarHandoffQuestion();
+		}
+	};
+
+	$effect(() => {
+		const nextStorageKey = calendarHandoffStorageKey();
+		if (!calendarHandoffMounted || nextStorageKey === activeCalendarHandoffStorageKey) return;
+		activeCalendarHandoffStorageKey = nextStorageKey;
+		restoreCalendarHandoff();
+	});
+
+	onMount(() => {
+		calendarHandoffMounted = true;
+		activeCalendarHandoffStorageKey = calendarHandoffStorageKey();
+		restoreCalendarHandoff();
+		const onVisibilityChange = () => {
+			if (document.visibilityState === 'hidden') markCalendarHandoffAway();
+			else continueAfterCalendarHandoff();
+		};
+		const onBlur = () => markCalendarHandoffAway();
+		const onFocus = () => continueAfterCalendarHandoff();
+		const onPageHide = () => markCalendarHandoffAway();
+		const onPageShow = (event: PageTransitionEvent) => {
+			if (event.persisted) calendarHandoffWasAway = true;
+			continueAfterCalendarHandoff();
+		};
+		document.addEventListener('visibilitychange', onVisibilityChange);
+		window.addEventListener('blur', onBlur);
+		window.addEventListener('focus', onFocus);
+		window.addEventListener('pagehide', onPageHide);
+		window.addEventListener('pageshow', onPageShow);
+		return () => {
+			calendarHandoffMounted = false;
+			clearCalendarHandoffRevealTimer();
+			document.removeEventListener('visibilitychange', onVisibilityChange);
+			window.removeEventListener('blur', onBlur);
+			window.removeEventListener('focus', onFocus);
+			window.removeEventListener('pagehide', onPageHide);
+			window.removeEventListener('pageshow', onPageShow);
+		};
+	});
 	const siteLabel = $derived.by(() => {
 		try {
 			// El permiso pertenece al origen que está abierto, no necesariamente al
@@ -330,7 +509,7 @@
 
 	const applyDelivery = (delivery: PushDelivery) => {
 		activeTestDeliveryId = delivery.deliveryId;
-		if (delivery.state === 'confirmed') {
+		if (delivery.state === 'confirmed' || delivery.state === 'clicked') {
 			activeTestPhase = null;
 			pushState = 'subscribed';
 			pushMessage = '';
@@ -698,7 +877,7 @@
 			clearPermissionRecoveryTarget();
 			// Si el permiso ya estaba concedido, no se vuelve a pedir ni se espera un
 			// toque: se crea o recupera la suscripción y el servidor evita repetir una
-			// prueba que ya haya sido confirmada.
+			// prueba que ya tenga confirmación positiva o un clic real.
 			void syncPushSubscription(true, 'initial');
 		}
 
@@ -757,6 +936,9 @@
 			['active', 'preparing', 'updating', 'removing'].includes(data.googleCalendar.state)
 	);
 	const pushReminderIsActive = $derived(renderedPushState === 'subscribed');
+	const calendarHandoffSaved = $derived(
+		calendarHandoffAllowed && calendarHandoffStage === 'saved'
+	);
 	const showAndroidCalendarFallback = $derived(
 		device === 'android' &&
 		(
@@ -782,50 +964,66 @@
 		return 'en los próximos minutos';
 	});
 
-	const reminderTitle = $derived(
-		pushReminderIsActive || googleCalendarIsCurrent
-			? 'Recordatorio activado'
-			: googleCalendarIsUpdating
-				? 'Actualizando tu recordatorio'
-				: data.googleCalendar.state === 'preparing'
-					? 'Activando tu recordatorio'
-					: needsCalendarUpdate
-						? 'Actualizá el calendario'
-						: 'Último paso: activá el recordatorio'
-	);
-	const reminderIntro = $derived(
-		pushReminderIsActive
-			? `Este teléfono ya está listo para avisarte ${pushWindowsLabel}.`
-			: googleCalendarIsCurrent
-			? `El turno está guardado en tu cuenta Google con avisos ${data.googleCalendar.reminderLabel}. Si cambia el horario, lo actualizamos automáticamente.`
-			: googleCalendarIsUpdating
-				? 'Ya estamos pasando la nueva fecha y hora al mismo evento. No tenés que volver a agregarlo.'
-				: data.googleCalendar.state === 'preparing'
-					? 'Estamos creando el evento con su horario y sus avisos. Esta pantalla se actualiza al volver a abrirla.'
-					: data.googleCalendar.state === 'needs_reconnect'
-						? 'Elegí nuevamente tu cuenta Google para mantener el turno y sus avisos actualizados.'
-						: needsCalendarUpdate
-							? 'El turno cambió de fecha. Actualizá el calendario para conservar el horario correcto.'
-						: renderedPushState === 'denied' && deniedPermissionGuide
-							? permissionRecoveryTarget === 'phone'
-								? `Para enviarte los recordatorios, necesitamos que ${data.notificationBrowser.label ?? 'la aplicación que muestra esta página'} pueda mostrar avisos en el teléfono.`
-								: 'Para enviarte los recordatorios, necesitamos que permitas los avisos de este turno.'
-						: renderedPushState === 'awaiting_permission'
-							? 'Para enviarte los recordatorios, necesitamos que permitas los avisos. Tocá el botón y elegí la opción indicada.'
-						: renderedPushState === 'needs_device_check'
-								? deviceCheckReason === 'permission_not_granted'
-									? `${data.notificationBrowser.label ?? 'La aplicación que muestra esta página'} todavía no pudo habilitar los avisos. Revisá sus notificaciones en el teléfono y completá la activación al volver.`
-									: `Los avisos de este turno ya están permitidos. Ahora falta que ${data.notificationBrowser.label ?? 'la aplicación que muestra esta página'} pueda mostrarlos en el teléfono.`
-								: showAndroidCalendarFallback
-									? renderedPushState === 'unsupported' && data.notificationBrowser.samsungExclusive
-										? 'Conservá este enlace: desde acá siempre podés consultar la fecha y la hora del turno.'
-										: 'Elegí la opción que corresponde a tu teléfono para terminar de guardar el recordatorio.'
-							: device === 'android'
-								? 'Activá el recordatorio y comprobamos ahora mismo que este teléfono pueda avisarte.'
-								: device === 'ios'
-									? 'Agregá el turno al calendario del iPhone para recibir el recordatorio.'
-									: 'Agregá el turno a tu calendario para recibir avisos antes y tener la dirección a mano.'
-	);
+	const reminderTitle = $derived.by(() => {
+		if (pushReminderIsActive || googleCalendarIsCurrent) return 'Recordatorio activado';
+		if (calendarHandoffSaved) return 'Turno guardado en tu calendario';
+		if (calendarHandoffAllowed && calendarHandoffStage === 'asking') {
+			return 'Último paso: confirmá el calendario';
+		}
+		if (googleCalendarIsUpdating) return 'Actualizando tu recordatorio';
+		if (data.googleCalendar.state === 'preparing') return 'Activando tu recordatorio';
+		if (needsCalendarUpdate) return 'Actualizá el calendario';
+		return 'Último paso: activá el recordatorio';
+	});
+	const reminderIntro = $derived.by(() => {
+		if (pushReminderIsActive) {
+			return `Este teléfono ya está listo para avisarte ${pushWindowsLabel}.`;
+		}
+		if (googleCalendarIsCurrent) {
+			return `El turno está guardado en tu cuenta Google con avisos ${data.googleCalendar.reminderLabel}. Si cambia el horario, lo actualizamos automáticamente.`;
+		}
+		if (calendarHandoffSaved) return 'Tu calendario podrá avisarte antes de la cita.';
+		if (calendarHandoffAllowed && calendarHandoffStage === 'asking') {
+			return 'Confirmá abajo si pudiste guardar el turno.';
+		}
+		if (googleCalendarIsUpdating) {
+			return 'Ya estamos pasando la nueva fecha y hora al mismo evento. No tenés que volver a agregarlo.';
+		}
+		if (data.googleCalendar.state === 'preparing') {
+			return 'Estamos creando el evento con su horario y sus avisos. Esta pantalla se actualiza al volver a abrirla.';
+		}
+		if (data.googleCalendar.state === 'needs_reconnect') {
+			return 'Elegí nuevamente tu cuenta Google para mantener el turno y sus avisos actualizados.';
+		}
+		if (needsCalendarUpdate) {
+			return 'El turno cambió de fecha. Actualizá el calendario para conservar el horario correcto.';
+		}
+		if (renderedPushState === 'denied' && deniedPermissionGuide) {
+			return permissionRecoveryTarget === 'phone'
+				? `Para enviarte los recordatorios, necesitamos que ${data.notificationBrowser.label ?? 'la aplicación que muestra esta página'} pueda mostrar avisos en el teléfono.`
+				: 'Para enviarte los recordatorios, necesitamos que permitas los avisos de este turno.';
+		}
+		if (renderedPushState === 'awaiting_permission') {
+			return 'Para enviarte los recordatorios, necesitamos que permitas los avisos. Tocá el botón y elegí la opción indicada.';
+		}
+		if (renderedPushState === 'needs_device_check') {
+			return deviceCheckReason === 'permission_not_granted'
+				? `${data.notificationBrowser.label ?? 'La aplicación que muestra esta página'} todavía no pudo habilitar los avisos. Revisá sus notificaciones en el teléfono y completá la activación al volver.`
+				: `Los avisos de este turno ya están permitidos. Ahora falta que ${data.notificationBrowser.label ?? 'la aplicación que muestra esta página'} pueda mostrarlos en el teléfono.`;
+		}
+		if (showAndroidCalendarFallback) {
+			return renderedPushState === 'unsupported' && data.notificationBrowser.samsungExclusive
+				? 'Conservá este enlace: desde acá siempre podés consultar la fecha y la hora del turno.'
+				: 'Elegí la opción que corresponde a tu teléfono para terminar de guardar el recordatorio.';
+		}
+		if (device === 'android') {
+			return 'Activá el recordatorio y comprobamos ahora mismo que este teléfono pueda avisarte.';
+		}
+		if (device === 'ios') {
+			return 'Agregá el turno al calendario del iPhone para recibir el recordatorio.';
+		}
+		return 'Agregá el turno a tu calendario para recibir avisos antes y tener la dirección a mano.';
+	});
 	const calendarSummaryClass = $derived.by(() => {
 		if (managedGoogleCalendar) return 'ux-btn-secondary';
 		// Reprogramación: actualizar el calendario ES la tarea → CTA enfatizado.
@@ -1059,7 +1257,7 @@
 {/snippet}
 
 {#snippet androidCalendarFallback()}
-	{#if showAndroidCalendarFallback && ((renderedPushState === 'needs_device_check' && phoneNotificationGuide) || !data.notificationBrowser.samsungExclusive)}
+	{#if calendarHandoffStage === 'idle' && showAndroidCalendarFallback && ((renderedPushState === 'needs_device_check' && phoneNotificationGuide) || !data.notificationBrowser.samsungExclusive)}
 		<div class="mt-5 space-y-4" aria-live="polite">
 			{#if renderedPushState === 'needs_device_check' && phoneNotificationGuide}
 				<details
@@ -1109,6 +1307,7 @@
 			{#if !data.notificationBrowser.samsungExclusive}
 				<a
 					href={`${base}/ir/google`}
+					onclick={() => beginCalendarHandoff('google')}
 					class="flex min-h-[5.75rem] items-center justify-between gap-4 rounded-2xl border border-violet-300/30 bg-violet-400/[0.07] px-5 py-4 shadow-[0_12px_30px_rgba(76,29,149,0.12)] transition hover:border-violet-300/45 hover:bg-violet-400/[0.1]"
 				>
 					<span>
@@ -1120,6 +1319,43 @@
 					</svg>
 				</a>
 			{/if}
+		</div>
+	{/if}
+{/snippet}
+
+{#snippet calendarHandoffFeedback()}
+	{#if calendarHandoffAllowed && calendarHandoffStage === 'asking'}
+		<div
+			class="mt-5 rounded-2xl border border-violet-300/30 bg-violet-400/[0.075] p-5 shadow-[0_16px_36px_rgba(76,29,149,0.16)]"
+			aria-live="polite"
+			aria-labelledby="calendar-handoff-question"
+		>
+			<h3 id="calendar-handoff-question" class="text-lg font-extrabold leading-snug text-white">
+				¿Pudiste guardar el turno en tu calendario?
+			</h3>
+			<div class="mt-4 grid gap-3 sm:grid-cols-2">
+				<button type="button" class="ux-btn-primary w-full" onclick={confirmCalendarSaved}>
+					Sí, quedó guardado
+				</button>
+				<a
+					href={calendarHandoffRetryHref}
+					class="ux-btn-secondary w-full text-center"
+					onclick={() => beginCalendarHandoff(calendarHandoffProvider ?? 'google')}
+				>
+					No, volver a intentarlo
+				</a>
+			</div>
+		</div>
+	{:else if calendarHandoffAllowed && calendarHandoffStage === 'saved'}
+		<div
+			class="mt-5 inline-flex items-center gap-2 rounded-full border border-emerald-300/25 bg-emerald-300/[0.08] px-4 py-2 text-sm font-extrabold text-emerald-100"
+			role="status"
+			aria-live="polite"
+		>
+			<svg viewBox="0 0 20 20" aria-hidden="true" class="h-4 w-4 shrink-0 text-emerald-300">
+				<path d="m5.5 10 3 3 6-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+			</svg>
+			<span>Listo, quedó guardado</span>
 		</div>
 	{/if}
 {/snippet}
@@ -1159,15 +1395,18 @@
 				{@render androidCalendarFallback()}
 			{/if}
 		{:else if device === 'ios'}
-			<a
-				href={`${base}/calendario.ics?p=phone`}
-				class="ux-btn-primary ux-btn-cta mt-5 flex w-full whitespace-nowrap px-3 text-center text-[1.075rem] font-extrabold"
-			>
-				📅 Agregar al calendario
-			</a>
-			<p class="mt-3 text-center text-xs leading-relaxed text-white/45">
-				El evento queda preparado con la fecha, la hora y sus avisos.
-			</p>
+			{#if calendarHandoffStage === 'idle'}
+				<a
+					href={`${base}/calendario.ics?p=phone`}
+					onclick={() => beginCalendarHandoff('iphone')}
+					class="ux-btn-primary ux-btn-cta mt-5 flex w-full whitespace-nowrap px-3 text-center text-[1.075rem] font-extrabold"
+				>
+					📅 Agregar al calendario
+				</a>
+				<p class="mt-3 text-center text-xs leading-relaxed text-white/45">
+					El evento queda preparado con la fecha, la hora y sus avisos.
+				</p>
+			{/if}
 		{:else}
 			<details class="mt-4 rounded-2xl border border-white/10 bg-white/[0.035]">
 				<summary class={`${calendarSummaryClass} block w-full cursor-pointer list-none text-center`}>
@@ -1198,6 +1437,8 @@
 			</details>
 			{@render pushBlock(false)}
 		{/if}
+
+		{@render calendarHandoffFeedback()}
 
 		<details class="mt-4 rounded-2xl border border-white/10 bg-white/[0.02]">
 			<summary class="cursor-pointer list-none px-5 py-3 text-sm font-bold text-white/70">

@@ -48,6 +48,7 @@ const createSupabaseMock = (queues: Record<string, Queued[]>, rpcResult: Queued)
 	const inserts: Array<{ table: string; payload: Record<string, unknown> }> = [];
 	const upserts: Array<{ table: string; payload: Record<string, unknown> }> = [];
 	const filters: Array<{ table: string; method: string; args: unknown[] }> = [];
+	const rpcCalls: Array<{ name: string; args: Record<string, unknown> | undefined }> = [];
 	const consume = (table: string): Queued => queues[table]?.shift() ?? { data: null, error: null };
 	const makeChain = (table: string) => {
 		const result = consume(table);
@@ -79,12 +80,16 @@ const createSupabaseMock = (queues: Record<string, Queued[]>, rpcResult: Queued)
 	return {
 		supabase: {
 			from: (table: string) => makeChain(table),
-			rpc: async () => rpcResult
+			rpc: async (name: string, args?: Record<string, unknown>) => {
+				rpcCalls.push({ name, args });
+				return rpcResult;
+			}
 		} as any,
 		updates,
 		inserts,
 		upserts,
-		filters
+		filters,
+		rpcCalls
 	};
 };
 
@@ -361,6 +366,69 @@ describe('telemetría de entrega', () => {
 		expect(updates).toEqual([]);
 	});
 
+	it('registra el clic mediante la operación atómica y autenticada', async () => {
+		const { supabase, rpcCalls, updates } = createSupabaseMock({}, { data: true, error: null });
+
+		expect(
+			await recordPushDeliveryReceipt(supabase, {
+				appointmentId: 'apt-1',
+				deliveryId,
+				receiptToken,
+				stage: 'clicked',
+				now
+			})
+		).toBe(true);
+		expect(rpcCalls).toEqual([
+			{
+				name: 'record_push_notification_click',
+				args: {
+					target_appointment_id: 'apt-1',
+					target_delivery_id: deliveryId,
+					target_receipt_token_hash: receiptHash,
+					click_time: now.toISOString()
+				}
+			}
+		]);
+		// El servidor no intenta reproducir en dos escrituras lo que la base resuelve
+		// de forma transaccional.
+		expect(updates).toEqual([]);
+	});
+
+	it('presenta el clic como interacción confirmada, distinta de displayed', async () => {
+		const { supabase } = createSupabaseMock(
+			{
+				push_delivery_attempts: [
+					{
+						data: {
+							id: deliveryId,
+							kind: 'test',
+							accepted_at: now.toISOString(),
+							received_at: now.toISOString(),
+							displayed_at: now.toISOString(),
+							clicked_at: now.toISOString(),
+							user_confirmed_at: null,
+							user_reported_missing_at: null,
+							superseded_at: null,
+							failed_at: null,
+							expires_at: new Date(now.getTime() + 60_000).toISOString(),
+							created_at: now.toISOString()
+						},
+						error: null
+					}
+				]
+			},
+			{ data: null, error: null }
+		);
+
+		await expect(
+			getPushDeliveryStatus(supabase, {
+				appointmentId: 'apt-1',
+				deliveryId,
+				now
+			})
+		).resolves.toMatchObject({ state: 'clicked' });
+	});
+
 	it('prioriza el estado obsoleto después de una reprogramación', async () => {
 		const { supabase } = createSupabaseMock(
 			{
@@ -394,15 +462,7 @@ describe('telemetría de entrega', () => {
 	});
 
 	it('guarda la confirmación explícita de la persona', async () => {
-		const { supabase, updates, filters } = createSupabaseMock(
-			{
-				push_delivery_attempts: [
-					{ data: { id: deliveryId, subscription_id: 'sub-1' }, error: null }
-				],
-				push_subscriptions: [{ data: { id: 'sub-1' }, error: null }]
-			},
-			{ data: null, error: null }
-		);
+		const { supabase, rpcCalls, updates } = createSupabaseMock({}, { data: true, error: null });
 		expect(
 			await recordPushTestFeedback(supabase, {
 				appointmentId: 'apt-1',
@@ -411,35 +471,22 @@ describe('telemetría de entrega', () => {
 				now
 			})
 		).toBe(true);
-		expect(updates[0].payload).toMatchObject({
-			user_confirmed_at: now.toISOString(),
-			user_reported_missing_at: null
-		});
-		expect(filters).toContainEqual({
-			table: 'push_delivery_attempts',
-			method: 'not',
-			args: ['accepted_at', 'is', null]
-		});
-		expect(updates[1]).toMatchObject({
-			table: 'push_subscriptions',
-			payload: {
-				verified_at: now.toISOString(),
-				revoked_at: null,
-				failed_count: 0
+		expect(rpcCalls).toEqual([
+			{
+				name: 'record_push_test_feedback',
+				args: {
+					target_appointment_id: 'apt-1',
+					target_delivery_id: deliveryId,
+					feedback_visible: true,
+					feedback_time: now.toISOString()
+				}
 			}
-		});
+		]);
+		expect(updates).toEqual([]);
 	});
 
 	it('quita la verificación sin revocar el endpoint cuando la persona informa que no llegó', async () => {
-		const { supabase, updates } = createSupabaseMock(
-			{
-				push_delivery_attempts: [
-					{ data: { id: deliveryId, subscription_id: 'sub-1' }, error: null }
-				],
-				push_subscriptions: [{ data: { id: 'sub-1' }, error: null }]
-			},
-			{ data: null, error: null }
-		);
+		const { supabase, rpcCalls, updates } = createSupabaseMock({}, { data: true, error: null });
 
 		expect(
 			await recordPushTestFeedback(supabase, {
@@ -449,13 +496,16 @@ describe('telemetría de entrega', () => {
 				now
 			})
 		).toBe(true);
-		expect(updates[1]).toMatchObject({
-			table: 'push_subscriptions',
-			payload: {
-				verified_at: null
+		expect(rpcCalls[0]).toEqual({
+			name: 'record_push_test_feedback',
+			args: {
+				target_appointment_id: 'apt-1',
+				target_delivery_id: deliveryId,
+				feedback_visible: false,
+				feedback_time: now.toISOString()
 			}
 		});
-		expect(updates[1].payload).not.toHaveProperty('revoked_at');
+		expect(updates).toEqual([]);
 	});
 });
 

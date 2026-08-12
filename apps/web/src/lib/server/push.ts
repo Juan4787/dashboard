@@ -28,6 +28,7 @@ export type PushDeliveryState =
 	| 'accepted'
 	| 'received'
 	| 'displayed'
+	| 'clicked'
 	| 'confirmed'
 	| 'missing'
 	| 'superseded'
@@ -188,8 +189,9 @@ const receiptTokenMatches = (token: string, expectedHash: string) => {
 };
 
 const deliveryState = (row: any, now: Date): PushDeliveryState => {
-	if (row.user_reported_missing_at) return 'missing';
 	if (row.user_confirmed_at) return 'confirmed';
+	if (row.clicked_at) return 'clicked';
+	if (row.user_reported_missing_at) return 'missing';
 	if (row.superseded_at) return 'superseded';
 	if (row.failed_at) return 'failed';
 	if (row.displayed_at) return 'displayed';
@@ -214,7 +216,7 @@ export const getPushDeliveryStatus = async (
 	const { data, error } = await supabase
 		.from('push_delivery_attempts')
 		.select(
-			'id, kind, accepted_at, received_at, displayed_at, user_confirmed_at, user_reported_missing_at, superseded_at, failed_at, expires_at, created_at'
+			'id, kind, accepted_at, received_at, displayed_at, clicked_at, user_confirmed_at, user_reported_missing_at, superseded_at, failed_at, expires_at, created_at'
 		)
 		.eq('id', input.deliveryId)
 		.eq('appointment_id', input.appointmentId)
@@ -230,7 +232,7 @@ export const getLatestPushTestStatus = async (
 	const { data, error } = await supabase
 		.from('push_delivery_attempts')
 		.select(
-			'id, kind, accepted_at, received_at, displayed_at, user_confirmed_at, user_reported_missing_at, superseded_at, failed_at, expires_at, created_at'
+			'id, kind, accepted_at, received_at, displayed_at, clicked_at, user_confirmed_at, user_reported_missing_at, superseded_at, failed_at, expires_at, created_at'
 		)
 		.eq('subscription_id', input.subscriptionId)
 		.eq('kind', 'test')
@@ -247,10 +249,24 @@ export const recordPushDeliveryReceipt = async (
 		appointmentId: string;
 		deliveryId: string;
 		receiptToken: string;
-		stage: 'received' | 'displayed';
+		stage: 'received' | 'displayed' | 'clicked';
 		now?: Date;
 	}
 ): Promise<boolean> => {
+	if (!/^[A-Za-z0-9_-]{32,256}$/.test(input.receiptToken)) return false;
+	if (input.stage === 'clicked') {
+		// El RPC registra la interacción y verifica la suscripción en una sola
+		// transacción. Así el turno nunca queda a medias entre telemetría y cobertura.
+		const { data, error } = await supabase.rpc('record_push_notification_click', {
+			target_appointment_id: input.appointmentId,
+			target_delivery_id: input.deliveryId,
+			target_receipt_token_hash: hashReceiptToken(input.receiptToken),
+			click_time: (input.now ?? new Date()).toISOString()
+		});
+		if (error) throw error;
+		return data === true;
+	}
+
 	const { data, error } = await supabase
 		.from('push_delivery_attempts')
 		.select('id, receipt_token_hash, received_at, displayed_at')
@@ -285,47 +301,17 @@ export const recordPushTestFeedback = async (
 	supabase: SupabaseClient,
 	input: { appointmentId: string; deliveryId: string; visible: boolean; now?: Date }
 ): Promise<boolean> => {
-	const now = (input.now ?? new Date()).toISOString();
-	const { data, error } = await supabase
-		.from('push_delivery_attempts')
-		.update(
-			input.visible
-				? { user_confirmed_at: now, user_reported_missing_at: null, updated_at: now }
-				: { user_confirmed_at: null, user_reported_missing_at: now, updated_at: now }
-		)
-		.eq('id', input.deliveryId)
-		.eq('appointment_id', input.appointmentId)
-		.eq('kind', 'test')
-		// La persona puede confirmar aunque Android omita el recibo "displayed". Sí
-		// exigimos que el proveedor haya aceptado una prueba real y que no haya fallado.
-		.not('accepted_at', 'is', null)
-		.is('failed_at', null)
-		.is('superseded_at', null)
-		.select('id, subscription_id')
-		.maybeSingle();
+	// La persona puede confirmar aunque Android omita el recibo "displayed". El RPC
+	// exige una prueba aceptada y serializa la respuesta con un posible clic del
+	// service worker para que una interacción real nunca se pierda por una carrera.
+	const { data, error } = await supabase.rpc('record_push_test_feedback', {
+		target_appointment_id: input.appointmentId,
+		target_delivery_id: input.deliveryId,
+		feedback_visible: input.visible,
+		feedback_time: (input.now ?? new Date()).toISOString()
+	});
 	if (error) throw error;
-	if (!data?.id || !data.subscription_id) return false;
-
-	const subscriptionUpdate = input.visible
-		? {
-				verified_at: now,
-				revoked_at: null,
-				failed_count: 0,
-				updated_at: now
-			}
-		// No recibir una prueba no demuestra que el endpoint haya vencido. Se quita
-		// la cobertura verificada, pero se conserva la suscripción para poder hacer
-		// una única prueba de recuperación cuando la persona vuelva de Ajustes.
-		: { verified_at: null, updated_at: now };
-	const { data: subscription, error: subscriptionError } = await supabase
-		.from('push_subscriptions')
-		.update(subscriptionUpdate)
-		.eq('id', String(data.subscription_id))
-		.eq('appointment_id', input.appointmentId)
-		.select('id')
-		.maybeSingle();
-	if (subscriptionError) throw subscriptionError;
-	return Boolean(subscription?.id);
+	return data === true;
 };
 
 type TrackedPushTarget = {
@@ -524,7 +510,9 @@ export const sendTestPushNotification = async (
 		if (
 			latest &&
 			now.getTime() - new Date(latest.createdAt).getTime() < 30_000 &&
-			['pending', 'accepted', 'received', 'displayed', 'confirmed'].includes(latest.state)
+			['pending', 'accepted', 'received', 'displayed', 'clicked', 'confirmed'].includes(
+				latest.state
+			)
 		) {
 			// Una segunda pestaña puede traer otra clave lógica, pero si apunta a la
 			// misma suscripción y ya hay una prueba viva, debe observar esa entrega en

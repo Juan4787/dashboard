@@ -26,7 +26,10 @@ export const POST: RequestHandler = async ({ params, request, fetch, setHeaders 
 	const deliveryId = typeof input?.deliveryId === 'string' ? input.deliveryId.trim() : '';
 	const receiptToken =
 		typeof input?.receiptToken === 'string' ? input.receiptToken.trim() : '';
-	const stage = input?.stage === 'received' || input?.stage === 'displayed' ? input.stage : null;
+	const stage =
+		input?.stage === 'received' || input?.stage === 'displayed' || input?.stage === 'clicked'
+			? input.stage
+			: null;
 	if (
 		!stage ||
 		!isValidPushDeliveryId(deliveryId) ||

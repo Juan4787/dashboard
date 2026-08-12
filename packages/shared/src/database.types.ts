@@ -17,10 +17,10 @@ export type Database = {
     Functions: {
       graphql: {
         Args: {
-          operationName?: string
           query?: string
-          variables?: Json
           extensions?: Json
+          variables?: Json
+          operationName?: string
         }
         Returns: Json
       }
@@ -247,6 +247,88 @@ export type Database = {
           updated_by?: string | null
         }
         Relationships: []
+      }
+      appointment_google_calendar_events: {
+        Row: {
+          appointment_id: string
+          attempt_count: number
+          business_id: string
+          calendar_id: string
+          claimed_at: string | null
+          connection_id: string
+          created_at: string
+          event_id: string | null
+          id: string
+          last_attempt_at: string | null
+          last_error_at: string | null
+          last_error_code: string | null
+          last_synced_at: string | null
+          next_attempt_at: string
+          sync_status: string
+          synced_sequence: number
+          updated_at: string
+        }
+        Insert: {
+          appointment_id: string
+          attempt_count?: number
+          business_id: string
+          calendar_id?: string
+          claimed_at?: string | null
+          connection_id: string
+          created_at?: string
+          event_id?: string | null
+          id?: string
+          last_attempt_at?: string | null
+          last_error_at?: string | null
+          last_error_code?: string | null
+          last_synced_at?: string | null
+          next_attempt_at?: string
+          sync_status?: string
+          synced_sequence?: number
+          updated_at?: string
+        }
+        Update: {
+          appointment_id?: string
+          attempt_count?: number
+          business_id?: string
+          calendar_id?: string
+          claimed_at?: string | null
+          connection_id?: string
+          created_at?: string
+          event_id?: string | null
+          id?: string
+          last_attempt_at?: string | null
+          last_error_at?: string | null
+          last_error_code?: string | null
+          last_synced_at?: string | null
+          next_attempt_at?: string
+          sync_status?: string
+          synced_sequence?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "appointment_google_calendar_eve_business_id_appointment_id_fkey"
+            columns: ["business_id", "appointment_id"]
+            isOneToOne: false
+            referencedRelation: "appointments"
+            referencedColumns: ["business_id", "id"]
+          },
+          {
+            foreignKeyName: "appointment_google_calendar_events_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "appointment_google_calendar_events_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "google_calendar_connections"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       appointment_professionals: {
         Row: {
@@ -642,6 +724,35 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "professionals"
             referencedColumns: ["business_id", "id"]
+          },
+        ]
+      }
+      business_data_revisions: {
+        Row: {
+          business_id: string
+          patients_revision: number
+          realtime_topic_token: string
+          updated_at: string
+        }
+        Insert: {
+          business_id: string
+          patients_revision?: number
+          realtime_topic_token?: string
+          updated_at?: string
+        }
+        Update: {
+          business_id?: string
+          patients_revision?: number
+          realtime_topic_token?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "business_data_revisions_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: true
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -1118,6 +1229,96 @@ export type Database = {
             columns: ["patient_id"]
             isOneToOne: false
             referencedRelation: "patients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      google_calendar_connections: {
+        Row: {
+          created_at: string
+          google_subject: string
+          granted_scopes: string[]
+          id: string
+          last_error_code: string | null
+          last_refresh_at: string | null
+          oauth_client_key: string
+          refresh_token_ciphertext: string | null
+          revoked_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          google_subject: string
+          granted_scopes?: string[]
+          id?: string
+          last_error_code?: string | null
+          last_refresh_at?: string | null
+          oauth_client_key: string
+          refresh_token_ciphertext?: string | null
+          revoked_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          google_subject?: string
+          granted_scopes?: string[]
+          id?: string
+          last_error_code?: string | null
+          last_refresh_at?: string | null
+          oauth_client_key?: string
+          refresh_token_ciphertext?: string | null
+          revoked_at?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      google_calendar_oauth_attempts: {
+        Row: {
+          appointment_id: string
+          business_id: string
+          code_verifier_ciphertext: string
+          consumed_at: string | null
+          created_at: string
+          expires_at: string
+          force_consent: boolean
+          id: string
+          state_hash: string
+        }
+        Insert: {
+          appointment_id: string
+          business_id: string
+          code_verifier_ciphertext: string
+          consumed_at?: string | null
+          created_at?: string
+          expires_at: string
+          force_consent?: boolean
+          id?: string
+          state_hash: string
+        }
+        Update: {
+          appointment_id?: string
+          business_id?: string
+          code_verifier_ciphertext?: string
+          consumed_at?: string | null
+          created_at?: string
+          expires_at?: string
+          force_consent?: boolean
+          id?: string
+          state_hash?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "google_calendar_oauth_attempts_business_id_appointment_id_fkey"
+            columns: ["business_id", "appointment_id"]
+            isOneToOne: false
+            referencedRelation: "appointments"
+            referencedColumns: ["business_id", "id"]
+          },
+          {
+            foreignKeyName: "google_calendar_oauth_attempts_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
             referencedColumns: ["id"]
           },
         ]
@@ -2090,6 +2291,97 @@ export type Database = {
           },
         ]
       }
+      push_delivery_attempts: {
+        Row: {
+          accepted_at: string | null
+          appointment_id: string
+          business_id: string
+          clicked_at: string | null
+          created_at: string
+          displayed_at: string | null
+          expires_at: string
+          failed_at: string | null
+          failure_kind: string | null
+          id: string
+          kind: string
+          push_service_status: number | null
+          receipt_token_hash: string
+          received_at: string | null
+          request_key_hash: string | null
+          subscription_id: string
+          superseded_at: string | null
+          updated_at: string
+          user_confirmed_at: string | null
+          user_reported_missing_at: string | null
+        }
+        Insert: {
+          accepted_at?: string | null
+          appointment_id: string
+          business_id: string
+          clicked_at?: string | null
+          created_at?: string
+          displayed_at?: string | null
+          expires_at: string
+          failed_at?: string | null
+          failure_kind?: string | null
+          id?: string
+          kind: string
+          push_service_status?: number | null
+          receipt_token_hash: string
+          received_at?: string | null
+          request_key_hash?: string | null
+          subscription_id: string
+          superseded_at?: string | null
+          updated_at?: string
+          user_confirmed_at?: string | null
+          user_reported_missing_at?: string | null
+        }
+        Update: {
+          accepted_at?: string | null
+          appointment_id?: string
+          business_id?: string
+          clicked_at?: string | null
+          created_at?: string
+          displayed_at?: string | null
+          expires_at?: string
+          failed_at?: string | null
+          failure_kind?: string | null
+          id?: string
+          kind?: string
+          push_service_status?: number | null
+          receipt_token_hash?: string
+          received_at?: string | null
+          request_key_hash?: string | null
+          subscription_id?: string
+          superseded_at?: string | null
+          updated_at?: string
+          user_confirmed_at?: string | null
+          user_reported_missing_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "push_delivery_attempts_business_id_appointment_id_fkey"
+            columns: ["business_id", "appointment_id"]
+            isOneToOne: false
+            referencedRelation: "appointments"
+            referencedColumns: ["business_id", "id"]
+          },
+          {
+            foreignKeyName: "push_delivery_attempts_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "push_delivery_attempts_subscription_id_fkey"
+            columns: ["subscription_id"]
+            isOneToOne: false
+            referencedRelation: "push_subscriptions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       push_subscriptions: {
         Row: {
           appointment_id: string
@@ -2305,26 +2597,26 @@ export type Database = {
     }
     Functions: {
       activate_account_assistance: {
-        Args: { target_business_id: string; target_support_user_id: string }
+        Args: { target_support_user_id: string; target_business_id: string }
         Returns: {
-          support_user_id: string
-          id: string
-          business_id: string
-          requested_by_user_id: string
-          status: string
-          starts_at: string
-          expires_at: string
-          revoked_at: string
-          dismissed_at: string
           created_at: string
+          revoked_at: string
+          expires_at: string
+          starts_at: string
+          status: string
+          support_user_id: string
+          requested_by_user_id: string
+          business_id: string
+          id: string
           updated_at: string
+          dismissed_at: string
         }[]
       }
       add_business_user_by_email: {
         Args: {
-          target_role: string
           target_business_id: string
           target_email: string
+          target_role: string
         }
         Returns: string
       }
@@ -2334,16 +2626,30 @@ export type Database = {
       }
       audit_security_event: {
         Args: {
-          p_actor_id: string
-          p_business_id: string
           p_metadata: Json
-          p_reason: string
-          p_outcome: string
           p_entity_id: string
-          p_entity_type: string
+          p_outcome: string
+          p_reason: string
+          p_business_id: string
+          p_actor_id: string
           p_action: string
+          p_entity_type: string
         }
         Returns: undefined
+      }
+      authorize_google_calendar_event: {
+        Args: {
+          p_oauth_client_key: string
+          p_appointment_id: string
+          p_google_subject: string
+          p_refresh_token_ciphertext: string
+          p_granted_scopes: string[]
+          p_now?: string
+        }
+        Returns: {
+          connection_row_id: string
+          event_row_id: string
+        }[]
       }
       business_allows_operation: {
         Args: { target_business_id: string }
@@ -2358,15 +2664,21 @@ export type Database = {
         Returns: undefined
       }
       claim_due_push_reminders: {
+        Args: { claim_limit?: number; claim_now: string }
+        Returns: {
+          auth: string
+          endpoint: string
+          business_id: string
+          appointment_id: string
+          subscription_id: string
+          p256dh: string
+          reminder_kind: string
+        }[]
+      }
+      claim_google_calendar_sync_jobs: {
         Args: { claim_now: string; claim_limit?: number }
         Returns: {
-          reminder_kind: string
-          subscription_id: string
-          appointment_id: string
-          business_id: string
-          endpoint: string
-          p256dh: string
-          auth: string
+          event_row_id: string
         }[]
       }
       claim_queued_message_dispatches: {
@@ -2411,32 +2723,55 @@ export type Database = {
         Args: { p_business_id: string }
         Returns: undefined
       }
-      compute_business_subscription_status: {
+      complete_google_calendar_event_delete: {
+        Args: { p_now?: string; p_event_row_id: string }
+        Returns: string
+      }
+      complete_google_calendar_event_sync: {
         Args: {
-          p_is_permanent: boolean
-          p_paid_until: string
-          p_grace_until: string
-          p_restricted_until: string
-          p_archived_at: string
-          p_commercial_access_enabled: boolean
+          p_google_event_id: string
+          p_event_row_id: string
+          p_now?: string
+          p_synced_sequence: number
         }
         Returns: string
       }
+      compute_business_subscription_status: {
+        Args: {
+          p_archived_at: string
+          p_commercial_access_enabled: boolean
+          p_paid_until: string
+          p_restricted_until: string
+          p_grace_until: string
+          p_is_permanent: boolean
+        }
+        Returns: string
+      }
+      consume_google_calendar_oauth_attempt: {
+        Args: { p_state_hash: string; p_now?: string }
+        Returns: {
+          appointment_id: string
+          code_verifier_ciphertext: string
+          force_consent: boolean
+          business_id: string
+          attempt_id: string
+        }[]
+      }
       consume_server_rate_limit: {
         Args: {
-          p_window_seconds: number
           p_action: string
           p_subject_hash: string
           p_limit: number
+          p_window_seconds: number
         }
         Returns: {
           allowed: boolean
-          used: number
           retry_after_seconds: number
+          used: number
         }[]
       }
       consume_server_rate_limits: {
-        Args: { p_windows: Json; p_action: string; p_subject_hash: string }
+        Args: { p_action: string; p_windows: Json; p_subject_hash: string }
         Returns: {
           allowed: boolean
           retry_after_seconds: number
@@ -2451,12 +2786,12 @@ export type Database = {
         Args: {
           p_business_id: string
           p_patient_id: string
+          p_internal_note?: string
+          p_teeth?: string
+          p_created_at?: string
+          p_amount?: number
           p_entry_type: string
           p_description: string
-          p_created_at?: string
-          p_teeth?: string
-          p_internal_note?: string
-          p_amount?: number
         }
         Returns: string
       }
@@ -2464,20 +2799,41 @@ export type Database = {
         Args: {
           p_internal_note?: string
           p_professional_ids: string[]
-          p_starts_at: string
+          p_service_id: string
+          p_patient_id: string
+          p_business_id: string
           p_created_by_user_id?: string
           p_ignore_break?: boolean
-          p_business_id: string
-          p_patient_id: string
-          p_service_id: string
+          p_starts_at: string
         }
         Returns: {
           professional_name_snapshot: string
           service_name_snapshot: string
-          id: string
-          confirmation_token: string
-          starts_at: string
           ends_at: string
+          starts_at: string
+          confirmation_token: string
+          id: string
+        }[]
+      }
+      create_joint_appointment_with_source: {
+        Args: {
+          p_business_id: string
+          p_patient_id: string
+          p_service_id: string
+          p_professional_ids: string[]
+          p_starts_at: string
+          p_internal_note: string
+          p_created_by_user_id: string
+          p_ignore_break: boolean
+          p_source: string
+        }
+        Returns: {
+          service_name_snapshot: string
+          professional_name_snapshot: string
+          id: string
+          ends_at: string
+          starts_at: string
+          confirmation_token: string
         }[]
       }
       current_user_professional_id: {
@@ -2489,11 +2845,21 @@ export type Database = {
         Returns: undefined
       }
       ensure_user_default_business: {
-        Args: { p_name?: string; p_industry?: string }
+        Args: { p_industry?: string; p_name?: string }
         Returns: {
           role: string
           business_id: string
         }[]
+      }
+      fail_google_calendar_event_sync: {
+        Args: {
+          p_error_code: string
+          p_next_attempt_at: string
+          p_now?: string
+          p_failure_category: string
+          p_event_row_id: string
+        }
+        Returns: string
       }
       gbt_bit_compress: {
         Args: { "": unknown }
@@ -2719,27 +3085,41 @@ export type Database = {
         Args: { "": unknown }
         Returns: unknown
       }
+      get_availability_snapshot: {
+        Args: { p_from: string; p_business_id: string; p_to: string }
+        Returns: Json
+      }
+      get_patient_data_revision: {
+        Args: { p_business_id: string }
+        Returns: {
+          viewer_role: string
+          can_create_patient: boolean
+          business_id: string
+          patients_revision: number
+          realtime_topic: string
+        }[]
+      }
       get_patient_drive_folder_safely: {
-        Args: { p_business_id: string; p_patient_id: string }
+        Args: { p_patient_id: string; p_business_id: string }
         Returns: string
       }
       get_public_booking_active_future_count_by_name: {
-        Args: { p_now?: string; p_business_id: string; p_patient_name: string }
+        Args: { p_business_id: string; p_now?: string; p_patient_name: string }
         Returns: number
       }
       grant_business_access: {
         Args: {
-          p_business_id: string
-          p_source: string
-          p_operation: string
           p_duration_seconds: number
-          p_duration_unit: string
-          p_is_permanent: boolean
-          p_amount: number
           p_idempotency_key: string
           p_admin_email: string
           p_admin_id: string
           p_note: string
+          p_source: string
+          p_amount: number
+          p_is_permanent: boolean
+          p_business_id: string
+          p_operation: string
+          p_duration_unit: string
         }
         Returns: {
           status_after: string
@@ -2756,34 +3136,34 @@ export type Database = {
       list_business_role_access: {
         Args: { target_business_id: string }
         Returns: {
-          professional_id: string
-          created_at: string
-          status: string
           role: string
           email: string
-          user_id: string
+          created_at: string
+          professional_id: string
           id: string
+          status: string
           business_id: string
+          user_id: string
         }[]
       }
       list_business_users: {
         Args: { target_business_id: string }
         Returns: {
+          created_at: string
+          role: string
+          email: string
           id: string
           business_id: string
           user_id: string
-          email: string
-          role: string
-          created_at: string
         }[]
       }
       list_user_business_contexts: {
         Args: Record<PropertyKey, never>
         Returns: {
-          business: Json
-          role: string
-          assistance: Json
           subscription: Json
+          assistance: Json
+          role: string
+          business: Json
         }[]
       }
       normalize_phone_e164: {
@@ -2798,16 +3178,16 @@ export type Database = {
         Args: { p_business: string }
         Returns: {
           archived_count: number
-          total_count: number
           active_count: number
+          total_count: number
         }[]
       }
       patients_counts_by_owner: {
         Args: { p_owner: string }
         Returns: {
+          archived_count: number
           total_count: number
           active_count: number
-          archived_count: number
         }[]
       }
       professional_break_minutes_at: {
@@ -2820,15 +3200,33 @@ export type Database = {
       }
       professional_update_appointment_status: {
         Args: {
+          target_business_id: string
           target_appointment_id: string
           target_status: string
-          target_business_id: string
         }
         Returns: undefined
       }
       record_calendar_action: {
         Args: { p_action: string; p_appointment_id: string; p_provider: string }
         Returns: undefined
+      }
+      record_push_notification_click: {
+        Args: {
+          click_time?: string
+          target_appointment_id: string
+          target_delivery_id: string
+          target_receipt_token_hash: string
+        }
+        Returns: boolean
+      }
+      record_push_test_feedback: {
+        Args: {
+          target_appointment_id: string
+          target_delivery_id: string
+          feedback_visible: boolean
+          feedback_time?: string
+        }
+        Returns: boolean
       }
       remove_business_role_access: {
         Args: { target_access_id: string }
@@ -2837,10 +3235,10 @@ export type Database = {
       replace_professional_availability_rules: {
         Args: {
           p_professional_id: string
-          p_ranges: Json
           p_weekdays: number[]
-          p_business_id: string
+          p_ranges: Json
           p_slot_interval_minutes: number
+          p_business_id: string
         }
         Returns: {
           break_minutes: number
@@ -2855,35 +3253,39 @@ export type Database = {
           weekday: number
         }[]
       }
+      request_google_calendar_event_deletion: {
+        Args: { p_appointment_id: string; p_now?: string }
+        Returns: string
+      }
       revoke_account_assistance: {
         Args: { target_business_id: string }
         Returns: {
-          status: string
-          expires_at: string
-          revoked_at: string
+          support_user_id: string
           id: string
           business_id: string
           requested_by_user_id: string
-          support_user_id: string
+          status: string
           starts_at: string
-          updated_at: string
-          created_at: string
+          expires_at: string
+          revoked_at: string
           dismissed_at: string
+          created_at: string
+          updated_at: string
         }[]
       }
       set_patient_archive_state_safely: {
         Args: {
+          p_patient_id: string
           p_archived: boolean
           p_business_id: string
-          p_patient_id: string
         }
         Returns: undefined
       }
       set_patient_drive_folder_safely: {
         Args: {
           p_business_id: string
-          p_drive_folder_id: string
           p_patient_id: string
+          p_drive_folder_id: string
         }
         Returns: undefined
       }
@@ -2897,22 +3299,22 @@ export type Database = {
       }
       update_clinical_entry_safely: {
         Args: {
-          p_teeth?: string
-          p_internal_note?: string
-          p_amount?: number
-          p_description: string
-          p_entry_id: string
           p_entry_type: string
+          p_amount?: number
+          p_internal_note?: string
+          p_teeth?: string
           p_business_id: string
           p_patient_id: string
+          p_entry_id: string
+          p_description: string
         }
         Returns: undefined
       }
       upsert_business_role_access: {
         Args: {
+          target_email: string
           target_role: string
           target_business_id: string
-          target_email: string
           target_professional_id?: string
         }
         Returns: {
@@ -2924,14 +3326,14 @@ export type Database = {
       }
       upsert_patient_clinical_profile_safely: {
         Args: {
-          p_clinical_alert_note?: string
-          p_custom_fields?: Json
-          p_business_id: string
           p_patient_id: string
           p_allergies?: string
           p_medication?: string
           p_background?: string
+          p_clinical_alert_note?: string
           p_notes?: string
+          p_custom_fields?: Json
+          p_business_id: string
         }
         Returns: string
       }
@@ -2952,7 +3354,7 @@ export type Database = {
         Returns: boolean
       }
       user_can_read_basic_patient: {
-        Args: { target_business_id: string; target_patient_id: string }
+        Args: { target_patient_id: string; target_business_id: string }
         Returns: boolean
       }
       user_can_read_clinical_patient: {
@@ -2960,7 +3362,7 @@ export type Database = {
         Returns: boolean
       }
       user_can_read_patient: {
-        Args: { target_business_id: string; target_patient_id: string }
+        Args: { target_patient_id: string; target_business_id: string }
         Returns: boolean
       }
       user_can_read_professional_schedule: {
@@ -3107,18 +3509,18 @@ export type Database = {
       search: {
         Args: {
           offsets?: number
-          prefix: string
-          bucketname: string
-          limits?: number
           levels?: number
+          limits?: number
+          bucketname: string
+          prefix: string
         }
         Returns: {
-          name: string
-          id: string
-          updated_at: string
-          created_at: string
-          last_accessed_at: string
           metadata: Json
+          created_at: string
+          updated_at: string
+          id: string
+          name: string
+          last_accessed_at: string
         }[]
       }
     }

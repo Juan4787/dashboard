@@ -9,10 +9,12 @@
 //   (pipeline Meta dormida: si algún día se prende, acá no se duplica).
 // "offered" NUNCA cuenta como cobertura: solo significa que vio la pantalla.
 //
-// La cobertura push exige el respaldo explícito "Sí, la recibí". `displayed_at` es
-// telemetría útil, pero una web no puede comprobar si Android bloqueó globalmente
-// las notificaciones del navegador después del handoff; tampoco alcanzan el permiso,
-// guardar un endpoint ni recibir un 201 del proveedor. Para los calendarios, la señal
+// La cobertura push exige una prueba positiva de interacción: "Sí, la recibí" o un
+// clic real en la notificación. `displayed_at` es telemetría útil, pero una web no
+// puede comprobar si Android bloqueó globalmente las notificaciones del navegador
+// después del handoff; tampoco alcanzan el permiso, guardar un endpoint ni recibir
+// un 201 del proveedor. Esta cobertura sólo evita el refuerzo manual: una suscripción
+// vigente recibe siempre los avisos automáticos. Para los calendarios, la señal
 // observable y suficiente es haber iniciado la entrega o la salida hacia la opción
 // elegida: no afirmamos ni intentamos comprobar el guardado dentro de una aplicación
 // externa.
@@ -241,8 +243,9 @@ export type ConfirmedPushSubscriptionInput = {
 	verified_at: string | null;
 };
 
-// `verified_at` conserva una semántica estricta: la persona respondió "Sí, la
-// recibí". No se usa para decidir si el sistema debe ENVIAR recordatorios.
+// `verified_at` conserva una semántica estricta: hubo una confirmación positiva
+// ("Sí, la recibí" o clic real en el aviso). No se usa para decidir si el sistema
+// debe ENVIAR recordatorios.
 export const hasConfirmedPushSubscription = (row: ConfirmedPushSubscriptionInput): boolean =>
 	row.revoked_at == null && Boolean(row.verified_at);
 

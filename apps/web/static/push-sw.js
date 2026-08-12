@@ -13,6 +13,41 @@ self.addEventListener('activate', (event) => {
 	event.waitUntil(clients.claim());
 });
 
+const normalizeDelivery = (value) => {
+	if (
+		!value ||
+		typeof value !== 'object' ||
+		typeof value.id !== 'string' ||
+		typeof value.token !== 'string' ||
+		typeof value.receiptUrl !== 'string'
+	) {
+		return null;
+	}
+	return { id: value.id, token: value.token, receiptUrl: value.receiptUrl };
+};
+
+const reportDeliveryStage = async (delivery, stage) => {
+	if (!delivery) return false;
+	try {
+		const receiptUrl = new URL(delivery.receiptUrl, self.location.origin);
+		if (receiptUrl.origin !== self.location.origin) return false;
+		const response = await fetch(receiptUrl.href, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({
+				deliveryId: delivery.id,
+				receiptToken: delivery.token,
+				stage
+			}),
+			credentials: 'omit',
+			cache: 'no-store'
+		});
+		return response.ok;
+	} catch {
+		return false;
+	}
+};
+
 self.addEventListener('push', (event) => {
 	let payload = {};
 	try {
@@ -21,9 +56,12 @@ self.addEventListener('push', (event) => {
 		payload = {};
 	}
 	const title = payload.title || 'Recordatorio de turno';
+	const delivery = normalizeDelivery(payload.delivery);
 	const options = {
 		body: payload.body || 'Tenés un turno próximo.',
-		data: { url: payload.url || '/' },
+		// El secreto queda dentro de los datos privados de la notificación, nunca en
+		// la URL. Permite autenticar una interacción posterior con ese aviso concreto.
+		data: { url: payload.url || '/', ...(delivery ? { delivery } : {}) },
 		// El contenido es neutral (sin datos clínicos): puede aparecer en pantalla bloqueada.
 		tag: payload.tag || 'turno-recordatorio',
 		renotify: true
@@ -32,35 +70,6 @@ self.addEventListener('push', (event) => {
 	// cierran las viejas del grupo (p.ej. el aviso de 24h con el horario anterior a una
 	// reprogramación). El tag igual pisa la del mismo kind; esto cubre los kinds cruzados.
 	const group = typeof payload.group === 'string' && payload.group ? payload.group : null;
-	const delivery = payload.delivery && typeof payload.delivery === 'object' ? payload.delivery : null;
-	const reportDeliveryStage = async (stage) => {
-		if (
-			!delivery ||
-			typeof delivery.id !== 'string' ||
-			typeof delivery.token !== 'string' ||
-			typeof delivery.receiptUrl !== 'string'
-		) {
-			return false;
-		}
-		try {
-			const receiptUrl = new URL(delivery.receiptUrl, self.location.origin);
-			if (receiptUrl.origin !== self.location.origin) return false;
-			const response = await fetch(receiptUrl.href, {
-				method: 'POST',
-				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({
-					deliveryId: delivery.id,
-					receiptToken: delivery.token,
-					stage
-				}),
-				credentials: 'omit',
-				cache: 'no-store'
-			});
-			return response.ok;
-		} catch {
-			return false;
-		}
-	};
 	const show = async () => {
 		if (group && typeof self.registration.getNotifications === 'function') {
 			try {
@@ -80,17 +89,24 @@ self.addEventListener('push', (event) => {
 		// aviso. Un único acuse alcanza: `displayed` también completa `received` en el
 		// servidor; si showNotification falla, se registra solamente `received`.
 		const [shown] = await Promise.allSettled([show()]);
-		await reportDeliveryStage(shown.status === 'fulfilled' ? 'displayed' : 'received');
+		await reportDeliveryStage(delivery, shown.status === 'fulfilled' ? 'displayed' : 'received');
 	};
 	event.waitUntil(handlePush());
 });
 
 self.addEventListener('notificationclick', (event) => {
 	event.notification.close();
-	const url = event.notification.data && event.notification.data.url;
-	if (!url) return;
-	event.waitUntil(
-		clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+	const notificationData = event.notification.data || {};
+	const delivery = normalizeDelivery(notificationData.delivery);
+	const clickReceipt = reportDeliveryStage(delivery, 'clicked');
+	const url = notificationData.url;
+	if (!url) {
+		event.waitUntil(clickReceipt);
+		return;
+	}
+	const navigation = clients
+		.matchAll({ type: 'window', includeUncontrolled: true })
+		.then((windowClients) => {
 			const targetUrl = new URL(url, self.location.origin);
 			// Algunos navegadores Android (Samsung Browser incluido) consideran
 			// `navigate()` a la misma URL una navegación vacía y conservan el HTML
@@ -126,7 +142,9 @@ self.addEventListener('notificationclick', (event) => {
 					return client.focus();
 				}
 			}
-			return clients.openWindow(targetUrl.href);
-		})
-	);
+			return clients.openWindow(refreshUrl.href);
+		});
+	// El acuse y la navegación empiezan juntos. Una falla de red jamás impide abrir
+	// el turno, y waitUntil conserva al worker vivo para completar ambos trabajos.
+	event.waitUntil(Promise.allSettled([clickReceipt, navigation]).then(() => undefined));
 });
