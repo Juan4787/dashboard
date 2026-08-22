@@ -536,7 +536,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 		</div>
 		<div class="mt-5 rounded-xl border border-neutral-200 bg-white/60 p-4 dark:border-[#1f3554] dark:bg-[#0f1f36]">
 			<div class="flex items-center justify-between gap-3">
-				<h2 class="text-sm font-semibold text-neutral-900 dark:text-white">Turnos recientes</h2>
+				<h2 class="text-sm font-semibold text-neutral-900 dark:text-white">Próximos turnos</h2>
 				<a href={`/odonto/agenda`} class="text-xs font-semibold text-[#7c3aed] hover:underline">Abrir agenda</a>
 			</div>
 			<div class="mt-3 grid gap-2">
@@ -547,7 +547,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 					</a>
 				{/each}
 				{#if data.appointments.length === 0}
-					<p class="text-sm text-neutral-600 dark:text-neutral-200">Todavía no hay turnos asociados a este paciente.</p>
+					<p class="text-sm text-neutral-600 dark:text-neutral-200">No hay próximos turnos.</p>
 				{/if}
 			</div>
 		</div>

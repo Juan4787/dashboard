@@ -9,6 +9,10 @@
 	} from '$lib/availability/snapshot';
 	import { tick } from 'svelte';
 	import { slide } from 'svelte/transition';
+	import {
+		ACTIVE_APPOINTMENT_STATUSES,
+		isUpcomingActiveAppointment
+	} from '$lib/utils/appointment-visibility';
 
 	type Appointment = {
 		id: string;
@@ -27,7 +31,14 @@
 	type AppointmentGroups = { upcoming: Appointment[]; past: Appointment[] };
 	type Professional = { id: string; name: string; specialty?: string | null; is_active: boolean };
 	type Service = { id: string; name: string; duration_minutes: number };
-	type Patient = { id: string; full_name: string; phone_e164: string | null; blocked: boolean };
+	type Patient = {
+		id: string;
+		full_name: string;
+		phone: string | null;
+		phone_raw: string | null;
+		phone_e164: string | null;
+		blocked: boolean;
+	};
 	type Stat = { status: string; count: number };
 
 	let { data, form } = $props<{
@@ -54,7 +65,11 @@
 			reminderCount?: number;
 			demo: boolean;
 		};
-		form?: { message?: string; values?: Record<string, unknown> };
+			form?: {
+				message?: string;
+				phoneWarning?: { kind: 'missing' | 'invalid' };
+				values?: Record<string, unknown>;
+			};
 	}>();
 
 	const canOperate = $derived(data.context.canOperate && !data.demo);
@@ -113,7 +128,12 @@
 	};
 
 	const statCount = (status: string) => data.stats.find((stat: Stat) => stat.status === status)?.count ?? 0;
-	const statusFilterEntries = $derived(Object.entries(statusLabels));
+	const statusFilterEntries = $derived(
+		Object.entries(statusLabels).filter(
+			([status]) =>
+				!data.anyDay || (ACTIVE_APPOINTMENT_STATUSES as readonly string[]).includes(status)
+		)
+	);
 	const hasActiveSearch = $derived(
 		Boolean(data.selectedProfessionalId || data.selectedStatus || data.selectedServiceId || data.anyDay)
 	);
@@ -161,8 +181,8 @@
 		return d.getFullYear() === today.getFullYear() ? label : `${label} ${d.getFullYear()}`;
 	};
 
-	// Buscador en vivo: independiente de los filtros, busca por nombre o
-	// teléfono en todas las fechas a medida que se escribe.
+	// Buscador en vivo: independiente de los filtros, busca próximos turnos
+	// activos por nombre o teléfono a medida que se escribe.
 	let searchInput = $state('');
 	let liveResults = $state<AppointmentGroups | null>(null);
 	let liveLoading = $state(false);
@@ -186,8 +206,12 @@
 				return;
 			}
 			liveResults = {
-				upcoming: Array.isArray(payload?.upcoming) ? payload.upcoming : [],
-				past: Array.isArray(payload?.past) ? payload.past : []
+				upcoming: Array.isArray(payload?.upcoming)
+					? payload.upcoming.filter((appointment: Appointment) =>
+							isUpcomingActiveAppointment(appointment)
+						)
+					: [],
+				past: []
 			};
 		} catch {
 			if (request !== liveRequest) return;
@@ -221,16 +245,13 @@
 		liveError = '';
 	});
 
-	const splitByNow = (list: Appointment[]): AppointmentGroups => {
-		const nowIso = new Date().toISOString();
-		return {
-			upcoming: list.filter((appointment: Appointment) => appointment.starts_at >= nowIso),
-			past: list.filter((appointment: Appointment) => appointment.starts_at < nowIso)
-		};
-	};
+	const upcomingOnly = (list: Appointment[]): AppointmentGroups => ({
+		upcoming: list.filter((appointment: Appointment) => isUpcomingActiveAppointment(appointment)),
+		past: []
+	});
 	const displayGroups = $derived.by((): AppointmentGroups | null => {
 		if (liveActive) return liveResults ?? { upcoming: [], past: [] };
-		if (data.anyDay) return splitByNow(data.appointments);
+		if (data.anyDay) return upcomingOnly(data.appointments);
 		return null;
 	});
 	const visibleCount = $derived(
@@ -358,8 +379,8 @@
 
 	$effect(() => {
 		if (initialized) return;
-		showCreate = Boolean(form?.message || data.selectedPatientId);
-		showSearch = Boolean(hasActiveSearch || form?.message);
+		showCreate = Boolean(form?.message || form?.phoneWarning || data.selectedPatientId);
+		showSearch = Boolean(hasActiveSearch);
 		// Recepción usa esta pantalla para operar: empezamos el snapshot en
 		// background apenas abre /agenda, antes de que elija el primer servicio.
 		if (canOperate || showCreate || showSearch) void loadReferences();
@@ -489,9 +510,7 @@
 					class="ux-input"
 				/>
 			</label>
-			<p class="mt-2 text-xs font-semibold text-white/40">
-				Busca en todas las fechas a medida que escribís, sin usar los filtros.
-			</p>
+			<p class="mt-2 text-xs font-semibold text-white/40">Busca próximos turnos mientras escribís.</p>
 			{#if referencesLoading}
 				<p class="mt-3 text-sm font-semibold text-[#c4b5fd]" aria-live="polite">
 					Cargando profesionales y servicios…
@@ -617,16 +636,6 @@
 							</div>
 						</div>
 					{/if}
-					{#if displayGroups.past.length > 0}
-						<div>
-							<p class="text-xs font-bold uppercase tracking-wide text-white/40">Anteriores</p>
-							<div class="mt-2 grid gap-3">
-								{#each displayGroups.past as appointment (appointment.id)}
-									{@render appointmentRow(appointment, true)}
-								{/each}
-							</div>
-						</div>
-					{/if}
 				</div>
 				{#if !liveActive && data.anyDayLimited}
 					<p class="mt-4 text-sm font-semibold text-white/45">
@@ -663,17 +672,6 @@
 						description={canOperate ? 'Agendá el primero o revisá otro día.' : 'Revisá otro día.'}
 					>
 						{#snippet actions()}
-							{#if canOperate && !needsSetup}
-								<button
-									type="button"
-									class="ux-btn-primary"
-									onclick={toggleCreate}
-									onpointerenter={() => void loadReferences()}
-									onfocus={() => void loadReferences()}
-								>
-									+ Nuevo turno
-								</button>
-							{/if}
 							<a href={buildAgendaHref(nextDate)} class="ux-btn-secondary">Día siguiente</a>
 						{/snippet}
 					</EmptyState>

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { loginWithSharedSession } from './helpers/shared-auth';
 
 const email = process.env.E2E_EMAIL;
 const password = process.env.E2E_PASSWORD;
@@ -12,12 +13,11 @@ test.describe('Odontología mobile - navegación', () => {
 	});
 
 	test('menú vertical muestra opciones y cerrar sesión sin rotar el teléfono', async ({ page }) => {
-		await page.goto('/login');
-		await page.waitForLoadState('networkidle');
-		await page.getByLabel('Correo electrónico').fill(email ?? '');
-		await page.getByLabel('Contraseña').fill(password ?? '');
-		await page.locator('form').first().getByRole('button', { name: 'Ingresar', exact: true }).click();
-		await expect(page).toHaveURL(/\/odonto/);
+		await loginWithSharedSession(page, {
+			email: email ?? '',
+			password: password ?? '',
+			readyLinkNames: ['Agenda', 'Mis turnos']
+		});
 
 		await page.goto('/odonto/agenda');
 		await page.waitForLoadState('networkidle');

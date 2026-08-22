@@ -34,6 +34,7 @@ export type PatientListData = {
 	totalCount: number;
 	activeCount: number;
 	archivedCount: number;
+	countsIncluded: boolean;
 	countsSource: CountsSource;
 	hasMore: boolean;
 	nextCursor: string | null;
@@ -128,6 +129,7 @@ export const loadPatientList = async ({
 	if (!locals.auth) throw redirect(303, '/login');
 	const showArchived = url.searchParams.get('estado') === 'archivados';
 	const query = normalizePatientListQuery(url.searchParams.get('q'));
+	const fastSearch = url.searchParams.get('mode') === 'search' && Boolean(query);
 	const rawCursor = url.searchParams.get('cursor')?.trim() ?? '';
 
 	if (env.DEMO_MODE === 'true') {
@@ -161,6 +163,7 @@ export const loadPatientList = async ({
 			totalCount: demoPatients.length,
 			activeCount,
 			archivedCount,
+			countsIncluded: true,
 			countsSource: 'fallback_planned',
 			hasMore: false,
 			nextCursor: null,
@@ -212,10 +215,9 @@ export const loadPatientList = async ({
 		throw kitError(400, 'La página solicitada ya no es válida. Actualizá la lista.');
 	}
 
-	const loadRows = async (): Promise<ListWithoutCacheMetadata> => {
+	const loadRows = async ({ includeCounts = true }: { includeCounts?: boolean } = {}): Promise<ListWithoutCacheMetadata> => {
 		const snapshotAt = cursor?.snapshotAt ?? new Date().toISOString();
-		const [patientsResult, countsResult] = await Promise.all([
-			supabase.rpc('list_accessible_patients_page' as never, {
+		const patientsPromise = supabase.rpc('list_accessible_patients_page' as never, {
 				p_business_id: context.business.id,
 				p_show_archived: showArchived,
 				p_query: query,
@@ -224,17 +226,21 @@ export const loadPatientList = async ({
 				p_cursor_rank: cursor?.rank ?? null,
 				p_cursor_activity_at: cursor?.activityAt ?? null,
 				p_cursor_id: cursor?.id ?? null
-			} as never),
-			supabase.rpc('accessible_patient_counts' as never, {
-				p_business_id: context.business.id
-			} as never)
-		]);
+			} as never);
+		const [patientsResult, countsResult] = includeCounts
+			? await Promise.all([
+					patientsPromise,
+					supabase.rpc('accessible_patient_counts' as never, {
+						p_business_id: context.business.id
+					} as never)
+				])
+			: [await patientsPromise, { data: null, error: null }];
 
 		if (patientsResult.error) {
 			console.error('Error cargando página autorizada de pacientes', patientsResult.error);
 			throw kitError(500, 'No se pudieron cargar los pacientes.');
 		}
-		if (countsResult.error) {
+		if (includeCounts && countsResult.error) {
 			console.error('Error contando pacientes autorizados', countsResult.error);
 			throw kitError(500, 'No se pudieron cargar los totales de pacientes.');
 		}
@@ -261,7 +267,8 @@ export const loadPatientList = async ({
 			totalCount: Number(countRow?.total_count ?? 0),
 			activeCount: Number(countRow?.active_count ?? 0),
 			archivedCount: Number(countRow?.archived_count ?? 0),
-			countsSource: 'rpc',
+			countsIncluded: includeCounts,
+			countsSource: includeCounts ? 'rpc' : 'fallback_planned',
 			hasMore,
 			nextCursor:
 				hasMore && last
@@ -279,6 +286,16 @@ export const loadPatientList = async ({
 			pageSize: PAGE_SIZE
 		};
 	};
+
+	// Mientras se escribe, la autorización sigue resuelta por el mismo RPC, pero no
+	// repetimos los recuentos ni las dos lecturas de revisión en cada tecla. La respuesta
+	// no se almacena como snapshot y la lista completa conserva el contrato estricto.
+	if (fastSearch) {
+		return withUncacheablePatientListMetadata(
+			await loadRows({ includeCounts: false }),
+			context.business.id
+		);
+	}
 
 	// Las páginas posteriores pertenecen al snapshot temporal firmado por el cursor.
 	// No deben publicarse como una nueva instantánea completa bajo la revisión actual:

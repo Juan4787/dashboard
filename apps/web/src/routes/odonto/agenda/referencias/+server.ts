@@ -35,7 +35,7 @@ export const GET: RequestHandler = async ({ url, locals, fetch, cookies, setHead
 	if (scope === 'patients') {
 		const { data: patients, error } = await supabase
 			.from('patients')
-			.select('id, full_name, phone_e164, blocked')
+				.select('id, full_name, phone, phone_raw, phone_e164, blocked')
 			.eq('business_id', businessId)
 			.is('archived_at', null)
 			.order('updated_at', { ascending: false })

@@ -18,6 +18,13 @@ import { countTomorrowUncovered } from '$lib/server/reminders';
 import { createSupabaseAdminClient } from '$lib/server/supabase';
 import { processAppointmentGoogleCalendarSync } from '$lib/server/google-calendar';
 import { createdAppointmentDetailUrl } from '$lib/server/agenda-navigation';
+import {
+	ACTIVE_APPOINTMENT_STATUSES,
+	isActiveAppointmentStatus
+} from '$lib/utils/appointment-visibility';
+import { resolveCommunicationPhoneDecision } from '$lib/utils/communication-phone';
+import { normalizePhoneRaw } from '$lib/server/phone';
+import { normalizePhone } from '$lib/utils/format';
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -40,7 +47,7 @@ const todayForTimezone = (timeZone: string) => {
 const APPOINTMENT_COLUMNS =
 	'id, patient_id, service_id, professional_id, starts_at, ends_at, status, source, service_name_snapshot, professional_name_snapshot, internal_note, cancelled_reason, patients(full_name, phone_e164, dni, email)';
 
-// Tope por grupo (próximos/anteriores) al buscar con "Cualquier día".
+// Tope de próximos turnos al buscar con "Cualquier día".
 const ANY_DAY_LIMIT = 100;
 
 const isIsoDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
@@ -80,7 +87,8 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 	// Las fechas malformadas caen en "hoy" (antes rompían zonedDateTimeToUtc).
 	const date = !anyDay && isIsoDate(dateParam) ? dateParam : todayForTimezone(business.business.timezone);
 	const professionalId = url.searchParams.get('professional_id') ?? '';
-	const status = url.searchParams.get('status') ?? '';
+	const requestedStatus = url.searchParams.get('status') ?? '';
+	const status = anyDay && !isActiveAppointmentStatus(requestedStatus) ? '' : requestedStatus;
 	const serviceId = url.searchParams.get('service_id') ?? '';
 	const patientId = url.searchParams.get('patient_id') ?? '';
 	const searchApplied =
@@ -101,8 +109,8 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 	let appointmentsError: unknown = null;
 	let anyDayLimited = false;
 	if (anyDay) {
-		// "Cualquier día": los filtros van directo a SQL y se traen dos ventanas
-		// acotadas — próximos (ascendente) y anteriores (descendente).
+		// "Cualquier día" es una vista operativa: sólo devuelve próximos turnos activos.
+		// Los registros históricos siguen disponibles al elegir explícitamente una fecha pasada.
 		const baseQuery = () => {
 			let builder = supabase
 				.from('appointments')
@@ -124,15 +132,15 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 			return builder;
 		};
 		const nowIso = new Date().toISOString();
-		const [upcomingResult, pastResult] = await Promise.all([
-			baseQuery().gte('starts_at', nowIso).order('starts_at').limit(ANY_DAY_LIMIT),
-			baseQuery().lt('starts_at', nowIso).order('starts_at', { ascending: false }).limit(ANY_DAY_LIMIT)
-		]);
-		appointmentsError = upcomingResult.error ?? pastResult.error;
+		const upcomingResult = await baseQuery()
+			.in('status', [...ACTIVE_APPOINTMENT_STATUSES])
+			.gte('starts_at', nowIso)
+			.order('starts_at')
+			.limit(ANY_DAY_LIMIT);
+		appointmentsError = upcomingResult.error;
 		const upcoming = upcomingResult.data ?? [];
-		const past = pastResult.data ?? [];
-		anyDayLimited = upcoming.length === ANY_DAY_LIMIT || past.length === ANY_DAY_LIMIT;
-		dayAppointments = [...upcoming, ...past];
+		anyDayLimited = upcoming.length === ANY_DAY_LIMIT;
+		dayAppointments = upcoming;
 	} else {
 		const dayStart = zonedDateTimeToUtc(date, '00:00', business.business.timezone);
 		const dayEnd = zonedDateTimeToUtc(date, '23:59', business.business.timezone);
@@ -205,7 +213,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 	if (patientId) {
 		const { data: selectedPatient } = await supabase
 			.from('patients')
-			.select('id, full_name, phone_e164, blocked')
+			.select('id, full_name, phone, phone_raw, phone_e164, blocked')
 			.eq('business_id', business.business.id)
 			.eq('id', patientId)
 			.maybeSingle();
@@ -270,6 +278,8 @@ export const actions: Actions = {
 		const patientName = String(form.get('patient_name') ?? '').trim();
 		const patientPhone = String(form.get('patient_phone') ?? '').trim();
 		const patientEmail = String(form.get('patient_email') ?? '').trim();
+		const patientPhoneChanged = form.get('patient_phone_changed') === 'true';
+		const phoneWarningOverride = String(form.get('phone_warning_override') ?? '').trim();
 		const ignoreBreak = form.get('ignore_break') === 'true';
 		const values = {
 			...Object.fromEntries(form),
@@ -304,6 +314,55 @@ export const actions: Actions = {
 				message:
 					'Falta el paciente. Buscá una ficha existente o elegí “Nuevo paciente” y completá sus datos antes de crear el turno.',
 				values
+			});
+		}
+
+		let admin: Awaited<ReturnType<typeof createSupabaseAdminClient>>;
+		try {
+			admin = await createSupabaseAdminClient('odonto', fetch);
+		} catch (adminError) {
+			console.error('Error preparando la creación del turno', adminError);
+			return fail(500, { message: 'No pudimos preparar el turno. Intentá de nuevo.', values });
+		}
+
+		let effectivePatientPhone = patientPhone;
+		if (patientId) {
+			const { data: selectedPatient, error: selectedPatientError } = await admin
+				.from('patients')
+				.select('id, blocked, phone, phone_raw, phone_e164')
+				.eq('business_id', business.business.id)
+				.eq('id', patientId)
+				.maybeSingle();
+			if (selectedPatientError) {
+				console.error('Error validando el teléfono del paciente', selectedPatientError);
+				return fail(500, { message: 'No pudimos comprobar el teléfono. Intentá de nuevo.', values });
+			}
+			if (!selectedPatient) {
+				return fail(404, { message: 'No encontramos al paciente seleccionado.', values });
+			}
+			if (selectedPatient.blocked) {
+				return fail(400, { message: 'Ese paciente está bloqueado.', values });
+			}
+			if (!patientPhoneChanged) {
+				effectivePatientPhone = String(
+					selectedPatient.phone_raw ?? selectedPatient.phone ?? selectedPatient.phone_e164 ?? ''
+				).trim();
+			}
+		}
+
+		const phoneDecision = resolveCommunicationPhoneDecision(
+			effectivePatientPhone,
+			phoneWarningOverride
+		);
+		if (phoneDecision.warning) {
+			return fail(422, {
+				phoneWarning: { kind: phoneDecision.warning },
+				values: {
+					...values,
+					patient_phone: effectivePatientPhone,
+					patient_phone_changed: patientPhoneChanged ? 'true' : 'false',
+					phone_warning_override: ''
+				}
 			});
 		}
 		const startsAt = zonedDateTimeToUtc(date, time, business.business.timezone);
@@ -347,19 +406,38 @@ export const actions: Actions = {
 		}
 
 		try {
-			const admin = await createSupabaseAdminClient('odonto', fetch);
+			if (patientId && patientPhoneChanged) {
+				const normalizedPhone = normalizePhone(effectivePatientPhone);
+				const { data: updatedPatient, error: updatePhoneError } = await admin
+					.from('patients')
+					.update({
+						phone:
+							phoneDecision.normalized?.replace(/\D/g, '') ?? (normalizedPhone || null),
+						phone_raw: normalizePhoneRaw(effectivePatientPhone),
+						phone_e164: phoneDecision.normalized,
+						updated_at: new Date().toISOString()
+					})
+					.eq('business_id', business.business.id)
+					.eq('id', patientId)
+					.select('id')
+					.maybeSingle();
+				if (updatePhoneError) throw updatePhoneError;
+				if (!updatedPatient?.id) throw new Error('PATIENT_NOT_FOUND');
+			}
 			const commonInput = {
 				businessId: business.business.id,
 				ownerId: userId,
 				createdByUserId: userId,
 				patientId: patientId || null,
 				patientName,
-				patientPhone,
+				patientPhone: effectivePatientPhone,
 				patientEmail,
 				serviceId,
 				startsAt,
 				internalNote: String(form.get('internal_note') ?? '').trim() || null,
-				ignoreBreak
+				ignoreBreak,
+				phoneCommunicationStatus: phoneDecision.status,
+				phoneWarningAcknowledged: phoneDecision.acknowledged
 			};
 			const created =
 				bookingMode === 'joint'

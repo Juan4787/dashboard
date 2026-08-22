@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { loginWithSharedSession } from './helpers/shared-auth';
 
 const email = process.env.E2E_EMAIL;
 const password = process.env.E2E_PASSWORD;
@@ -7,11 +8,12 @@ test.describe('Odontologia - flujo base', () => {
 	test.skip(!email || !password, 'Definí E2E_EMAIL y E2E_PASSWORD para correr el test.');
 
 	test('login y navegación principal', async ({ page }) => {
-		await page.goto('/');
-
-		await page.getByLabel('Correo electrónico').fill(email ?? '');
-		await page.getByLabel('Contraseña').fill(password ?? '');
-		await page.locator('form').getByRole('button', { name: 'Ingresar', exact: true }).click();
+		await loginWithSharedSession(page, {
+			email: email ?? '',
+			password: password ?? '',
+			readyLinkNames: ['Agenda'],
+			loginPath: '/'
+		});
 
 		await expect(page.getByRole('link', { name: 'Agenda' })).toBeVisible();
 		await expect(page.getByRole('link', { name: 'Pacientes' })).toBeVisible();

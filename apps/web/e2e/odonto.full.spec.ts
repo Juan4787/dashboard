@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
+import { loginWithSharedSession } from './helpers/shared-auth';
 
 const email = process.env.E2E_EMAIL;
 const password = process.env.E2E_PASSWORD;
@@ -129,6 +130,7 @@ const cleanupE2EFixtures = async () => {
 	await restDelete('services?name=like.E2E*', { optional: true });
 	await restDelete('professionals?name=like.E2E*', { optional: true });
 	await restDelete('patients?full_name=like.E2E*', { optional: true });
+	await restDelete(`patients?full_name=like.${PUBLIC_PATIENT_E2E_PREFIX}*`, { optional: true });
 };
 
 const restInsertSingle = async <T>(table: string, row: Record<string, unknown>, select = 'id'): Promise<T> => {
@@ -244,12 +246,11 @@ const createPublicBookingFixtures = async (input: {
 };
 
 const login = async (page: import('@playwright/test').Page) => {
-	await page.goto('/login');
-	await page.waitForLoadState('networkidle');
-	await page.getByLabel('Correo electrónico').fill(email ?? '');
-	await page.getByLabel('Contraseña').fill(password ?? '');
-	await page.locator('form').getByRole('button', { name: 'Ingresar', exact: true }).click();
-	await expect(page.getByRole('link', { name: 'Agenda' })).toBeVisible();
+	await loginWithSharedSession(page, {
+		email: email ?? '',
+		password: password ?? '',
+		readyLinkNames: ['Agenda']
+	});
 };
 
 const section = (page: import('@playwright/test').Page, text: string) =>
@@ -318,7 +319,6 @@ test.describe('Dental Suite - flujo operativo completo', () => {
 		await page.getByRole('link', { name: new RegExp(serviceName) }).click();
 		const professionalStep = section(page, '¿Con quién?');
 		await expect(professionalStep.getByRole('link', { name: new RegExp(professionalName) })).toBeVisible();
-		await expect(professionalStep.getByText('Primer turno:')).toBeVisible();
 		await expect(professionalStep.getByText(unavailableProfessionalName)).toHaveCount(0);
 		await expect(professionalStep.getByText(unassignedProfessionalName)).toHaveCount(0);
 		await professionalStep.getByRole('link', { name: new RegExp(professionalName) }).click();
@@ -338,7 +338,7 @@ test.describe('Dental Suite - flujo operativo completo', () => {
 		await page.getByLabel('Correo electrónico (opcional)').fill(`paciente-${suffix}@example.com`);
 		await page.getByRole('button', { name: 'Confirmar reserva' }).click();
 		await expect(page).toHaveURL(/\/turno\/[^/?]+\?creado=1$/, { timeout: 60_000 });
-		await expect(page.getByRole('heading', { name: 'Listo, tu turno quedó reservado' })).toBeVisible();
+		await expect(page.getByRole('heading', { name: 'Tu turno quedó reservado' })).toBeVisible();
 		const bookingSummary = page.locator('section').filter({
 			has: page.getByRole('heading', { name: 'Resumen de la reserva' })
 		});

@@ -1,6 +1,7 @@
 import { env } from '$env/dynamic/private';
 import { patientMatchesAgendaQuery } from '$lib/server/agenda-search';
 import { getOdontoContext } from '$lib/server/odonto-context';
+import { ACTIVE_APPOINTMENT_STATUSES } from '$lib/utils/appointment-visibility';
 import { json, redirect } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 
@@ -56,15 +57,16 @@ export const GET: RequestHandler = async ({ url, locals, fetch, cookies }) => {
 			.select(APPOINTMENT_COLUMNS)
 			.eq('business_id', business.business.id)
 			.in('patient_id', matchedIds);
-	const [upcomingResult, pastResult] = await Promise.all([
-		baseQuery().gte('starts_at', nowIso).order('starts_at', { ascending: true }).limit(MAX_RESULTS_PER_GROUP),
-		baseQuery().lt('starts_at', nowIso).order('starts_at', { ascending: false }).limit(MAX_RESULTS_PER_GROUP)
-	]);
-	const appointmentsError = upcomingResult.error ?? pastResult.error;
+	const upcomingResult = await baseQuery()
+		.in('status', [...ACTIVE_APPOINTMENT_STATUSES])
+		.gte('starts_at', nowIso)
+		.order('starts_at', { ascending: true })
+		.limit(MAX_RESULTS_PER_GROUP);
+	const appointmentsError = upcomingResult.error;
 	if (appointmentsError) {
 		console.error('Error buscando turnos en la agenda', appointmentsError);
 		return json({ message: 'No se pudo buscar. Probá de nuevo.' }, { status: 500 });
 	}
 
-	return json({ upcoming: upcomingResult.data ?? [], past: pastResult.data ?? [] });
+	return json({ upcoming: upcomingResult.data ?? [], past: [] });
 };

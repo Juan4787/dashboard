@@ -24,6 +24,7 @@ import {
 	roleSeesAllFollowUps
 } from '$lib/server/follow-ups';
 import { resolvePatientPermissions } from '$lib/server/patient-permissions';
+import { ACTIVE_APPOINTMENT_STATUSES } from '$lib/utils/appointment-visibility';
 
 const getLatestEntryDate = (patientId: string, entries: { patient_id: string; created_at: string }[]) =>
 	entries
@@ -354,11 +355,11 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, dep
 	const context = await resolveActiveBusiness({
 		supabase,
 		accessToken: locals.auth.access_token,
-		cookies,
-		membershipCache: 'short'
+		cookies
 	});
 	if (!context) throw kitError(500, 'No se pudo resolver el negocio activo');
 	const permissions = resolvePatientPermissions(context);
+	const nowIso = new Date().toISOString();
 	const admin = await createSupabaseAdminClient('odonto', fetch);
 	const currentProfessional =
 		context.role === 'professional'
@@ -406,13 +407,15 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, dep
 			.order('created_at', { ascending: false })
 			.order('id', { ascending: false })
 			.limit(ENTRIES_PAGE_SIZE + 1),
-		supabase
-			.from('appointments')
-			.select('id, starts_at, ends_at, status, source, service_name_snapshot, professional_name_snapshot')
-			.eq('patient_id', params.id)
-			.eq('business_id', context.business.id)
-			.order('starts_at', { ascending: false })
-			.limit(12),
+			supabase
+				.from('appointments')
+				.select('id, starts_at, ends_at, status, source, service_name_snapshot, professional_name_snapshot')
+				.eq('patient_id', params.id)
+				.eq('business_id', context.business.id)
+				.in('status', [...ACTIVE_APPOINTMENT_STATUSES])
+				.gte('starts_at', nowIso)
+				.order('starts_at', { ascending: true })
+				.limit(12),
 		context.role === 'professional' && currentProfessional
 			? admin
 					.from('professional_patient_links')

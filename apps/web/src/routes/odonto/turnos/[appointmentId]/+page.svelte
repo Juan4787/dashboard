@@ -27,8 +27,9 @@
 			fromDate: string;
 			justRescheduled: boolean;
 			justCreated: boolean;
-			activationWhatsAppUrl: string | null;
-			activationPublicUrl: string | null;
+				activationWhatsAppUrl: string | null;
+				activationPublicUrl: string | null;
+				phoneWarningAcknowledged: boolean;
 			rescheduleWhatsAppUrl: string | null;
 			reschedulePublicUrl: string | null;
 			demo: boolean;
@@ -313,7 +314,7 @@
 		</p>
 	{/if}
 
-	{#if data.justCreated && data.appointment}
+	{#if data.justCreated && data.appointment && !data.phoneWarningAcknowledged}
 		<section
 			aria-labelledby="activation-title"
 			class="relative overflow-hidden rounded-3xl border border-violet-300/35 bg-[linear-gradient(135deg,rgba(124,58,237,0.2),rgba(7,22,38,0.96)_62%)] p-5 shadow-2xl shadow-violet-950/25 sm:p-7"

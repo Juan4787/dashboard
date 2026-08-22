@@ -19,6 +19,7 @@ import {
 } from '$lib/server/reminders';
 import { publicRescheduleUrl } from '$lib/server/messaging';
 import { shouldOfferCreatedAppointmentActivation } from '$lib/server/agenda-navigation';
+import { normalizeArgentineWhatsAppPhone } from '$lib/server/phone';
 import { error as kitError, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -66,8 +67,9 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 			fromDate: '',
 			justRescheduled: false,
 			justCreated: false,
-			activationWhatsAppUrl: null,
-			activationPublicUrl: null,
+				activationWhatsAppUrl: null,
+				activationPublicUrl: null,
+				phoneWarningAcknowledged: false,
 			rescheduleWhatsAppUrl: null,
 			reschedulePublicUrl: null,
 			demo: true
@@ -78,7 +80,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 	const { data, error } = await supabase
 		.from('appointments')
 		.select(
-			'id, business_id, patient_id, service_id, professional_id, starts_at, ends_at, blocking_starts_at, blocking_ends_at, status, source, confirmation_token, service_name_snapshot, professional_name_snapshot, duration_minutes_snapshot, buffer_before_minutes_snapshot, buffer_after_minutes_snapshot, break_minutes_snapshot, ignore_break, confirmed_at, cancelled_at, cancelled_reason, reschedule_requested_at, attended_at, no_show_at, internal_note, created_by_user_id, updated_by_user_id, cancelled_by_user_id, created_at, updated_at, patients(id, full_name, phone_e164, email, blocked)'
+			'id, business_id, patient_id, service_id, professional_id, starts_at, ends_at, blocking_starts_at, blocking_ends_at, status, source, confirmation_token, service_name_snapshot, professional_name_snapshot, duration_minutes_snapshot, buffer_before_minutes_snapshot, buffer_after_minutes_snapshot, break_minutes_snapshot, ignore_break, confirmed_at, cancelled_at, cancelled_reason, reschedule_requested_at, attended_at, no_show_at, internal_note, phone_communication_status_at_booking, phone_warning_acknowledged_at, created_by_user_id, updated_by_user_id, cancelled_by_user_id, created_at, updated_at, patients(id, full_name, phone_e164, email, blocked)'
 		)
 		.eq('business_id', business.business.id)
 		.eq('id', params.appointmentId)
@@ -143,7 +145,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 	// teléfono E.164 plausible y un token. El enlace privado muestra SOLO el aviso de
 	// reprogramación. El texto va precargado y neutral (sin datos clínicos).
 	const patient = (data as any).patients;
-	const phone = patient?.phone_e164 ? String(patient.phone_e164) : null;
+	const phone = normalizeArgentineWhatsAppPhone(patient?.phone_e164);
 	const token = (data as any).confirmation_token ? String((data as any).confirmation_token) : null;
 	const canNotifyReschedule = ['reserved', 'confirmed', 'reschedule_requested'].includes(data.status);
 	let rescheduleWhatsAppUrl: string | null = null;
@@ -162,6 +164,10 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 		);
 	}
 
+	const phoneWarningAcknowledged =
+		['missing', 'invalid'].includes(
+			String((data as any).phone_communication_status_at_booking)
+		) && Boolean((data as any).phone_warning_acknowledged_at);
 	const justCreated = shouldOfferCreatedAppointmentActivation({
 		requested: url.searchParams.get('created') === '1',
 		source: String(data.source),
@@ -169,7 +175,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 		startsAt: String(data.starts_at),
 		token
 	});
-	const activation = justCreated && token
+	const activation = justCreated && token && !phoneWarningAcknowledged
 		? buildAppointmentActivationDelivery(phone, token)
 		: null;
 
@@ -202,6 +208,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 		justCreated,
 		activationWhatsAppUrl: activation?.whatsappUrl ?? null,
 		activationPublicUrl: activation?.publicUrl ?? null,
+		phoneWarningAcknowledged,
 		rescheduleWhatsAppUrl,
 		reschedulePublicUrl,
 		demo: false

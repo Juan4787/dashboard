@@ -10,7 +10,7 @@ export const GET: RequestHandler = async ({ url, locals, fetch, cookies }) => {
 	if (env.DEMO_MODE === 'true') return json({ patients: [] });
 
 	const query = cleanQuery(url.searchParams.get('q') ?? '');
-	if (query.length < 2) return json({ patients: [] });
+	if (query.length < 1) return json({ patients: [] });
 
 	const { supabase, business } = await getOdontoContext({
 		locals,
@@ -29,7 +29,7 @@ export const GET: RequestHandler = async ({ url, locals, fetch, cookies }) => {
 
 	const { data, error } = await supabase
 		.from('patients')
-		.select('id, full_name, phone_e164, blocked')
+		.select('id, full_name, phone, phone_raw, phone_e164, blocked')
 		.eq('business_id', business.business.id)
 		.is('archived_at', null)
 		.or(filters.join(','))

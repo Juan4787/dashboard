@@ -125,6 +125,42 @@ describe('appointment error messages', () => {
 });
 
 describe('patient identity during appointment creation', () => {
+	it('conserva el texto de un teléfono inválido sin usarlo como identidad ni WhatsApp', async () => {
+		const inserted: Record<string, unknown>[] = [];
+		let lookups = 0;
+		const supabase = {
+			from: (table: string) => {
+				if (table !== 'patients') throw new Error(`Tabla inesperada: ${table}`);
+				return {
+					select: () => {
+						lookups += 1;
+						throw new Error('No debía buscar identidad por un teléfono inválido');
+					},
+					insert: async (payload: Record<string, unknown>) => {
+						inserted.push(payload);
+						return { error: null };
+					}
+				};
+			}
+		};
+
+		await createOrFindPatientForAppointment(supabase as never, {
+			businessId: 'business-1',
+			ownerId: 'owner-1',
+			name: 'Paciente nuevo',
+			phone: '123',
+			communicationPhoneE164: null
+		});
+
+		expect(lookups).toBe(0);
+		expect(inserted).toHaveLength(1);
+		expect(inserted[0]).toMatchObject({
+			phone: '123',
+			phone_raw: '123',
+			phone_e164: null
+		});
+	});
+
 	it('reutiliza la ficha creada por otra reserva simultánea con el mismo teléfono', async () => {
 		let lookups = 0;
 		let inserts = 0;
@@ -172,10 +208,12 @@ describe('patient identity during appointment creation', () => {
 });
 
 describe('joint appointment creation', () => {
-	it('envía una sola operación atómica con todo el equipo y la excepción de descanso', async () => {
+	const createExistingPatientJointMock = () => {
 		const rpcCalls: Array<{ name: string; payload: Record<string, unknown> }> = [];
+		let tableReads = 0;
 		const supabase = {
 			from: (table: string) => {
+				tableReads += 1;
 				if (table !== 'patients') throw new Error(`Tabla inesperada: ${table}`);
 				return {
 					select: () => {
@@ -203,8 +241,13 @@ describe('joint appointment creation', () => {
 				};
 			}
 		};
+		return { supabase: supabase as never, rpcCalls, getTableReads: () => tableReads };
+	};
 
-		const created = await createJointAppointment(supabase as never, {
+	it('envía una sola operación atómica con todo el equipo y la excepción de descanso', async () => {
+		const { supabase, rpcCalls } = createExistingPatientJointMock();
+
+		const created = await createJointAppointment(supabase, {
 			businessId: 'business-1',
 			createdByUserId: 'user-1',
 			patientId: 'patient-1',
@@ -217,7 +260,7 @@ describe('joint appointment creation', () => {
 		expect(created.id).toBe('appointment-1');
 		expect(rpcCalls).toEqual([
 			{
-				name: 'create_joint_appointment_with_source',
+					name: 'create_joint_appointment_with_phone_decision',
 				payload: {
 					p_business_id: 'business-1',
 					p_patient_id: 'patient-1',
@@ -227,10 +270,81 @@ describe('joint appointment creation', () => {
 					p_internal_note: null,
 					p_created_by_user_id: 'user-1',
 					p_ignore_break: true,
-					p_source: 'manual'
+						p_source: 'manual',
+						p_phone_communication_status: 'unknown',
+						p_phone_warning_acknowledged: false
 				}
 			}
 		]);
+	});
+
+	it('no toca pacientes ni crea el turno si falta aceptar la advertencia del teléfono', async () => {
+		const { supabase, rpcCalls, getTableReads } = createExistingPatientJointMock();
+
+		await expect(
+			createJointAppointment(supabase, {
+				businessId: 'business-1',
+				patientId: 'patient-1',
+				patientPhone: '123',
+				serviceId: 'service-1',
+				professionalIds: ['professional-1', 'professional-2'],
+				startsAt: new Date('2026-07-30T13:00:00.000Z'),
+				phoneCommunicationStatus: 'invalid'
+			})
+		).rejects.toThrow('PHONE_WARNING_ACKNOWLEDGEMENT_REQUIRED');
+		expect(getTableReads()).toBe(0);
+		expect(rpcCalls).toHaveLength(0);
+	});
+
+	it('persiste la aceptación explícita y no permite declarar válido un número inválido', async () => {
+		const acknowledged = createExistingPatientJointMock();
+		await createJointAppointment(acknowledged.supabase, {
+			businessId: 'business-1',
+			patientId: 'patient-1',
+			patientPhone: '123',
+			serviceId: 'service-1',
+			professionalIds: ['professional-1', 'professional-2'],
+			startsAt: new Date('2026-07-30T13:00:00.000Z'),
+			phoneCommunicationStatus: 'invalid',
+			phoneWarningAcknowledged: true
+		});
+		expect(acknowledged.rpcCalls[0]?.payload).toMatchObject({
+			p_phone_communication_status: 'invalid',
+			p_phone_warning_acknowledged: true
+		});
+
+		const forged = createExistingPatientJointMock();
+		await expect(
+			createJointAppointment(forged.supabase, {
+				businessId: 'business-1',
+				patientId: 'patient-1',
+				patientPhone: '123',
+				serviceId: 'service-1',
+				professionalIds: ['professional-1', 'professional-2'],
+				startsAt: new Date('2026-07-30T13:00:00.000Z'),
+				phoneCommunicationStatus: 'valid'
+			})
+		).rejects.toThrow('PHONE_COMMUNICATION_STATUS_MISMATCH');
+		expect(forged.getTableReads()).toBe(0);
+	});
+
+	it('mantiene compatibles las reservas públicas con teléfonos externos no clasificables', async () => {
+		const { supabase, rpcCalls } = createExistingPatientJointMock();
+		await createJointAppointment(supabase, {
+			businessId: 'business-1',
+			patientId: 'patient-1',
+			patientPhone: '+598 99 123 456',
+			serviceId: 'service-1',
+			professionalIds: ['professional-1', 'professional-2'],
+			startsAt: new Date('2026-07-30T13:00:00.000Z'),
+			source: 'public_booking'
+		});
+
+		expect(rpcCalls[0]?.payload).toMatchObject({
+			p_source: 'public_booking',
+			p_phone_communication_status: 'unknown',
+			p_phone_warning_acknowledged: false
+		});
 	});
 });
 

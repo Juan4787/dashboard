@@ -3,6 +3,7 @@ import { demoBusinessContext } from '$lib/server/business';
 import { getHumanAppointmentErrorMessage, updateProfessionalAppointmentStatus } from '$lib/server/appointments';
 import { getOdontoContext } from '$lib/server/odonto-context';
 import { zonedDateTimeToUtc } from '$lib/server/availability';
+import { ACTIVE_APPOINTMENT_STATUSES } from '$lib/utils/appointment-visibility';
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -69,9 +70,10 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 					.select(
 						'id, starts_at, ends_at, status, source, service_name_snapshot, professional_name_snapshot, patients(id, full_name, phone_e164), appointment_professionals!inner(professional_id)'
 					)
-					.eq('business_id', business.business.id)
-					.in('appointment_professionals.professional_id', visibleProfessionalIds)
-					.gt('starts_at', dayEnd.toISOString())
+						.eq('business_id', business.business.id)
+						.in('appointment_professionals.professional_id', visibleProfessionalIds)
+						.in('status', [...ACTIVE_APPOINTMENT_STATUSES])
+						.gt('starts_at', dayEnd.toISOString())
 					.order('starts_at')
 					.limit(30)
 			: { data: [] };

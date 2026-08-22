@@ -8,6 +8,10 @@ import {
 	LEGACY_PATIENT_NAME_CONFLICT_MESSAGE,
 	PATIENT_UNIQUE_CONFLICT_MESSAGES
 } from './patient-identity';
+import {
+	classifyCommunicationPhone,
+	type CommunicationPhoneStatus
+} from '$lib/utils/communication-phone';
 
 export const APPOINTMENT_STATUSES = [
 	'reserved',
@@ -55,6 +59,45 @@ const transitionMap: Record<AppointmentStatus, AppointmentStatus[]> = {
 
 export const isTerminalAppointmentStatus = (status: AppointmentStatus) =>
 	status === 'cancelled' || status === 'attended' || status === 'no_show';
+
+const resolvePhoneDecision = (input: {
+	patientId?: string | null;
+	patientPhone?: string | null;
+	source?: AppointmentSource;
+	phoneCommunicationStatus?: CommunicationPhoneStatus;
+	phoneWarningAcknowledged?: boolean;
+}) => {
+	const classifiedPhone = classifyCommunicationPhone(input.patientPhone);
+	let status: CommunicationPhoneStatus | 'unknown';
+	if (input.phoneCommunicationStatus) {
+		status = input.phoneCommunicationStatus;
+		if (status !== classifiedPhone.status) {
+			throw new Error('PHONE_COMMUNICATION_STATUS_MISMATCH');
+		}
+	} else if ((input.source ?? 'manual') !== 'manual') {
+		// Los flujos externos anteriores a esta decisión no tienen una instancia
+		// de confirmación manual. Sólo afirmamos "valid" si pasan la regla estricta;
+		// el resto queda neutral y los canales vuelven a validar antes de enviar.
+		status = classifiedPhone.status === 'valid' ? 'valid' : 'unknown';
+	} else if (!String(input.patientPhone ?? '').trim() && input.patientId) {
+		// Compatibilidad para invocaciones internas legadas que sólo aportan la ficha.
+		status = 'unknown';
+	} else {
+		status = classifiedPhone.status;
+	}
+	const acknowledged = input.phoneWarningAcknowledged === true;
+	if ((status === 'missing' || status === 'invalid') && !acknowledged) {
+		throw new Error('PHONE_WARNING_ACKNOWLEDGEMENT_REQUIRED');
+	}
+	if ((status === 'valid' || status === 'unknown') && acknowledged) {
+		throw new Error('PHONE_WARNING_ACKNOWLEDGEMENT_UNEXPECTED');
+	}
+	return {
+		status,
+		acknowledged,
+		normalized: status === 'valid' ? classifiedPhone.normalized : null
+	};
+};
 
 export const assertCanTransitionAppointment = (input: {
 	currentStatus: AppointmentStatus;
@@ -200,6 +243,7 @@ export const createOrFindPatientForAppointment = async (
 		patientId?: string | null;
 		name?: string | null;
 		phone?: string | null;
+		communicationPhoneE164?: string | null;
 		email?: string | null;
 	}
 ) => {
@@ -218,7 +262,10 @@ export const createOrFindPatientForAppointment = async (
 
 	const fullName = String(input.name ?? '').trim();
 	const phoneRaw = normalizePhoneRaw(input.phone);
-	const phoneE164 = normalizePhoneE164(input.phone);
+	const phoneE164 =
+		input.communicationPhoneE164 === undefined
+			? normalizePhoneE164(input.phone)
+			: input.communicationPhoneE164;
 	const email = String(input.email ?? '').trim();
 
 	if (!fullName) {
@@ -290,14 +337,19 @@ export const createManualAppointment = async (
 		internalNote?: string | null;
 		source?: AppointmentSource;
 		ignoreBreak?: boolean;
+		phoneCommunicationStatus?: CommunicationPhoneStatus;
+		phoneWarningAcknowledged?: boolean;
 	}
 ) => {
+	const phoneDecision = resolvePhoneDecision(input);
 	const patientId = await createOrFindPatientForAppointment(supabase, {
 		businessId: input.businessId,
 		ownerId: input.ownerId,
 		patientId: input.patientId,
 		name: input.patientName,
 		phone: input.patientPhone,
+		communicationPhoneE164:
+			phoneDecision.status === 'unknown' ? undefined : phoneDecision.normalized,
 		email: input.patientEmail
 	});
 
@@ -333,7 +385,11 @@ export const createManualAppointment = async (
 			updated_by_user_id: input.createdByUserId ?? null,
 			service_name_snapshot: 'Pendiente',
 			professional_name_snapshot: 'Pendiente',
-			duration_minutes_snapshot: Number(service.duration_minutes)
+			duration_minutes_snapshot: Number(service.duration_minutes),
+			phone_communication_status_at_booking: phoneDecision.status,
+			phone_warning_acknowledged_at: phoneDecision.acknowledged
+				? new Date().toISOString()
+				: null
 		})
 		.select(
 			'id, confirmation_token, starts_at, ends_at, service_name_snapshot, professional_name_snapshot'
@@ -353,7 +409,9 @@ export const createManualAppointment = async (
 			patient_id: patientId,
 			service_id: input.serviceId,
 			professional_id: input.professionalId,
-			starts_at: input.startsAt.toISOString()
+			starts_at: input.startsAt.toISOString(),
+			phone_communication_status_at_booking: phoneDecision.status,
+			phone_warning_acknowledged: phoneDecision.acknowledged
 		}
 	});
 
@@ -376,8 +434,11 @@ export const createJointAppointment = async (
 		internalNote?: string | null;
 		ignoreBreak?: boolean;
 		source?: AppointmentSource;
+		phoneCommunicationStatus?: CommunicationPhoneStatus;
+		phoneWarningAcknowledged?: boolean;
 	}
 ) => {
+	const phoneDecision = resolvePhoneDecision(input);
 	const professionalIds = [
 		...new Set(input.professionalIds.map((professionalId) => professionalId.trim()).filter(Boolean))
 	];
@@ -391,11 +452,13 @@ export const createJointAppointment = async (
 		patientId: input.patientId,
 		name: input.patientName,
 		phone: input.patientPhone,
+		communicationPhoneE164:
+			phoneDecision.status === 'unknown' ? undefined : phoneDecision.normalized,
 		email: input.patientEmail
 	});
 
 	const { data, error } = await supabase
-		.rpc('create_joint_appointment_with_source', {
+		.rpc('create_joint_appointment_with_phone_decision', {
 			p_business_id: input.businessId,
 			p_patient_id: patientId,
 			p_service_id: input.serviceId,
@@ -404,7 +467,9 @@ export const createJointAppointment = async (
 			p_internal_note: input.internalNote || null,
 			p_created_by_user_id: input.createdByUserId ?? null,
 			p_ignore_break: Boolean(input.ignoreBreak),
-			p_source: input.source ?? 'manual'
+			p_source: input.source ?? 'manual',
+			p_phone_communication_status: phoneDecision.status,
+			p_phone_warning_acknowledged: phoneDecision.acknowledged
 		})
 		.single();
 	if (error) throw error;

@@ -7,6 +7,7 @@
 	import OdontoRouteSkeleton from '$lib/components/skeleton/OdontoRouteSkeleton.svelte';
 	import FollowUpsNotice from '$lib/components/seguimientos/FollowUpsNotice.svelte';
 	import { formatAccessRemaining, formatDateTime } from '$lib/utils/format';
+	import { allowsRestrictedClinicalRead } from '$lib/utils/restricted-clinical-read';
 
 	let { data, children } = $props();
 	let mobileMenuOpen = $state(false);
@@ -168,6 +169,20 @@
 			access.commercialStatus === 'archived'
 		);
 	});
+	const restrictedClinicalReadContext = $derived({
+		role: activeBusiness?.role,
+		commercialStatus: activeBusiness?.access?.commercialStatus,
+		commercialAccessEnabled: activeBusiness?.access?.commercialAccessEnabled,
+		canEnterApp: activeBusiness?.access?.canEnterApp
+	});
+	const restrictedClinicalReadAvailable = $derived.by(() =>
+		allowsRestrictedClinicalRead('/odonto/pacientes', restrictedClinicalReadContext)
+	);
+	const restrictedClinicalReadRouteAllowed = $derived.by(() =>
+		allowsRestrictedClinicalRead($page.url.pathname, {
+			...restrictedClinicalReadContext
+		})
+	);
 	const shouldShowMissingAddress = $derived.by(() => {
 		if (isMasterPage || commercialAccessRestricted || !activeBusiness?.access?.canUseBusiness) return false;
 		if (activeBusiness.role !== 'owner' && activeBusiness.role !== 'admin') return false;
@@ -192,6 +207,7 @@
 		// autoservicio para activar o volver a pagar con Mercado Pago.
 		if ($page.url.pathname.startsWith('/odonto/configuracion/suscripcion')) return true;
 		if ($page.url.pathname.startsWith('/odonto/pago/procesando')) return true;
+		if (restrictedClinicalReadRouteAllowed) return true;
 		return false;
 	});
 	const commercialLockActive = $derived(commercialAccessRestricted && !routeAllowsCommercialBypass);
@@ -220,7 +236,11 @@
 	const visibleNav = $derived.by(() => {
 		if (isMasterPage) return [];
 		if (!activeBusiness || accountPendingManualSetup) return [];
-		if (commercialAccessRestricted) return [];
+		if (commercialAccessRestricted) {
+			return restrictedClinicalReadAvailable
+				? dailyNav.filter((item) => item.label === 'Pacientes')
+				: [];
+		}
 		if (activeBusiness?.role === 'professional') {
 			return professionalNav;
 		}

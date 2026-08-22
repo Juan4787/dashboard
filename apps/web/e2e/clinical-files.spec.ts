@@ -335,7 +335,76 @@ test.describe('Archivos clínicos privados', () => {
 			'/storage/v1/object/sign/patient-clinical-files/'
 		);
 		await expect.poll(() => ownerViewer.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(1);
-		await page.getByLabel('Cerrar modal').last().getByRole('button', { name: 'Cerrar' }).click();
+		const ownerViewerDialog = page.getByRole('dialog', { name: description });
+		const ownerViewerBox = await ownerViewerDialog.boundingBox();
+		expect(ownerViewerBox?.width ?? 0).toBeGreaterThan(page.viewportSize()!.width * 0.9);
+		expect(ownerViewerBox?.height ?? 0).toBeGreaterThan(page.viewportSize()!.height * 0.9);
+		const desktopZoom = ownerViewerDialog.getByRole('group', { name: 'Controles de zoom' });
+		await desktopZoom.getByRole('button', { name: 'Acercar imagen' }).click();
+		await expect(desktopZoom.getByLabel('Nivel de zoom')).toHaveText('140%');
+		await desktopZoom.getByRole('button', { name: 'Ajustar' }).click();
+		await expect(desktopZoom.getByLabel('Nivel de zoom')).toHaveText('Ajustada');
+		await ownerViewerDialog.getByRole('button', { name: 'Cerrar visor' }).click();
+
+		const mobileContext = await browser.newContext({
+			viewport: { width: 390, height: 844 },
+			deviceScaleFactor: 1,
+			isMobile: true,
+			hasTouch: true
+		});
+		try {
+			const mobilePage = await mobileContext.newPage();
+			await login(mobilePage, fixture.ownerEmail);
+			await mobilePage.goto(`/odonto/pacientes/${fixture.patientId}?tab=radiografias`);
+			await mobilePage.getByRole('button', { name: 'Ver imagen' }).click();
+			const mobileViewerDialog = mobilePage.getByRole('dialog', { name: description });
+			await expect(mobileViewerDialog).toBeVisible();
+			const mobileViewerBox = await mobileViewerDialog.boundingBox();
+			expect(mobileViewerBox?.width ?? 0).toBeGreaterThanOrEqual(390);
+			expect(mobileViewerBox?.width ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(391);
+			expect(mobileViewerBox?.height ?? 0).toBeGreaterThanOrEqual(844);
+			await expect(mobileViewerDialog.getByText('Pellizcá para ampliar')).toBeVisible();
+			const touchControls = mobileViewerDialog.locator('.clinical-viewer-touch-controls');
+			const touchZoom = touchControls.getByLabel('Nivel de zoom');
+			await expect(touchZoom).toHaveText('Ajustada');
+
+			const stage = mobileViewerDialog.getByRole('group', {
+				name: 'Área de observación de la imagen'
+			});
+			const stageBox = await stage.boundingBox();
+			if (!stageBox) throw new Error('El lienzo clínico móvil no tiene dimensiones.');
+			const centerX = stageBox.x + stageBox.width / 2;
+			const centerY = stageBox.y + stageBox.height / 2;
+			const cdp = await mobileContext.newCDPSession(mobilePage);
+			await cdp.send('Input.dispatchTouchEvent', {
+				type: 'touchStart',
+				touchPoints: [
+					{ x: centerX - 40, y: centerY, id: 1 },
+					{ x: centerX + 40, y: centerY, id: 2 }
+				]
+			});
+			await cdp.send('Input.dispatchTouchEvent', {
+				type: 'touchMove',
+				touchPoints: [
+					{ x: centerX - 90, y: centerY, id: 1 },
+					{ x: centerX + 90, y: centerY, id: 2 }
+				]
+			});
+			await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+			await expect
+				.poll(async () => Number.parseInt((await touchZoom.textContent()) ?? '0', 10))
+				.toBeGreaterThan(150);
+			expect(
+				await mobileViewerDialog.evaluate((dialog) => dialog.scrollWidth <= dialog.clientWidth)
+			).toBe(true);
+			await expect(mobileViewerDialog.getByRole('button', { name: 'Cerrar visor' })).toBeInViewport();
+			await expect(touchControls.getByRole('button', { name: 'Restablecer' })).toBeInViewport();
+			await touchControls.getByRole('button', { name: 'Restablecer' }).click();
+			await expect(touchZoom).toHaveText('Ajustada');
+			await mobileViewerDialog.getByRole('button', { name: 'Cerrar visor' }).click();
+		} finally {
+			await mobileContext.close();
+		}
 
 		const professionalContext = await browser.newContext();
 		const professionalPage = await professionalContext.newPage();
@@ -354,9 +423,8 @@ test.describe('Archivos clínicos privados', () => {
 			.poll(() => professionalViewer.evaluate((image: HTMLImageElement) => image.naturalWidth))
 			.toBe(1);
 		await professionalPage
-			.getByLabel('Cerrar modal')
-			.last()
-			.getByRole('button', { name: 'Cerrar' })
+			.getByRole('dialog', { name: description })
+			.getByRole('button', { name: 'Cerrar visor' })
 			.click();
 		await professionalPage.locator('input[type="file"]:not([capture])').setInputFiles({
 			name: professionalFilename,
@@ -412,6 +480,21 @@ test.describe('Archivos clínicos privados', () => {
 			)
 		).toBeVisible();
 		await expect(page.getByRole('button', { name: 'Restaurar' })).toHaveCount(0);
+		await page.goto('/odonto/agenda');
+		await expect(page.getByRole('heading', { name: 'Tu acceso a Cita Suite venció' })).toBeVisible();
+		await page.getByRole('link', { name: 'Pacientes', exact: true }).click();
+		await expect(page).toHaveURL(/\/odonto\/pacientes$/);
+		await expect(page.getByRole('heading', { name: 'Pacientes', exact: true })).toBeVisible();
+
+		await page.goto(`/odonto/pacientes/${fixture.patientId}?tab=radiografias`);
+		await expect(page.getByRole('heading', { name: professionalDescription })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Añadir imagen' })).toHaveCount(0);
+		await expect(page.getByRole('button', { name: 'Mover a papelera' })).toHaveCount(0);
+		await page.getByRole('button', { name: 'Ver imagen' }).click();
+		const restrictedViewerDialog = page.getByRole('dialog', { name: professionalDescription });
+		await expect(restrictedViewerDialog.getByRole('img', { name: professionalDescription })).toBeVisible();
+		await restrictedViewerDialog.getByRole('button', { name: 'Cerrar visor' }).click();
+		await page.goto('/odonto/pacientes/papelera');
 
 		await must(
 			admin

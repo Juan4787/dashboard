@@ -579,3 +579,73 @@ recuperación, exportación y purga controlada. Su diseño deberá contemplar, d
 - purga física en Supabase y backup, con autorización fuerte y auditoría.
 
 Hasta que todo eso exista y se pruebe, no debe agregarse ninguna forma de eliminación definitiva.
+
+## Evolución posterior: visor clínico de detalle — 22 de agosto de 2026
+
+Esta evolución está implementada y validada en el worktree aislado, pero no fue publicada como
+parte de este pedido. No modifica el bucket, las rutas de Storage, la metadata, las políticas RLS
+ni los contratos de autorización. El original continúa obteniéndose mediante una URL firmada de
+corta duración y sólo después de que Cita Suite vuelve a autorizar al usuario y al paciente.
+
+### Decisiones de experiencia clínica
+
+- El modal genérico fue reemplazado únicamente para la observación de imágenes por un visor
+  dedicado. Los diálogos de carga y Papelera siguen usando el componente común.
+- En escritorio el visor ocupa más del 90 % del ancho y alto disponibles. Mantiene título, fecha,
+  formato y peso en una cabecera compacta, y reserva el resto para la imagen sobre un fondo oscuro.
+- Los controles de escritorio incluyen lupa para acercar y alejar, porcentaje visible, `Ajustar`,
+  rueda del mouse con anclaje bajo el cursor y arrastre de la imagen ampliada. El rango está
+  limitado entre 100 % y 800 %.
+- El teclado admite `+`, `-`, `0`, flechas, `Shift` + flechas y `Escape`. El foco queda atrapado
+  dentro del diálogo y vuelve al botón `Ver imagen` que lo abrió al cerrar.
+- En mobile el visor ocupa exactamente el viewport. Dos punteros controlan el pellizco alrededor
+  de su punto medio y un puntero recorre la imagen ampliada. El porcentaje y `Restablecer`
+  permanecen siempre visibles; el lienzo usa `touch-action: none` para que el navegador no capture
+  el gesto destinado al análisis clínico.
+- El límite de arrastre se calcula con las dimensiones reales de la imagen ajustada, no con las
+  bandas vacías del viewport. Una panorámica horizontal o una placa vertical no puede perderse
+  fuera del área observable al ampliar.
+- Cambios de orientación o tamaño recalculan el ajuste y acotan nuevamente la posición sin bajar
+  el zoom elegido. Cerrar o cargar otra imagen siempre restablece la vista a 100 %.
+- Si falla la descarga o la decodificación, el visor muestra una explicación humana y `Reintentar`;
+  el reintento solicita otra URL firmada en vez de reutilizar una vencida.
+- No se agregaron edición, recorte, rotación, filtros, anotaciones ni descarga. El alcance es
+  deliberadamente observacional.
+
+### Continuidad de lectura comercial
+
+La auditoría E2E reveló que la autorización clínica ya permitía a Dueño y Administrador consultar
+archivos durante el período restringido, pero el bloqueo visual global ocultaba esas superficies.
+Se cerró la divergencia con una excepción estrecha y verificable:
+
+- sólo Dueño y Administrador;
+- sólo una cuenta `restricted` que aún puede entrar, nunca una cuenta archivada o deshabilitada;
+- sólo lista de pacientes, una ficha cuyo identificador tenga forma UUID y Papelera;
+- navegación visible únicamente hacia `Pacientes`;
+- sin alta, edición, carga, envío a Papelera ni restauración.
+
+La ficha del paciente dejó además de usar el caché compartido de 12 segundos para resolver sus
+permisos. Su lectura comercial ahora es fresca, evitando que un botón de carga permanezca visible
+brevemente después de que la cuenta pasa a modo restringido. Los endpoints y RLS ya bloqueaban la
+operación; este cambio alinea inmediatamente la interfaz con esa seguridad.
+
+### Validación de esta evolución
+
+Se ejecutó todo en secuencia y con un solo worker cuando correspondía:
+
+- `pnpm check`: 0 errores y 0 advertencias;
+- Vitest de servidor: 77 archivos y 626 pruebas aprobadas;
+- Vitest de cliente: 3 archivos y 36 pruebas aprobadas, incluidas geometría, límites, anclaje y
+  punto medio móvil;
+- Playwright de archivos clínicos: 2 de 2 casos aprobados, con visor mayor al 90 % en escritorio,
+  viewport exacto de 390 × 844, pellizco real mediante eventos táctiles, zoom superior al 150 %,
+  restablecimiento, ausencia de overflow, controles dentro del viewport, lectura compartida del
+  profesional y continuidad restringida de Dueño;
+- Playwright de bloqueo comercial: 2 de 2 casos aprobados en escritorio y mobile;
+- `pnpm build` y `node scripts/netlify-build.mjs`: aprobados;
+- `pnpm audit --audit-level high`: sin vulnerabilidades conocidas;
+- inspección visual manual en 1280 × 720 y 390 × 844: cabecera, lienzo, lupa, cierre, ayuda táctil,
+  porcentaje y restablecimiento quedaron legibles y dentro de pantalla.
+
+No se agregó ninguna dependencia ni migración. Backup externo, recuperación, exportación y purga
+controlada continúan íntegramente en fase 2.

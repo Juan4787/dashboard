@@ -15,6 +15,7 @@ const rows = (label: string) => ({
 	totalCount: 1,
 	activeCount: 1,
 	archivedCount: 0,
+	countsIncluded: true,
 	countsSource: 'rpc' as const,
 	hasMore: false,
 	nextCursor: null,
@@ -29,9 +30,9 @@ const revision = (value: string) => ({
 });
 
 describe('stable patient list revision', () => {
-	it('starts global search at two trimmed characters and caps its input', () => {
+	it('starts global search at one trimmed character and caps its input', () => {
 		expect(normalizePatientListQuery(null)).toBe('');
-		expect(normalizePatientListQuery(' a ')).toBe('');
+		expect(normalizePatientListQuery(' a ')).toBe('a');
 		expect(normalizePatientListQuery(' an ')).toBe('an');
 		expect(normalizePatientListQuery(`  ${'x'.repeat(100)}  `)).toHaveLength(80);
 	});

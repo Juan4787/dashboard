@@ -6,7 +6,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { writeAuditLog } from './audit';
 import { getBusinessAccessState, type BusinessSubscriptionRow } from './commercial-access';
 import { hmacSha256HexMatches } from './hmac';
-import { normalizePhoneE164 } from './phone';
+import { normalizeArgentineWhatsAppPhone, normalizePhoneE164 } from './phone';
 
 export const MESSAGE_DISPATCH_STATUSES = [
 	'scheduled',
@@ -542,7 +542,8 @@ export const generateReminderDispatches = async (
 				skipped += 1;
 				continue;
 			}
-			if (!patient?.phone_e164 || patient.blocked) {
+			const communicationPhone = normalizeArgentineWhatsAppPhone(patient?.phone_e164);
+			if (!communicationPhone || patient.blocked) {
 				skipped += 1;
 				continue;
 			}
@@ -576,7 +577,7 @@ export const generateReminderDispatches = async (
 				provider: account.provider,
 				channel: 'whatsapp',
 				type: REMINDER_TEMPLATE_NAME,
-				to_phone_e164: patient.phone_e164,
+				to_phone_e164: communicationPhone,
 				status: 'queued',
 				scheduled_for: row.reminder_due_at,
 				queued_at: nowIso,
@@ -710,6 +711,13 @@ export const processQueuedMessageDispatches = async (
 				throw new Error('TEMPLATE_NOT_APPROVED');
 			}
 
+			const communicationPhone = normalizeArgentineWhatsAppPhone(dispatch.to_phone_e164);
+			if (!communicationPhone) {
+				await skipDispatch(supabase, dispatch, 'PHONE_NOT_USABLE', now);
+				skipped += 1;
+				continue;
+			}
+
 			const provider = providerForAccount(account as MessagingAccount);
 			const variables = Array.isArray(dispatch.template_variables)
 				? (dispatch.template_variables as string[])
@@ -718,14 +726,14 @@ export const processQueuedMessageDispatches = async (
 				dispatch.type === 'appointment_reminder_24h' && template
 					? await provider.sendTemplate({
 							account: account as MessagingAccount,
-							to: dispatch.to_phone_e164,
+							to: communicationPhone,
 							templateName: template.name,
 							language: template.language,
 							variables
 						})
 					: await provider.sendFreeForm({
 							account: account as MessagingAccount,
-							to: dispatch.to_phone_e164,
+							to: communicationPhone,
 							text: dispatch.message_body ?? ''
 						});
 

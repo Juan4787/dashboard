@@ -181,6 +181,8 @@ const createFixture = async (admin: SupabaseClient): Promise<Fixture> => {
 		}
 	}
 
+	const firstPatientPhone = `+54911${Math.floor(10000000 + Math.random() * 90000000)}`;
+	const secondPatientPhone = `+54911${Math.floor(10000000 + Math.random() * 90000000)}`;
 	const [patient, secondPatient] = await Promise.all([
 		must(
 			admin
@@ -189,9 +191,9 @@ const createFixture = async (admin: SupabaseClient): Promise<Fixture> => {
 					business_id: business.id,
 					owner_id: ownerUserId,
 					full_name: `E2E Paciente ${suffix}`,
-					phone: `549111${Math.floor(100000 + Math.random() * 899999)}`,
-					phone_raw: `+549111${Math.floor(100000 + Math.random() * 899999)}`,
-					phone_e164: `+549111${Math.floor(100000 + Math.random() * 899999)}`
+					phone: firstPatientPhone.replace(/\D/g, ''),
+					phone_raw: firstPatientPhone,
+					phone_e164: firstPatientPhone
 				})
 				.select('id')
 				.single()
@@ -203,9 +205,9 @@ const createFixture = async (admin: SupabaseClient): Promise<Fixture> => {
 					business_id: business.id,
 					owner_id: ownerUserId,
 					full_name: `E2E Paciente Dos ${suffix}`,
-					phone: `549112${Math.floor(100000 + Math.random() * 899999)}`,
-					phone_raw: `+549112${Math.floor(100000 + Math.random() * 899999)}`,
-					phone_e164: `+549112${Math.floor(100000 + Math.random() * 899999)}`
+					phone: secondPatientPhone.replace(/\D/g, ''),
+					phone_raw: secondPatientPhone,
+					phone_e164: secondPatientPhone
 				})
 				.select('id')
 				.single()
@@ -284,6 +286,24 @@ const postAction = async (
 		},
 		{ url, fields }
 	);
+
+const expectAppointmentCreated = (result: { status: number; text: string; url: string }) => {
+	let actionResult: { type?: string; status?: number; location?: string } | null = null;
+	try {
+		actionResult = JSON.parse(result.text) as {
+			type?: string;
+			status?: number;
+			location?: string;
+		};
+	} catch {
+		// La aserción inferior conserva un diagnóstico breve si el contrato cambia.
+	}
+	expect(
+		actionResult,
+		`La acción no creó el turno (HTTP ${result.status}): ${result.text.slice(0, 800)}`
+	).toMatchObject({ type: 'redirect', status: 303 });
+	expect(actionResult?.location).toMatch(/\/odonto\/turnos\/[0-9a-f-]+\?.*created=1/);
+};
 
 const openDayAppointmentsPanel = async (page: Page) => {
 	const heading = page.getByRole('heading', { name: /Turnos del día|Resultado de búsqueda/ });
@@ -483,7 +503,7 @@ test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 			time: '10:30',
 			patient_id: fixture.secondPatientId
 		});
-		expect(createOtherProfessionalAppointment.status).toBeLessThan(500);
+		expectAppointmentCreated(createOtherProfessionalAppointment);
 
 		const createAppointment = await postAction(page, '/odonto/agenda?/create_appointment', {
 			service_id: fixture.serviceId,
@@ -492,7 +512,7 @@ test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 			time: '09:00',
 			patient_id: fixture.patientId
 		});
-		expect(createAppointment.status).toBeLessThan(500);
+		expectAppointmentCreated(createAppointment);
 
 		const { data: appointment } = await admin
 			.from('appointments')
@@ -559,9 +579,9 @@ test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 			date: fixture.date,
 			time: '10:30',
 			patient_name: `E2E Bloqueo ${fixture.suffix}`,
-			patient_phone: `+549113${Math.floor(100000 + Math.random() * 899999)}`
+			patient_phone: `+54911${Math.floor(10000000 + Math.random() * 90000000)}`
 		});
-		expect(createSameProfessionalBlock.status).toBeLessThan(500);
+		expectAppointmentCreated(createSameProfessionalBlock);
 
 		await page.goto(`/odonto/turnos/${appointment?.id}?from_date=${fixture.date}&reprogram_date=${fixture.date}`);
 		const reprogramPanelAfterBlock = await openReprogramPanel(page);
@@ -634,7 +654,7 @@ test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 		await wizard.getByText(`E2E Paciente ${fixture.suffix}`, { exact: true }).click();
 		await Promise.all([
 			page.waitForURL(/\/odonto\/turnos\/[0-9a-f-]+/),
-			wizard.getByRole('button', { name: 'Crear turno conjunto', exact: true }).click()
+			wizard.getByRole('button', { name: 'Confirmar turno conjunto', exact: true }).click()
 		]);
 
 		const jointId = page.url().match(/\/odonto\/turnos\/([0-9a-f-]+)/)?.[1];

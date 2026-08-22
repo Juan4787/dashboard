@@ -1,6 +1,7 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
+import { loginWithSharedSession } from './helpers/shared-auth';
 
 // E2E exhaustivo de Seguimientos (feature nueva sin cobertura previa).
 // - Credenciales SOLO por env (E2E_EMAIL / E2E_PASSWORD); nunca hardcodeadas.
@@ -11,6 +12,7 @@ import path from 'node:path';
 
 const email = process.env.E2E_EMAIL;
 const password = process.env.E2E_PASSWORD;
+const businessId = process.env.CITA_SUITE_TEST_BUSINESS_ID;
 
 const E2E_TAG = 'E2E-SEG';
 const marker = `${E2E_TAG}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -52,23 +54,6 @@ const restHeaders = (key: string) => ({
 	'content-type': 'application/json'
 });
 
-const clearLocalLoginRateLimits = async () => {
-	const { url, key } = restEnv();
-	if (!url || !key || (!url.startsWith('http://127.0.0.1') && !url.startsWith('http://localhost'))) {
-		return;
-	}
-	const response = await fetch(
-		`${url}/rest/v1/server_rate_limit_events?action=in.(login_password_by_email,login_password_by_ip)`,
-		{
-			method: 'DELETE',
-			headers: { ...restHeaders(key), prefer: 'return=minimal' }
-		}
-	);
-	if (!response.ok) {
-		throw new Error(`No se pudo limpiar el rate limit de login local: ${await response.text()}`);
-	}
-};
-
 /** Borra los follow_ups de esta corrida (marcador en message). Idempotente. */
 const cleanupFollowUps = async () => {
 	const { url, key } = restEnv();
@@ -85,7 +70,9 @@ const anyPatientName = async (): Promise<string | null> => {
 	const { url, key } = restEnv();
 	if (!url || !key) return null;
 	const res = await fetch(
-		`${url}/rest/v1/patients?select=full_name&archived_at=is.null&order=updated_at.desc&limit=1`,
+		`${url}/rest/v1/patients?select=full_name&business_id=eq.${encodeURIComponent(
+			businessId ?? ''
+		)}&archived_at=is.null&order=updated_at.desc&limit=1`,
 		{ headers: restHeaders(key) }
 	);
 	if (!res.ok) return null;
@@ -96,15 +83,11 @@ const anyPatientName = async (): Promise<string | null> => {
 
 // ---------- login adaptivo (owner/admin/reception → Agenda; professional → Mis turnos) ----------
 const login = async (page: Page) => {
-	await clearLocalLoginRateLimits();
-	await page.goto('/login');
-	await page.waitForLoadState('networkidle');
-	await page.getByLabel('Correo electrónico').fill(email ?? '');
-	await page.getByLabel('Contraseña').fill(password ?? '');
-	await page.locator('form').getByRole('button', { name: 'Ingresar', exact: true }).click();
-	await expect(
-		page.getByRole('link', { name: 'Agenda' }).or(page.getByRole('link', { name: 'Mis turnos' }))
-	).toBeVisible({ timeout: 15_000 });
+	await loginWithSharedSession(page, {
+		email: email ?? '',
+		password: password ?? '',
+		readyLinkNames: ['Agenda', 'Mis turnos']
+	});
 };
 
 const openFollowUpDialog = async (page: Page) => {
@@ -121,14 +104,27 @@ const openFollowUpDialog = async (page: Page) => {
 test.describe.configure({ mode: 'serial' });
 
 test.describe('Seguimientos — cobertura E2E', () => {
-	test.skip(!email || !password, 'Definí E2E_EMAIL y E2E_PASSWORD para correr estos tests.');
+	test.skip(
+		!email || !password || !businessId,
+		'Definí E2E_EMAIL, E2E_PASSWORD y CITA_SUITE_TEST_BUSINESS_ID para correr estos tests.'
+	);
 	test.skip(process.env.DEMO_MODE === 'true', 'Seguimientos no aplica en modo demo.');
 
-	test.beforeAll(cleanupFollowUps);
-	test.afterAll(cleanupFollowUps);
+	let context: BrowserContext;
+	let page: Page;
 
-	test('la sección Seguimientos está en el menú y renderiza', async ({ page }) => {
+	test.beforeAll(async ({ browser }) => {
+		await cleanupFollowUps();
+		context = await browser.newContext();
+		page = await context.newPage();
 		await login(page);
+	});
+	test.afterAll(async () => {
+		await cleanupFollowUps();
+		await context?.close();
+	});
+
+	test('la sección Seguimientos está en el menú y renderiza', async () => {
 		await expect(page.getByRole('link', { name: 'Seguimientos' })).toBeVisible();
 		await page.getByRole('link', { name: 'Seguimientos' }).click();
 		await expect(page).toHaveURL(/\/odonto\/seguimientos$/);
@@ -139,8 +135,7 @@ test.describe('Seguimientos — cobertura E2E', () => {
 		).toBeVisible();
 	});
 
-	test('el formulario NO se cierra al clickear afuera y SÍ con la X', async ({ page }) => {
-		await login(page);
+	test('el formulario NO se cierra al clickear afuera y SÍ con la X', async () => {
 		await page.goto('/odonto/seguimientos');
 		await openFollowUpDialog(page);
 
@@ -156,10 +151,7 @@ test.describe('Seguimientos — cobertura E2E', () => {
 		await expect(dialogTitle).toBeHidden();
 	});
 
-	test('validación: "Continuar" deshabilitado sin fecha; búsqueda de paciente responde', async ({
-		page
-	}) => {
-		await login(page);
+	test('validación: "Continuar" deshabilitado sin fecha; búsqueda de paciente responde', async () => {
 		await page.goto('/odonto/seguimientos');
 		await openFollowUpDialog(page);
 
@@ -187,11 +179,10 @@ test.describe('Seguimientos — cobertura E2E', () => {
 		await expect(page.getByRole('button', { name: 'Continuar' })).toBeDisabled();
 	});
 
-	test('crear seguimiento futuro → aparece en programados → editar → limpiar', async ({ page }) => {
+	test('crear seguimiento futuro → aparece en programados → editar → limpiar', async () => {
 		const name = await anyPatientName();
 		test.skip(!name, 'La cuenta no tiene pacientes: no se puede ejercitar la creación.');
 
-		await login(page);
 		await page.goto('/odonto/seguimientos');
 		await openFollowUpDialog(page);
 
@@ -245,8 +236,7 @@ test.describe('Seguimientos — cobertura E2E', () => {
 		await expect(page.locator('.ux-choice', { hasText: editedMsg })).toBeVisible({ timeout: 10_000 });
 	});
 
-	test('la página de Recordatorios importantes renderiza', async ({ page }) => {
-		await login(page);
+	test('la página de Recordatorios importantes renderiza', async () => {
 		await page.goto('/odonto/seguimientos/importantes');
 		await expect(page.getByRole('heading', { name: 'Recordatorios importantes' })).toBeVisible();
 	});

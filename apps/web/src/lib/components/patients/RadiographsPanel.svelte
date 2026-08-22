@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Modal from '$lib/components/Modal.svelte';
+	import ClinicalImageViewer from '$lib/components/patients/ClinicalImageViewer.svelte';
 	import {
 		createClinicalImageThumbnail,
 		formatClinicalFileBytes,
@@ -83,6 +84,7 @@
 	let viewerUrl = $state('');
 	let viewerBusy = $state(false);
 	let viewerError = $state('');
+	let viewerTrigger = $state<HTMLElement | null>(null);
 	let viewerRequestSequence = 0;
 	let trashTarget = $state<RadiographItem | null>(null);
 	let trashBusy = $state(false);
@@ -118,6 +120,7 @@
 		viewerUrl = '';
 		viewerBusy = false;
 		viewerError = '';
+		viewerTrigger = null;
 		trashTarget = null;
 		trashBusy = false;
 		message = '';
@@ -424,19 +427,10 @@
 		}
 	};
 
-	const openViewer = async (item: RadiographItem) => {
-		if (demo) {
-			errorMessage = 'La vista de imágenes no está disponible en el modo de demostración.';
-			return;
-		}
-		if (item.integrity_status !== 'ok') {
-			errorMessage = 'El archivo no está disponible. Informá el problema para que podamos revisarlo.';
-			return;
-		}
+	const requestViewerAccess = async (item: RadiographItem) => {
 		const generation = patientGeneration;
 		const requestEndpoint = endpoint;
 		const sequence = ++viewerRequestSequence;
-		viewerItem = item;
 		viewerUrl = '';
 		viewerError = '';
 		viewerBusy = true;
@@ -458,12 +452,33 @@
 		}
 	};
 
+	const openViewer = (item: RadiographItem, trigger: HTMLElement) => {
+		if (demo) {
+			errorMessage = 'La vista de imágenes no está disponible en el modo de demostración.';
+			return;
+		}
+		if (item.integrity_status !== 'ok') {
+			errorMessage = 'El archivo no está disponible. Informá el problema para que podamos revisarlo.';
+			return;
+		}
+		viewerTrigger = trigger;
+		viewerItem = item;
+		void requestViewerAccess(item);
+	};
+
+	const retryViewer = () => {
+		if (viewerItem) void requestViewerAccess(viewerItem);
+	};
+
 	const closeViewer = () => {
+		const trigger = viewerTrigger;
 		viewerRequestSequence += 1;
 		viewerItem = null;
 		viewerUrl = '';
 		viewerBusy = false;
 		viewerError = '';
+		viewerTrigger = null;
+		queueMicrotask(() => trigger?.focus());
 	};
 
 	const moveToTrash = async () => {
@@ -614,7 +629,7 @@
 						</div>
 						<div class="flex flex-col gap-2 sm:flex-row">
 							{#if item.status === 'ready'}
-								<button type="button" class="ux-btn-primary" onclick={() => openViewer(item)}>Ver imagen</button>
+								<button type="button" class="ux-btn-primary" onclick={(event) => openViewer(item, event.currentTarget)}>Ver imagen</button>
 							{:else if canUpload && !demo}
 								<button type="button" class="ux-btn-secondary" onclick={() => chooseFile('files', item)}>Reintentar</button>
 							{/if}
@@ -683,17 +698,17 @@
 	</div>
 </Modal>
 
-<Modal open={Boolean(viewerItem)} title={titleFor(viewerItem ?? {})} closable on:close={closeViewer}>
-	<div class="min-h-56">
-		{#if viewerBusy}
-			<div class="grid min-h-56 place-items-center text-sm text-neutral-500 dark:text-neutral-300">Abriendo imagen…</div>
-		{:else if viewerError}
-			<div class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-400/40 dark:bg-red-500/10 dark:text-red-100" role="alert">{viewerError}</div>
-		{:else if viewerUrl}
-			<img src={viewerUrl} alt={viewerItem?.note || 'Imagen clínica del paciente'} class="mx-auto max-h-[70dvh] max-w-full rounded-xl bg-black object-contain" />
-		{/if}
-	</div>
-</Modal>
+<ClinicalImageViewer
+	open={Boolean(viewerItem)}
+	title={titleFor(viewerItem ?? {})}
+	metadata={viewerItem ? metadataFor(viewerItem) : ''}
+	imageUrl={viewerUrl}
+	alt={viewerItem?.note || 'Imagen clínica del paciente'}
+	busy={viewerBusy}
+	error={viewerError}
+	onclose={closeViewer}
+	onretry={retryViewer}
+/>
 
 <Modal open={Boolean(trashTarget)} title="Mover imagen a la papelera" dismissible={!trashBusy} on:close={() => !trashBusy && (trashTarget = null)}>
 	<div class="space-y-4 text-sm text-neutral-800 dark:text-neutral-100">

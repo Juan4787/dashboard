@@ -49,6 +49,7 @@ const data = {
 	activationWhatsAppUrl:
 		'https://wa.me/5493511234567?text=Tu%20turno%20qued%C3%B3%20reservado.',
 	activationPublicUrl: 'https://cita-suite.test/turno/token-1?creado=1',
+	phoneWarningAcknowledged: false,
 	rescheduleWhatsAppUrl: null,
 	reschedulePublicUrl: null,
 	demo: false
@@ -71,17 +72,20 @@ describe('último paso después de crear un turno desde Agenda', () => {
 		).toBeInTheDocument();
 	});
 
-	it('si el número no es utilizable ofrece corregir la ficha en vez de generar un wa.me roto', () => {
+	it('no vuelve a advertir después de que el usuario confirmó sin un número utilizable', () => {
 		render(Page, {
-			data: { ...data, activationWhatsAppUrl: null }
+			data: { ...data, phoneWarningAcknowledged: true }
 		});
 
 		expect(screen.queryByRole('link', { name: 'Enviar enlace de activación' })).not.toBeInTheDocument();
+		expect(screen.queryByText('Falta completar el teléfono del paciente')).not.toBeInTheDocument();
+		expect(screen.queryByRole('heading', { name: 'Último paso' })).not.toBeInTheDocument();
+	});
+
+	it('mantiene el fallback para un turno legado creado sin decisión previa', () => {
+		render(Page, { data: { ...data, activationWhatsAppUrl: null } });
+
 		expect(screen.getByText('Falta completar el teléfono del paciente')).toBeInTheDocument();
-		expect(screen.getByRole('link', { name: 'Corregir teléfono del paciente' })).toHaveAttribute(
-			'href',
-			'/odonto/pacientes/patient-1'
-		);
 	});
 
 	it('no agrega el bloque a una visita normal del detalle', () => {

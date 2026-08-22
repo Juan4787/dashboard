@@ -10,7 +10,8 @@
 		type AvailabilitySnapshotProfessional,
 		type AvailabilitySnapshotService
 	} from '$lib/availability/snapshot';
-	import { onDestroy } from 'svelte';
+	import { classifyCommunicationPhone } from '$lib/utils/communication-phone';
+	import { onDestroy, tick, untrack } from 'svelte';
 
 	type Service = { id: string; name: string; duration_minutes: number };
 	type Professional = {
@@ -19,8 +20,16 @@
 		specialty?: string | null;
 		is_active: boolean;
 	};
-	type Patient = { id: string; full_name: string; phone_e164: string | null; blocked: boolean };
+	type Patient = {
+		id: string;
+		full_name: string;
+		phone: string | null;
+		phone_raw: string | null;
+		phone_e164: string | null;
+		blocked: boolean;
+	};
 	type Slot = AvailabilitySlot;
+	type PhoneWarningKind = 'missing' | 'invalid';
 
 	let {
 		services,
@@ -49,7 +58,11 @@
 		initialDate: string;
 		initialPatientId?: string;
 		canOperate: boolean;
-		form?: { values?: Record<string, unknown> };
+		form?: {
+			message?: string;
+			phoneWarning?: { kind: PhoneWarningKind };
+			values?: Record<string, unknown>;
+		};
 	}>();
 
 	const value = (key: string) => String(form?.values?.[key] ?? '');
@@ -111,6 +124,9 @@
 	let selectedPatientId = $state(getInitialPatientSelection());
 	let patientName = $state(value('patient_name'));
 	let patientPhone = $state(value('patient_phone'));
+	let newPatientPhoneDraft = $state(
+		untrack(() => (patientMode === 'new' ? value('patient_phone') : ''))
+	);
 	let patientEmail = $state(value('patient_email'));
 	let patientSearch = $state('');
 	let internalNote = $state(value('internal_note'));
@@ -126,6 +142,20 @@
 	let patientSearchLoading = $state(false);
 	let patientSearchError = $state('');
 	let patientSearchRequest = 0;
+	let appointmentForm = $state<HTMLFormElement | null>(null);
+	let phoneInput = $state<HTMLInputElement | null>(null);
+	let patientPhoneChanged = $state(value('patient_phone_changed') === 'true');
+	let phoneWarningOverride = $state<'' | PhoneWarningKind>(
+		value('phone_warning_override') === 'missing' || value('phone_warning_override') === 'invalid'
+			? (value('phone_warning_override') as PhoneWarningKind)
+			: ''
+	);
+	let phoneWarning = $state<PhoneWarningKind | null>(
+		untrack(() => form?.phoneWarning?.kind ?? null)
+	);
+	let phoneNeedsAttention = $state(false);
+	let hydratedPatientId = untrack(() => (value('patient_phone') ? selectedPatientId : ''));
+	let appliedFormResult = untrack(() => form);
 
 	onDestroy(() => slotAbortController?.abort());
 
@@ -186,13 +216,13 @@
 	const selectedSlot = $derived(
 		professionalSlots.find((slot) => slot.starts_at === selectedSlotStartsAt) ?? null
 	);
-	const patientCandidates = $derived(patientSearch.trim().length >= 2 ? remotePatients : patients);
+	const patientCandidates = $derived(patientSearch.trim().length >= 1 ? remotePatients : patients);
 	const visiblePatients = $derived(
 		patientCandidates
 			.filter((patient: Patient) => !patient.blocked)
 			.filter((patient: Patient) => {
 				const query = patientSearch.trim().toLowerCase();
-				if (patientSearch.trim().length >= 2) return true;
+				if (patientSearch.trim().length >= 1) return true;
 				if (!query) return true;
 				return (
 					patient.full_name.toLowerCase().includes(query) ||
@@ -206,9 +236,7 @@
 			null
 	);
 	const canUseExistingPatient = $derived(patientMode === 'existing' && Boolean(selectedPatientId));
-	const canUseNewPatient = $derived(
-		patientMode === 'new' && patientName.trim().length >= 2 && patientPhone.trim().length >= 6
-	);
+	const canUseNewPatient = $derived(patientMode === 'new' && patientName.trim().length >= 2);
 	const canCreate = $derived(
 		Boolean(
 			selectedService &&
@@ -236,9 +264,15 @@
 		patientMode = 'new';
 		patientName = '';
 		patientPhone = '';
+		newPatientPhoneDraft = '';
 		patientEmail = '';
 		patientSearch = '';
 		internalNote = '';
+		patientPhoneChanged = false;
+		phoneWarningOverride = '';
+		phoneWarning = null;
+		phoneNeedsAttention = false;
+		hydratedPatientId = '';
 		ignoreBreak = false;
 		slots = [];
 		slotsLoaded = false;
@@ -326,6 +360,76 @@
 	const selectSlot = (slot: Slot) => {
 		selectedSlotStartsAt = slot.starts_at;
 		step = 5;
+	};
+
+	const patientPhoneValue = (patient: Patient | null) =>
+		String(patient?.phone_raw ?? patient?.phone ?? patient?.phone_e164 ?? '').trim();
+
+	const selectPatient = (patient: Patient) => {
+		selectedPatientId = patient.id;
+		patientPhone = patientPhoneValue(patient);
+		patientPhoneChanged = false;
+		phoneWarningOverride = '';
+		phoneWarning = null;
+		phoneNeedsAttention = false;
+		hydratedPatientId = patient.id;
+	};
+
+	const selectPatientMode = (mode: 'existing' | 'new') => {
+		if (mode === patientMode) return;
+		if (patientMode === 'new') newPatientPhoneDraft = patientPhone;
+		patientMode = mode;
+		phoneWarningOverride = '';
+		phoneWarning = null;
+		phoneNeedsAttention = false;
+		if (mode === 'new') {
+			selectedPatientId = '';
+			patientPhone = newPatientPhoneDraft;
+			patientPhoneChanged = false;
+			hydratedPatientId = '';
+		}
+	};
+
+	const handlePhoneInput = () => {
+		const shouldKeepAttention = phoneNeedsAttention || Boolean(phoneWarning);
+		patientPhoneChanged = patientMode === 'existing';
+		if (patientMode === 'new') newPatientPhoneDraft = patientPhone;
+		phoneWarningOverride = '';
+		phoneWarning = null;
+		phoneNeedsAttention = shouldKeepAttention;
+	};
+
+	const correctPhone = async () => {
+		phoneWarning = null;
+		phoneWarningOverride = '';
+		phoneNeedsAttention = true;
+		await tick();
+		phoneInput?.focus();
+		phoneInput?.select();
+	};
+
+	const confirmWithoutPhone = async () => {
+		if (!phoneWarning) return;
+		phoneWarningOverride = phoneWarning;
+		phoneWarning = null;
+		phoneNeedsAttention = false;
+		await tick();
+		appointmentForm?.requestSubmit();
+	};
+
+	const validatePhoneBeforeSubmit = (event: SubmitEvent) => {
+		const decision = classifyCommunicationPhone(patientPhone);
+		if (decision.status === 'valid') {
+			phoneWarning = null;
+			phoneWarningOverride = '';
+			phoneNeedsAttention = false;
+			return;
+		}
+		if (phoneWarningOverride === decision.status) return;
+		event.preventDefault();
+		phoneWarningOverride = '';
+		phoneWarning = decision.status;
+		phoneNeedsAttention = false;
 	};
 
 	const changeWeek = (days: number) => {
@@ -602,14 +706,37 @@
 
 	$effect(() => {
 		const query = patientSearch.trim();
-		if (query.length < 2) {
+		if (query.length < 1) {
 			remotePatients = [];
 			patientSearchLoading = false;
 			patientSearchError = '';
 			return;
 		}
-		const timeout = window.setTimeout(() => void loadPatients(query), 220);
+		const timeout = window.setTimeout(() => void loadPatients(query), 120);
 		return () => window.clearTimeout(timeout);
+	});
+
+	$effect(() => {
+		const result = form;
+		if (result === appliedFormResult) return;
+		appliedFormResult = result;
+		const warning = result?.phoneWarning?.kind;
+		if (!warning) return;
+		const serverPhone = String(result.values?.patient_phone ?? patientPhone);
+		patientPhone = serverPhone;
+		if (patientMode === 'new') newPatientPhoneDraft = serverPhone;
+		patientPhoneChanged = result.values?.patient_phone_changed === 'true';
+		phoneWarningOverride = '';
+		phoneWarning = warning;
+		phoneNeedsAttention = false;
+	});
+
+	$effect(() => {
+		const patient = selectedPatient;
+		if (patientMode !== 'existing' || !patient || hydratedPatientId === patient.id) return;
+		patientPhone = patientPhoneValue(patient);
+		patientPhoneChanged = false;
+		hydratedPatientId = patient.id;
 	});
 
 	$effect(() => {
@@ -626,7 +753,7 @@
 	});
 </script>
 
-<form method="POST" action="?/create_appointment" class="mx-auto grid w-full max-w-5xl gap-4">
+<form bind:this={appointmentForm} method="POST" action="?/create_appointment" class="mx-auto grid w-full max-w-5xl gap-4" onsubmit={validatePhoneBeforeSubmit}>
 	<input type="hidden" name="service_id" value={selectedServiceId} />
 	<input type="hidden" name="booking_mode" value={bookingMode} />
 	<input type="hidden" name="professional_id" value={selectedProfessionalId} />
@@ -637,6 +764,8 @@
 	<input type="hidden" name="time" value={selectedSlot?.time ?? ''} />
 	<input type="hidden" name="internal_note" value={internalNote} />
 	<input type="hidden" name="ignore_break" value={ignoreBreak ? 'true' : 'false'} />
+	<input type="hidden" name="patient_phone_changed" value={patientPhoneChanged ? 'true' : 'false'} />
+	<input type="hidden" name="phone_warning_override" value={phoneWarningOverride} />
 
 	<section class="ux-card min-w-0 w-full px-5 py-4 sm:px-6">
 		<div class="flex items-center justify-between gap-4">
@@ -664,9 +793,7 @@
 	{#if step === 1}
 		<section class="ux-card min-w-0 w-full p-5 sm:p-7">
 			<h2 class="text-xl font-bold tracking-tight text-white sm:text-2xl">¿Qué necesita el paciente?</h2>
-			<p class="mt-2 text-base text-white/60">
-				Elegí el procedimiento para ver quién puede realizarlo.
-			</p>
+			<p class="mt-2 text-base text-white/60">Elegí un procedimiento.</p>
 
 			<div class="mt-6 grid gap-3 sm:grid-cols-2">
 				{#each services as service}
@@ -679,7 +806,6 @@
 					>
 						<span class="min-w-0">
 							<span class="block text-lg font-bold leading-tight text-white">{service.name}</span>
-							<span class="mt-1.5 block text-base text-white/55">Procedimiento</span>
 						</span>
 						<span class="ux-badge shrink-0 text-sm">{durationLabel(service.duration_minutes)}</span>
 					</button>
@@ -723,10 +849,7 @@
 			</div>
 
 			{#if bookingMode === 'joint'}
-				<p class="mt-5 max-w-3xl text-base leading-relaxed text-white/60">
-					Seleccioná dos o más integrantes. La agenda mostrará únicamente los días y horarios
-					en los que todo el equipo puede atender al mismo tiempo.
-				</p>
+				<p class="mt-5 text-base text-white/60">Elegí dos o más profesionales.</p>
 			{:else}
 				<p class="mt-5 text-base text-white/60">Elegí quién realizará el procedimiento.</p>
 			{/if}
@@ -879,11 +1002,8 @@
 					class="mt-1 h-5 w-5 shrink-0 accent-amber-400"
 				/>
 				<span>
-					<span class="block text-base font-bold text-amber-100">Ignorar descanso para esta carga manual</span>
-					<span class="mt-1 block text-sm leading-relaxed text-amber-100/70">
-						Usalo sólo si confirmaste que el profesional puede comenzar inmediatamente. El sistema
-						seguirá bloqueando cualquier superposición con una atención real.
-					</span>
+					<span class="block text-base font-bold text-amber-100">Permitir turno sin descanso</span>
+					<span class="mt-1 block text-sm text-amber-100/70">Solo para esta reserva.</span>
 				</span>
 			</label>
 
@@ -1000,7 +1120,7 @@
 				<div class="mt-6 grid gap-3 sm:grid-cols-2">
 					<button
 						type="button"
-						onclick={() => (patientMode = 'existing')}
+						onclick={() => selectPatientMode('existing')}
 						class="ux-choice flex min-h-28 min-w-0 w-full items-center gap-4 p-5 text-left"
 						class:ux-choice-active={patientMode === 'existing'}
 					>
@@ -1018,10 +1138,7 @@
 					</button>
 					<button
 						type="button"
-						onclick={() => {
-							patientMode = 'new';
-							selectedPatientId = '';
-						}}
+						onclick={() => selectPatientMode('new')}
 						class="ux-choice flex min-h-28 min-w-0 w-full items-center gap-4 p-5 text-left"
 						class:ux-choice-active={patientMode === 'new'}
 					>
@@ -1041,7 +1158,6 @@
 
 				{#if patientMode === 'existing'}
 					<input type="hidden" name="patient_name" value="" />
-					<input type="hidden" name="patient_phone" value="" />
 					<input type="hidden" name="patient_email" value="" />
 					<input type="hidden" name="patient_id" value={selectedPatientId} />
 					<div class="mt-6">
@@ -1049,13 +1165,13 @@
 							<span class="ux-label">Buscar por nombre, teléfono o DNI</span>
 							<input
 								bind:value={patientSearch}
-								placeholder="Escribí al menos 2 caracteres"
+								placeholder="Buscar paciente"
 								class="ux-input"
 							/>
 						</label>
 						{#if patientSearchLoading}
 							<p class="mt-3 text-base font-semibold text-white/55">Buscando pacientes…</p>
-						{:else if patientsLoading && patientSearch.trim().length < 2}
+						{:else if patientsLoading && patientSearch.trim().length < 1}
 							<p class="mt-3 text-base font-semibold text-white/55" aria-live="polite">
 								Cargando fichas recientes…
 							</p>
@@ -1063,7 +1179,7 @@
 						{#if patientSearchError}
 							<p class="ux-alert mt-3">{patientSearchError}</p>
 						{/if}
-						{#if patientsError && patientSearch.trim().length < 2}
+						{#if patientsError && patientSearch.trim().length < 1}
 							<div class="ux-alert mt-3">
 								{patientsError}
 								<button type="button" class="ml-2 font-bold underline" onclick={() => void onNeedPatients()}>
@@ -1075,7 +1191,7 @@
 							{#each visiblePatients as patient}
 								<button
 									type="button"
-									onclick={() => (selectedPatientId = patient.id)}
+									onclick={() => selectPatient(patient)}
 									class="ux-choice px-4 py-3 text-left"
 									class:ux-choice-active={selectedPatientId === patient.id}
 								>
@@ -1087,15 +1203,34 @@
 							{/each}
 							{#if visiblePatients.length === 0 && !patientsLoading && !patientSearchLoading}
 								<p class="ux-empty p-4 text-base">
-									{patientSearch.trim().length >= 2
+									{patientSearch.trim().length >= 1
 										? 'No encontramos pacientes con esa búsqueda.'
 										: patientsLoaded
 											? 'No hay fichas de pacientes para mostrar.'
-											: 'Escribí al menos 2 caracteres para buscar una ficha.'}
+											: 'Buscá una ficha.'}
 								</p>
 							{/if}
 						</div>
 					</div>
+					{#if selectedPatientId}
+						<label class="mt-4 block">
+							<span class="ux-label">Teléfono</span>
+							<input
+								bind:this={phoneInput}
+								id="patient_phone"
+								name="patient_phone"
+								inputmode="tel"
+								autocomplete="tel"
+								bind:value={patientPhone}
+								oninput={handlePhoneInput}
+								aria-invalid={phoneNeedsAttention || phoneWarning ? 'true' : undefined}
+								aria-describedby={phoneWarning ? 'phone-warning' : undefined}
+								class={`ux-input ${phoneNeedsAttention || phoneWarning ? 'border-amber-300 ring-2 ring-amber-300/25' : ''}`}
+							/>
+						</label>
+					{:else}
+						<input type="hidden" name="patient_phone" value="" />
+					{/if}
 				{:else}
 					<input type="hidden" name="patient_id" value="" />
 					<div class="mt-6 grid gap-4">
@@ -1112,11 +1247,17 @@
 						<label>
 							<span class="ux-label">Teléfono</span>
 							<input
+								bind:this={phoneInput}
+								id="patient_phone"
 								name="patient_phone"
 								bind:value={patientPhone}
-								required
+								inputmode="tel"
+								autocomplete="tel"
+								oninput={handlePhoneInput}
 								disabled={!canOperate}
-								class="ux-input"
+								aria-invalid={phoneNeedsAttention || phoneWarning ? 'true' : undefined}
+								aria-describedby={phoneWarning ? 'phone-warning' : undefined}
+								class={`ux-input ${phoneNeedsAttention || phoneWarning ? 'border-amber-300 ring-2 ring-amber-300/25' : ''}`}
 							/>
 						</label>
 						<label>
@@ -1129,6 +1270,29 @@
 								class="ux-input"
 							/>
 						</label>
+					</div>
+				{/if}
+
+				{#if phoneWarning}
+					<div id="phone-warning" class="mt-5 rounded-2xl border border-amber-300/35 bg-amber-300/[0.09] p-4 text-amber-50" role="alert">
+						<p class="text-base font-extrabold">
+							{phoneWarning === 'missing'
+								? 'Falta el número de teléfono'
+								: 'El número de teléfono no es válido'}
+						</p>
+						<p class="mt-1 text-sm text-amber-50/75">
+							{phoneWarning === 'missing'
+								? 'Agregalo para que el paciente pueda recibir recordatorios automáticos.'
+								: 'Corregilo para que el paciente pueda recibir recordatorios automáticos.'}
+						</p>
+						<div class="mt-4 flex flex-col gap-2 sm:flex-row">
+							<button type="button" class="ux-btn-primary" onclick={correctPhone}>
+								{phoneWarning === 'missing' ? 'Agregar número' : 'Corregir número'}
+							</button>
+							<button type="button" class="ux-btn-secondary" onclick={confirmWithoutPhone}>
+								Confirmar de todos modos
+							</button>
+						</div>
 					</div>
 				{/if}
 			</div>
@@ -1167,12 +1331,12 @@
 						<p class="text-xs font-semibold uppercase tracking-wide text-white/40">Hora</p>
 						<p class="mt-1 text-base font-semibold text-white">{selectedSlot?.time ?? '-'}</p>
 					</div>
-					<div>
-						<p class="text-xs font-semibold uppercase tracking-wide text-white/40">Descanso</p>
-						<p class="mt-1 text-sm font-semibold text-white">
-							{ignoreBreak ? 'Ignorado manualmente' : 'Se respeta el configurado'}
-						</p>
-					</div>
+					{#if ignoreBreak}
+						<div>
+							<p class="text-xs font-semibold uppercase tracking-wide text-white/40">Descanso</p>
+							<p class="mt-1 text-sm font-semibold text-amber-100">Sin descanso</p>
+						</div>
+					{/if}
 					<div>
 						<p class="text-xs font-semibold uppercase tracking-wide text-white/40">Paciente</p>
 						<p class="mt-1 text-base font-semibold text-white">
@@ -1182,10 +1346,10 @@
 				</div>
 				<button
 					type="submit"
-					disabled={!canOperate || !canCreate}
+					disabled={!canOperate || !canCreate || Boolean(phoneWarning)}
 					class="ux-btn-primary ux-btn-cta mt-6 w-full"
 				>
-					{bookingMode === 'joint' ? 'Crear turno conjunto' : 'Crear turno'}
+					{bookingMode === 'joint' ? 'Confirmar turno conjunto' : 'Confirmar turno'}
 				</button>
 			</aside>
 		</section>
