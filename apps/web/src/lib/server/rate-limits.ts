@@ -11,7 +11,11 @@ export const RATE_LIMIT_ACTIONS = [
 	'login_password_by_ip',
 	'pending_business_creation_by_user',
 	'pending_business_creation_by_ip',
-	'mp_subscription_create_by_business'
+	'mp_subscription_create_by_business',
+	'radiograph_upload_by_user',
+	'radiograph_original_access_by_user',
+	'radiograph_trash_by_user',
+	'radiograph_restore_by_user'
 ] as const;
 
 export type RateLimitAction = (typeof RATE_LIMIT_ACTIONS)[number];
@@ -215,6 +219,53 @@ export const mpSubscriptionRateLimitRules = (businessId: string): RateLimitRule[
 		limit: 10,
 		windowSeconds: ONE_DAY,
 		message: 'Hay demasiados intentos de activar la suscripción.'
+	}
+];
+
+export const radiographUploadRateLimitRules = (userId: string): RateLimitRule[] => [
+	{
+		action: 'radiograph_upload_by_user',
+		subject: userId,
+		limit: 6,
+		windowSeconds: 60,
+		message: 'Iniciaste varias cargas seguidas.'
+	},
+	{
+		action: 'radiograph_upload_by_user',
+		subject: userId,
+		limit: 60,
+		windowSeconds: ONE_HOUR,
+		message: 'Alcanzaste el límite de cargas por hora.'
+	}
+];
+
+export const radiographOriginalAccessRateLimitRules = (userId: string): RateLimitRule[] => [
+	{
+		action: 'radiograph_original_access_by_user',
+		subject: userId,
+		limit: 300,
+		windowSeconds: ONE_HOUR,
+		message: 'Abriste muchas imágenes en poco tiempo.'
+	}
+];
+
+export const radiographTrashRateLimitRules = (userId: string): RateLimitRule[] => [
+	{
+		action: 'radiograph_trash_by_user',
+		subject: userId,
+		limit: 30,
+		windowSeconds: 60,
+		message: 'Moviste varias imágenes a la papelera en poco tiempo.'
+	}
+];
+
+export const radiographRestoreRateLimitRules = (userId: string): RateLimitRule[] => [
+	{
+		action: 'radiograph_restore_by_user',
+		subject: userId,
+		limit: 30,
+		windowSeconds: 60,
+		message: 'Restauraste varias imágenes en poco tiempo.'
 	}
 ];
 

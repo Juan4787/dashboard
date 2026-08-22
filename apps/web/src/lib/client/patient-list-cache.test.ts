@@ -6,11 +6,13 @@ import {
 	PATIENT_REVISION_VERIFICATION_MAX_AGE_MS,
 	acceptPatientListSnapshot,
 	acceptVerifiedPatientRevision,
+	consumePatientListNavigation,
 	getCachedPatientList,
 	getCurrentVerifiedPatientRevision,
 	isPatientListSnapshotCurrent,
 	observePatientRevisionEvent,
 	patientRevisionState,
+	rememberPatientListNavigation,
 	resetPatientListClientState,
 	setCachedPatientList,
 	type PatientListSnapshot
@@ -22,6 +24,7 @@ const snapshot = (
 ): PatientListSnapshot => ({
 	businessId: 'business-1',
 	showArchived: false,
+	query: '',
 	cacheable: true,
 	revision,
 	cacheScope: 'private-scope-1',
@@ -41,6 +44,7 @@ describe('patient list private memory cache', () => {
 			getCachedPatientList({
 				cacheScope: 'private-scope-1',
 				showArchived: false,
+				query: '',
 				revision: '4',
 				now: 1_500
 			})
@@ -49,6 +53,7 @@ describe('patient list private memory cache', () => {
 			getCachedPatientList({
 				cacheScope: 'private-scope-1',
 				showArchived: true,
+				query: '',
 				revision: '4',
 				now: 1_500
 			})
@@ -57,6 +62,7 @@ describe('patient list private memory cache', () => {
 			getCachedPatientList({
 				cacheScope: 'private-scope-1',
 				showArchived: false,
+				query: '',
 				revision: '5',
 				now: 1_500
 			})
@@ -72,6 +78,7 @@ describe('patient list private memory cache', () => {
 			getCachedPatientList({
 				cacheScope: 'private-scope-1',
 				showArchived: false,
+				query: '',
 				revision: '4',
 				now: 2_000 + 90_000
 			})
@@ -80,6 +87,7 @@ describe('patient list private memory cache', () => {
 			getCachedPatientList({
 				cacheScope: 'private-scope-1',
 				showArchived: false,
+				query: '',
 				revision: '4',
 				now: 2_000 + PATIENT_LIST_CACHE_TTL_MS
 			})
@@ -118,6 +126,7 @@ describe('patient list private memory cache', () => {
 			getCachedPatientList({
 				cacheScope: 'private-scope-1',
 				showArchived: false,
+				query: '',
 				revision: '7',
 				now: 1_001
 			})
@@ -159,8 +168,79 @@ describe('patient list private memory cache', () => {
 			getCachedPatientList({
 				cacheScope: 'private-scope-1',
 				showArchived: false,
+				query: '',
 				revision: '4',
 				now: 1_001
+			})
+		).toBeNull();
+	});
+
+	it('isolates cached rows by normalized server search query', () => {
+		const juan = snapshot('12', { query: '  Juan  ' });
+		acceptPatientListSnapshot(juan);
+		setCachedPatientList(juan, 1_000);
+
+		expect(
+			getCachedPatientList({
+				cacheScope: 'private-scope-1',
+				showArchived: false,
+				query: 'juan',
+				revision: '12',
+				now: 1_001
+			})
+		).toBe(juan);
+		expect(
+			getCachedPatientList({
+				cacheScope: 'private-scope-1',
+				showArchived: false,
+				query: 'maría',
+				revision: '12',
+				now: 1_001
+			})
+		).toBeNull();
+	});
+
+	it('restores only non-clinical navigation context once and only in the exact scope', () => {
+		rememberPatientListNavigation({
+			businessId: 'business-1',
+			showArchived: false,
+			query: '  JUAN ',
+			loadedCount: 61.9,
+			scrollY: 840.7,
+			now: 5_000
+		});
+
+		expect(
+			consumePatientListNavigation({
+				businessId: 'business-1',
+				showArchived: false,
+				query: 'juan',
+				now: 5_001
+			})
+		).toEqual({ loadedCount: 61, scrollY: 840 });
+		expect(
+			consumePatientListNavigation({
+				businessId: 'business-1',
+				showArchived: false,
+				query: 'juan',
+				now: 5_002
+			})
+		).toBeNull();
+
+		rememberPatientListNavigation({
+			businessId: 'business-1',
+			showArchived: true,
+			query: '',
+			loadedCount: 30,
+			scrollY: 400,
+			now: 6_000
+		});
+		expect(
+			consumePatientListNavigation({
+				businessId: 'business-2',
+				showArchived: true,
+				query: '',
+				now: 6_001
 			})
 		).toBeNull();
 	});

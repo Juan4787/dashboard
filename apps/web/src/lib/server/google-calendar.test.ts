@@ -100,7 +100,7 @@ describe('secretos Google Calendar', () => {
 		expect(() => parseGoogleCalendarEncryptionKey('no-es-una-clave')).toThrow();
 		expect(isGoogleCalendarConfigured()).toBe(true);
 		delete envState.privateEnv.GOOGLE_CALENDAR_CLIENT_ID;
-		envState.publicEnv.PUBLIC_GOOGLE_CLIENT_ID = 'drive-client.apps.googleusercontent.com';
+		envState.publicEnv.PUBLIC_GOOGLE_CLIENT_ID = 'legacy-public-client.apps.googleusercontent.com';
 		expect(isGoogleCalendarConfigured()).toBe(false);
 	});
 

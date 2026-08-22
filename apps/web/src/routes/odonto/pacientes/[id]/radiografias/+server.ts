@@ -1,101 +1,140 @@
 import { env } from '$env/dynamic/private';
+import {
+	CLINICAL_FILES_BUCKET,
+	CLINICAL_FILE_THUMBNAIL_URL_TTL_SECONDS,
+	clinicalFileCacheHeaders,
+	clinicalFileErrorBody,
+	clinicalFileError,
+	getClinicalFileRequestContext,
+	requireClinicalFileView
+} from '$lib/server/clinical-files';
 import { readDemoDb } from '$lib/server/demo-store';
-import { getOdontoContext } from '$lib/server/odonto-context';
-import { json, redirect } from '@sveltejs/kit';
+import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 
-const PAGE_SIZE = 24;
+const PAGE_SIZE = 30;
 
-export const GET: RequestHandler = async ({ params, url, locals, fetch, cookies, setHeaders }) => {
-	if (!locals.auth) {
-		throw redirect(303, '/login');
+type Cursor = { createdAt: string; id: string };
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const timestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;
+
+const decodeCursor = (value: string | null): Cursor | null => {
+	if (!value) return null;
+	if (value.length > 512) return null;
+	try {
+		const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as Partial<Cursor>;
+		if (
+			typeof parsed.createdAt !== 'string' ||
+			!timestampPattern.test(parsed.createdAt) ||
+			Number.isNaN(Date.parse(parsed.createdAt)) ||
+			typeof parsed.id !== 'string' ||
+			!uuidPattern.test(parsed.id)
+		) {
+			return null;
+		}
+		return { createdAt: parsed.createdAt, id: parsed.id };
+	} catch {
+		return null;
 	}
+};
 
-	const cursorCreatedAt = url.searchParams.get('cursor_created_at')?.trim() ?? '';
-	const cursorId = url.searchParams.get('cursor_id')?.trim() ?? '';
-	const isInitialPage = !cursorCreatedAt && !cursorId;
-	setHeaders({ 'cache-control': 'private, no-store' });
+const encodeCursor = (cursor: Cursor) => Buffer.from(JSON.stringify(cursor)).toString('base64url');
+
+export const GET: RequestHandler = async (event) => {
+	event.setHeaders(clinicalFileCacheHeaders);
 
 	if (env.DEMO_MODE === 'true') {
-		const rows = readDemoDb()
-			.radiographs.filter((item) => item.patient_id === params.id)
-			.sort((a, b) => {
-				const dateA = a.created_at ?? '';
-				const dateB = b.created_at ?? '';
-				if (dateA === dateB) return a.id < b.id ? 1 : -1;
-				return dateA < dateB ? 1 : -1;
-			});
+		const rows = readDemoDb().radiographs.filter((row) => row.patient_id === event.params.id);
+		return json({ items: rows, has_more: false, next_cursor: null });
+	}
 
-		const filtered = cursorCreatedAt
-			? rows.filter((item) => {
-					const itemDate = item.created_at ?? '';
-					if (itemDate < cursorCreatedAt) return true;
-					if (itemDate > cursorCreatedAt) return false;
-					return cursorId ? item.id < cursorId : false;
-				})
-			: rows;
-		const slice = filtered.slice(0, PAGE_SIZE + 1);
-		const hasMore = slice.length > PAGE_SIZE;
-		const items = hasMore ? slice.slice(0, PAGE_SIZE) : slice;
-		const last = items.at(-1);
+	try {
+		const context = await getClinicalFileRequestContext(event);
+		requireClinicalFileView(context);
+		const rawCursor = event.url.searchParams.get('cursor');
+		const cursor = decodeCursor(rawCursor);
+		if (rawCursor && !cursor) {
+			return json(
+				{
+					code: 'INVALID_REQUEST',
+					message: 'La página solicitada ya no es válida. Actualizá la ficha.'
+				},
+				{ status: 400 }
+			);
+		}
+
+		let query = context.supabase
+			.from('patient_radiographs')
+			.select(
+				'id, patient_id, status, original_filename, mime_type, bytes, taken_at, note, created_at, ready_at, integrity_status, storage_bucket, thumbnail_path, uploaded_by'
+			)
+			.eq('business_id', context.businessId)
+			.eq('patient_id', event.params.id)
+			.eq('storage_provider', 'supabase_storage')
+			.in('status', ['ready', 'uploading', 'failed'])
+			.order('created_at', { ascending: false })
+			.order('id', { ascending: false })
+			.limit(PAGE_SIZE + 1);
+
+		if (cursor) {
+			query = query.or(
+				`created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`
+			);
+		}
+
+		const { data, error } = await query;
+		if (error) throw error;
+
+		const rows = data ?? [];
+		const hasMore = rows.length > PAGE_SIZE;
+		const visibleRows = hasMore ? rows.slice(0, PAGE_SIZE) : rows;
+		const thumbnailPaths = visibleRows
+			.filter(
+				(row) =>
+					row.status === 'ready' &&
+					row.integrity_status === 'ok' &&
+					row.thumbnail_path
+			)
+			.map((row) => String(row.thumbnail_path));
+		const thumbnailUrls = new Map<string, string>();
+
+		if (thumbnailPaths.length > 0) {
+			const signed = await context.admin.storage
+				.from(CLINICAL_FILES_BUCKET)
+				.createSignedUrls(thumbnailPaths, CLINICAL_FILE_THUMBNAIL_URL_TTL_SECONDS);
+			if (!signed.error && signed.data) {
+				for (const item of signed.data) {
+					if (item.path && item.signedUrl) thumbnailUrls.set(item.path, item.signedUrl);
+				}
+			}
+		}
+
+		const items = visibleRows.map((row) => ({
+			id: row.id,
+			patient_id: row.patient_id,
+			status: row.status,
+			original_filename: row.original_filename,
+			mime_type: row.mime_type,
+			bytes: row.bytes,
+			taken_at: row.taken_at,
+			note: row.note,
+			created_at: row.created_at,
+			ready_at: row.ready_at,
+			integrity_status: row.integrity_status,
+			thumbnail_url: row.thumbnail_path ? (thumbnailUrls.get(row.thumbnail_path) ?? null) : null,
+			is_mine: row.uploaded_by === context.userId
+		}));
+		const last = visibleRows.at(-1);
+
 		return json({
 			items,
 			has_more: hasMore,
-			next_cursor_created_at: hasMore ? last?.created_at ?? null : null,
-			next_cursor_id: hasMore ? last?.id ?? null : null
+			next_cursor:
+				hasMore && last ? encodeCursor({ createdAt: last.created_at, id: last.id }) : null
 		});
+	} catch (error) {
+		console.error('Error cargando imágenes clínicas', error);
+		const safe = clinicalFileError(error, 'No pudimos cargar las imágenes. Probá de nuevo.');
+		return json(clinicalFileErrorBody(safe), { status: safe.status });
 	}
-
-	const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
-	let query = supabase
-		.from('patient_radiographs')
-		.select(
-			'id, patient_id, status, drive_file_id, original_filename, mime_type, bytes, taken_at, note, created_at'
-		)
-		.eq('patient_id', params.id)
-		.eq('business_id', business.business.id)
-		.is('deleted_at', null)
-		.order('created_at', { ascending: false })
-		.order('id', { ascending: false })
-		.limit(PAGE_SIZE + 1);
-
-	if (cursorCreatedAt && cursorId) {
-		query = query.or(
-			`created_at.lt.${cursorCreatedAt},and(created_at.eq.${cursorCreatedAt},id.lt.${cursorId})`
-		);
-	} else if (cursorCreatedAt) {
-		query = query.lt('created_at', cursorCreatedAt);
-	}
-
-	const [radiographsResult, driveResult] = await Promise.all([
-		query,
-		isInitialPage
-			? supabase
-					.from('drive_connections')
-					.select('connected_email, root_folder_id, updated_at')
-					.eq('owner_id', userId)
-					.maybeSingle()
-			: Promise.resolve({ data: null, error: null })
-	]);
-	const { data, error } = radiographsResult;
-	if (error) {
-		console.error('Error cargando radiografias paginadas', error);
-		return json({ message: 'No se pudieron cargar las radiografías.' }, { status: 500 });
-	}
-	if (driveResult.error) {
-		console.error('Error cargando conexión Drive del paciente', driveResult.error);
-	}
-
-	const rows = data ?? [];
-	const hasMore = rows.length > PAGE_SIZE;
-	const items = hasMore ? rows.slice(0, PAGE_SIZE) : rows;
-	const last = items.at(-1);
-
-	return json({
-		items,
-		has_more: hasMore,
-		drive_connection: isInitialPage ? (driveResult.data ?? null) : undefined,
-		next_cursor_created_at: hasMore ? last?.created_at ?? null : null,
-		next_cursor_id: hasMore ? last?.id ?? null : null
-	});
 };

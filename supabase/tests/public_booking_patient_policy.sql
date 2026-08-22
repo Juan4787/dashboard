@@ -5,6 +5,8 @@
 
 begin;
 
+select extensions.plan(1);
+
 do $$
 declare
 	v_business_id uuid;
@@ -201,5 +203,8 @@ begin
 	raise notice 'PASS: two phones share one normalized-name capacity; past=345; active future=4/4; fifth rejected exactly';
 end;
 $$;
+
+select extensions.pass('public booking patient policy');
+select * from extensions.finish();
 
 rollback;

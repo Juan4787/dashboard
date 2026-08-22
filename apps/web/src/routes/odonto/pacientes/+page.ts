@@ -7,15 +7,20 @@ import {
 	verifyPatientRevision,
 	type PatientListSnapshot
 } from '$lib/client/patient-list-cache';
+import { normalizePatientListQuery } from '$lib/utils/patient-list-query';
 import { error as kitError, type LoadEvent } from '@sveltejs/kit';
 import type { PageLoad } from './$types';
 
 const fetchPatientList = async (
 	fetcher: LoadEvent['fetch'],
-	showArchived: boolean
+	showArchived: boolean,
+	query: string
 ): Promise<PatientListSnapshot> => {
-	const query = showArchived ? '?estado=archivados' : '';
-	const response = await fetcher(`/odonto/pacientes/lista${query}`, {
+	const params = new URLSearchParams();
+	if (showArchived) params.set('estado', 'archivados');
+	if (query) params.set('q', query);
+	const suffix = params.size > 0 ? `?${params.toString()}` : '';
+	const response = await fetcher(`/odonto/pacientes/lista${suffix}`, {
 		headers: { accept: 'application/json' },
 		cache: 'no-store'
 	});
@@ -35,13 +40,14 @@ const fetchPatientList = async (
 export const load: PageLoad = async ({ fetch, url, depends, parent }) => {
 	depends('app:patients');
 	const showArchived = url.searchParams.get('estado') === 'archivados';
+	const query = normalizePatientListQuery(url.searchParams.get('q'));
 
-	if (!browser) return fetchPatientList(fetch, showArchived);
+	if (!browser) return fetchPatientList(fetch, showArchived, query);
 
 	const layoutData = await parent();
 	const businessId = String(layoutData?.activeBusiness?.business?.id ?? '').trim();
 	if (!businessId || businessId === 'demo-business') {
-		return fetchPatientList(fetch, showArchived);
+		return fetchPatientList(fetch, showArchived, query);
 	}
 
 	const currentRevision = getCurrentVerifiedPatientRevision(businessId);
@@ -49,6 +55,7 @@ export const load: PageLoad = async ({ fetch, url, depends, parent }) => {
 		const cached = getCachedPatientList({
 			cacheScope: currentRevision.cacheScope,
 			showArchived,
+			query,
 			revision: currentRevision.revision
 		});
 		if (cached) return cached;
@@ -59,6 +66,7 @@ export const load: PageLoad = async ({ fetch, url, depends, parent }) => {
 				const cached = getCachedPatientList({
 					cacheScope: revision.cacheScope,
 					showArchived,
+					query,
 					revision: revision.revision
 				});
 				if (cached) return cached;
@@ -69,7 +77,7 @@ export const load: PageLoad = async ({ fetch, url, depends, parent }) => {
 	}
 
 	for (let attempt = 0; attempt < 3; attempt += 1) {
-		const data = await fetchPatientList(fetch, showArchived);
+		const data = await fetchPatientList(fetch, showArchived, query);
 		if (!data.cacheable) return data;
 		if (data.businessId === businessId && acceptPatientListSnapshot(data)) {
 			setCachedPatientList(data);

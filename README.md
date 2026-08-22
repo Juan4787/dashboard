@@ -35,4 +35,4 @@ Las variables de entorno viven en la raíz. `apps/web/vite.config.ts` usa `envDi
 
 ## Estado actual
 
-La app operativa sigue siendo el panel SvelteKit existente en `apps/web`, con rutas `/odonto` protegidas, login Supabase, modo demo y radiografías vía Google Drive. Las siguientes fases incorporan el modelo multi-tenant, turnos, disponibilidad, agenda y WhatsApp oficial.
+La app operativa es el panel SvelteKit de `apps/web`, con rutas `/odonto` protegidas, login Supabase, modo demo, modelo multi-tenant, agenda, turnos, ficha clínica y archivos privados en Supabase Storage.

@@ -5,6 +5,8 @@
 
 begin;
 
+select extensions.plan(1);
+
 do $$
 declare
 	v_owner_id uuid := gen_random_uuid();
@@ -614,5 +616,8 @@ begin
 	raise notice 'PASS: joint appointment is single, team allocation is atomic, reschedule is atomic, overlap is global, flexible break and manual override are enforced';
 end;
 $$;
+
+select extensions.pass('joint appointments contract');
+select * from extensions.finish();
 
 rollback;

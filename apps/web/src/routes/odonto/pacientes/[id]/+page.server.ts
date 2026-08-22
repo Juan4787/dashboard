@@ -23,19 +23,12 @@ import {
 	roleParticipatesInFollowUps,
 	roleSeesAllFollowUps
 } from '$lib/server/follow-ups';
+import { resolvePatientPermissions } from '$lib/server/patient-permissions';
 
 const getLatestEntryDate = (patientId: string, entries: { patient_id: string; created_at: string }[]) =>
 	entries
 		.filter((e) => e.patient_id === patientId)
 		.reduce<string | null>((latest, entry) => (entry.created_at > (latest ?? '') ? entry.created_at : latest), null);
-
-const normalizeFilename = (value?: string | null) => {
-	const cleaned = String(value ?? '')
-		.replace(/[\\/]/g, '')
-		.trim();
-	if (!cleaned) return null;
-	return cleaned.length > 120 ? cleaned.slice(0, 120) : cleaned;
-};
 
 const ENTRIES_PAGE_SIZE = 30;
 const COMMERCIAL_RESTRICTED_MESSAGE =
@@ -276,34 +269,6 @@ const changedFieldsForPatientUpdate = ({
 	return changed;
 };
 
-const resolvePatientPermissions = (context: BusinessActionSession['context']) => {
-	const role = context.role;
-	const capabilities = context.access.allowedCapabilities;
-	const isOwnerOrAdmin = role === 'owner' || role === 'admin';
-	const canEditPatientData = role === 'owner' || role === 'admin' || role === 'reception' || role === 'professional';
-	const canWriteClinical = role === 'owner' || role === 'admin' || role === 'professional';
-	const canManageRadiographs = role === 'owner' || role === 'admin' || role === 'professional';
-	const canArchivePatient = role === 'owner' || role === 'admin' || role === 'professional';
-
-	return {
-		canReadClinicalProfile:
-			(role === 'owner' || role === 'admin' || role === 'professional') &&
-			capabilities.canViewExistingClinicalNotes,
-		canEditClinicalProfile:
-			(role === 'owner' || role === 'admin' || role === 'professional') && capabilities.canEditPatient,
-		canViewCosts: isOwnerOrAdmin && capabilities.canViewExistingCosts,
-		canEditPatient: canEditPatientData && capabilities.canEditPatient,
-		canArchivePatient: canArchivePatient && capabilities.canEditPatient,
-		canCreateClinicalEntry: canWriteClinical && capabilities.canCreateClinicalEntry,
-		canEditClinicalEntry: canWriteClinical && capabilities.canEditClinicalEntry,
-		canCreateAppointment:
-			(role === 'owner' || role === 'admin' || role === 'reception') &&
-			capabilities.canCreateAppointment,
-		canManageDriveFolders: canManageRadiographs && capabilities.canLinkExternalFiles,
-		canManageRadiographs: canManageRadiographs && capabilities.canLinkExternalFiles
-	};
-};
-
 const clinicalEntryRpcError = (error: { message?: string; code?: string } | null | undefined) => {
 	const message = `${error?.message ?? ''} ${error?.code ?? ''}`;
 
@@ -362,8 +327,6 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, dep
 			radiographs,
 			appointments: [],
 			hasMoreEntries: false,
-			hasMoreRadiographs: false,
-			driveConnection: null,
 			permissions: {
 				canReadClinicalProfile: true,
 				canEditClinicalProfile: true,
@@ -373,12 +336,15 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, dep
 				canCreateClinicalEntry: true,
 				canEditClinicalEntry: true,
 				canCreateAppointment: true,
-				canManageDriveFolders: true,
-				canManageRadiographs: true
+				canViewRadiographs: true,
+				canUploadRadiographs: true,
+				canViewRadiographTrash: true,
+				canTrashRadiographs: true
 			},
 			followUpParticipates: false,
 			followUpCanAssign: false,
 			followUpTodayISO: '',
+			clinicalTodayISO: businessTodayISO('America/Argentina/Buenos_Aires'),
 			demo: true
 		};
 	}
@@ -416,7 +382,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, dep
 		supabase
 			.from('patients')
 			.select(
-				'id, full_name, dni, phone, email, birth_date, address, insurance, insurance_plan, archived_at, drive_folder_id, created_at, updated_at'
+				'id, full_name, dni, phone, email, birth_date, address, insurance, insurance_plan, archived_at, created_at, updated_at'
 			)
 			.eq('id', params.id)
 			.eq('business_id', context.business.id)
@@ -500,7 +466,6 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, dep
 			medication: clinicalProfile?.medication ?? null,
 			background: clinicalProfile?.background ?? null,
 			custom_fields: clinicalProfile?.custom_fields ?? null,
-			drive_folder_id: typeof patient.drive_folder_id === 'string' ? patient.drive_folder_id : null,
 			professional_archived_at:
 				context.role === 'professional' ? ((professionalLink as any)?.archived_at ?? null) : null
 		},
@@ -508,9 +473,6 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, dep
 		appointments: appointments ?? [],
 		radiographs: [],
 		hasMoreEntries,
-		hasMoreRadiographs: false,
-		driveConnection: null,
-		radiographsDeferred: true,
 		changeEvents: [],
 		changeEventsDeferred: true,
 		role: context.role,
@@ -519,348 +481,12 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, dep
 		followUpParticipates: roleParticipatesInFollowUps(context.role),
 		followUpCanAssign: roleSeesAllFollowUps(context.role),
 		followUpTodayISO: businessTodayISO(context.business.timezone),
+		clinicalTodayISO: businessTodayISO(context.business.timezone),
 		demo: false
 	};
 };
 
 export const actions: Actions = {
-	save_drive_connection: async ({ request, locals, fetch, cookies }) => {
-		if (!locals.auth) throw redirect(303, '/login');
-		if (env.DEMO_MODE === 'true') {
-			return fail(400, { message: 'No disponible en modo demo.' });
-		}
-
-		const form = await request.formData();
-		const connected_email = String(form.get('connected_email') ?? '').trim();
-		const root_folder_id = String(form.get('root_folder_id') ?? '').trim();
-
-		if (!connected_email || !root_folder_id) {
-			return fail(400, { message: 'Faltan datos para guardar la conexión.' });
-		}
-
-		const session = await resolveBusinessActionContext({ locals, fetch, cookies });
-		if (!session) {
-			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
-		}
-		if (!resolvePatientPermissions(session.context).canManageDriveFolders) {
-			return fail(403, { message: 'Tu rol no permite administrar Google Drive de pacientes.' });
-		}
-		const { supabase, ownerId } = session;
-		const { error } = await supabase
-			.from('drive_connections')
-			.upsert(
-				{
-					owner_id: ownerId,
-					connected_email,
-					root_folder_id,
-					updated_at: new Date().toISOString()
-				},
-				{ onConflict: 'owner_id' }
-			);
-
-		if (error) {
-			console.error('Error guardando Drive connection', error);
-			return fail(500, { message: 'No se pudo guardar la conexión con Drive.' });
-		}
-
-		return { success: true };
-	},
-	disconnect_drive: async ({ locals, fetch, cookies }) => {
-		if (!locals.auth) throw redirect(303, '/login');
-		if (env.DEMO_MODE === 'true') {
-			return fail(400, { message: 'No disponible en modo demo.' });
-		}
-
-		const session = await resolveBusinessActionContext({ locals, fetch, cookies });
-		if (!session) {
-			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
-		}
-		if (!resolvePatientPermissions(session.context).canManageDriveFolders) {
-			return fail(403, { message: 'Tu rol no permite administrar Google Drive de pacientes.' });
-		}
-		const { supabase, ownerId, context } = session;
-		const { error } = await supabase.from('drive_connections').delete().eq('owner_id', ownerId);
-		const resetResult =
-			context.role === 'owner' || context.role === 'admin'
-				? await supabase.rpc('clear_patient_drive_folders_safely', {
-						p_business_id: context.business.id
-					})
-				: { error: null };
-		const resetError = resetResult.error;
-
-		if (error) {
-			console.error('Error desconectando Drive', error);
-			return fail(500, { message: 'No se pudo desconectar Drive.' });
-		}
-		if (resetError) {
-			console.error('Error limpiando carpetas Drive en pacientes', resetError);
-		}
-
-		return { success: true };
-	},
-	set_drive_folder: async ({ request, params, locals, fetch, cookies }) => {
-		if (!locals.auth) throw redirect(303, '/login');
-		if (env.DEMO_MODE === 'true') {
-			return fail(400, { message: 'No disponible en modo demo.' });
-		}
-		const form = await request.formData();
-		const drive_folder_id = String(form.get('drive_folder_id') ?? '').trim();
-		if (!drive_folder_id) {
-			return fail(400, { message: 'Carpeta invalida.' });
-		}
-
-		const session = await resolveBusinessActionContext({ locals, fetch, cookies });
-		if (!session) {
-			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
-		}
-		if (!resolvePatientPermissions(session.context).canManageDriveFolders) {
-			return fail(403, { message: 'Tu rol no permite administrar Google Drive de pacientes.' });
-		}
-		const { context } = session;
-		const admin = await createSupabaseAdminClient('odonto', fetch);
-		const { error } = await admin
-			.from('patients')
-			.update({
-				drive_folder_id,
-				updated_at: new Date().toISOString()
-			})
-			.eq('business_id', context.business.id)
-			.eq('id', params.id);
-
-		if (error) {
-			console.error('Error guardando carpeta Drive', error);
-			return fail(500, { message: 'No se pudo guardar la carpeta de Drive.' });
-		}
-
-		return { success: true };
-	},
-	start_radiograph: async ({ request, params, locals, fetch, cookies }) => {
-		if (!locals.auth) throw redirect(303, '/login');
-		if (env.DEMO_MODE === 'true') {
-			return fail(400, { message: 'No disponible en modo demo.' });
-		}
-
-		const form = await request.formData();
-		const original_filename = normalizeFilename(form.get('original_filename') as string);
-		const mime_type = String(form.get('mime_type') ?? '').trim();
-		const bytesRaw = String(form.get('bytes') ?? '').trim();
-		const parsedBytes = bytesRaw ? Number(bytesRaw) : null;
-		const bytes = typeof parsedBytes === 'number' && Number.isFinite(parsedBytes) ? parsedBytes : null;
-
-		const session = await resolveBusinessActionContext({ locals, fetch, cookies });
-		if (!session) {
-			return fail(401, { message: 'Sesion invalida. Volve a iniciar sesion.' });
-		}
-		if (!resolvePatientPermissions(session.context).canManageRadiographs) {
-			return fail(403, { message: 'Tu rol no permite administrar radiografías de este paciente.' });
-		}
-		const { ownerId, context } = session;
-		const admin = await createSupabaseAdminClient('odonto', fetch);
-		const { data, error } = await admin
-			.from('patient_radiographs')
-			.insert({
-				owner_id: ownerId,
-				business_id: context.business.id,
-				patient_id: params.id,
-				status: 'uploading',
-				original_filename,
-				mime_type: mime_type || null,
-				bytes,
-				created_by: ownerId
-			})
-			.select(
-				'id, patient_id, status, original_filename, mime_type, bytes, taken_at, note, created_at'
-			)
-			.single();
-
-		if (error || !data) {
-			console.error('Error creando radiografia', error);
-			return fail(500, { message: 'No se pudo iniciar la carga.' });
-		}
-
-		return { success: true, radiograph: data };
-	},
-	reset_radiograph: async ({ request, params, locals, fetch, cookies }) => {
-		if (!locals.auth) throw redirect(303, '/login');
-		if (env.DEMO_MODE === 'true') {
-			return fail(400, { message: 'No disponible en modo demo.' });
-		}
-
-		const form = await request.formData();
-		const radiograph_id = String(form.get('radiograph_id') ?? '').trim();
-		const original_filename = normalizeFilename(form.get('original_filename') as string);
-		const mime_type = String(form.get('mime_type') ?? '').trim();
-		const bytesRaw = String(form.get('bytes') ?? '').trim();
-		const parsedBytes = bytesRaw ? Number(bytesRaw) : null;
-		const bytes = typeof parsedBytes === 'number' && Number.isFinite(parsedBytes) ? parsedBytes : null;
-
-		if (!radiograph_id) {
-			return fail(400, { message: 'Radiografia invalida.' });
-		}
-
-		const session = await resolveBusinessActionContext({ locals, fetch, cookies });
-		if (!session) {
-			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
-		}
-		if (!resolvePatientPermissions(session.context).canManageRadiographs) {
-			return fail(403, { message: 'Tu rol no permite administrar radiografías de este paciente.' });
-		}
-		const { context } = session;
-		const admin = await createSupabaseAdminClient('odonto', fetch);
-		const { data, error } = await admin
-			.from('patient_radiographs')
-			.update({
-				status: 'uploading',
-				drive_file_id: null,
-				original_filename,
-				mime_type: mime_type || null,
-				bytes
-			})
-			.eq('id', radiograph_id)
-			.eq('patient_id', params.id)
-			.eq('business_id', context.business.id)
-			.select(
-				'id, patient_id, status, drive_file_id, original_filename, mime_type, bytes, taken_at, note, created_at'
-			)
-			.single();
-
-		if (error || !data) {
-			console.error('Error reintentando radiografia', error);
-			return fail(500, { message: 'No se pudo reintentar la carga.' });
-		}
-
-		return { success: true, radiograph: data };
-	},
-	finalize_radiograph: async ({ request, params, locals, fetch, cookies }) => {
-		if (!locals.auth) throw redirect(303, '/login');
-		if (env.DEMO_MODE === 'true') {
-			return fail(400, { message: 'No disponible en modo demo.' });
-		}
-
-		const form = await request.formData();
-		const radiograph_id = String(form.get('radiograph_id') ?? '').trim();
-		const drive_file_id = String(form.get('drive_file_id') ?? '').trim();
-		const noteRaw = String(form.get('note') ?? '').trim();
-		const note = noteRaw.length > 500 ? noteRaw.slice(0, 500) : noteRaw;
-		const taken_at_raw = String(form.get('taken_at') ?? '').trim();
-		let taken_at: string | null = null;
-		if (taken_at_raw) {
-			if (!/^\d{4}-\d{2}-\d{2}$/.test(taken_at_raw)) {
-				return fail(400, { message: 'Fecha invalida. Formato esperado: AAAA-MM-DD.' });
-			}
-			taken_at = taken_at_raw;
-		}
-
-		if (!radiograph_id || !drive_file_id) {
-			return fail(400, { message: 'Faltan datos para finalizar la carga.' });
-		}
-
-		const session = await resolveBusinessActionContext({ locals, fetch, cookies });
-		if (!session) {
-			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
-		}
-		if (!resolvePatientPermissions(session.context).canManageRadiographs) {
-			return fail(403, { message: 'Tu rol no permite administrar radiografías de este paciente.' });
-		}
-		const { context } = session;
-		const admin = await createSupabaseAdminClient('odonto', fetch);
-		const { data, error } = await admin
-			.from('patient_radiographs')
-			.update({
-				drive_file_id,
-				status: 'ready',
-				note: note || null,
-				taken_at
-			})
-			.eq('id', radiograph_id)
-			.eq('patient_id', params.id)
-			.eq('business_id', context.business.id)
-			.select(
-				'id, patient_id, status, drive_file_id, original_filename, mime_type, bytes, taken_at, note, created_at'
-			)
-			.single();
-
-		if (error || !data) {
-			console.error('Error finalizando radiografia', error);
-			return fail(500, { message: 'No se pudo guardar la radiografia.' });
-		}
-
-		return { success: true, radiograph: data };
-	},
-	mark_radiograph_failed: async ({ request, params, locals, fetch, cookies }) => {
-		if (!locals.auth) throw redirect(303, '/login');
-		if (env.DEMO_MODE === 'true') {
-			return fail(400, { message: 'No disponible en modo demo.' });
-		}
-
-		const form = await request.formData();
-		const radiograph_id = String(form.get('radiograph_id') ?? '').trim();
-		if (!radiograph_id) {
-			return fail(400, { message: 'Radiografia invalida.' });
-		}
-
-		const session = await resolveBusinessActionContext({ locals, fetch, cookies });
-		if (!session) {
-			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
-		}
-		if (!resolvePatientPermissions(session.context).canManageRadiographs) {
-			return fail(403, { message: 'Tu rol no permite administrar radiografías de este paciente.' });
-		}
-		const { context } = session;
-		const admin = await createSupabaseAdminClient('odonto', fetch);
-		const { data, error } = await admin
-			.from('patient_radiographs')
-			.update({ status: 'failed' })
-			.eq('id', radiograph_id)
-			.eq('patient_id', params.id)
-			.eq('business_id', context.business.id)
-			.select(
-				'id, patient_id, status, drive_file_id, original_filename, mime_type, bytes, taken_at, note, created_at'
-			)
-			.single();
-
-		if (error || !data) {
-			console.error('Error marcando radiografia fallida', error);
-			return fail(500, { message: 'No se pudo actualizar la radiografia.' });
-		}
-
-		return { success: true, radiograph: data };
-	},
-	delete_radiograph: async ({ request, params, locals, fetch, cookies }) => {
-		if (!locals.auth) throw redirect(303, '/login');
-		if (env.DEMO_MODE === 'true') {
-			return fail(400, { message: 'No disponible en modo demo.' });
-		}
-
-		const form = await request.formData();
-		const radiograph_id = String(form.get('radiograph_id') ?? '').trim();
-		if (!radiograph_id) {
-			return fail(400, { message: 'Radiografia invalida.' });
-		}
-
-		const session = await resolveBusinessActionContext({ locals, fetch, cookies });
-		if (!session) {
-			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
-		}
-		if (!resolvePatientPermissions(session.context).canManageRadiographs) {
-			return fail(403, { message: 'Tu rol no permite administrar radiografías de este paciente.' });
-		}
-		const { context } = session;
-		const admin = await createSupabaseAdminClient('odonto', fetch);
-		const { error } = await admin
-			.from('patient_radiographs')
-			.delete()
-			.eq('id', radiograph_id)
-			.eq('patient_id', params.id)
-			.eq('business_id', context.business.id);
-
-		if (error) {
-			console.error('Error eliminando radiografia', error);
-			return fail(500, { message: 'No se pudo eliminar la radiografia.' });
-		}
-
-		return { success: true };
-	},
 	add_entry: async ({ request, params, locals, fetch, cookies }) => {
 		if (!locals.auth) throw redirect(303, '/login');
 		const form = await request.formData();

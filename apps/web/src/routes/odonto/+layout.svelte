@@ -290,7 +290,7 @@
 		if (!access.commercialAccessEnabled) return 'La cuenta no está disponible. Contactá soporte.';
 		if (access.commercialStatus === 'archived') {
 			return access.archivedAt
-				? 'La cuenta está archivada. Contactá soporte para solicitar reactivación o exportación.'
+				? 'La cuenta está archivada. Contactá soporte para solicitar la reactivación.'
 				: 'Tu acceso a Cita Suite venció. Activá tu suscripción para volver a usar la plataforma.';
 		}
 		if (access.commercialStatus === 'restricted') {
@@ -351,7 +351,10 @@
 				if (disposed) return;
 				stopSync = startPatientRevisionSync({
 					businessId,
-					onRevisionChanged: () => void invalidate('app:patients')
+					onRevisionChanged: () => {
+						if ($page.url.pathname === '/odonto/pacientes') return;
+						void invalidate('app:patients');
+					}
 				});
 			})
 			.catch(() => {

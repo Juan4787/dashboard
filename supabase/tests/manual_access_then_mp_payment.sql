@@ -6,6 +6,8 @@
 
 begin;
 
+select extensions.plan(1);
+
 do $$
 declare
 	v_business_id uuid;
@@ -84,5 +86,8 @@ begin
 	raise notice 'PASS: manual month is preserved and one approved MP payment appends exactly 30 days once.';
 end;
 $$;
+
+select extensions.pass('manual access and Mercado Pago payment contract');
+select * from extensions.finish();
 
 rollback;

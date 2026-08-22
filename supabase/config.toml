@@ -17,13 +17,13 @@ port = 55423
 
 [storage]
 enabled = true
-file_size_limit = "10MiB"
+file_size_limit = "25MiB"
 
 [analytics]
 enabled = true
 port = 55427
 
-[inbucket]
+[local_smtp]
 enabled = true
 port = 55424
 smtp_port = 55425

@@ -9,6 +9,7 @@ import {
 	type BusinessSubscriptionRow
 } from './commercial-access';
 import { enforceRateLimits, pendingBusinessIpRateLimitRules } from './rate-limits';
+import { isEmailAlreadyAssociatedWithOtherBusinessError } from './business-email-association';
 
 export const BUSINESS_ROLES = ['owner', 'admin', 'reception', 'professional', 'readonly'] as const;
 export type BusinessRole = (typeof BUSINESS_ROLES)[number];
@@ -379,7 +380,13 @@ const loadMemberships = async (
 	return loadMembershipsLegacy(supabase, userId);
 };
 
-const membershipsByRequest = new WeakMap<object, Promise<BusinessContext[]>>();
+type MembershipsByRequestEntry = {
+	pending: Promise<BusinessContext[]>;
+	// A shared short read can be up to 12 seconds old. A security-sensitive
+	// child load in the same SvelteKit request must still be able to bypass it.
+	source: 'fresh' | 'shared-short';
+};
+const membershipsByRequest = new WeakMap<object, MembershipsByRequestEntry>();
 
 const MEMBERSHIP_READ_CACHE_TTL_MS = 12_000;
 const MEMBERSHIP_READ_CACHE_MAX_ENTRIES = 500;
@@ -455,20 +462,30 @@ const loadMembershipsForRequest = (
 	if (readCacheKey) {
 		const shared = getFreshMembershipRead(readCacheKey);
 		if (shared) {
-			if (requestKey) membershipsByRequest.set(requestKey, shared);
+			if (requestKey) {
+				membershipsByRequest.set(requestKey, { pending: shared, source: 'shared-short' });
+			}
 			return shared;
 		}
 	}
 
 	const cached = requestKey ? membershipsByRequest.get(requestKey) : null;
-	if (cached) return readCacheKey ? rememberMembershipRead(readCacheKey, cached) : cached;
+	if (cached && (readCacheKey || cached.source === 'fresh')) {
+		return readCacheKey
+			? rememberMembershipRead(readCacheKey, cached.pending)
+			: cached.pending;
+	}
 
-	const pending = loadMemberships(supabase, userId).catch((error) => {
-		if (requestKey) membershipsByRequest.delete(requestKey);
+	const loaded = loadMemberships(supabase, userId);
+	const pending = readCacheKey ? rememberMembershipRead(readCacheKey, loaded) : loaded;
+	const guarded = pending.catch((error) => {
+		if (requestKey && membershipsByRequest.get(requestKey)?.pending === guarded) {
+			membershipsByRequest.delete(requestKey);
+		}
 		throw error;
 	});
-	if (requestKey) membershipsByRequest.set(requestKey, pending);
-	return readCacheKey ? rememberMembershipRead(readCacheKey, pending) : pending;
+	if (requestKey) membershipsByRequest.set(requestKey, { pending: guarded, source: 'fresh' });
+	return guarded;
 };
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -484,8 +501,10 @@ export const isDefaultBusinessCreationDisabledError = (error: unknown) =>
 export const isDefaultBusinessPendingManualSetupError = (error: unknown) =>
 	errorMessage(error).includes('DEFAULT_BUSINESS_PENDING_MANUAL_SETUP');
 
-const isDefaultBusinessBootstrapBlocked = (error: unknown) =>
-	isDefaultBusinessCreationDisabledError(error) || isDefaultBusinessPendingManualSetupError(error);
+const isRecoverableDefaultBusinessBootstrapRace = (error: unknown) =>
+	isDefaultBusinessCreationDisabledError(error) ||
+	isDefaultBusinessPendingManualSetupError(error) ||
+	isEmailAlreadyAssociatedWithOtherBusinessError(error);
 
 const reloadMembershipsAfterBootstrap = async (
 	supabase: SupabaseClient,
@@ -537,7 +556,7 @@ export const resolveActiveBusiness = async ({
 		});
 		if (error) {
 			memberships = await reloadMembershipsAfterBootstrap(supabase, userId, requestKey);
-			if (memberships.length === 0 || !isDefaultBusinessBootstrapBlocked(error)) {
+			if (memberships.length === 0 || !isRecoverableDefaultBusinessBootstrapRace(error)) {
 				throw error;
 			}
 		} else {

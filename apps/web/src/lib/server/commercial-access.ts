@@ -25,9 +25,8 @@ export type BusinessAccessCapabilities = {
 	canManageAvailability: boolean;
 	canCreateClinicalEntry: boolean;
 	canEditClinicalEntry: boolean;
-	canLinkExternalFiles: boolean;
+	canManagePatientFiles: boolean;
 	canManageUsers: boolean;
-	canRequestExport: boolean;
 	canViewSubscription: boolean;
 };
 
@@ -93,9 +92,8 @@ const fullCapabilities = (): BusinessAccessCapabilities => ({
 	canManageAvailability: true,
 	canCreateClinicalEntry: true,
 	canEditClinicalEntry: true,
-	canLinkExternalFiles: true,
+	canManagePatientFiles: true,
 	canManageUsers: true,
-	canRequestExport: true,
 	canViewSubscription: true
 });
 
@@ -115,9 +113,8 @@ const restrictedCapabilities = (): BusinessAccessCapabilities => ({
 	canManageAvailability: false,
 	canCreateClinicalEntry: false,
 	canEditClinicalEntry: false,
-	canLinkExternalFiles: false,
+	canManagePatientFiles: false,
 	canManageUsers: false,
-	canRequestExport: true,
 	canViewSubscription: true
 });
 
@@ -137,9 +134,8 @@ const archivedCapabilities = (): BusinessAccessCapabilities => ({
 	canManageAvailability: false,
 	canCreateClinicalEntry: false,
 	canEditClinicalEntry: false,
-	canLinkExternalFiles: false,
+	canManagePatientFiles: false,
 	canManageUsers: false,
-	canRequestExport: true,
 	canViewSubscription: true
 });
 
@@ -245,7 +241,7 @@ export const getBusinessAccessState = (
 export const commercialAccessMessage = (state: BusinessAccessState) => {
 	if (state.commercialStatus === 'archived') {
 		return state.archivedAt
-			? 'La cuenta está archivada. Contactá soporte para reactivación o exportación.'
+			? 'La cuenta está archivada. Contactá soporte para solicitar la reactivación.'
 			: 'Tu acceso a Cita Suite venció. Tu agenda, pacientes y configuración siguen guardados.';
 	}
 	if (state.commercialStatus === 'restricted') {

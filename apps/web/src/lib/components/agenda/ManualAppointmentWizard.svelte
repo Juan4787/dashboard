@@ -306,9 +306,9 @@
 	const continueWithTeam = () => {
 		if (selectedTeam.length < 2) return;
 		const firstAvailableDate = slots[0]?.date ?? safeStartDate();
-		slotRequest += 1;
-		slots = [];
-		slotsLoaded = false;
+		// `slots` ya contiene un día válido por fecha para el equipo. Conservarlo
+		// evita dejar el paso siguiente vacío cuando la primera fecha disponible
+		// coincide con `visibleWeekStart` y, por lo tanto, no dispara otra carga.
 		visibleWeekStart = firstAvailableDate;
 		clearSlotSelection();
 		step = 3;

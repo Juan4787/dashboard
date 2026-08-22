@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import WebSocket from 'ws';
 
@@ -312,6 +312,22 @@ const ensureCategoryOpen = async (page: Page, name: RegExp) => {
 	}).toPass({ timeout: 10_000 });
 };
 
+const openAddMemberModal = async (page: Page) => {
+	const addMemberButton = page.getByRole('button', { name: 'Agregar integrante' });
+	await expect(async () => {
+		await addMemberButton.click();
+		await expect(page.getByRole('heading', { name: 'Agregar integrante' })).toBeVisible({
+			timeout: 1000
+		});
+	}).toPass({ timeout: 10_000 });
+};
+
+const replaceNumberLikeAUser = async (input: Locator, value: string) => {
+	await input.click();
+	await input.press('Control+A');
+	await input.pressSequentially(value);
+};
+
 test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 	test.skip(!allowDestructive || !supabaseUrl || !serviceRoleKey, 'Requiere E2E_ALLOW_DESTRUCTIVE=true y ODONTO_SUPABASE_* local/staging.');
 
@@ -338,11 +354,7 @@ test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 		await page.goto('/odonto/configuracion/usuarios');
 		await expect(page.getByRole('heading', { name: 'Equipo' })).toBeVisible();
 
-		const addMemberButton = page.getByRole('button', { name: 'Agregar integrante' });
-		await expect(async () => {
-			await addMemberButton.click();
-			await expect(page.getByRole('heading', { name: 'Agregar integrante' })).toBeVisible({ timeout: 1000 });
-		}).toPass({ timeout: 10_000 });
+		await openAddMemberModal(page);
 		await page.getByLabel('Email').fill(pendingProfessionalEmail);
 		await page.getByRole('button', { name: 'Siguiente' }).click();
 		await page.getByRole('button', { name: 'Profesional Atiende turnos y accede a sus pacientes.' }).click();
@@ -363,7 +375,9 @@ test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 		await expect(page.getByText('Perfil profesional configurado con rol Profesional.')).toBeVisible();
 
 		await ensureCategoryOpen(page, /^Profesionales/);
-		await expect(page.getByText(pendingProfessionalEmail)).toBeVisible();
+		await expect(
+			page.getByRole('heading', { name: pendingProfessionalEmail, exact: true })
+		).toBeVisible();
 		await expect(page.getByText('Pendiente', { exact: true })).toBeVisible();
 		await expect(page.getByRole('link', { name: 'Ver profesional' })).toBeVisible();
 
@@ -587,15 +601,36 @@ test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 			.getByRole('button')
 			.filter({ hasText: `E2E Profesional Otro ${fixture.suffix}` })
 			.click();
-		const commonSlotsButton = wizard.getByRole('button', {
-			name: 'Ver horarios de 2 profesionales',
+		const commonDaysButton = wizard.getByRole('button', {
+			name: 'Ver días disponibles',
 			exact: true
 		});
-		await expect(commonSlotsButton).toBeEnabled({ timeout: 15_000 });
-		await commonSlotsButton.click();
+		await expect(commonDaysButton).toBeEnabled({ timeout: 15_000 });
+		await commonDaysButton.click();
 		await expect(wizard.getByText('Equipo seleccionado', { exact: true })).toBeVisible();
+		await expect(wizard.getByRole('heading', { name: 'Elegí un día', exact: true })).toBeVisible();
+		const [, month, day] = fixture.date.split('-');
+		const targetDayButton = wizard
+			.locator('button.ux-choice')
+			.filter({ hasText: `${Number(day)}/${Number(month)}` });
+		await expect(targetDayButton).toBeVisible({ timeout: 15_000 });
+		const liveDaySlots = page.waitForResponse((response) => {
+			const requestUrl = new URL(response.url());
+			return (
+				requestUrl.pathname === '/odonto/disponibilidad/slots' &&
+				requestUrl.searchParams.get('from') === fixture?.date &&
+				requestUrl.searchParams.get('to') === fixture?.date
+			);
+		});
+		await targetDayButton.click();
+		await liveDaySlots;
+		await expect(wizard.getByRole('heading', { name: 'Elegí un horario', exact: true })).toBeVisible();
 		await wizard.getByRole('button', { name: '09:45', exact: true }).first().click();
-		await wizard.getByRole('button', { name: 'Buscar paciente', exact: true }).click();
+		const searchPatientButton = wizard.getByRole('button', {
+			name: /^Buscar paciente/
+		});
+		await expect(searchPatientButton).toBeVisible({ timeout: 15_000 });
+		await searchPatientButton.click();
 		await wizard.getByText(`E2E Paciente ${fixture.suffix}`, { exact: true }).click();
 		await Promise.all([
 			page.waitForURL(/\/odonto\/turnos\/[0-9a-f-]+/),
@@ -684,7 +719,7 @@ test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 		const scheduleForm = page.locator('form[action="?/save_weekly_rules"]');
 		const breakInput = scheduleForm.locator('input[type="number"]').first();
 		await expect(breakInput).toHaveValue('0');
-		await breakInput.fill('23');
+		await replaceNumberLikeAUser(breakInput, '23');
 		const saveScheduleButton = scheduleForm.getByRole('button', {
 			name: 'Guardar sólo horarios',
 			exact: true
@@ -717,7 +752,7 @@ test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 		const adminProfessionalName = `E2E Administrador Profesional ${fixture.suffix}`;
 
 		await page.goto('/odonto/configuracion/usuarios');
-		await page.getByRole('button', { name: 'Agregar integrante' }).click();
+		await openAddMemberModal(page);
 		await page.getByLabel('Email').fill(adminEmail);
 		await page.getByRole('button', { name: 'Siguiente' }).click();
 		await page
@@ -736,7 +771,7 @@ test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 		await expect(page.getByText('Perfil profesional configurado con rol Administrador.')).toBeVisible();
 
 		await ensureCategoryOpen(page, /^Administradores/);
-		await expect(page.getByText(adminEmail)).toBeVisible();
+		await expect(page.getByRole('heading', { name: adminEmail, exact: true })).toBeVisible();
 		await expect(page.getByText('Cuenta profesional pendiente', { exact: true })).toBeVisible();
 
 		const { data: pendingInvite, error: pendingInviteError } = await admin
@@ -806,10 +841,17 @@ test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 
 		await adminPage.goto(`/odonto/profesionales/${acceptedInvite?.professional_id}?tab=horarios`);
 		await expect(adminPage.getByRole('heading', { name: adminProfessionalName })).toBeVisible();
+		await adminPage.waitForLoadState('networkidle');
 		const scheduleForm = adminPage.locator('form[action="?/save_weekly_rules"]');
 		const breakInput = scheduleForm.locator('input[type="number"]').first();
-		await breakInput.fill('19');
-		await scheduleForm.getByRole('button', { name: 'Guardar sólo horarios', exact: true }).click();
+		await replaceNumberLikeAUser(breakInput, '19');
+		await expect(breakInput).toHaveValue('19');
+		const saveScheduleButton = scheduleForm.getByRole('button', {
+			name: 'Guardar sólo horarios',
+			exact: true
+		});
+		await expect(saveScheduleButton).toBeEnabled({ timeout: 5_000 });
+		await saveScheduleButton.click();
 		await expect(adminPage.getByText('Horarios guardados.', { exact: true })).toBeVisible();
 		await adminContext.close();
 	});

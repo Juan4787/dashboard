@@ -5,6 +5,8 @@
 
 begin;
 
+select extensions.plan(1);
+
 do $$
 declare
 	v_business_a uuid;
@@ -75,5 +77,8 @@ begin
 	raise notice 'PASS: active memberships and pending invitations reserve an email for one consultorio.';
 end;
 $$;
+
+select extensions.pass('business email association policy');
+select * from extensions.finish();
 
 rollback;

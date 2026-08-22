@@ -51,9 +51,8 @@ const allCapabilities = {
 	canManageAvailability: true,
 	canCreateClinicalEntry: true,
 	canEditClinicalEntry: true,
-	canLinkExternalFiles: true,
+	canManagePatientFiles: true,
 	canManageUsers: true,
-	canRequestExport: true,
 	canViewSubscription: true
 };
 

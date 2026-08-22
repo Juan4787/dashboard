@@ -232,15 +232,6 @@ const cleanupMasterFixture = async (admin: SupabaseClient) => {
 	createdMasterUserId = null;
 };
 
-const clearLocalLoginRateLimits = async (admin: SupabaseClient) => {
-	if (!isLocalSupabase) return;
-	await admin
-		.from('server_rate_limit_events')
-		.delete()
-		.in('action', ['login_password_by_email', 'login_password_by_ip'])
-		.gte('created_at', '1970-01-01T00:00:00.000Z');
-};
-
 const login = async (page: import('@playwright/test').Page, email: string, targetPassword: string) => {
 	await page.goto('/login');
 	await page.getByLabel('Correo electrónico').fill(email);
@@ -263,7 +254,8 @@ test.describe('Ayuda para configurar', () => {
 
 	test.beforeAll(async () => {
 		try {
-			await clearLocalLoginRateLimits(adminClient());
+			// El fixture usa identidades únicas y no necesita vulnerar la tabla
+			// privada de rate limits para ser repetible en Supabase local.
 			fixture = await createFixture(adminClient());
 		} catch (error) {
 			setupError = error instanceof Error ? error.message : String(error);

@@ -3,6 +3,8 @@
 
 begin;
 
+select extensions.plan(1);
+
 do $$
 declare
 	v_owner_id uuid := gen_random_uuid();
@@ -273,5 +275,8 @@ begin
 	raise notice 'PASS: push click verifies manual coverage without gating or consuming automatic reminders.';
 end;
 $$;
+
+select extensions.pass('push notification click contract');
+select * from extensions.finish();
 
 rollback;

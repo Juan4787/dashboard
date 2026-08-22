@@ -16,10 +16,10 @@ Paciente o cliente final: persona cuyos datos son cargados, tratados, consultado
 Datos del Cliente: información relativa al Cliente, su cuenta, negocio, usuarios, configuración, pagos, suscripción, actividad operativa, registros técnicos y uso de la Plataforma.
 Datos de pacientes o clientes finales: datos identificatorios, datos de contacto, DNI, teléfono, email, fecha de nacimiento, dirección, turnos, notas, antecedentes, tratamientos, costos, observaciones, registros clínicos u operativos, historial, estados, referencias, metadatos y demás información cargada o generada por el Cliente respecto de pacientes o clientes finales.
 Datos sensibles: datos personales que revelen, directa o indirectamente, información relativa a la salud u otras categorías especialmente protegidas por la normativa aplicable.
-Contenido: toda información, texto, nota, archivo externo referenciado, ID, metadato, registro, dato, observación, costo, antecedente, tratamiento, diagnóstico, comentario, configuración o elemento incorporado o generado mediante la Plataforma.
+Contenido: toda información, texto, nota, archivo alojado o referenciado, ID, metadato, registro, dato, observación, costo, antecedente, tratamiento, diagnóstico, comentario, configuración o elemento incorporado o generado mediante la Plataforma.
 Cuenta: espacio de uso asociado al Cliente dentro de la Plataforma.
 Suscripción: modalidad de acceso temporal, onerosa o gratuita, manual o automatizada, que habilita el uso de la Plataforma durante el período correspondiente.
-Modo restringido: estado de la cuenta en el cual se suspenden total o parcialmente funciones operativas, pudiendo mantenerse acceso limitado a determinadas funciones de consulta, resguardo o exportación, según disponibilidad técnica, estado de cuenta y decisión del Prestador.
+Modo restringido: estado de la cuenta en el cual se suspenden total o parcialmente funciones operativas, pudiendo mantenerse acceso limitado a determinadas funciones de consulta, según disponibilidad técnica, estado de cuenta y decisión del Prestador.
 Cuenta archivada: estado posterior a la suspensión o falta de pago prolongada, en el cual no se garantiza acceso operativo normal a la Plataforma.
 Subprestadores: proveedores externos utilizados por el Prestador para infraestructura, hosting, base de datos, autenticación, despliegue, almacenamiento, monitoreo, seguridad, correo, pagos, soporte u otros servicios técnicos necesarios o convenientes para prestar la Plataforma.
 
@@ -30,9 +30,9 @@ El Cliente reconoce que la Plataforma no constituye, por sí sola, garantía de 
 La Plataforma podrá incluir distintas funcionalidades según el plan contratado, configuración, disponibilidad técnica, etapa de desarrollo, permisos habilitados y decisiones del Prestador. Ninguna funcionalidad se considerará garantizada, permanente, ilimitada o incluida, salvo que se encuentre expresamente habilitada para el Cliente y vigente al momento de uso.
 
 3. Alcance del servicio
-El servicio puede permitir, según disponibilidad y configuración, la gestión de agenda, pacientes, profesionales, servicios, turnos, disponibilidad, registros, notas, tratamientos, costos, antecedentes, observaciones, enlaces o referencias a archivos externos, vistas por perfil de usuario, reserva pública por enlace, acciones mediante token y otras funciones relacionadas.
+El servicio puede permitir, según disponibilidad y configuración, la gestión de agenda, pacientes, profesionales, servicios, turnos, disponibilidad, registros, notas, tratamientos, costos, antecedentes, observaciones, radiografías e imágenes clínicas, vistas por perfil de usuario, reserva pública por enlace, acciones mediante token y otras funciones relacionadas.
 El Prestador podrá modificar, limitar, pausar, retirar, reemplazar o mejorar funcionalidades cuando ello resulte razonable por motivos técnicos, comerciales, regulatorios, de seguridad, mantenimiento, escalabilidad, prevención de abuso, corrección de errores o evolución del producto.
-Las funcionalidades no expresamente habilitadas, contratadas o disponibles no forman parte del servicio exigible. En particular, las integraciones con pagos, pasarelas de cobro, WhatsApp oficial, recordatorios automáticos, mensajería oficial, campañas, marketing, inteligencia artificial, historia clínica legal certificada, firma digital, facturación electrónica, almacenamiento propio de radiografías, integraciones externas o cualquier otro módulo adicional solo estarán disponibles si el Prestador las habilita expresamente y bajo las condiciones aplicables.
+Las funcionalidades no expresamente habilitadas, contratadas o disponibles no forman parte del servicio exigible. En particular, las integraciones con pagos, pasarelas de cobro, WhatsApp oficial, recordatorios automáticos, mensajería oficial, campañas, marketing, inteligencia artificial, historia clínica legal certificada, firma digital, facturación electrónica, exportación masiva, respaldo externo dedicado, recuperación individual desde respaldo, purga física, integraciones externas o cualquier otro módulo adicional solo estarán disponibles si el Prestador las habilita expresamente y bajo las condiciones aplicables.
 El Cliente acepta que el Prestador puede ofrecer, probar o mantener funcionalidades internas, experimentales, no comerciales, beta, preparatorias o técnicamente existentes sin que ello implique obligación de activarlas, mantenerlas, venderlas, soportarlas o garantizar su disponibilidad.
 
 4. Herramienta auxiliar y documentación profesional
@@ -124,25 +124,13 @@ El Cliente reconoce que, si utiliza la Plataforma para registrar información cl
 La Plataforma no se ofrece como sistema certificado de historia clínica legal permanente ni garantiza por sí sola el cumplimiento íntegro de las obligaciones legales o profesionales aplicables a historia clínica, documentación clínica o registros sanitarios.
 El Cliente es responsable de conservar, fuera o dentro de la Plataforma, los registros, copias, respaldos, documentos y soportes que su actividad requiera.
 
-14. Archivos, radiografías, imágenes y servicios externos
-La Plataforma no aloja directamente radiografías, fotografías clínicas, documentos, imágenes u otros archivos que el Cliente mantenga en servicios externos bajo su propio control, tales como Google Drive u otros proveedores.
-Cuando el Cliente vincule, utilice o acceda a servicios externos para alojar archivos, radiografías, fotografías, imágenes, documentos o cualquier otro contenido, dichos archivos permanecerán sujetos a las cuentas, permisos, términos, disponibilidad, seguridad, políticas, almacenamiento y responsabilidad del servicio externo utilizado por el Cliente.
-El Cliente es exclusivo responsable por:
-a. qué archivos sube a servicios externos;
-b. la licitud del contenido;
-c. permisos de acceso;
-d. configuración de privacidad;
-e. conservación;
-f. eliminación;
-g. enlaces compartidos;
-h. exposición pública o indebida;
-i. respaldo;
-j. cumplimiento legal;
-k. uso de cuentas propias o de terceros.
-La Plataforma puede almacenar referencias técnicas, IDs, nombres, metadatos, descripciones, estados, notas o datos vinculados a archivos externos. Dichas referencias pueden constituir datos personales o sensibles si permiten asociar información a una persona identificada o identificable.
-El hecho de que la Plataforma almacene una referencia o ID de un archivo externo no implica que el Prestador aloje, controle, copie, conserve, respalde o garantice acceso permanente al archivo externo.
-El Cliente acepta que el Prestador no será responsable por pérdida, eliminación, cambio de permisos, indisponibilidad, bloqueo, restricción, exposición pública, falla, modificación o inaccesibilidad de archivos almacenados en servicios externos del Cliente.
-Si el Cliente utiliza integraciones, autenticaciones o permisos con servicios externos, lo hace bajo su responsabilidad y sujeto a las condiciones del proveedor externo correspondiente.
+14. Archivos, radiografías e imágenes clínicas
+Cuando la función se encuentre habilitada, la Plataforma aloja radiografías e imágenes clínicas en infraestructura privada de almacenamiento provista por subprestadores tecnológicos. También conserva miniaturas y metadatos necesarios para asociar cada archivo con el consultorio y el paciente correspondiente.
+El acceso se decide según los roles y vínculos vigentes dentro de la Plataforma. Como regla funcional, un usuario autorizado para acceder clínicamente a un paciente puede ver sus imágenes activas; sólo los roles expresamente habilitados pueden cargar archivos, enviarlos a la papelera o restaurarlos.
+Los originales se entregan mediante enlaces temporales y específicos luego de verificar el permiso del usuario. El Cliente debe administrar correctamente usuarios, roles, vínculos profesionales y dispositivos de acceso.
+El Cliente es responsable por la licitud, pertinencia, exactitud y contenido de las imágenes que carga; por contar con la base legal o autorización necesaria; y por determinar sus obligaciones profesionales de conservación, copia, entrega, integridad y documentación.
+Enviar una imagen a la papelera es una supresión lógica: deja de mostrarse en la ficha activa, pero no borra físicamente el objeto. El dueño o un administrador pueden restaurarla. La versión actual no permite vaciar la papelera ni eliminar definitivamente imágenes clínicas desde la Plataforma.
+La versión actual tampoco incluye un servicio de backup externo dedicado, recuperación individual desde backup ni exportación masiva de archivos. Supabase Storage constituye la copia física operativa de estas imágenes. En consecuencia, el Prestador no garantiza recuperación frente a pérdida o corrupción física completa de dicha infraestructura, y el Cliente debe evaluar respaldos adicionales si su actividad o normativa los exige.
 
 15. Subprestadores e infraestructura
 El Cliente autoriza al Prestador a utilizar subprestadores necesarios o convenientes para prestar la Plataforma, incluyendo proveedores de infraestructura, hosting, base de datos, autenticación, despliegue, monitoreo, seguridad, correo, almacenamiento, soporte, pagos, analítica técnica o servicios relacionados.
@@ -152,13 +140,13 @@ El Prestador procurará utilizar subprestadores razonables y adoptar medidas con
 El Prestador podrá modificar subprestadores cuando resulte necesario o conveniente por motivos técnicos, comerciales, de seguridad, escalabilidad, mantenimiento, continuidad, costo o disponibilidad.
 
 16. Transferencias internacionales y servicios en la nube
-La Plataforma puede operar sobre infraestructura cloud o servicios tecnológicos cuyos servidores, procesamiento, soporte, backups, logs o subprocesos se encuentren fuera de la República Argentina.
+La Plataforma puede operar sobre infraestructura cloud o servicios tecnológicos cuyos servidores, procesamiento, soporte, redundancia interna, logs o subprocesos se encuentren fuera de la República Argentina.
 El Cliente reconoce y acepta que el uso de la Plataforma puede implicar transferencias internacionales o tratamiento transfronterizo de datos en la medida necesaria para prestar el servicio.
 El Cliente declara contar con legitimación suficiente para contratar un servicio tecnológico basado en infraestructura cloud y se obliga a informar u obtener autorizaciones que resulten necesarias respecto de sus pacientes, clientes finales, usuarios o terceros.
 El Prestador adoptará medidas razonables para que el tratamiento por subprestadores sea compatible con la finalidad del servicio y con la normativa aplicable, sin asumir obligaciones que correspondan legal o profesionalmente al Cliente.
 
 17. Seguridad de la información
-El Prestador implementará medidas técnicas y organizativas razonables para proteger la Plataforma y la información alojada, incluyendo, según disponibilidad y evolución del sistema, autenticación, permisos por rol, separación lógica por negocio, políticas de acceso, registros, controles server-side, restricciones de rutas, medidas antiabuso, copias técnicas, prácticas de desarrollo seguro y monitoreo razonable.
+El Prestador implementará medidas técnicas y organizativas razonables para proteger la Plataforma y la información alojada, incluyendo, según disponibilidad y evolución del sistema, autenticación, permisos por rol, separación lógica por negocio, políticas de acceso, registros, controles server-side, restricciones de rutas, medidas antiabuso, controles de integridad, prácticas de desarrollo seguro y monitoreo razonable.
 El Prestador no garantiza seguridad absoluta, invulnerabilidad total, ausencia de errores, disponibilidad permanente, inexistencia de incidentes o recuperación ilimitada.
 El Cliente deberá adoptar sus propias medidas de seguridad, incluyendo uso de emails reales, contraseñas seguras, control de dispositivos, revocación de usuarios, administración responsable de permisos, resguardo de credenciales, respaldo de información y capacitación interna.
 El Cliente será responsable por accesos indebidos derivados de usuarios propios, credenciales compartidas, dispositivos inseguros, emails falsos, pérdida de cuentas, falta de revocación de usuarios o configuración negligente.
@@ -213,22 +201,19 @@ La reactivación podrá estar sujeta a pago, disponibilidad técnica, conservaci
 La falta de pago no implica eliminación automática inmediata de datos. La eliminación, conservación, bloqueo, anonimización, exportación o archivo se regirá por estos Términos y la normativa aplicable.
 
 23. Exportación de datos
-La exportación de datos se realizará únicamente por solicitud, salvo que el Prestador habilite herramientas automáticas.
-El Cliente podrá solicitar exportación de información disponible, sujeta a verificación de identidad, permisos suficientes, estado de cuenta, disponibilidad técnica, formato razonable, seguridad, ausencia de riesgo y compatibilidad legal.
-La exportación puede incluir, según disponibilidad y procedencia, datos de pacientes, turnos, profesionales, servicios, notas, antecedentes, tratamientos, costos, observaciones, metadatos, referencias, auditoría básica u otros datos técnicamente exportables.
-El Prestador no garantiza un formato específico, salvo acuerdo expreso. La exportación podrá realizarse en formatos razonables tales como CSV, JSON, ZIP, PDF, archivos estructurados, enlaces temporales u otros medios técnicos disponibles.
-La exportación de archivos alojados en servicios externos, como Google Drive del Cliente, no será responsabilidad del Prestador, salvo que dichos archivos estén bajo control técnico efectivo del Prestador, lo cual no ocurre por el solo hecho de guardar referencias, IDs o metadatos.
-El Prestador podrá rechazar, limitar o diferir solicitudes de exportación cuando el solicitante no acredite permisos suficientes, exista riesgo de acceso indebido, la solicitud sea abusiva o técnicamente desproporcionada, afecte derechos de terceros, comprometa seguridad, exista conflicto de titularidad o resulte incompatible con obligaciones legales.
+La versión actual no incluye una herramienta de exportación masiva o descarga integral de datos e imágenes, ni garantiza una exportación automática o en un formato determinado.
+El Cliente podrá formular una solicitud por los canales de soporte. Cualquier asistencia excepcional quedará sujeta a verificación de identidad y permisos, disponibilidad técnica, seguridad, proporcionalidad y normativa aplicable, sin que ello implique que exista una función contratada de exportación.
+La futura habilitación de exportaciones requerirá condiciones técnicas y de seguridad específicas y será informada expresamente.
 
 24. Baja del servicio
 El Cliente podrá solicitar la baja del servicio mediante los canales habilitados.
 La baja suspende o finaliza el uso operativo de la Plataforma, pero no implica eliminación automática, inmediata o total de la información.
-Antes de solicitar la baja, el Cliente debe solicitar o realizar exportación de la información que necesite conservar.
-La baja podrá derivar en restricción, archivo, conservación temporal, exportación, bloqueo, anonimización o eliminación según corresponda.
+Antes de solicitar la baja, el Cliente debe conservar por sus propios medios la información que su actividad requiera, teniendo presente que la versión actual no incluye una exportación masiva garantizada.
+La baja podrá derivar en restricción, archivo, conservación temporal, bloqueo, anonimización o eliminación según corresponda.
 El Prestador podrá conservar información mínima necesaria para seguridad, auditoría, facturación, prevención de abuso, defensa legal, cumplimiento normativo, soporte, trazabilidad, obligaciones contractuales o recuperación posterior.
 
 25. Eliminación de datos
-La eliminación de datos no será automática ni instantánea.
+La eliminación de datos no será automática ni instantánea. En particular, las imágenes clínicas sólo pueden enviarse a una papelera lógica y restaurarse; la versión actual no ofrece purga física ni vaciado de papelera.
 El Cliente podrá solicitar eliminación de datos mediante un usuario con permisos suficientes. El Prestador podrá requerir verificación adicional de identidad, titularidad, autorización, alcance y consecuencias.
 El Prestador podrá denegar, diferir, limitar o adaptar una solicitud de eliminación cuando:
 a. exista obligación legal, contractual, profesional, técnica o de seguridad de conservar;
@@ -236,21 +221,19 @@ b. se afecten derechos de pacientes, usuarios, terceros o del propio Prestador;
 c. existan reclamos, auditorías, incidentes, facturación, pagos pendientes, investigaciones o defensa legal;
 d. la eliminación comprometa integridad, trazabilidad, auditoría o seguridad;
 e. no pueda verificarse la autoridad del solicitante;
-f. la información se encuentre en copias técnicas, backups o registros sujetos a ciclos de rotación;
-g. la eliminación deba ser realizada por el Cliente en un servicio externo bajo su control;
-h. la solicitud sea abusiva, ambigua o técnicamente inviable.
-La eliminación podrá consistir, según corresponda, en supresión lógica, supresión física, anonimización, bloqueo, desvinculación, archivo, restricción de acceso o cualquier procedimiento técnicamente razonable y legalmente compatible.
+f. la información se encuentre en registros técnicos o de auditoría sujetos a ciclos de retención;
+g. la solicitud sea abusiva, ambigua o técnicamente inviable.
+La eliminación podrá consistir, según corresponda y según las funciones efectivamente disponibles, en supresión lógica, anonimización, bloqueo, desvinculación, archivo o restricción de acceso. Una eventual purga física requerirá un proceso separado que no forma parte de la versión actual.
 
 26. Conservación posterior a la baja
-Finalizada, suspendida, restringida o archivada la cuenta, el Prestador podrá conservar información durante el tiempo razonablemente necesario para permitir exportación, reactivación, soporte, seguridad, auditoría, continuidad, defensa frente a reclamos, cumplimiento legal o conservación técnica.
+Finalizada, suspendida, restringida o archivada la cuenta, el Prestador podrá conservar información durante el tiempo razonablemente necesario para reactivación, soporte, seguridad, auditoría, continuidad, defensa frente a reclamos, cumplimiento legal o conservación técnica.
 Cuando corresponda al régimen de tratamiento por cuenta de terceros, y salvo instrucción legal o contractual distinta, el Prestador no utilizará los datos para una finalidad ajena al servicio ni los cederá a terceros no autorizados.
-El Cliente reconoce que determinada información puede conservarse en backups, logs, registros técnicos o auditoría durante ciclos técnicos de retención, rotación o resguardo.
+El Cliente reconoce que determinada información puede conservarse en logs, registros técnicos o auditoría durante ciclos técnicos de retención o resguardo.
 
 27. Backups y restauración
-El Prestador podrá mantener copias de seguridad o mecanismos técnicos de recuperación, según configuración de infraestructura y disponibilidad de proveedores.
-La existencia de backups no garantiza restauración individual, parcial, inmediata o a pedido.
-Los backups son una medida técnica de continuidad y seguridad del sistema, no una obligación de conservación profesional del Cliente ni una garantía de recuperación de información borrada o modificada.
-El Cliente es responsable de conservar respaldos propios cuando su actividad, normativa o criterio profesional lo exija.
+La versión actual no ofrece un backup externo dedicado de imágenes clínicas ni una función de restauración individual desde backup. La papelera permite revertir únicamente la supresión lógica de una imagen cuyo objeto siga disponible; no constituye un backup.
+Los mecanismos internos que pudiera utilizar un proveedor de infraestructura no se ofrecen al Cliente como copia independiente ni garantizan recuperación individual, parcial, inmediata o a pedido.
+El Cliente es responsable de evaluar y conservar respaldos propios cuando su actividad, normativa o criterio profesional lo exija.
 
 28. Disponibilidad del servicio
 El Prestador procurará mantener la Plataforma disponible de forma razonable, pero no garantiza disponibilidad ininterrumpida, ausencia de errores, continuidad absoluta, compatibilidad permanente, velocidad constante, inexistencia de interrupciones ni recuperación ilimitada.
@@ -258,7 +241,7 @@ La Plataforma puede verse afectada por mantenimiento, actualizaciones, errores, 
 El Prestador podrá realizar mantenimiento programado o urgente y adoptar medidas que afecten temporalmente el acceso cuando resulte necesario para preservar seguridad, integridad, continuidad o funcionamiento.
 
 29. Servicios externos
-El Cliente puede utilizar, conectar o referenciar servicios externos como Google Drive, correo electrónico, proveedores de autenticación, pagos, almacenamiento, mensajería, herramientas de terceros u otros servicios ajenos al Prestador.
+El Cliente puede utilizar servicios externos como correo electrónico, calendario, proveedores de autenticación, pagos, mensajería, herramientas de terceros u otros servicios ajenos al Prestador.
 El uso de dichos servicios estará sujeto a sus propios términos, políticas, costos, permisos, disponibilidad, limitaciones y seguridad.
 El Prestador no será responsable por fallas, pérdida de datos, cambios de permisos, cambios de API, eliminación, bloqueo, suspensión, indisponibilidad, filtración, exposición pública o errores de servicios externos bajo control del Cliente o de terceros.
 
@@ -281,7 +264,7 @@ El Prestador podrá conservar registro de versiones aceptadas, fecha de aceptaci
 33. Propiedad intelectual
 La Plataforma, su código, diseño, estructura, interfaces, documentación, nombre, marcas, bases técnicas, flujos, know-how y desarrollos pertenecen al Prestador o a sus licenciantes.
 El Cliente no adquiere propiedad sobre la Plataforma, sino un derecho limitado, revocable, no exclusivo, no transferible y sujeto a estos Términos.
-El Cliente conserva los derechos que correspondan sobre los datos y contenidos que cargue, sin perjuicio de las autorizaciones necesarias para que el Prestador los aloje, procese, muestre, proteja, respalde y trate para prestar la Plataforma.
+El Cliente conserva los derechos que correspondan sobre los datos y contenidos que cargue, sin perjuicio de las autorizaciones necesarias para que el Prestador los aloje, procese, muestre, proteja, conserve y trate para prestar la Plataforma.
 
 34. Confidencialidad
 El Prestador mantendrá confidencial la información no pública del Cliente y de sus pacientes o clientes finales a la que acceda en razón del servicio.
@@ -339,7 +322,7 @@ El Prestador no aplicará los datos a finalidades ajenas al servicio ni los cede
 4. Finalidad
 El tratamiento tendrá por finalidad prestar, mantener, operar, proteger, auditar, soportar, exportar, recuperar, migrar, facturar, mejorar técnicamente y asegurar la Plataforma.
 5. Categorías de datos
-Podrán tratarse datos identificatorios, datos de contacto, DNI, teléfono, email, fecha de nacimiento, dirección, turnos, profesionales, servicios, antecedentes, tratamientos, costos, diagnósticos textuales, observaciones, notas, metadatos, referencias a archivos externos, auditoría, datos técnicos, datos de suscripción y datos de usuarios.
+Podrán tratarse datos identificatorios, datos de contacto, DNI, teléfono, email, fecha de nacimiento, dirección, turnos, profesionales, servicios, antecedentes, tratamientos, costos, diagnósticos textuales, observaciones, notas, radiografías, imágenes clínicas, miniaturas, metadatos, auditoría, datos técnicos, datos de suscripción y datos de usuarios.
 6. Categorías de titulares
 Podrán tratarse datos de pacientes, clientes finales, profesionales, usuarios, administradores, personal del Cliente, contactos operativos y personas vinculadas al negocio del Cliente.
 7. Seguridad
@@ -351,21 +334,21 @@ El Cliente autoriza el uso de subprestadores necesarios o convenientes para la p
 10. Finalización
 Al finalizar la relación, los datos podrán ser exportados, conservados temporalmente, bloqueados, archivados, eliminados o anonimizados conforme a estos Términos, instrucciones razonables del Cliente, disponibilidad técnica y normativa aplicable.
 
-ANEXO II — POLÍTICA DE BAJA, EXPORTACIÓN, CONSERVACIÓN Y ELIMINACIÓN
+ANEXO II — POLÍTICA DE BAJA, CONSERVACIÓN Y SUPRESIÓN LÓGICA
 1. Principio general
 La falta de pago, suspensión, baja o archivo de cuenta no implica eliminación inmediata de datos.
-2. Exportación por solicitud
-La exportación se realizará únicamente por solicitud del Cliente y estará sujeta a verificación, disponibilidad técnica, permisos, seguridad y formatos razonables.
+2. Exportación
+La versión actual no incluye una exportación masiva garantizada. Las consultas excepcionales se rigen por la sección 23.
 3. Gracia y modo restringido
 La cuenta podrá tener hasta 48 horas de gracia tras el vencimiento. Luego podrá pasar a modo restringido por hasta 30 días, con funciones limitadas.
 4. Cuenta archivada
 Pasado el período restringido sin regularización, la cuenta podrá archivarse. La cuenta archivada no garantiza acceso normal al panel.
 5. Eliminación
 La eliminación de datos requerirá solicitud, verificación y evaluación. No será automática ni inmediata.
-6. Servicios externos
-La eliminación o exportación de archivos alojados en cuentas externas del Cliente, como Google Drive, deberá ser gestionada por el Cliente dentro de dichos servicios.
-7. Backups y registros
-La eliminación del sistema activo no implica eliminación inmediata de backups, logs, auditoría o registros mínimos necesarios.
+6. Imágenes clínicas
+Las imágenes enviadas a la papelera conservan el objeto y pueden restaurarse. No existe una función de purga física en la versión actual.
+7. Respaldo y registros
+No se ofrece un backup externo dedicado de imágenes. Los logs, la auditoría y los registros mínimos necesarios pueden conservarse según sus ciclos técnicos y finalidades legítimas.
 8. Conservación legítima
 El Prestador podrá conservar información mínima cuando sea necesario por seguridad, auditoría, defensa, cumplimiento legal, facturación, prevención de abuso o integridad del sistema.
 
@@ -380,9 +363,9 @@ f. que asume responsabilidad por informar, obtener autorizaciones y responder a 
 g. que acepta el uso de subprestadores e infraestructura tecnológica;
 h. que acepta que puede existir acceso técnico-administrativo excepcional limitado a finalidades legítimas;
 i. que entiende que el Prestador no accede ordinariamente ni usa los datos para fines propios;
-j. que acepta la política de pagos, vencimiento, restricción, archivo y exportación;
+j. que acepta la política de pagos, vencimiento, restricción y archivo, y entiende que no existe una exportación masiva garantizada en la versión actual;
 k. que entiende que la recuperación de cuenta no está garantizada si pierde email, contraseña, factores, usuarios administradores o prueba de titularidad;
-l. que reconoce que los archivos alojados en servicios externos, como Google Drive, quedan bajo su propia responsabilidad;
+l. que comprende que las imágenes clínicas se alojan en infraestructura privada de la Plataforma, se comparten según permisos del paciente y no cuentan actualmente con backup externo dedicado ni purga física;
 m. que acepta que la baja no implica eliminación inmediata de datos;
 n. que acepta que la eliminación estará sujeta a verificación, disponibilidad técnica y obligaciones aplicables.`;
 
@@ -402,7 +385,7 @@ n. que acepta que la eliminación estará sujeta a verificación, disponibilidad
 			<BackLink href="/login" label="Volver al ingreso" />
 			<h1 class="mt-3 text-2xl font-semibold">Términos y condiciones</h1>
 			<p class="mt-1 text-xs text-neutral-500 dark:text-neutral-300">
-				Documento vigente: Terminos_y_condiciones_Cita_Suite.odt
+				Última actualización: 2026-08-20
 			</p>
 
 			<div class="mt-6 space-y-3 text-sm leading-relaxed text-neutral-700 dark:text-neutral-200">

@@ -2,22 +2,17 @@ import { env } from '$env/dynamic/private';
 import { resolveActiveBusiness } from '$lib/server/business';
 import {
 	createSupabaseServerClient,
-	getAuthUserId,
 	getEmailFromAccessToken,
 	isMasterEmail
 } from '$lib/server/supabase';
-import { fail, redirect } from '@sveltejs/kit';
-import type { Actions, PageServerLoad } from './$types';
+import { redirect } from '@sveltejs/kit';
+import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
-	if (!locals.auth) {
-		throw redirect(303, '/login');
-	}
-	const isMaster = isMasterEmail(getEmailFromAccessToken(locals.auth.access_token));
+	if (!locals.auth) throw redirect(303, '/login');
 
-	if (env.DEMO_MODE === 'true') {
-		return { demo: true, driveConnection: null, canLinkExternalFiles: true, isMaster };
-	}
+	const isMaster = isMasterEmail(getEmailFromAccessToken(locals.auth.access_token));
+	if (env.DEMO_MODE === 'true') return { demo: true, isMaster };
 
 	const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
 	const context = await resolveActiveBusiness({
@@ -25,119 +20,11 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies }) => {
 		accessToken: locals.auth.access_token,
 		cookies
 	});
+
 	if (context?.role === 'professional') throw redirect(303, '/odonto/mis-turnos');
 	if (context && context.role !== 'owner' && context.role !== 'admin') {
 		throw redirect(303, '/odonto/agenda');
 	}
-	const ownerId = await getAuthUserId(supabase, locals.auth.access_token);
-	if (!ownerId) {
-		return { demo: false, driveConnection: null, canLinkExternalFiles: false, isMaster };
-	}
 
-	const { data, error } = await supabase
-		.from('drive_connections')
-		.select('owner_id, connected_email, root_folder_id, updated_at')
-		.eq('owner_id', ownerId)
-		.maybeSingle();
-
-	if (error) {
-		console.error('Error cargando Drive connection', error);
-	}
-
-	return {
-		demo: false,
-		driveConnection: data ?? null,
-		canLinkExternalFiles: Boolean(context?.access.allowedCapabilities.canLinkExternalFiles),
-		isMaster
-	};
-};
-
-export const actions: Actions = {
-	save_drive_connection: async ({ request, locals, fetch, cookies }) => {
-		if (!locals.auth) throw redirect(303, '/login');
-		if (env.DEMO_MODE === 'true') {
-			return fail(400, { message: 'No disponible en modo demo.' });
-		}
-
-		const form = await request.formData();
-		const connected_email = String(form.get('connected_email') ?? '').trim();
-		const root_folder_id = String(form.get('root_folder_id') ?? '').trim();
-
-		if (!connected_email || !root_folder_id) {
-			return fail(400, { message: 'Faltan datos para guardar la conexion.' });
-		}
-
-		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
-		const ownerId = await getAuthUserId(supabase, locals.auth.access_token);
-		if (!ownerId) {
-			return fail(401, { message: 'Sesion invalida. Volve a iniciar sesion.' });
-		}
-		const context = await resolveActiveBusiness({
-			supabase,
-			accessToken: locals.auth.access_token,
-			cookies
-		});
-		if (!context?.access.allowedCapabilities.canLinkExternalFiles) {
-			return fail(403, {
-				message: 'Tu acceso a Cita Suite venció. Activá tu suscripción para volver a usar la plataforma.'
-			});
-		}
-		const { error } = await supabase
-			.from('drive_connections')
-			.upsert(
-				{
-					owner_id: ownerId,
-					connected_email,
-					root_folder_id,
-					updated_at: new Date().toISOString()
-				},
-				{ onConflict: 'owner_id' }
-			);
-
-		if (error) {
-			console.error('Error guardando Drive connection', error);
-			return fail(500, { message: 'No se pudo guardar la conexion con Drive.' });
-		}
-
-		return { success: true };
-	},
-	disconnect_drive: async ({ locals, fetch, cookies }) => {
-		if (!locals.auth) throw redirect(303, '/login');
-		if (env.DEMO_MODE === 'true') {
-			return fail(400, { message: 'No disponible en modo demo.' });
-		}
-
-		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
-		const ownerId = await getAuthUserId(supabase, locals.auth.access_token);
-		if (!ownerId) {
-			return fail(401, { message: 'Sesion invalida. Volve a iniciar sesion.' });
-		}
-		const context = await resolveActiveBusiness({
-			supabase,
-			accessToken: locals.auth.access_token,
-			cookies
-		});
-		if (!context) {
-			return fail(500, { message: 'No se pudo resolver el negocio activo.' });
-		}
-		if (!context.access.allowedCapabilities.canLinkExternalFiles) {
-			return fail(403, {
-				message: 'Tu acceso a Cita Suite venció. Activá tu suscripción para volver a usar la plataforma.'
-			});
-		}
-		const { error } = await supabase.from('drive_connections').delete().eq('owner_id', ownerId);
-		const { error: resetError } = await supabase.rpc('clear_patient_drive_folders_safely', {
-			p_business_id: context.business.id
-		});
-
-		if (error) {
-			console.error('Error desconectando Drive', error);
-			return fail(500, { message: 'No se pudo desconectar Drive.' });
-		}
-		if (resetError) {
-			console.error('Error limpiando carpetas Drive en pacientes', resetError);
-		}
-
-		return { success: true };
-	}
+	return { demo: false, isMaster };
 };

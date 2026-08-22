@@ -3,6 +3,8 @@
 
 begin;
 
+select extensions.plan(1);
+
 do $$
 declare
 	v_owner_id uuid := gen_random_uuid();
@@ -133,5 +135,8 @@ begin
 	raise notice 'PASS: pending admin profile hides, links, publishes, and survives attending-role changes.';
 end;
 $$;
+
+select extensions.pass('pending attending profiles contract');
+select * from extensions.finish();
 
 rollback;

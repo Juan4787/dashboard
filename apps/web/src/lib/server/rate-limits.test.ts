@@ -17,6 +17,10 @@ const {
 	enforceRateLimits,
 	hashRateLimitSubject,
 	loginPasswordRateLimitRules,
+	radiographOriginalAccessRateLimitRules,
+	radiographRestoreRateLimitRules,
+	radiographTrashRateLimitRules,
+	radiographUploadRateLimitRules,
 	signupEmailRateLimitRules,
 	RateLimitExceededError
 } = await import('./rate-limits');
@@ -92,5 +96,54 @@ describe('rate limits server helper', () => {
 		await expect(
 			enforceRateLimits(loginPasswordRateLimitRules('cliente@example.com', '203.0.113.10'))
 		).rejects.toBeInstanceOf(RateLimitExceededError);
+	});
+
+	it('define límites clínicos acotados por usuario y agrupa las dos ventanas de carga', async () => {
+		const rpc = vi.fn(async () => ({
+			data: [{ allowed: true, used: 1, retry_after_seconds: 0 }],
+			error: null
+		}));
+		mocks.createSupabaseAdminClient.mockResolvedValue({ rpc });
+
+		await enforceRateLimits(radiographUploadRateLimitRules('user-1'));
+		await enforceRateLimits(radiographOriginalAccessRateLimitRules('user-1'));
+		await enforceRateLimits(radiographTrashRateLimitRules('user-1'));
+		await enforceRateLimits(radiographRestoreRateLimitRules('user-1'));
+
+		expect(rpc).toHaveBeenNthCalledWith(
+			1,
+			'consume_server_rate_limits',
+			expect.objectContaining({
+				p_action: 'radiograph_upload_by_user',
+				p_windows: [
+					{ limit_count: 6, window_seconds: 60 },
+					{ limit_count: 60, window_seconds: 3600 }
+				]
+			})
+		);
+		expect(rpc).toHaveBeenNthCalledWith(
+			2,
+			'consume_server_rate_limits',
+			expect.objectContaining({
+				p_action: 'radiograph_original_access_by_user',
+				p_windows: [{ limit_count: 300, window_seconds: 3600 }]
+			})
+		);
+		expect(rpc).toHaveBeenNthCalledWith(
+			3,
+			'consume_server_rate_limits',
+			expect.objectContaining({
+				p_action: 'radiograph_trash_by_user',
+				p_windows: [{ limit_count: 30, window_seconds: 60 }]
+			})
+		);
+		expect(rpc).toHaveBeenNthCalledWith(
+			4,
+			'consume_server_rate_limits',
+			expect.objectContaining({
+				p_action: 'radiograph_restore_by_user',
+				p_windows: [{ limit_count: 30, window_seconds: 60 }]
+			})
+		);
 	});
 });

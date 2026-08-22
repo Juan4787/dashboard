@@ -4,6 +4,8 @@
 
 begin;
 
+select extensions.plan(1);
+
 do $$
 declare
 	v_owner uuid := gen_random_uuid();
@@ -83,5 +85,8 @@ begin
 	raise notice 'PASS: direct, assisted and isolated business contexts are correct.';
 end;
 $$;
+
+select extensions.pass('user business contexts contract');
+select * from extensions.finish();
 
 rollback;

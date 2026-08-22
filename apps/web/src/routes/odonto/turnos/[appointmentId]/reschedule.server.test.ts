@@ -44,6 +44,17 @@ vi.mock('$lib/server/messaging', () => ({ publicRescheduleUrl: vi.fn() }));
 
 const { actions } = await import('./+page.server');
 
+const futureDateParts = Object.fromEntries(
+	new Intl.DateTimeFormat('en-CA', {
+		timeZone: 'America/Argentina/Buenos_Aires',
+		year: 'numeric',
+		month: '2-digit',
+		day: '2-digit'
+	}).formatToParts(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)).map((part) => [part.type, part.value])
+);
+const reprogramDate = `${futureDateParts.year}-${futureDateParts.month}-${futureDateParts.day}`;
+const slotStartsAt = `${reprogramDate}T15:00:00.000Z`;
+
 const appointmentResult = {
 	data: {
 		id: 'appointment-1',
@@ -76,8 +87,8 @@ const callReschedule = () =>
 		request: new Request('https://app.test/odonto/turnos/appointment-1?/reschedule', {
 			method: 'POST',
 			body: new URLSearchParams({
-				slot_starts_at: '2026-08-20T15:00:00.000Z',
-				reprogram_date: '2026-08-20',
+				slot_starts_at: slotStartsAt,
+				reprogram_date: reprogramDate,
 				ignore_break: 'false'
 			})
 		}),
@@ -103,9 +114,9 @@ beforeEach(() => {
 	});
 	mocks.getAvailabilitySlots.mockResolvedValue([
 		{
-			date: '2026-08-20',
+			date: reprogramDate,
 			time: '12:00',
-			starts_at: '2026-08-20T15:00:00.000Z',
+			starts_at: slotStartsAt,
 			professional_id: 'professional-1'
 		}
 	]);
@@ -121,7 +132,7 @@ describe('reprogramación desde el detalle de Agenda', () => {
 		await expect(callReschedule()).rejects.toMatchObject({
 			status: 303,
 			location:
-				'/odonto/turnos/appointment-1?from_date=2026-08-20&reprogram_date=2026-08-20&rescheduled=1'
+				`/odonto/turnos/appointment-1?from_date=${reprogramDate}&reprogram_date=${reprogramDate}&rescheduled=1`
 		});
 
 		expect(mocks.rescheduleAppointment).toHaveBeenCalledWith(
@@ -129,7 +140,7 @@ describe('reprogramación desde el detalle de Agenda', () => {
 			expect.objectContaining({
 				businessId: 'business-1',
 				appointmentId: 'appointment-1',
-				startsAt: new Date('2026-08-20T15:00:00.000Z')
+				startsAt: new Date(slotStartsAt)
 			})
 		);
 		expect(mocks.resetPushRemindersForReschedule).toHaveBeenCalledOnce();

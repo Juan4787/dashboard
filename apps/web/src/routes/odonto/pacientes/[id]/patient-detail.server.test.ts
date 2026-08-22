@@ -25,6 +25,7 @@ vi.mock('$lib/server/business', () => ({
 }));
 
 const { actions } = await import('./+page.server');
+const { resolvePatientPermissions } = await import('$lib/server/patient-permissions');
 
 const businessId = '00000000-0000-4000-8000-000000000001';
 const ownerId = '00000000-0000-4000-8000-000000000002';
@@ -46,9 +47,8 @@ const allCapabilities = {
 	canManageAvailability: true,
 	canCreateClinicalEntry: true,
 	canEditClinicalEntry: true,
-	canLinkExternalFiles: true,
+	canManagePatientFiles: true,
 	canManageUsers: true,
-	canRequestExport: true,
 	canViewSubscription: true
 };
 
@@ -117,9 +117,40 @@ const makeProfessionalContext = () => {
 	mocks.resolveActiveBusiness.mockResolvedValue({
 		business: { id: businessId },
 		role: 'professional',
-		access: { allowedCapabilities: { ...allCapabilities } }
+		access: { canEnterApp: true, canUseBusiness: true, allowedCapabilities: { ...allCapabilities } }
 	});
 };
+
+describe('patient detail clinical-file permissions', () => {
+	it('keeps restricted owner read-only access and hides files entirely from restricted professionals', () => {
+		const restrictedCapabilities = {
+			...allCapabilities,
+			canManagePatientFiles: false
+		};
+		const restrictedAccess = {
+			canEnterApp: true,
+			canUseBusiness: false,
+			allowedCapabilities: restrictedCapabilities
+		};
+
+		expect(
+			resolvePatientPermissions({ role: 'owner', access: restrictedAccess } as any)
+		).toMatchObject({
+			canViewRadiographs: true,
+			canUploadRadiographs: false,
+			canViewRadiographTrash: true,
+			canTrashRadiographs: false
+		});
+		expect(
+			resolvePatientPermissions({ role: 'professional', access: restrictedAccess } as any)
+		).toMatchObject({
+			canViewRadiographs: false,
+			canUploadRadiographs: false,
+			canViewRadiographTrash: false,
+			canTrashRadiographs: false
+		});
+	});
+});
 
 describe('patient detail migrated actions', () => {
 	beforeEach(() => {
@@ -130,7 +161,7 @@ describe('patient detail migrated actions', () => {
 		mocks.resolveActiveBusiness.mockResolvedValue({
 			business: { id: businessId },
 			role: 'owner',
-			access: { allowedCapabilities: { ...allCapabilities } }
+			access: { canEnterApp: true, canUseBusiness: true, allowedCapabilities: { ...allCapabilities } }
 		});
 	});
 

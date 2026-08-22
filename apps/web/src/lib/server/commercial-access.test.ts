@@ -96,7 +96,7 @@ describe('getBusinessAccessState', () => {
 		expect(state.allowedCapabilities.canCreatePatient).toBe(true);
 	});
 
-	it('bloquea acciones operativas en restricted pero mantiene lectura/exportación', () => {
+	it('bloquea acciones operativas en restricted pero mantiene la lectura permitida', () => {
 		const state = getBusinessAccessState(
 			{
 				...baseSubscription,
@@ -112,10 +112,9 @@ describe('getBusinessAccessState', () => {
 		expect(state.allowedCapabilities.canViewExistingPatients).toBe(true);
 		expect(state.allowedCapabilities.canCreatePatient).toBe(false);
 		expect(state.allowedCapabilities.canUsePublicBooking).toBe(false);
-		expect(state.allowedCapabilities.canRequestExport).toBe(true);
 	});
 
-	it('deja sólo estado/exportación en archived', () => {
+	it('deja sólo el estado de suscripción en archived', () => {
 		const state = getBusinessAccessState(
 			{
 				...baseSubscription,
@@ -131,7 +130,6 @@ describe('getBusinessAccessState', () => {
 		expect(state.commercialStatus).toBe('archived');
 		expect(state.canEnterApp).toBe(false);
 		expect(state.allowedCapabilities.canViewExistingPatients).toBe(false);
-		expect(state.allowedCapabilities.canRequestExport).toBe(true);
 	});
 
 	it('bloquea manualmente el uso comercial sin tocar emails existentes', () => {

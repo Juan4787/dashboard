@@ -3,10 +3,12 @@ import { get, writable } from 'svelte/store';
 export const PATIENT_LIST_CACHE_TTL_MS = 2 * 60 * 1000;
 export const PATIENT_REVISION_VERIFICATION_MAX_AGE_MS = 35_000;
 const MAX_CACHE_ENTRIES = 8;
+const NAVIGATION_CONTEXT_TTL_MS = 10 * 60 * 1000;
 
 export type PatientListSnapshot = {
 	businessId: string | null;
 	showArchived: boolean;
+	query: string;
 	cacheable: boolean;
 	revision: string | null;
 	cacheScope: string | null;
@@ -47,6 +49,14 @@ const initialRevisionState = (): PatientRevisionState => ({
 
 const patientListCache = new Map<string, CacheEntry>();
 const verificationInFlight = new Map<string, Promise<PatientRevisionSnapshot>>();
+let patientListNavigationContext: {
+	businessId: string;
+	showArchived: boolean;
+	query: string;
+	loadedCount: number;
+	scrollY: number;
+	expiresAt: number;
+} | null = null;
 
 export const patientRevisionState = writable<PatientRevisionState>(initialRevisionState());
 
@@ -61,8 +71,10 @@ const compareRevisions = (left: string, right: string) => {
 	return leftValue === rightValue ? 0 : leftValue > rightValue ? 1 : -1;
 };
 
-const cacheKey = (cacheScope: string, showArchived: boolean) =>
-	`${cacheScope}:${showArchived ? 'archived' : 'active'}`;
+const normalizeQuery = (query: string) => query.trim().toLocaleLowerCase('es');
+
+const cacheKey = (cacheScope: string, showArchived: boolean, query: string) =>
+	`${cacheScope}:${showArchived ? 'archived' : 'active'}:${normalizeQuery(query)}`;
 
 const prunePatientListCache = (now: number) => {
 	for (const [key, entry] of patientListCache) {
@@ -80,17 +92,19 @@ const prunePatientListCache = (now: number) => {
 export const getCachedPatientList = ({
 	cacheScope,
 	showArchived,
+	query,
 	revision,
 	now = Date.now()
 }: {
 	cacheScope: string;
 	showArchived: boolean;
+	query: string;
 	revision: string;
 	now?: number;
 }): PatientListSnapshot | null => {
 	if (typeof window === 'undefined') return null;
 	prunePatientListCache(now);
-	const entry = patientListCache.get(cacheKey(cacheScope, showArchived));
+	const entry = patientListCache.get(cacheKey(cacheScope, showArchived, query));
 	if (!entry || entry.data.revision !== revision || entry.expiresAt <= now) return null;
 	return entry.data;
 };
@@ -107,7 +121,7 @@ export const setCachedPatientList = (
 	) {
 		return;
 	}
-	patientListCache.set(cacheKey(data.cacheScope, data.showArchived), {
+	patientListCache.set(cacheKey(data.cacheScope, data.showArchived, data.query), {
 		data,
 		storedAt: now,
 		expiresAt: now + PATIENT_LIST_CACHE_TTL_MS
@@ -304,5 +318,58 @@ export const verifyPatientRevision = async (
 export const resetPatientListClientState = () => {
 	patientListCache.clear();
 	verificationInFlight.clear();
+	patientListNavigationContext = null;
 	patientRevisionState.set(initialRevisionState());
+};
+
+export const rememberPatientListNavigation = ({
+	businessId,
+	showArchived,
+	query,
+	loadedCount,
+	scrollY,
+	now = Date.now()
+}: {
+	businessId: string;
+	showArchived: boolean;
+	query: string;
+	loadedCount: number;
+	scrollY: number;
+	now?: number;
+}) => {
+	if (typeof window === 'undefined' || !businessId) return;
+	patientListNavigationContext = {
+		businessId,
+		showArchived,
+		query: normalizeQuery(query),
+		loadedCount: Math.max(0, Math.floor(loadedCount)),
+		scrollY: Math.max(0, Math.floor(scrollY)),
+		expiresAt: now + NAVIGATION_CONTEXT_TTL_MS
+	};
+};
+
+export const consumePatientListNavigation = ({
+	businessId,
+	showArchived,
+	query,
+	now = Date.now()
+}: {
+	businessId: string;
+	showArchived: boolean;
+	query: string;
+	now?: number;
+}) => {
+	if (typeof window === 'undefined') return null;
+	const context = patientListNavigationContext;
+	patientListNavigationContext = null;
+	if (
+		!context ||
+		context.expiresAt <= now ||
+		context.businessId !== businessId ||
+		context.showArchived !== showArchived ||
+		context.query !== normalizeQuery(query)
+	) {
+		return null;
+	}
+	return { loadedCount: context.loadedCount, scrollY: context.scrollY };
 };

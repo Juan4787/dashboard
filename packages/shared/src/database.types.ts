@@ -17,10 +17,10 @@ export type Database = {
     Functions: {
       graphql: {
         Args: {
-          query?: string
           extensions?: Json
-          variables?: Json
           operationName?: string
+          query?: string
+          variables?: Json
         }
         Returns: Json
       }
@@ -593,6 +593,8 @@ export type Database = {
           entity_type: string
           id: string
           metadata: Json | null
+          reason_code: string | null
+          result: string
           user_id: string | null
         }
         Insert: {
@@ -603,6 +605,8 @@ export type Database = {
           entity_type: string
           id?: string
           metadata?: Json | null
+          reason_code?: string | null
+          result?: string
           user_id?: string | null
         }
         Update: {
@@ -613,6 +617,8 @@ export type Database = {
           entity_type?: string
           id?: string
           metadata?: Json | null
+          reason_code?: string | null
+          result?: string
           user_id?: string | null
         }
         Relationships: [
@@ -1811,6 +1817,48 @@ export type Database = {
           },
         ]
       }
+      patient_drive_folders: {
+        Row: {
+          business_id: string
+          created_at: string
+          drive_folder_id: string
+          patient_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          business_id: string
+          created_at?: string
+          drive_folder_id: string
+          patient_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          business_id?: string
+          created_at?: string
+          drive_folder_id?: string
+          patient_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "patient_drive_folders_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "patient_drive_folders_business_id_patient_id_fkey"
+            columns: ["business_id", "patient_id"]
+            isOneToOne: false
+            referencedRelation: "patients"
+            referencedColumns: ["business_id", "id"]
+          },
+        ]
+      }
       patient_profile_change_events: {
         Row: {
           business_id: string
@@ -1871,55 +1919,91 @@ export type Database = {
       }
       patient_radiographs: {
         Row: {
-          business_id: string | null
+          business_id: string
           bytes: number | null
+          client_request_id: string | null
           created_at: string
           created_by: string | null
           deleted_at: string | null
+          deleted_by: string | null
           drive_file_id: string | null
+          failure_code: string | null
           id: string
+          integrity_status: string
           mime_type: string | null
           note: string | null
           original_filename: string | null
-          owner_id: string
+          owner_id: string | null
           patient_id: string
+          ready_at: string | null
+          restored_at: string | null
+          restored_by: string | null
           sha256: string | null
           status: string
+          storage_bucket: string | null
+          storage_path: string | null
+          storage_provider: string
           taken_at: string | null
+          thumbnail_path: string | null
+          uploaded_by: string | null
         }
         Insert: {
-          business_id?: string | null
+          business_id: string
           bytes?: number | null
+          client_request_id?: string | null
           created_at?: string
           created_by?: string | null
           deleted_at?: string | null
+          deleted_by?: string | null
           drive_file_id?: string | null
+          failure_code?: string | null
           id?: string
+          integrity_status?: string
           mime_type?: string | null
           note?: string | null
           original_filename?: string | null
-          owner_id: string
+          owner_id?: string | null
           patient_id: string
+          ready_at?: string | null
+          restored_at?: string | null
+          restored_by?: string | null
           sha256?: string | null
           status?: string
+          storage_bucket?: string | null
+          storage_path?: string | null
+          storage_provider?: string
           taken_at?: string | null
+          thumbnail_path?: string | null
+          uploaded_by?: string | null
         }
         Update: {
-          business_id?: string | null
+          business_id?: string
           bytes?: number | null
+          client_request_id?: string | null
           created_at?: string
           created_by?: string | null
           deleted_at?: string | null
+          deleted_by?: string | null
           drive_file_id?: string | null
+          failure_code?: string | null
           id?: string
+          integrity_status?: string
           mime_type?: string | null
           note?: string | null
           original_filename?: string | null
-          owner_id?: string
+          owner_id?: string | null
           patient_id?: string
+          ready_at?: string | null
+          restored_at?: string | null
+          restored_by?: string | null
           sha256?: string | null
           status?: string
+          storage_bucket?: string | null
+          storage_path?: string | null
+          storage_provider?: string
           taken_at?: string | null
+          thumbnail_path?: string | null
+          uploaded_by?: string | null
         }
         Relationships: [
           {
@@ -1940,6 +2024,7 @@ export type Database = {
       }
       patients: {
         Row: {
+          activity_at: string
           address: string | null
           allergies: string | null
           archived_at: string | null
@@ -1963,10 +2048,14 @@ export type Database = {
           phone: string | null
           phone_e164: string | null
           phone_raw: string | null
+          search_dni_digits: string
+          search_name_normalized: string
+          search_phone_digits: string
           spam_score: number
           updated_at: string
         }
         Insert: {
+          activity_at?: string
           address?: string | null
           allergies?: string | null
           archived_at?: string | null
@@ -1990,10 +2079,14 @@ export type Database = {
           phone?: string | null
           phone_e164?: string | null
           phone_raw?: string | null
+          search_dni_digits?: string
+          search_name_normalized?: string
+          search_phone_digits?: string
           spam_score?: number
           updated_at?: string
         }
         Update: {
+          activity_at?: string
           address?: string | null
           allergies?: string | null
           archived_at?: string | null
@@ -2017,6 +2110,9 @@ export type Database = {
           phone?: string | null
           phone_e164?: string | null
           phone_raw?: string | null
+          search_dni_digits?: string
+          search_name_normalized?: string
+          search_phone_digits?: string
           spam_score?: number
           updated_at?: string
         }
@@ -2596,20 +2692,28 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      activate_account_assistance: {
-        Args: { target_support_user_id: string; target_business_id: string }
+      accessible_patient_counts: {
+        Args: { p_business_id: string }
         Returns: {
+          active_count: number
+          archived_count: number
+          total_count: number
+        }[]
+      }
+      activate_account_assistance: {
+        Args: { target_business_id: string; target_support_user_id: string }
+        Returns: {
+          business_id: string
           created_at: string
-          revoked_at: string
+          dismissed_at: string
           expires_at: string
+          id: string
+          requested_by_user_id: string
+          revoked_at: string
           starts_at: string
           status: string
           support_user_id: string
-          requested_by_user_id: string
-          business_id: string
-          id: string
           updated_at: string
-          dismissed_at: string
         }[]
       }
       add_business_user_by_email: {
@@ -2626,29 +2730,51 @@ export type Database = {
       }
       audit_security_event: {
         Args: {
-          p_metadata: Json
-          p_entity_id: string
-          p_outcome: string
-          p_reason: string
-          p_business_id: string
-          p_actor_id: string
           p_action: string
+          p_business_id: string
+          p_entity_id: string
           p_entity_type: string
+          p_metadata?: Json
+          p_reason_code: string
+          p_result: string
+          p_user_id: string
         }
         Returns: undefined
       }
       authorize_google_calendar_event: {
         Args: {
-          p_oauth_client_key: string
           p_appointment_id: string
           p_google_subject: string
-          p_refresh_token_ciphertext: string
           p_granted_scopes: string[]
           p_now?: string
+          p_oauth_client_key: string
+          p_refresh_token_ciphertext: string
         }
         Returns: {
           connection_row_id: string
           event_row_id: string
+        }[]
+      }
+      begin_patient_radiograph_upload: {
+        Args: {
+          p_actor_id: string
+          p_business_id: string
+          p_bytes: number
+          p_client_request_id: string
+          p_mime_type: string
+          p_note?: string
+          p_original_filename: string
+          p_patient_id: string
+          p_sha256: string
+          p_taken_at?: string
+        }
+        Returns: {
+          created_at: string
+          radiograph_id: string
+          status: string
+          storage_bucket: string
+          storage_path: string
+          thumbnail_path: string
         }[]
       }
       business_allows_operation: {
@@ -2666,17 +2792,17 @@ export type Database = {
       claim_due_push_reminders: {
         Args: { claim_limit?: number; claim_now: string }
         Returns: {
-          auth: string
-          endpoint: string
-          business_id: string
           appointment_id: string
-          subscription_id: string
+          auth: string
+          business_id: string
+          endpoint: string
           p256dh: string
           reminder_kind: string
+          subscription_id: string
         }[]
       }
       claim_google_calendar_sync_jobs: {
-        Args: { claim_now: string; claim_limit?: number }
+        Args: { claim_limit?: number; claim_now: string }
         Returns: {
           event_row_id: string
         }[]
@@ -2718,21 +2844,39 @@ export type Database = {
           type: string
           updated_at: string
         }[]
+        SetofOptions: {
+          from: "*"
+          to: "message_dispatches"
+          isOneToOne: false
+          isSetofReturn: true
+        }
       }
       clear_patient_drive_folders_safely: {
         Args: { p_business_id: string }
         Returns: undefined
       }
       complete_google_calendar_event_delete: {
-        Args: { p_now?: string; p_event_row_id: string }
+        Args: { p_event_row_id: string; p_now?: string }
         Returns: string
       }
       complete_google_calendar_event_sync: {
         Args: {
-          p_google_event_id: string
           p_event_row_id: string
+          p_google_event_id: string
           p_now?: string
           p_synced_sequence: number
+        }
+        Returns: string
+      }
+      complete_patient_radiograph_upload: {
+        Args: {
+          p_actor_id: string
+          p_actual_bytes: number
+          p_actual_mime_type: string
+          p_business_id: string
+          p_patient_id: string
+          p_radiograph_id: string
+          p_thumbnail_uploaded?: boolean
         }
         Returns: string
       }
@@ -2740,28 +2884,28 @@ export type Database = {
         Args: {
           p_archived_at: string
           p_commercial_access_enabled: boolean
-          p_paid_until: string
-          p_restricted_until: string
           p_grace_until: string
           p_is_permanent: boolean
+          p_paid_until: string
+          p_restricted_until: string
         }
         Returns: string
       }
       consume_google_calendar_oauth_attempt: {
-        Args: { p_state_hash: string; p_now?: string }
+        Args: { p_now?: string; p_state_hash: string }
         Returns: {
           appointment_id: string
+          attempt_id: string
+          business_id: string
           code_verifier_ciphertext: string
           force_consent: boolean
-          business_id: string
-          attempt_id: string
         }[]
       }
       consume_server_rate_limit: {
         Args: {
           p_action: string
-          p_subject_hash: string
           p_limit: number
+          p_subject_hash: string
           p_window_seconds: number
         }
         Returns: {
@@ -2771,7 +2915,7 @@ export type Database = {
         }[]
       }
       consume_server_rate_limits: {
-        Args: { p_action: string; p_windows: Json; p_subject_hash: string }
+        Args: { p_action: string; p_subject_hash: string; p_windows: Json }
         Returns: {
           allowed: boolean
           retry_after_seconds: number
@@ -2784,56 +2928,56 @@ export type Database = {
       }
       create_clinical_entry_safely: {
         Args: {
-          p_business_id: string
-          p_patient_id: string
-          p_internal_note?: string
-          p_teeth?: string
-          p_created_at?: string
           p_amount?: number
-          p_entry_type: string
+          p_business_id: string
+          p_created_at?: string
           p_description: string
+          p_entry_type: string
+          p_internal_note?: string
+          p_patient_id: string
+          p_teeth?: string
         }
         Returns: string
       }
       create_joint_appointment: {
         Args: {
-          p_internal_note?: string
-          p_professional_ids: string[]
-          p_service_id: string
-          p_patient_id: string
           p_business_id: string
           p_created_by_user_id?: string
           p_ignore_break?: boolean
+          p_internal_note?: string
+          p_patient_id: string
+          p_professional_ids: string[]
+          p_service_id: string
           p_starts_at: string
         }
         Returns: {
+          confirmation_token: string
+          ends_at: string
+          id: string
           professional_name_snapshot: string
           service_name_snapshot: string
-          ends_at: string
           starts_at: string
-          confirmation_token: string
-          id: string
         }[]
       }
       create_joint_appointment_with_source: {
         Args: {
           p_business_id: string
-          p_patient_id: string
-          p_service_id: string
-          p_professional_ids: string[]
-          p_starts_at: string
-          p_internal_note: string
           p_created_by_user_id: string
           p_ignore_break: boolean
+          p_internal_note: string
+          p_patient_id: string
+          p_professional_ids: string[]
+          p_service_id: string
           p_source: string
+          p_starts_at: string
         }
         Returns: {
-          service_name_snapshot: string
-          professional_name_snapshot: string
-          id: string
-          ends_at: string
-          starts_at: string
           confirmation_token: string
+          ends_at: string
+          id: string
+          professional_name_snapshot: string
+          service_name_snapshot: string
+          starts_at: string
         }[]
       }
       current_user_professional_id: {
@@ -2841,266 +2985,65 @@ export type Database = {
         Returns: string
       }
       dismiss_account_assistance_notice: {
-        Args: { target_grant_id: string; target_business_id: string }
+        Args: { target_business_id: string; target_grant_id: string }
         Returns: undefined
       }
       ensure_user_default_business: {
         Args: { p_industry?: string; p_name?: string }
         Returns: {
-          role: string
           business_id: string
+          role: string
         }[]
       }
       fail_google_calendar_event_sync: {
         Args: {
           p_error_code: string
+          p_event_row_id: string
+          p_failure_category: string
           p_next_attempt_at: string
           p_now?: string
-          p_failure_category: string
-          p_event_row_id: string
         }
         Returns: string
       }
-      gbt_bit_compress: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_bool_compress: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_bool_fetch: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_bpchar_compress: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_bytea_compress: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_cash_compress: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_cash_fetch: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_date_compress: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_date_fetch: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_decompress: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_enum_compress: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_enum_fetch: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_float4_compress: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_float4_fetch: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_float8_compress: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_float8_fetch: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_inet_compress: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_int2_compress: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_int2_fetch: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_int4_compress: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_int4_fetch: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_int8_compress: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_int8_fetch: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_intv_compress: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_intv_decompress: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_intv_fetch: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_macad_compress: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_macad_fetch: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_macad8_compress: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_macad8_fetch: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_numeric_compress: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_oid_compress: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_oid_fetch: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_text_compress: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_time_compress: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_time_fetch: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_timetz_compress: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_ts_compress: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_ts_fetch: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_tstz_compress: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_uuid_compress: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_uuid_fetch: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_var_decompress: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbt_var_fetch: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbtreekey_var_in: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbtreekey_var_out: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbtreekey16_in: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbtreekey16_out: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbtreekey2_in: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbtreekey2_out: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbtreekey32_in: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbtreekey32_out: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbtreekey4_in: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbtreekey4_out: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbtreekey8_in: {
-        Args: { "": unknown }
-        Returns: unknown
-      }
-      gbtreekey8_out: {
-        Args: { "": unknown }
-        Returns: unknown
+      fail_patient_radiograph_upload: {
+        Args: {
+          p_actor_id: string
+          p_business_id: string
+          p_failure_code?: string
+          p_patient_id: string
+          p_radiograph_id: string
+        }
+        Returns: string
       }
       get_availability_snapshot: {
-        Args: { p_from: string; p_business_id: string; p_to: string }
+        Args: { p_business_id: string; p_from: string; p_to: string }
         Returns: Json
+      }
+      get_clinical_file_daily_transfer_estimates: {
+        Args: { p_local_day?: string }
+        Returns: {
+          business_id: string
+          estimated_transfer_bytes: number
+          local_day: string
+          original_access_bytes: number
+          original_access_events: number
+          threshold_level: string
+          upload_bytes: number
+          upload_events: number
+        }[]
       }
       get_patient_data_revision: {
         Args: { p_business_id: string }
         Returns: {
-          viewer_role: string
-          can_create_patient: boolean
           business_id: string
+          can_create_patient: boolean
           patients_revision: number
           realtime_topic: string
+          viewer_role: string
         }[]
       }
       get_patient_drive_folder_safely: {
-        Args: { p_patient_id: string; p_business_id: string }
+        Args: { p_business_id: string; p_patient_id: string }
         Returns: string
       }
       get_public_booking_active_future_count_by_name: {
@@ -3109,85 +3052,146 @@ export type Database = {
       }
       grant_business_access: {
         Args: {
-          p_duration_seconds: number
-          p_idempotency_key: string
           p_admin_email: string
           p_admin_id: string
-          p_note: string
-          p_source: string
           p_amount: number
-          p_is_permanent: boolean
           p_business_id: string
-          p_operation: string
+          p_duration_seconds: number
           p_duration_unit: string
+          p_idempotency_key: string
+          p_is_permanent: boolean
+          p_note: string
+          p_operation: string
+          p_source: string
         }
         Returns: {
-          status_after: string
+          applied: boolean
+          grant_id: string
           paid_until_after: string
           paid_until_before: string
-          grant_id: string
-          applied: boolean
+          status_after: string
         }[]
       }
-      is_email_enabled: {
-        Args: { p_email: string }
-        Returns: boolean
+      grant_patient_radiograph_original_access: {
+        Args: {
+          p_actor_id: string
+          p_business_id: string
+          p_patient_id: string
+          p_radiograph_id: string
+        }
+        Returns: {
+          bytes: number
+          mime_type: string
+          original_filename: string
+          storage_bucket: string
+          storage_path: string
+        }[]
+      }
+      is_email_enabled: { Args: { p_email: string }; Returns: boolean }
+      list_accessible_patients_page: {
+        Args: {
+          p_business_id: string
+          p_cursor_activity_at?: string
+          p_cursor_id?: string
+          p_cursor_rank?: number
+          p_limit?: number
+          p_query?: string
+          p_show_archived?: boolean
+          p_snapshot_at?: string
+        }
+        Returns: {
+          activity_at: string
+          archived_at: string
+          created_at: string
+          dni: string
+          full_name: string
+          id: string
+          last_entry_at: string
+          phone: string
+          professional_archived_at: string
+          search_rank: number
+        }[]
       }
       list_business_role_access: {
         Args: { target_business_id: string }
         Returns: {
-          role: string
-          email: string
-          created_at: string
-          professional_id: string
-          id: string
-          status: string
           business_id: string
+          created_at: string
+          email: string
+          id: string
+          professional_id: string
+          role: string
+          status: string
           user_id: string
         }[]
       }
       list_business_users: {
         Args: { target_business_id: string }
         Returns: {
+          business_id: string
           created_at: string
-          role: string
           email: string
           id: string
-          business_id: string
+          role: string
           user_id: string
         }[]
       }
-      list_user_business_contexts: {
-        Args: Record<PropertyKey, never>
+      list_trashed_patient_radiographs_page: {
+        Args: {
+          p_business_id: string
+          p_cursor_deleted_at?: string
+          p_cursor_id?: string
+          p_limit?: number
+          p_query?: string
+        }
         Returns: {
-          subscription: Json
-          assistance: Json
-          role: string
-          business: Json
+          bytes: number
+          created_at: string
+          deleted_at: string
+          deleted_by_label: string
+          id: string
+          integrity_status: string
+          mime_type: string
+          original_filename: string
+          patient_id: string
+          patient_name: string
+          taken_at: string
+          thumbnail_path: string
         }[]
       }
-      normalize_phone_e164: {
-        Args: { value: string }
+      list_user_business_contexts: {
+        Args: never
+        Returns: {
+          assistance: Json
+          business: Json
+          role: string
+          subscription: Json
+        }[]
+      }
+      normalize_patient_search_digits: {
+        Args: { p_value: string }
         Returns: string
       }
-      normalized_patient_name: {
-        Args: { value: string }
+      normalize_patient_search_text: {
+        Args: { p_value: string }
         Returns: string
       }
+      normalize_phone_e164: { Args: { value: string }; Returns: string }
+      normalized_patient_name: { Args: { value: string }; Returns: string }
       patients_counts_by_business: {
         Args: { p_business: string }
         Returns: {
-          archived_count: number
           active_count: number
+          archived_count: number
           total_count: number
         }[]
       }
       patients_counts_by_owner: {
         Args: { p_owner: string }
         Returns: {
+          active_count: number
           archived_count: number
           total_count: number
-          active_count: number
         }[]
       }
       professional_break_minutes_at: {
@@ -3200,8 +3204,8 @@ export type Database = {
       }
       professional_update_appointment_status: {
         Args: {
-          target_business_id: string
           target_appointment_id: string
+          target_business_id: string
           target_status: string
         }
         Returns: undefined
@@ -3221,10 +3225,10 @@ export type Database = {
       }
       record_push_test_feedback: {
         Args: {
+          feedback_time?: string
+          feedback_visible: boolean
           target_appointment_id: string
           target_delivery_id: string
-          feedback_visible: boolean
-          feedback_time?: string
         }
         Returns: boolean
       }
@@ -3234,11 +3238,11 @@ export type Database = {
       }
       replace_professional_availability_rules: {
         Args: {
+          p_business_id: string
           p_professional_id: string
-          p_weekdays: number[]
           p_ranges: Json
           p_slot_interval_minutes: number
-          p_business_id: string
+          p_weekdays: number[]
         }
         Returns: {
           break_minutes: number
@@ -3252,88 +3256,108 @@ export type Database = {
           start_time: string
           weekday: number
         }[]
+        SetofOptions: {
+          from: "*"
+          to: "availability_rules"
+          isOneToOne: false
+          isSetofReturn: true
+        }
       }
       request_google_calendar_event_deletion: {
         Args: { p_appointment_id: string; p_now?: string }
         Returns: string
       }
+      restore_patient_radiograph: {
+        Args: {
+          p_actor_id: string
+          p_business_id: string
+          p_radiograph_id: string
+        }
+        Returns: string
+      }
       revoke_account_assistance: {
         Args: { target_business_id: string }
         Returns: {
-          support_user_id: string
-          id: string
           business_id: string
-          requested_by_user_id: string
-          status: string
-          starts_at: string
-          expires_at: string
-          revoked_at: string
-          dismissed_at: string
           created_at: string
+          dismissed_at: string
+          expires_at: string
+          id: string
+          requested_by_user_id: string
+          revoked_at: string
+          starts_at: string
+          status: string
+          support_user_id: string
           updated_at: string
         }[]
       }
       set_patient_archive_state_safely: {
         Args: {
-          p_patient_id: string
           p_archived: boolean
           p_business_id: string
+          p_patient_id: string
         }
         Returns: undefined
       }
       set_patient_drive_folder_safely: {
         Args: {
           p_business_id: string
-          p_patient_id: string
           p_drive_folder_id: string
+          p_patient_id: string
         }
         Returns: undefined
       }
-      slugify_business_slug: {
-        Args: { value: string }
+      slugify_business_slug: { Args: { value: string }; Returns: string }
+      trash_patient_radiograph: {
+        Args: {
+          p_actor_id: string
+          p_business_id: string
+          p_patient_id: string
+          p_radiograph_id: string
+        }
         Returns: string
       }
       update_business_role_access: {
-        Args: { target_role: string; target_access_id: string }
+        Args: { target_access_id: string; target_role: string }
         Returns: undefined
       }
       update_clinical_entry_safely: {
         Args: {
-          p_entry_type: string
           p_amount?: number
-          p_internal_note?: string
-          p_teeth?: string
           p_business_id: string
-          p_patient_id: string
-          p_entry_id: string
           p_description: string
+          p_entry_id: string
+          p_entry_type: string
+          p_internal_note?: string
+          p_patient_id: string
+          p_teeth?: string
         }
         Returns: undefined
       }
       upsert_business_role_access: {
         Args: {
-          target_email: string
-          target_role: string
           target_business_id: string
+          target_email: string
           target_professional_id?: string
+          target_role: string
         }
         Returns: {
-          status: string
-          membership_id: string
           invite_id: string
+          membership_id: string
+          status: string
           user_id: string
         }[]
       }
       upsert_patient_clinical_profile_safely: {
         Args: {
-          p_patient_id: string
           p_allergies?: string
-          p_medication?: string
           p_background?: string
-          p_clinical_alert_note?: string
-          p_notes?: string
-          p_custom_fields?: Json
           p_business_id: string
+          p_clinical_alert_note?: string
+          p_custom_fields?: Json
+          p_medication?: string
+          p_notes?: string
+          p_patient_id: string
         }
         Returns: string
       }
@@ -3350,19 +3374,19 @@ export type Database = {
         Returns: boolean
       }
       user_can_read_appointment: {
-        Args: { target_business_id: string; target_appointment_id: string }
+        Args: { target_appointment_id: string; target_business_id: string }
         Returns: boolean
       }
       user_can_read_basic_patient: {
-        Args: { target_patient_id: string; target_business_id: string }
+        Args: { target_business_id: string; target_patient_id: string }
         Returns: boolean
       }
       user_can_read_clinical_patient: {
-        Args: { target_patient_id: string; target_business_id: string }
+        Args: { target_business_id: string; target_patient_id: string }
         Returns: boolean
       }
       user_can_read_patient: {
-        Args: { target_patient_id: string; target_business_id: string }
+        Args: { target_business_id: string; target_patient_id: string }
         Returns: boolean
       }
       user_can_read_professional_schedule: {
@@ -3382,7 +3406,7 @@ export type Database = {
         Returns: boolean
       }
       user_has_active_professional_patient_link: {
-        Args: { target_patient_id: string; target_business_id: string }
+        Args: { target_business_id: string; target_patient_id: string }
         Returns: boolean
       }
       user_has_business_access: {
@@ -3405,27 +3429,191 @@ export type Database = {
     Tables: {
       buckets: {
         Row: {
+          allowed_mime_types: string[] | null
+          avif_autodetection: boolean | null
           created_at: string | null
+          file_size_limit: number | null
           id: string
           name: string
           owner: string | null
+          owner_id: string | null
+          public: boolean | null
+          type: Database["storage"]["Enums"]["buckettype"]
           updated_at: string | null
         }
         Insert: {
+          allowed_mime_types?: string[] | null
+          avif_autodetection?: boolean | null
           created_at?: string | null
+          file_size_limit?: number | null
           id: string
           name: string
           owner?: string | null
+          owner_id?: string | null
+          public?: boolean | null
+          type?: Database["storage"]["Enums"]["buckettype"]
           updated_at?: string | null
         }
         Update: {
+          allowed_mime_types?: string[] | null
+          avif_autodetection?: boolean | null
           created_at?: string | null
+          file_size_limit?: number | null
           id?: string
           name?: string
           owner?: string | null
+          owner_id?: string | null
+          public?: boolean | null
+          type?: Database["storage"]["Enums"]["buckettype"]
           updated_at?: string | null
         }
         Relationships: []
+      }
+      buckets_analytics: {
+        Row: {
+          created_at: string
+          deleted_at: string | null
+          format: string
+          id: string
+          name: string
+          type: Database["storage"]["Enums"]["buckettype"]
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          deleted_at?: string | null
+          format?: string
+          id?: string
+          name: string
+          type?: Database["storage"]["Enums"]["buckettype"]
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          deleted_at?: string | null
+          format?: string
+          id?: string
+          name?: string
+          type?: Database["storage"]["Enums"]["buckettype"]
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      buckets_vectors: {
+        Row: {
+          created_at: string
+          id: string
+          type: Database["storage"]["Enums"]["buckettype"]
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id: string
+          type?: Database["storage"]["Enums"]["buckettype"]
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          type?: Database["storage"]["Enums"]["buckettype"]
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      iceberg_namespaces: {
+        Row: {
+          bucket_name: string
+          catalog_id: string
+          created_at: string
+          id: string
+          metadata: Json
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          bucket_name: string
+          catalog_id: string
+          created_at?: string
+          id?: string
+          metadata?: Json
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          bucket_name?: string
+          catalog_id?: string
+          created_at?: string
+          id?: string
+          metadata?: Json
+          name?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "iceberg_namespaces_catalog_id_fkey"
+            columns: ["catalog_id"]
+            isOneToOne: false
+            referencedRelation: "buckets_analytics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      iceberg_tables: {
+        Row: {
+          bucket_name: string
+          catalog_id: string
+          created_at: string
+          id: string
+          location: string
+          name: string
+          namespace_id: string
+          remote_table_id: string | null
+          shard_id: string | null
+          shard_key: string | null
+          updated_at: string
+        }
+        Insert: {
+          bucket_name: string
+          catalog_id: string
+          created_at?: string
+          id?: string
+          location: string
+          name: string
+          namespace_id: string
+          remote_table_id?: string | null
+          shard_id?: string | null
+          shard_key?: string | null
+          updated_at?: string
+        }
+        Update: {
+          bucket_name?: string
+          catalog_id?: string
+          created_at?: string
+          id?: string
+          location?: string
+          name?: string
+          namespace_id?: string
+          remote_table_id?: string | null
+          shard_id?: string | null
+          shard_key?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "iceberg_tables_catalog_id_fkey"
+            columns: ["catalog_id"]
+            isOneToOne: false
+            referencedRelation: "buckets_analytics"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "iceberg_tables_namespace_id_fkey"
+            columns: ["namespace_id"]
+            isOneToOne: false
+            referencedRelation: "iceberg_namespaces"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       migrations: {
         Row: {
@@ -3457,7 +3645,11 @@ export type Database = {
           metadata: Json | null
           name: string | null
           owner: string | null
+          owner_id: string | null
+          path_tokens: string[] | null
           updated_at: string | null
+          user_metadata: Json | null
+          version: string | null
         }
         Insert: {
           bucket_id?: string | null
@@ -3467,7 +3659,11 @@ export type Database = {
           metadata?: Json | null
           name?: string | null
           owner?: string | null
+          owner_id?: string | null
+          path_tokens?: string[] | null
           updated_at?: string | null
+          user_metadata?: Json | null
+          version?: string | null
         }
         Update: {
           bucket_id?: string | null
@@ -3477,7 +3673,11 @@ export type Database = {
           metadata?: Json | null
           name?: string | null
           owner?: string | null
+          owner_id?: string | null
+          path_tokens?: string[] | null
           updated_at?: string | null
+          user_metadata?: Json | null
+          version?: string | null
         }
         Relationships: [
           {
@@ -3489,43 +3689,282 @@ export type Database = {
           },
         ]
       }
+      s3_multipart_uploads: {
+        Row: {
+          bucket_id: string
+          created_at: string
+          id: string
+          in_progress_size: number
+          key: string
+          metadata: Json | null
+          owner_id: string | null
+          upload_signature: string
+          user_metadata: Json | null
+          version: string
+        }
+        Insert: {
+          bucket_id: string
+          created_at?: string
+          id: string
+          in_progress_size?: number
+          key: string
+          metadata?: Json | null
+          owner_id?: string | null
+          upload_signature: string
+          user_metadata?: Json | null
+          version: string
+        }
+        Update: {
+          bucket_id?: string
+          created_at?: string
+          id?: string
+          in_progress_size?: number
+          key?: string
+          metadata?: Json | null
+          owner_id?: string | null
+          upload_signature?: string
+          user_metadata?: Json | null
+          version?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "s3_multipart_uploads_bucket_id_fkey"
+            columns: ["bucket_id"]
+            isOneToOne: false
+            referencedRelation: "buckets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      s3_multipart_uploads_parts: {
+        Row: {
+          bucket_id: string
+          created_at: string
+          etag: string
+          id: string
+          key: string
+          owner_id: string | null
+          part_number: number
+          size: number
+          upload_id: string
+          version: string
+        }
+        Insert: {
+          bucket_id: string
+          created_at?: string
+          etag: string
+          id?: string
+          key: string
+          owner_id?: string | null
+          part_number: number
+          size?: number
+          upload_id: string
+          version: string
+        }
+        Update: {
+          bucket_id?: string
+          created_at?: string
+          etag?: string
+          id?: string
+          key?: string
+          owner_id?: string | null
+          part_number?: number
+          size?: number
+          upload_id?: string
+          version?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "s3_multipart_uploads_parts_bucket_id_fkey"
+            columns: ["bucket_id"]
+            isOneToOne: false
+            referencedRelation: "buckets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "s3_multipart_uploads_parts_upload_id_fkey"
+            columns: ["upload_id"]
+            isOneToOne: false
+            referencedRelation: "s3_multipart_uploads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      vector_indexes: {
+        Row: {
+          bucket_id: string
+          created_at: string
+          data_type: string
+          dimension: number
+          distance_metric: string
+          id: string
+          metadata_configuration: Json | null
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          bucket_id: string
+          created_at?: string
+          data_type: string
+          dimension: number
+          distance_metric: string
+          id?: string
+          metadata_configuration?: Json | null
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          bucket_id?: string
+          created_at?: string
+          data_type?: string
+          dimension?: number
+          distance_metric?: string
+          id?: string
+          metadata_configuration?: Json | null
+          name?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vector_indexes_bucket_id_fkey"
+            columns: ["bucket_id"]
+            isOneToOne: false
+            referencedRelation: "buckets_vectors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      extension: {
-        Args: { name: string }
+      allow_any_operation: {
+        Args: { expected_operations: string[] }
+        Returns: boolean
+      }
+      allow_only_operation: {
+        Args: { expected_operation: string }
+        Returns: boolean
+      }
+      can_insert_object: {
+        Args: { bucketid: string; metadata: Json; name: string; owner: string }
+        Returns: undefined
+      }
+      extension: { Args: { name: string }; Returns: string }
+      filename: { Args: { name: string }; Returns: string }
+      foldername: { Args: { name: string }; Returns: string[] }
+      get_common_prefix: {
+        Args: { p_delimiter: string; p_key: string; p_prefix: string }
         Returns: string
       }
-      filename: {
-        Args: { name: string }
-        Returns: string
+      get_size_by_bucket: {
+        Args: never
+        Returns: {
+          bucket_id: string
+          size: number
+        }[]
       }
-      foldername: {
-        Args: { name: string }
-        Returns: string[]
-      }
-      search: {
+      list_multipart_uploads_with_delimiter: {
         Args: {
-          offsets?: number
-          levels?: number
-          limits?: number
-          bucketname: string
-          prefix: string
+          bucket_id: string
+          delimiter_param: string
+          max_keys?: number
+          next_key_token?: string
+          next_upload_token?: string
+          prefix_param: string
         }
         Returns: {
-          metadata: Json
           created_at: string
-          updated_at: string
           id: string
-          name: string
+          key: string
+        }[]
+      }
+      list_objects_with_delimiter: {
+        Args: {
+          _bucket_id: string
+          delimiter_param: string
+          max_keys?: number
+          next_token?: string
+          prefix_param: string
+          sort_order?: string
+          start_after?: string
+        }
+        Returns: {
+          created_at: string
+          id: string
           last_accessed_at: string
+          metadata: Json
+          name: string
+          updated_at: string
+        }[]
+      }
+      operation: { Args: never; Returns: string }
+      search: {
+        Args: {
+          bucketname: string
+          levels?: number
+          limits?: number
+          offsets?: number
+          prefix: string
+          search?: string
+          sortcolumn?: string
+          sortorder?: string
+        }
+        Returns: {
+          created_at: string
+          id: string
+          last_accessed_at: string
+          metadata: Json
+          name: string
+          updated_at: string
+        }[]
+      }
+      search_by_timestamp: {
+        Args: {
+          p_bucket_id: string
+          p_level: number
+          p_limit: number
+          p_prefix: string
+          p_sort_column: string
+          p_sort_column_after: string
+          p_sort_order: string
+          p_start_after: string
+        }
+        Returns: {
+          created_at: string
+          id: string
+          key: string
+          last_accessed_at: string
+          metadata: Json
+          name: string
+          updated_at: string
+        }[]
+      }
+      search_v2: {
+        Args: {
+          bucket_name: string
+          levels?: number
+          limits?: number
+          prefix: string
+          sort_column?: string
+          sort_column_after?: string
+          sort_order?: string
+          start_after?: string
+        }
+        Returns: {
+          created_at: string
+          id: string
+          key: string
+          last_accessed_at: string
+          metadata: Json
+          name: string
+          updated_at: string
         }[]
       }
     }
     Enums: {
-      [_ in never]: never
+      buckettype: "STANDARD" | "ANALYTICS" | "VECTOR"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -3533,21 +3972,25 @@ export type Database = {
   }
 }
 
-type DefaultSchema = Database[Extract<keyof Database, "public">]
+type DatabaseWithoutInternals = Omit<Database, "__InternalSupabase">
+
+type DefaultSchema = DatabaseWithoutInternals[Extract<keyof Database, "public">]
 
 export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
-    | { schema: keyof Database },
+    | { schema: keyof DatabaseWithoutInternals },
   TableName extends DefaultSchemaTableNameOrOptions extends {
-    schema: keyof Database
+    schema: keyof DatabaseWithoutInternals
   }
-    ? keyof (Database[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
-        Database[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
+    ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
+        DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
     : never = never,
-> = DefaultSchemaTableNameOrOptions extends { schema: keyof Database }
-  ? (Database[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
-      Database[DefaultSchemaTableNameOrOptions["schema"]]["Views"])[TableName] extends {
+> = DefaultSchemaTableNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
+      DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])[TableName] extends {
       Row: infer R
     }
     ? R
@@ -3565,14 +4008,16 @@ export type Tables<
 export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
-    | { schema: keyof Database },
+    | { schema: keyof DatabaseWithoutInternals },
   TableName extends DefaultSchemaTableNameOrOptions extends {
-    schema: keyof Database
+    schema: keyof DatabaseWithoutInternals
   }
-    ? keyof Database[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
+    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
     : never = never,
-> = DefaultSchemaTableNameOrOptions extends { schema: keyof Database }
-  ? Database[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
+> = DefaultSchemaTableNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
       Insert: infer I
     }
     ? I
@@ -3588,14 +4033,16 @@ export type TablesInsert<
 export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
-    | { schema: keyof Database },
+    | { schema: keyof DatabaseWithoutInternals },
   TableName extends DefaultSchemaTableNameOrOptions extends {
-    schema: keyof Database
+    schema: keyof DatabaseWithoutInternals
   }
-    ? keyof Database[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
+    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
     : never = never,
-> = DefaultSchemaTableNameOrOptions extends { schema: keyof Database }
-  ? Database[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
+> = DefaultSchemaTableNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
       Update: infer U
     }
     ? U
@@ -3611,14 +4058,16 @@ export type TablesUpdate<
 export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
-    | { schema: keyof Database },
+    | { schema: keyof DatabaseWithoutInternals },
   EnumName extends DefaultSchemaEnumNameOrOptions extends {
-    schema: keyof Database
+    schema: keyof DatabaseWithoutInternals
   }
-    ? keyof Database[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
+    ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
     : never = never,
-> = DefaultSchemaEnumNameOrOptions extends { schema: keyof Database }
-  ? Database[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"][EnumName]
+> = DefaultSchemaEnumNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"][EnumName]
   : DefaultSchemaEnumNameOrOptions extends keyof DefaultSchema["Enums"]
     ? DefaultSchema["Enums"][DefaultSchemaEnumNameOrOptions]
     : never
@@ -3626,14 +4075,16 @@ export type Enums<
 export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
-    | { schema: keyof Database },
+    | { schema: keyof DatabaseWithoutInternals },
   CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
-    schema: keyof Database
+    schema: keyof DatabaseWithoutInternals
   }
-    ? keyof Database[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
+    ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
     : never = never,
-> = PublicCompositeTypeNameOrOptions extends { schema: keyof Database }
-  ? Database[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"][CompositeTypeName]
+> = PublicCompositeTypeNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"][CompositeTypeName]
   : PublicCompositeTypeNameOrOptions extends keyof DefaultSchema["CompositeTypes"]
     ? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
     : never
@@ -3646,6 +4097,8 @@ export const Constants = {
     Enums: {},
   },
   storage: {
-    Enums: {},
+    Enums: {
+      buckettype: ["STANDARD", "ANALYTICS", "VECTOR"],
+    },
   },
 } as const

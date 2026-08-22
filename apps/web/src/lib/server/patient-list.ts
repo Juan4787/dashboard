@@ -7,25 +7,38 @@ import {
 	type PatientDataRevision
 } from '$lib/server/patient-data-revision';
 import {
+	decodePatientListCursor,
+	encodePatientListCursor
+} from '$lib/server/patient-list-cursor';
+import {
 	createSupabaseAdminClient,
 	createSupabaseServerClient,
 	getAuthUserId
 } from '$lib/server/supabase';
+import { normalizePatientListQuery } from '$lib/utils/patient-list-query';
 import { error as kitError, redirect, type Cookies } from '@sveltejs/kit';
 
+export { normalizePatientListQuery } from '$lib/utils/patient-list-query';
+
+const PAGE_SIZE = 30;
 type CountsSource = 'rpc' | 'fallback_planned';
 
 export type PatientListData = {
 	businessId: string | null;
 	patients: any[];
-	query: '';
+	query: string;
 	showArchived: boolean;
 	demo: boolean;
 	canCreatePatient: boolean;
+	canAccessRadiographTrash: boolean;
 	totalCount: number;
 	activeCount: number;
 	archivedCount: number;
 	countsSource: CountsSource;
+	hasMore: boolean;
+	nextCursor: string | null;
+	snapshotAt: string | null;
+	pageSize: number;
 	cacheable: boolean;
 	revision: string | null;
 	cacheScope: string | null;
@@ -61,6 +74,18 @@ const withCacheMetadata = (
 	cacheable: revision.cacheable,
 	revision: revision.revision,
 	cacheScope: revision.cacheable ? cacheScope : null,
+	loadedAt: new Date().toISOString()
+});
+
+export const withUncacheablePatientListMetadata = (
+	data: ListWithoutCacheMetadata,
+	businessId: string
+): PatientListData => ({
+	...data,
+	businessId,
+	cacheable: false,
+	revision: null,
+	cacheScope: null,
 	loadedAt: new Date().toISOString()
 });
 
@@ -102,29 +127,45 @@ export const loadPatientList = async ({
 }: LoadPatientListOptions): Promise<PatientListData> => {
 	if (!locals.auth) throw redirect(303, '/login');
 	const showArchived = url.searchParams.get('estado') === 'archivados';
+	const query = normalizePatientListQuery(url.searchParams.get('q'));
+	const rawCursor = url.searchParams.get('cursor')?.trim() ?? '';
 
 	if (env.DEMO_MODE === 'true') {
+		const normalized = query.toLocaleLowerCase('es');
 		const demoPatients = readDemoDb().patients;
 		const activeCount = demoPatients.filter((patient) => !patient.archived_at).length;
 		const archivedCount = demoPatients.filter((patient) => patient.archived_at).length;
 		const patients = demoPatients
 			.filter((patient) => (showArchived ? patient.archived_at !== null : patient.archived_at === null))
+			.filter((patient) =>
+				normalized
+					? `${patient.full_name} ${patient.dni ?? ''} ${patient.phone ?? ''}`
+							.toLocaleLowerCase('es')
+							.includes(normalized)
+					: true
+			)
 			.sort((a, b) => {
 				const aDate = a.updated_at ?? a.last_entry_at ?? a.created_at ?? '';
 				const bDate = b.updated_at ?? b.last_entry_at ?? b.created_at ?? '';
 				return aDate < bDate ? 1 : -1;
-			});
+			})
+			.slice(0, PAGE_SIZE);
 		return {
 			businessId: null,
 			patients,
-			query: '',
+			query,
 			showArchived,
 			demo: true,
 			canCreatePatient: true,
+			canAccessRadiographTrash: true,
 			totalCount: demoPatients.length,
 			activeCount,
 			archivedCount,
 			countsSource: 'fallback_planned',
+			hasMore: false,
+			nextCursor: null,
+			snapshotAt: null,
+			pageSize: PAGE_SIZE,
 			cacheable: false,
 			revision: null,
 			cacheScope: null,
@@ -135,8 +176,8 @@ export const loadPatientList = async ({
 	let supabase;
 	try {
 		supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
-	} catch (error) {
-		console.error('Error creando cliente Supabase para listar pacientes', error);
+	} catch (cause) {
+		console.error('Error creando cliente Supabase para listar pacientes', cause);
 		throw kitError(500, 'No se pudo conectar para cargar los pacientes. Intentá de nuevo.');
 	}
 
@@ -160,198 +201,91 @@ export const loadPatientList = async ({
 		canCreatePatient: context.access.allowedCapabilities.canCreatePatient
 	});
 	const readRevision = () => getPatientDataRevision(admin, context.business.id);
+	const cursor = rawCursor
+		? decodePatientListCursor(rawCursor, {
+				businessId: context.business.id,
+				showArchived,
+				query
+			})
+		: null;
+	if (rawCursor && !cursor) {
+		throw kitError(400, 'La página solicitada ya no es válida. Actualizá la lista.');
+	}
 
 	const loadRows = async (): Promise<ListWithoutCacheMetadata> => {
-		if (context.role === 'professional') {
-			const { data: professionalUser, error: professionalUserError } = await admin
-				.from('professional_users')
-				.select('professional_id')
-				.eq('business_id', context.business.id)
-				.eq('user_id', userId)
-				.order('created_at', { ascending: true })
-				.limit(1)
-				.maybeSingle();
-
-			if (professionalUserError) {
-				console.error('Error resolviendo profesional para listar pacientes', professionalUserError);
-				throw kitError(500, 'No se pudieron cargar los pacientes.');
-			}
-
-			const professionalId = (professionalUser as any)?.professional_id
-				? String((professionalUser as any).professional_id)
-				: null;
-			if (!professionalId) {
-				return {
-					patients: [],
-					query: '',
-					showArchived,
-					demo: false,
-					canCreatePatient: context.access.allowedCapabilities.canCreatePatient,
-					totalCount: 0,
-					activeCount: 0,
-					archivedCount: 0,
-					countsSource: 'fallback_planned'
-				};
-			}
-
-			const { data: links, error: linksError } = await admin
-				.from('professional_patient_links')
-				.select('patient_id, archived_at')
-				.eq('business_id', context.business.id)
-				.eq('professional_id', professionalId)
-				.eq('is_active', true);
-
-			if (linksError) {
-				console.error('Error cargando vínculos profesional-paciente', linksError);
-				throw kitError(500, 'No se pudieron cargar los pacientes.');
-			}
-
-			const linkArchivedByPatientId = new Map(
-				(links ?? []).map((link: any) => [String(link.patient_id), link.archived_at ?? null])
-			);
-			const patientIds = [...linkArchivedByPatientId.keys()];
-			if (patientIds.length === 0) {
-				return {
-					patients: [],
-					query: '',
-					showArchived,
-					demo: false,
-					canCreatePatient: context.access.allowedCapabilities.canCreatePatient,
-					totalCount: 0,
-					activeCount: 0,
-					archivedCount: 0,
-					countsSource: 'fallback_planned'
-				};
-			}
-
-			const { data: linkedPatients, error: linkedPatientsError } = await admin
-				.from('patients')
-				.select('id, full_name, dni, phone, archived_at, last_entry_at, updated_at, created_at')
-				.eq('business_id', context.business.id)
-				.in('id', patientIds)
-				.is('archived_at', null)
-				.order('updated_at', { ascending: false })
-				.limit(200);
-
-			if (linkedPatientsError) {
-				console.error('Error cargando pacientes vinculados al profesional', linkedPatientsError);
-				throw kitError(500, 'No se pudieron cargar los pacientes.');
-			}
-
-			const decoratedPatients = (linkedPatients ?? []).map((patient: any) => {
-				const professionalArchivedAt = linkArchivedByPatientId.get(String(patient.id)) ?? null;
-				return {
-					...patient,
-					archived_at: professionalArchivedAt,
-					professional_archived_at: professionalArchivedAt
-				};
-			});
-			const activeCount = decoratedPatients.filter(
-				(patient: any) => !patient.professional_archived_at
-			).length;
-			const archivedCount = decoratedPatients.filter(
-				(patient: any) => patient.professional_archived_at
-			).length;
-
-			return {
-				patients: decoratedPatients.filter((patient: any) =>
-					showArchived ? patient.professional_archived_at : !patient.professional_archived_at
-				),
-				query: '',
-				showArchived,
-				demo: false,
-				canCreatePatient: context.access.allowedCapabilities.canCreatePatient,
-				totalCount: decoratedPatients.length,
-				activeCount,
-				archivedCount,
-				countsSource: 'fallback_planned'
-			};
-		}
-
-		let patientsBuilder = supabase
-			.from('patients')
-			.select('id, full_name, dni, phone, archived_at, last_entry_at, updated_at, created_at')
-			.eq('business_id', context.business.id)
-			.order('updated_at', { ascending: false })
-			.limit(200);
-
-		patientsBuilder = showArchived
-			? patientsBuilder.not('archived_at', 'is', null)
-			: patientsBuilder.is('archived_at', null);
-
+		const snapshotAt = cursor?.snapshotAt ?? new Date().toISOString();
 		const [patientsResult, countsResult] = await Promise.all([
-			patientsBuilder,
-			supabase.rpc('patients_counts_by_business', { p_business: context.business.id }).maybeSingle()
+			supabase.rpc('list_accessible_patients_page' as never, {
+				p_business_id: context.business.id,
+				p_show_archived: showArchived,
+				p_query: query,
+				p_limit: PAGE_SIZE,
+				p_snapshot_at: snapshotAt,
+				p_cursor_rank: cursor?.rank ?? null,
+				p_cursor_activity_at: cursor?.activityAt ?? null,
+				p_cursor_id: cursor?.id ?? null
+			} as never),
+			supabase.rpc('accessible_patient_counts' as never, {
+				p_business_id: context.business.id
+			} as never)
 		]);
+
 		if (patientsResult.error) {
-			console.error('Error cargando pacientes', patientsResult.error);
+			console.error('Error cargando página autorizada de pacientes', patientsResult.error);
 			throw kitError(500, 'No se pudieron cargar los pacientes.');
 		}
-
-		const patients = patientsResult.data ?? [];
-		let totalCount = patients.length;
-		let activeCount = showArchived ? 0 : totalCount;
-		let archivedCount = showArchived ? totalCount : 0;
-		let countsSource: CountsSource = 'rpc';
-		const counts = countsResult.data as
-			| { total_count?: number | null; active_count?: number | null; archived_count?: number | null }
-			| null;
-
-		if (!countsResult.error && counts) {
-			totalCount = Number(counts.total_count ?? totalCount);
-			activeCount = Number(counts.active_count ?? activeCount);
-			archivedCount = Number(counts.archived_count ?? archivedCount);
-		} else {
-			countsSource = 'fallback_planned';
-			if (countsResult.error) {
-				console.error('Error contando pacientes por RPC, se usa fallback planned', countsResult.error);
-			}
-			const [totalResult, activeResult, archivedResult] = await Promise.all([
-				supabase
-					.from('patients')
-					.select('id', { count: 'planned', head: true })
-					.eq('business_id', context.business.id),
-				supabase
-					.from('patients')
-					.select('id', { count: 'planned', head: true })
-					.eq('business_id', context.business.id)
-					.is('archived_at', null),
-				supabase
-					.from('patients')
-					.select('id', { count: 'planned', head: true })
-					.eq('business_id', context.business.id)
-					.not('archived_at', 'is', null)
-			]);
-
-			if (!totalResult.error && typeof totalResult.count === 'number') {
-				totalCount = totalResult.count;
-			} else if (totalResult.error) {
-				console.error('Error contando pacientes (planned)', totalResult.error);
-			}
-			if (!activeResult.error && typeof activeResult.count === 'number') {
-				activeCount = activeResult.count;
-			} else if (activeResult.error) {
-				console.error('Error contando pacientes activos (planned)', activeResult.error);
-			}
-			if (!archivedResult.error && typeof archivedResult.count === 'number') {
-				archivedCount = archivedResult.count;
-			} else if (archivedResult.error) {
-				console.error('Error contando pacientes archivados (planned)', archivedResult.error);
-			}
+		if (countsResult.error) {
+			console.error('Error contando pacientes autorizados', countsResult.error);
+			throw kitError(500, 'No se pudieron cargar los totales de pacientes.');
 		}
+
+		const rows = (Array.isArray(patientsResult.data) ? patientsResult.data : []) as Array<any>;
+		const hasMore = rows.length > PAGE_SIZE;
+		const patients = hasMore ? rows.slice(0, PAGE_SIZE) : rows;
+		const last = patients.at(-1);
+		const countRow = (Array.isArray(countsResult.data) ? countsResult.data[0] : countsResult.data) as
+			| { total_count?: number; active_count?: number; archived_count?: number }
+			| null;
+		const canAccessRadiographTrash =
+			(context.role === 'owner' || context.role === 'admin') &&
+			context.access.allowedCapabilities.canViewExistingClinicalNotes &&
+			context.access.canEnterApp;
 
 		return {
 			patients,
-			query: '',
+			query,
 			showArchived,
 			demo: false,
 			canCreatePatient: context.access.allowedCapabilities.canCreatePatient,
-			totalCount,
-			activeCount,
-			archivedCount,
-			countsSource
+			canAccessRadiographTrash,
+			totalCount: Number(countRow?.total_count ?? 0),
+			activeCount: Number(countRow?.active_count ?? 0),
+			archivedCount: Number(countRow?.archived_count ?? 0),
+			countsSource: 'rpc',
+			hasMore,
+			nextCursor:
+				hasMore && last
+					? encodePatientListCursor({
+							businessId: context.business.id,
+							showArchived,
+							query,
+							snapshotAt,
+							rank: Number(last.search_rank ?? 0),
+							activityAt: String(last.activity_at),
+							id: String(last.id)
+						})
+					: null,
+			snapshotAt,
+			pageSize: PAGE_SIZE
 		};
 	};
+
+	// Las páginas posteriores pertenecen al snapshot temporal firmado por el cursor.
+	// No deben publicarse como una nueva instantánea completa bajo la revisión actual:
+	// podría haber cambios concurrentes que, correctamente, quedaron fuera de ese snapshot.
+	if (cursor) {
+		return withUncacheablePatientListMetadata(await loadRows(), context.business.id);
+	}
 
 	return loadStablePatientListRevision({
 		readRevision,

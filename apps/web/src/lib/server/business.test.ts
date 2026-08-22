@@ -184,7 +184,52 @@ describe('resolveActiveBusiness', () => {
 		});
 	});
 
-		it('resolves an active account assistance grant as an admin context for support', async () => {
+	it('recovers the accepted invite when a concurrent bootstrap sees the email association', async () => {
+		const userId = 'user-concurrent-invite';
+		let contextReads = 0;
+		const supabase = {
+			from: vi.fn(),
+			rpc: vi.fn((name: string) => {
+				if (name === 'list_user_business_contexts') {
+					contextReads += 1;
+					return Promise.resolve({
+						data:
+							contextReads === 1
+								? []
+								: [
+										{
+											business: businessRow,
+											role: 'professional',
+											assistance: null,
+											subscription: subscriptionRow
+										}
+									],
+						error: null
+					});
+				}
+				if (name === 'ensure_user_default_business') {
+					return Promise.resolve({
+						data: null,
+						error: { code: 'P0001', message: 'EMAIL_ALREADY_ASSOCIATED_WITH_OTHER_BUSINESS' }
+					});
+				}
+				throw new Error(`Unexpected RPC ${name}`);
+			})
+		} as any;
+
+		const context = await resolveActiveBusiness({
+			supabase,
+			accessToken: accessTokenFor(userId)
+		});
+
+		expect(context).toMatchObject({
+			business: { id: 'business-1' },
+			role: 'professional'
+		});
+		expect(contextReads).toBe(2);
+	});
+
+	it('resolves an active account assistance grant as an admin context for support', async () => {
 		const userId = 'master-user';
 		const membershipsRead = queryReturning({ data: [], error: null });
 		const assistanceRead = queryReturning({
@@ -438,6 +483,73 @@ describe('resolveActiveBusiness', () => {
 			accessToken,
 			cookies: { get: vi.fn(() => null), set: vi.fn() } as any
 		});
+
+		expect(supabase.rpc).toHaveBeenCalledTimes(2);
+	});
+
+	it('lets a sensitive child load bypass a short value reused by its parent request', async () => {
+		const restrictedSubscription = {
+			...subscriptionRow,
+			is_permanent: false,
+			subscription_status: 'restricted',
+			paid_until: '2026-07-20T00:00:00.000Z',
+			grace_until: '2026-07-21T00:00:00.000Z',
+			restricted_until: '2099-07-21T00:00:00.000Z'
+		};
+		const supabase = {
+			from: vi.fn(),
+			rpc: vi
+				.fn()
+				.mockResolvedValueOnce({
+					data: [
+						{
+							business: businessRow,
+							role: 'owner',
+							assistance: null,
+							subscription: subscriptionRow
+						}
+					],
+					error: null
+				})
+				.mockResolvedValueOnce({
+					data: [
+						{
+							business: businessRow,
+							role: 'owner',
+							assistance: null,
+							subscription: restrictedSubscription
+						}
+					],
+					error: null
+				})
+		} as any;
+		const accessToken = accessTokenFor('mixed-cache-user');
+		const makeCookies = () => ({ get: vi.fn(() => null), set: vi.fn() }) as any;
+
+		await resolveActiveBusiness({
+			supabase,
+			accessToken,
+			cookies: makeCookies(),
+			membershipCache: 'short'
+		});
+
+		const requestCookies = makeCookies();
+		await expect(
+			resolveActiveBusiness({
+				supabase,
+				accessToken,
+				cookies: requestCookies,
+				membershipCache: 'short'
+			})
+		).resolves.toMatchObject({ access: { canUseBusiness: true } });
+		await expect(
+			resolveActiveBusiness({
+				supabase,
+				accessToken,
+				cookies: requestCookies,
+				membershipCache: 'fresh'
+			})
+		).resolves.toMatchObject({ access: { canUseBusiness: false } });
 
 		expect(supabase.rpc).toHaveBeenCalledTimes(2);
 	});

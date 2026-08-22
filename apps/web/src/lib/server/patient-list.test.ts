@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { loadStablePatientListRevision } from './patient-list';
+import {
+	loadStablePatientListRevision,
+	normalizePatientListQuery,
+	withUncacheablePatientListMetadata
+} from './patient-list';
 
 const rows = (label: string) => ({
 	patients: [{ id: label }],
@@ -7,10 +11,15 @@ const rows = (label: string) => ({
 	showArchived: false,
 	demo: false,
 	canCreatePatient: true,
+	canAccessRadiographTrash: true,
 	totalCount: 1,
 	activeCount: 1,
 	archivedCount: 0,
-	countsSource: 'rpc' as const
+	countsSource: 'rpc' as const,
+	hasMore: false,
+	nextCursor: null,
+	snapshotAt: '2026-08-20T12:00:00.000Z',
+	pageSize: 30
 });
 
 const revision = (value: string) => ({
@@ -20,6 +29,25 @@ const revision = (value: string) => ({
 });
 
 describe('stable patient list revision', () => {
+	it('starts global search at two trimmed characters and caps its input', () => {
+		expect(normalizePatientListQuery(null)).toBe('');
+		expect(normalizePatientListQuery(' a ')).toBe('');
+		expect(normalizePatientListQuery(' an ')).toBe('an');
+		expect(normalizePatientListQuery(`  ${'x'.repeat(100)}  `)).toHaveLength(80);
+	});
+
+	it('never marks a cursor page as a complete cacheable snapshot', () => {
+		const result = withUncacheablePatientListMetadata(rows('next-page'), 'business-1');
+
+		expect(result).toMatchObject({
+			businessId: 'business-1',
+			patients: [{ id: 'next-page' }],
+			cacheable: false,
+			revision: null,
+			cacheScope: null
+		});
+	});
+
 	it('returns a cacheable list only when the revision is identical before and after the read', async () => {
 		const readRevision = vi.fn().mockResolvedValue(revision('12'));
 		const loadRows = vi.fn().mockResolvedValue(rows('stable'));

@@ -6,6 +6,8 @@
 
 begin;
 
+select extensions.plan(1);
+
 do $$
 declare
 	v_business_id uuid;
@@ -84,5 +86,8 @@ begin
 	raise notice 'PASS: role update and removal complete and each writes a security audit event.';
 end;
 $$;
+
+select extensions.pass('role access audit contract');
+select * from extensions.finish();
 
 rollback;

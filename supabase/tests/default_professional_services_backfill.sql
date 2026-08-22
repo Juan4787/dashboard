@@ -1,4 +1,6 @@
 -- Run after the migration. Read-only assertion.
+select extensions.plan(1);
+
 do $$
 declare
 	v_missing integer;
@@ -21,3 +23,6 @@ begin
 	raise notice 'PASS: every professional has every existing default service assigned.';
 end;
 $$;
+
+select extensions.pass('default professional services backfill');
+select * from extensions.finish();

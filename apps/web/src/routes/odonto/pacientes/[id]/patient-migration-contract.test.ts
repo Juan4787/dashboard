@@ -14,16 +14,11 @@ describe('patient migration contracts', () => {
 		expect(historySource).not.toMatch(directAmountSelect);
 	});
 
-	it('does not archive, unarchive, delete, or clear drive folders through direct patient table writes', () => {
+	it('does not archive, unarchive, or delete patients through direct table writes', () => {
 		const detailSource = readPeer('./+page.server.ts');
-		const configurationSource = readFileSync(
-			new URL('../../configuracion/+page.server.ts', import.meta.url),
-			'utf8'
-		);
 
 		expect(detailSource).not.toMatch(/from\('patients'\)[\s\S]{0,160}\.delete\(/);
 		expect(detailSource).not.toMatch(/from\('patients'\)[\s\S]{0,240}\.update\(\{[^}]*archived_at/);
-		expect(configurationSource).not.toContain('update({ drive_folder_id: null })');
 	});
 
 	it('does not create or update clinical entries through direct route table writes', () => {
