@@ -843,6 +843,14 @@ $$;
 -- usable Drive function.
 do $$
 begin
+	if exists (
+		select 1
+		from pg_catalog.pg_policy policy
+		where policy.polrelid = 'public.patient_radiographs'::regclass
+			and policy.polcmd <> 'r'
+	) then
+		raise exception 'TEST_RADIOGRAPH_MUTATION_RLS_POLICY_REMAINS';
+	end if;
 	if has_table_privilege('authenticated', 'public.patient_radiographs', 'INSERT')
 		or has_table_privilege('authenticated', 'public.patient_radiographs', 'UPDATE')
 		or has_table_privilege('authenticated', 'public.patient_radiographs', 'DELETE')
