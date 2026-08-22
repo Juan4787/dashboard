@@ -509,16 +509,15 @@ se declara fase 1 completa en producción sólo porque compile localmente.
 - `git diff --check`, conflictos, marcadores de merge, depuración accidental y marcas de trabajo
   pendiente en archivos tocados: sin hallazgos pendientes.
 
-### Verificación del sitio actualmente publicado
+### Verificación del sitio publicada antes del lanzamiento
 
 Con las credenciales E2E provistas se verificó de forma no destructiva la versión que hoy está
 publicada: login/navegación/smoke, tres casos de Seguimientos de sólo lectura/UI y la reserva
 pública en desktop y móvil. La URL pública respondió 200, mostró el consultorio esperado, no tuvo
 overflow horizontal ni errores de página.
 
-Esto es evidencia de que el baseline publicado sigue sano; no valida los archivos Supabase porque
-esta rama todavía no se desplegó. No se ejecutaron operaciones que crearan o alteraran información
-clínica de la cuenta proporcionada.
+Esto fue evidencia de que el baseline publicado seguía sano antes del lanzamiento. No se
+ejecutaron operaciones que crearan o alteraran información clínica de la cuenta proporcionada.
 
 ### Hallazgos encontrados y cerrados
 
@@ -536,14 +535,34 @@ clínica de la cuenta proporcionada.
   los resultados válidos y pasaron las regresiones completas de Agenda;
 - la configuración local dependía de una CLI global incompatible; quedó fijada en el repositorio;
 - las dependencias reportadas por auditoría se actualizaron y la auditoría final quedó limpia.
+- el postflight remoto detectó tres políticas RLS antiguas de mutación que eran inertes por falta
+  de privilegios de tabla, pero constituían un riesgo futuro; la migración
+  `20260822010000_remove_legacy_radiograph_mutation_policies.sql` las eliminó y agregó una
+  aserción que impide cerrar el despliegue si queda cualquier política distinta de lectura.
+
+## Cierre en producción — 22 de agosto de 2026
+
+- Supabase remoto recibió `20260805223000_record_push_notification_click.sql`, que ya estaba en
+  `main` pero seguía pendiente, y las cuatro migraciones del cierre clínico:
+  `20260820020000_supabase_clinical_files_phase1.sql`,
+  `20260820030000_patient_activity_search_pagination.sql`,
+  `20260821010000_service_role_backend_privileges.sql` y
+  `20260822010000_remove_legacy_radiograph_mutation_policies.sql`.
+- La migración experimental `20260820010000_individual_google_drive_folders.sql` no se aplicó y
+  fue eliminada del repositorio. Google Drive no forma parte del producto operativo resultante.
+- El commit principal `bd64a6b` y el endurecimiento `4248eb4` se publicaron directamente en
+  `origin/main`. El SHA funcional publicado fue
+  `4248eb46827ab3142bed1b53a4713df3c826a926`.
+- Netlify publicó la versión nueva en `https://cita-suite.netlify.app`.
+- La salida no agregó backup externo, recuperación, exportación ni purga controlada. Esas cuatro
+  familias continúan reservadas íntegramente para fase 2.
 
 ## Estado de entrega
 
-La implementación está completa en el worktree aislado
-`Base-de-Datos-Sabrina-storage-phase1`, rama `codex/supabase-storage-phase1`. No se creó commit, no
-se publicó a `main`, no se aplicaron migraciones al Supabase remoto y no se desplegó Netlify,
-porque esas acciones no fueron solicitadas. La rama se mantiene lista para una revisión de diff y
-un proceso de publicación separado.
+La fase 1 está implementada y publicada en producción. El código está en `main`, el esquema está
+aplicado en el Supabase remoto y la aplicación está desplegada en Netlify. El worktree aislado
+`Base-de-Datos-Sabrina-storage-phase1`, rama `codex/supabase-storage-phase1`, se conserva como
+referencia de trabajo; el checkout original con cambios ajenos no fue modificado.
 
 ## Fase 2 reservada
 
