@@ -80,7 +80,8 @@ const resolveBusinessActionContext = async ({
 	const context = await resolveActiveBusiness({
 		supabase,
 		accessToken: locals.auth?.access_token,
-		cookies
+		cookies,
+		membershipCache: 'short'
 	});
 
 	if (!ownerId || !context) {
@@ -334,7 +335,8 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, dep
 	const context = await resolveActiveBusiness({
 		supabase,
 		accessToken: locals.auth.access_token,
-		cookies
+		cookies,
+		membershipCache: 'short'
 	});
 	if (!context) throw kitError(500, 'No se pudo resolver el negocio activo');
 	const permissions = resolvePatientPermissions(context);

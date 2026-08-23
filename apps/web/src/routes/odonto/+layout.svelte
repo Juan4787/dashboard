@@ -389,8 +389,9 @@
 				stopSync = startPatientRevisionSync({
 					businessId,
 					onRevisionChanged: () => {
-						if ($page.url.pathname === '/odonto/pacientes') return;
-						void invalidate('app:patients');
+						// El sincronizador ya invalida la caché privada y la lista activa
+						// observa ese estado. Reiniciar el router desde acá puede cancelar
+						// la navegación que sigue a una escritura clínica.
 					}
 				});
 			})
@@ -560,10 +561,11 @@
 	$effect(() => {
 		const navState = $navigating;
 		const targetPath = navState?.to?.url?.pathname ?? '';
-		if (targetPath.startsWith('/odonto')) {
+		const targetHref = navState?.to?.url?.href ?? '';
+		if (targetPath.startsWith('/odonto') && targetHref) {
 			const kind = resolveSkeletonKind(navState?.to?.route?.id, targetPath);
 			scheduleShowSkeleton(kind);
-			stalledNavigationRecovery?.schedule(navState.to.url.href);
+			stalledNavigationRecovery?.schedule(targetHref);
 		} else {
 			scheduleHideSkeleton();
 			stalledNavigationRecovery?.clear();

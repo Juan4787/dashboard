@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import { enhance } from '$app/forms';
-	import { goto, preloadData, replaceState } from '$app/navigation';
+	import { goto, replaceState } from '$app/navigation';
 	import { page } from '$app/stores';
 	import Modal from '$lib/components/Modal.svelte';
 	import {
@@ -278,37 +278,6 @@
 		};
 	};
 
-	let patientWarmTimer: ReturnType<typeof setTimeout> | null = null;
-	let pendingWarmPatientId = '';
-	const warmedPatientIds = new Set<string>();
-
-	const warmPatientNow = (patientId: string) => {
-		if (patientWarmTimer) clearTimeout(patientWarmTimer);
-		patientWarmTimer = null;
-		pendingWarmPatientId = '';
-		if (warmedPatientIds.has(patientId)) return;
-		warmedPatientIds.add(patientId);
-		void preloadData(`/odonto/pacientes/${patientId}`)
-			.then((result) => {
-				if (result.type === 'loaded' && result.status >= 400) warmedPatientIds.delete(patientId);
-			})
-			.catch(() => warmedPatientIds.delete(patientId));
-	};
-
-	const schedulePatientWarmup = (patientId: string) => {
-		if (warmedPatientIds.has(patientId) || pendingWarmPatientId === patientId) return;
-		if (patientWarmTimer) clearTimeout(patientWarmTimer);
-		pendingWarmPatientId = patientId;
-		patientWarmTimer = setTimeout(() => warmPatientNow(patientId), 100);
-	};
-
-	const cancelPatientWarmup = (patientId: string) => {
-		if (pendingWarmPatientId !== patientId) return;
-		if (patientWarmTimer) clearTimeout(patientWarmTimer);
-		patientWarmTimer = null;
-		pendingWarmPatientId = '';
-	};
-
 	const rememberPosition = () => {
 		if (!browser || !listData.businessId) return;
 		rememberPatientListNavigation({
@@ -362,7 +331,6 @@
 
 	onDestroy(() => {
 		activeController?.abort();
-		if (patientWarmTimer) clearTimeout(patientWarmTimer);
 	});
 
 	$effect(() => {
@@ -429,11 +397,11 @@
 					<tbody>
 						{#each displayedPatients as patient (patient.id)}
 							<!-- svelte-ignore a11y_no_static_element_interactions -->
-							<tr class="cursor-pointer border-t border-neutral-100 transition hover:bg-neutral-50 dark:border-white/10 dark:hover:bg-[#0f1f36]" onclick={(event) => openPatientFromContainer(event, patient.id)} onpointerenter={() => schedulePatientWarmup(patient.id)} onpointerleave={() => cancelPatientWarmup(patient.id)}>
+							<tr class="cursor-pointer border-t border-neutral-100 transition hover:bg-neutral-50 dark:border-white/10 dark:hover:bg-[#0f1f36]" onclick={(event) => openPatientFromContainer(event, patient.id)}>
 								<td class="px-6 py-5"><div class="flex items-center gap-4"><div class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-primary-100 font-semibold text-primary-700 dark:bg-primary-800/40 dark:text-primary-100">{(patient.full_name || '?').split(' ').filter(Boolean).slice(0, 2).map((part: string) => part[0]?.toUpperCase()).join('')}</div><div><button type="button" class="text-left text-sm font-semibold text-neutral-900 hover:underline dark:text-white" onclick={() => openPatient(patient.id)}>{patient.full_name}</button>{#if listData.showArchived}<p class="mt-1 text-xs text-neutral-500">Archivado</p>{/if}</div></div></td>
 								<td class="px-6 py-5 text-sm text-neutral-600 dark:text-neutral-200">{patient.dni || 'Sin DNI'}{patient.phone ? ` · ${patient.phone}` : ''}</td>
 								<td class="px-6 py-5 text-sm text-neutral-600 dark:text-neutral-200">{patient.last_entry_at ? formatDate(patient.last_entry_at) : '—'}</td>
-								<td class="px-6 py-5 text-right"><div class="flex flex-col items-end gap-2"><button type="button" class="rounded-full bg-[#7c3aed] px-4 py-2 text-xs font-semibold text-white" onfocus={() => warmPatientNow(patient.id)} onclick={() => openPatient(patient.id)}>Abrir paciente</button>{#if listData.showArchived}<form method="post" action={`/odonto/pacientes/${patient.id}?/unarchive_patient`}><button type="submit" class="rounded-full border border-neutral-300 px-4 py-2 text-xs font-semibold dark:border-[#8fb3ff]">Desarchivar</button></form>{/if}</div></td>
+								<td class="px-6 py-5 text-right"><div class="flex flex-col items-end gap-2"><button type="button" class="rounded-full bg-[#7c3aed] px-4 py-2 text-xs font-semibold text-white" onclick={() => openPatient(patient.id)}>Abrir paciente</button>{#if listData.showArchived}<form method="post" action={`/odonto/pacientes/${patient.id}?/unarchive_patient`}><button type="submit" class="rounded-full border border-neutral-300 px-4 py-2 text-xs font-semibold dark:border-[#8fb3ff]">Desarchivar</button></form>{/if}</div></td>
 							</tr>
 						{/each}
 					</tbody>
@@ -442,7 +410,7 @@
 
 			<div class="space-y-3 p-3 md:hidden">
 				{#each displayedPatients as patient (patient.id)}
-					<article class="relative rounded-xl border border-neutral-100 bg-white p-4 shadow-sm transition hover:border-[#7c3aed]/40 dark:border-[#1f3554] dark:bg-[#0f1f36]" onpointerenter={() => schedulePatientWarmup(patient.id)} onpointerleave={() => cancelPatientWarmup(patient.id)}>
+					<article class="relative rounded-xl border border-neutral-100 bg-white p-4 shadow-sm transition hover:border-[#7c3aed]/40 dark:border-[#1f3554] dark:bg-[#0f1f36]">
 						<a href={`/odonto/pacientes/${patient.id}`} class="absolute inset-0 z-0 rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7c3aed]" aria-label={`Abrir paciente ${patient.full_name}`} onclick={rememberPosition}></a>
 						<div class="pointer-events-none relative z-[1] flex items-center gap-3"><div class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-primary-100 font-semibold text-primary-700 dark:bg-primary-800/40 dark:text-primary-100">{(patient.full_name || '?').split(' ').filter(Boolean).slice(0, 2).map((part: string) => part[0]?.toUpperCase()).join('')}</div><div class="min-w-0 flex-1"><h2 class="truncate font-semibold text-neutral-900 dark:text-white">{patient.full_name}</h2><p class="mt-1 text-xs text-neutral-600 dark:text-neutral-300">DNI {patient.dni || 'Sin DNI'}{patient.phone ? ` · ${patient.phone}` : ''}</p><p class="mt-1 text-xs text-neutral-500">Últ. visita {patient.last_entry_at ? formatDate(patient.last_entry_at) : '—'}</p></div></div>
 						<div class="relative z-10 mt-3 grid gap-2"><button type="button" class="w-full rounded-full bg-[#7c3aed] px-4 py-2.5 text-sm font-semibold text-white" onclick={() => openPatient(patient.id)}>Abrir paciente</button>{#if listData.showArchived}<form method="post" action={`/odonto/pacientes/${patient.id}?/unarchive_patient`}><button type="submit" class="w-full rounded-full border border-neutral-300 px-4 py-2.5 text-sm font-semibold dark:border-[#8fb3ff]">Desarchivar paciente</button></form>{/if}</div>
