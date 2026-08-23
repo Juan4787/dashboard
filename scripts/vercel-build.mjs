@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 
 const run = (command, args, env = process.env) => {
@@ -8,20 +8,14 @@ const run = (command, args, env = process.env) => {
 	}
 };
 
-// Vercel ejecuta el build desde la raíz del monorepo. El adaptador genera su
-// Build Output API dentro de apps/web, por lo que se publica en la ubicación
-// que Vercel espera sin mover la raíz ni perder las dependencias workspace.
+// El proyecto de Vercel tiene apps/web como Root Directory. Volvemos a la raíz
+// del monorepo para instalar y compilar sus dependencias workspace, mientras el
+// adaptador escribe el Build Output API donde Vercel lo espera: apps/web/.vercel.
 run('pnpm', ['--filter', 'web', 'build'], { ...process.env, VERCEL: '1' });
 
-const source = 'apps/web/.vercel/output';
-const destination = '.vercel/output';
+const output = 'apps/web/.vercel/output';
 
-if (!existsSync(source)) {
+if (!existsSync(output)) {
 	console.error('Expected apps/web/.vercel/output after the SvelteKit Vercel build.');
 	process.exit(1);
 }
-
-// No borrar .vercel completo: puede contener el enlace local creado por la CLI.
-rmSync(destination, { recursive: true, force: true });
-mkdirSync('.vercel', { recursive: true });
-cpSync(source, destination, { recursive: true });

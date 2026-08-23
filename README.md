@@ -39,11 +39,13 @@ El repositorio admite Netlify y Vercel. Netlify conserva su configuración en
 `netlify.toml`; Vercel usa `vercel.json` y el adaptador se selecciona durante el
 build según la plataforma.
 
-Para crear el proyecto en Vercel, importá el repositorio manteniendo la raíz del
-repositorio (no `apps/web`), usá Node 20 o superior y dejá que `vercel.json`
-defina la instalación y el build. Cargá las mismas variables privadas de
-producción que usaba Netlify, pero definí `PUBLIC_SITE_URL` con el dominio de
-Vercel antes de promoverlo a producción. Después agregá ese dominio a:
+Para crear el proyecto en Vercel, configurá `apps/web` como **Root Directory**
+y mantené habilitada la opción para incluir archivos fuera de esa raíz. Así
+Vercel encuentra su `vercel.json`, y sus comandos vuelven a la raíz del
+monorepo para resolver `packages/shared`. Usá Node 20 o superior. Cargá las
+mismas variables privadas de producción que usaba Netlify, pero definí
+`PUBLIC_SITE_URL` con el dominio de Vercel antes de promoverlo a producción.
+Después agregá ese dominio a:
 
 - las Redirect URLs de Supabase (login, recuperación y reservas);
 - los redirect URIs de Google Calendar, si está habilitado;
