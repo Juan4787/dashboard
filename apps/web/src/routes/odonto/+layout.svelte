@@ -6,6 +6,7 @@
 	import DismissibleNotice from '$lib/components/notices/DismissibleNotice.svelte';
 	import OdontoRouteSkeleton from '$lib/components/skeleton/OdontoRouteSkeleton.svelte';
 	import FollowUpsNotice from '$lib/components/seguimientos/FollowUpsNotice.svelte';
+	import { createStalledNavigationRecovery } from '$lib/client/stalled-navigation-recovery';
 	import { formatAccessRemaining, formatDateTime } from '$lib/utils/format';
 	import { allowsRestrictedClinicalRead } from '$lib/utils/restricted-clinical-read';
 
@@ -37,6 +38,7 @@
 
 	let showDelayTimer: ReturnType<typeof setTimeout> | null = null;
 	let hideTimer: ReturnType<typeof setTimeout> | null = null;
+	let stalledNavigationRecovery: ReturnType<typeof createStalledNavigationRecovery> | null = null;
 
 	type NavItem = {
 		label: string;
@@ -357,7 +359,22 @@
 		};
 
 		document.addEventListener('pointerdown', handleOutsideClick, true);
-		return () => document.removeEventListener('pointerdown', handleOutsideClick, true);
+		stalledNavigationRecovery = createStalledNavigationRecovery({
+			isPending: (targetHref) => $navigating?.to?.url?.href === targetHref,
+			recover: (targetHref) => {
+				const target = new URL(targetHref);
+				if (target.href === window.location.href) {
+					window.location.reload();
+					return;
+				}
+				window.location.assign(target.href);
+			}
+		});
+		return () => {
+			document.removeEventListener('pointerdown', handleOutsideClick, true);
+			stalledNavigationRecovery?.clear();
+			stalledNavigationRecovery = null;
+		};
 	});
 
 	$effect(() => {
@@ -546,14 +563,17 @@
 		if (targetPath.startsWith('/odonto')) {
 			const kind = resolveSkeletonKind(navState?.to?.route?.id, targetPath);
 			scheduleShowSkeleton(kind);
+			stalledNavigationRecovery?.schedule(navState.to.url.href);
 		} else {
 			scheduleHideSkeleton();
+			stalledNavigationRecovery?.clear();
 		}
 	});
 
 	onDestroy(() => {
 		clearShowDelay();
 		clearHideDelay();
+		stalledNavigationRecovery?.clear();
 	});
 </script>
 

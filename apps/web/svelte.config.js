@@ -1,8 +1,12 @@
-import adapter from '@sveltejs/adapter-netlify';
+import netlifyAdapter from '@sveltejs/adapter-netlify';
+import vercelAdapter from '@sveltejs/adapter-vercel';
 import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 
 /** @type {import('@sveltejs/kit').Config} */
 const isProd = process.env.NODE_ENV === 'production';
+// Vercel expone esta variable durante sus builds. En cualquier otro entorno
+// conservamos el adaptador de Netlify para que los dos hosts sigan siendo válidos.
+const adapter = process.env.VERCEL === '1' ? vercelAdapter() : netlifyAdapter();
 
 const config = {
 	// Consult https://svelte.dev/docs/kit/integrations
@@ -13,8 +17,7 @@ const config = {
 		env: {
 			dir: '../..'
 		},
-		// Netlify adapter for deployment.
-		adapter: adapter(),
+		adapter,
 		csp: isProd
 			? {
 					mode: 'auto',
