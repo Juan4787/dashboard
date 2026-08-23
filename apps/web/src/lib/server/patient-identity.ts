@@ -1,4 +1,4 @@
-export type PatientUniqueField = 'dni' | 'phone';
+export type PatientUniqueField = 'dni';
 
 type DatabaseError = {
 	code?: string | null;
@@ -8,9 +8,7 @@ type DatabaseError = {
 };
 
 export const PATIENT_UNIQUE_CONFLICT_MESSAGES: Record<PatientUniqueField, string> = {
-	dni: 'Ya hay una ficha asociada a este DNI. Abrila para continuar o revisá el número si está mal cargado.',
-	phone:
-		'Ya hay una ficha asociada a este teléfono. Abrila para continuar o revisá el número si pertenece a otra persona.'
+	dni: 'Ya hay una ficha asociada a este DNI. Abrila para continuar o revisá el número si está mal cargado.'
 };
 
 export const LEGACY_PATIENT_NAME_CONFLICT_MESSAGE =
@@ -33,13 +31,6 @@ export const getPatientUniqueConflictField = (
 
 	if (raw.includes('PATIENT_DNI_ALREADY_EXISTS')) return 'dni';
 	if (error?.code !== '23505') return null;
-
-	if (
-		normalized.includes('patients_business_phone_e164_uq') ||
-		normalized.includes('(business_id, phone_e164)')
-	) {
-		return 'phone';
-	}
 
 	if (
 		normalized.includes('patients_business_dni_uq') ||

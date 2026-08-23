@@ -26,6 +26,9 @@
 		phone: string | null;
 		phone_raw: string | null;
 		phone_e164: string | null;
+		dni: string | null;
+		birth_date: string | null;
+		activity_at: string;
 		blocked: boolean;
 	};
 	type Slot = AvailabilitySlot;
@@ -43,6 +46,7 @@
 		onNeedPatients = () => undefined,
 		initialDate,
 		initialPatientId = '',
+		appointmentRequestId,
 		canOperate,
 		form
 	} = $props<{
@@ -57,6 +61,7 @@
 		onNeedPatients?: () => void | Promise<void>;
 		initialDate: string;
 		initialPatientId?: string;
+		appointmentRequestId: string;
 		canOperate: boolean;
 		form?: {
 			message?: string;
@@ -88,6 +93,7 @@
 		);
 	const durationLabel = (minutes: number) =>
 		String(minutes) + ' ' + (minutes === 1 ? 'minuto' : 'minutos');
+	const patientDateFormatter = new Intl.DateTimeFormat('es-AR', { timeZone: 'UTC' });
 	const initialsFor = (name: string) =>
 		name
 			.split(/\s+/)
@@ -130,6 +136,9 @@
 	let patientEmail = $state(value('patient_email'));
 	let patientSearch = $state('');
 	let internalNote = $state(value('internal_note'));
+	let idempotencyKey = $state(
+		untrack(() => value('idempotency_key') || appointmentRequestId)
+	);
 	let pendingInitialTime = $state(value('time'));
 	let ignoreBreak = $state(value('ignore_break') === 'true');
 	let slots = $state<Slot[]>([]);
@@ -229,7 +238,7 @@
 					(patient.phone_e164 ?? '').toLowerCase().includes(query)
 				);
 			})
-			.slice(0, 8)
+			.slice(0, patientSearch.trim().length >= 1 ? 12 : 8)
 	);
 	const selectedPatient = $derived(
 		[...patients, ...remotePatients].find((patient: Patient) => patient.id === selectedPatientId) ??
@@ -268,6 +277,7 @@
 		patientEmail = '';
 		patientSearch = '';
 		internalNote = '';
+		idempotencyKey = crypto.randomUUID();
 		patientPhoneChanged = false;
 		phoneWarningOverride = '';
 		phoneWarning = null;
@@ -364,6 +374,20 @@
 
 	const patientPhoneValue = (patient: Patient | null) =>
 		String(patient?.phone_raw ?? patient?.phone ?? patient?.phone_e164 ?? '').trim();
+	const patientDisambiguation = (patient: Patient) => {
+		const activityDate = new Date(patient.activity_at);
+		const details = [
+			patient.phone_e164,
+			patient.dni ? `DNI ${patient.dni}` : null,
+			patient.birth_date
+				? `Nac. ${patientDateFormatter.format(new Date(`${patient.birth_date}T00:00:00Z`))}`
+				: null,
+			Number.isNaN(activityDate.getTime())
+				? null
+				: `Últ. actividad ${patientDateFormatter.format(activityDate)}`
+		].filter(Boolean);
+		return details.join(' · ');
+	};
 
 	const selectPatient = (patient: Patient) => {
 		selectedPatientId = patient.id;
@@ -756,6 +780,8 @@
 <form bind:this={appointmentForm} method="POST" action="?/create_appointment" class="mx-auto grid w-full max-w-5xl gap-4" onsubmit={validatePhoneBeforeSubmit}>
 	<input type="hidden" name="service_id" value={selectedServiceId} />
 	<input type="hidden" name="booking_mode" value={bookingMode} />
+	<input type="hidden" name="patient_mode" value={patientMode} />
+	<input type="hidden" name="idempotency_key" value={idempotencyKey} />
 	<input type="hidden" name="professional_id" value={selectedProfessionalId} />
 	{#each selectedProfessionalIds as professionalId}
 		<input type="hidden" name="professional_ids" value={professionalId} />
@@ -1196,8 +1222,8 @@
 									class:ux-choice-active={selectedPatientId === patient.id}
 								>
 									<span class="block text-base font-bold text-white">{patient.full_name}</span>
-									{#if patient.phone_e164}
-										<span class="mt-1 block text-sm text-white/55">{patient.phone_e164}</span>
+									{#if patientDisambiguation(patient)}
+										<span class="mt-1 block text-sm text-white/55">{patientDisambiguation(patient)}</span>
 									{/if}
 								</button>
 							{/each}

@@ -198,13 +198,22 @@ describe('patients create action', () => {
 		expect(patientInsertBuilder.insert).toHaveBeenCalledWith(
 			expect.objectContaining({ full_name: 'Juan Carlos Ramírez' })
 		);
-		expect(patientLookupBuilder.select).toHaveBeenCalledWith('id');
+		expect(patientLookupBuilder.select).not.toHaveBeenCalled();
 		expect(patientLookupBuilder.range).not.toHaveBeenCalled();
 	});
 
-	it('identifies an existing patient by phone and says that exact cause', async () => {
-		mocks.supabase.from.mockImplementation(() => {
-			throw new Error('Patient insert should not run for duplicates.');
+	it('crea otra ficha cuando el teléfono ya pertenece a una persona distinta', async () => {
+		const secondPatientId = '00000000-0000-4000-8000-000000000006';
+		const patientInsertBuilder = {
+			insert: vi.fn(() => ({
+				select: vi.fn(() => ({
+					single: vi.fn(async () => ({ data: { id: secondPatientId }, error: null }))
+				}))
+			}))
+		};
+		mocks.supabase.from.mockImplementation((table: string) => {
+			if (table === 'patients') return patientInsertBuilder;
+			throw new Error(`Unexpected table ${table}`);
 		});
 
 		const patientLookupBuilder = chain({
@@ -228,19 +237,26 @@ describe('patients create action', () => {
 		form.set('full_name', 'Otra persona');
 		form.set('phone', '+54 9 11 5555-5555');
 
-		const result = (await actions.create_patient!(makeEvent(form))) as any;
+		try {
+			await actions.create_patient!(makeEvent(form));
+			throw new Error('Expected redirect');
+		} catch (err) {
+			expect(err).toMatchObject({
+				status: 303,
+				location: `/odonto/pacientes/${secondPatientId}`
+			});
+		}
 
-		expect(result).toMatchObject({
-			duplicate: true,
-			duplicateField: 'phone',
-			message:
-				'Ya hay una ficha asociada a este teléfono. Abrila para continuar o revisá el número si pertenece a otra persona.',
-			existingId: patientId
-		});
+		expect(patientInsertBuilder.insert).toHaveBeenCalledWith(
+			expect.objectContaining({
+				full_name: 'Otra persona',
+				phone_e164: '+5491155555555'
+			})
+		);
 		expect(professionalPatientLinkBuilder.insert).toHaveBeenCalledWith({
 			business_id: businessId,
 			professional_id: professionalId,
-			patient_id: patientId,
+			patient_id: secondPatientId,
 			source: 'manual',
 			created_by: professionalUserId
 		});

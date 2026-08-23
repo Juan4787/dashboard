@@ -14,12 +14,17 @@ import {
 } from './public-booking';
 import type { AvailabilitySlot } from './availability';
 
-const { createJointAppointmentMock, createManualAppointmentMock, getAvailabilitySlotsMock } =
-	vi.hoisted(() => ({
-		createJointAppointmentMock: vi.fn(),
-		createManualAppointmentMock: vi.fn(),
-		getAvailabilitySlotsMock: vi.fn()
-	}));
+const {
+	createJointAppointmentMock,
+	createManualAppointmentMock,
+	findAppointmentCreationReplayMock,
+	getAvailabilitySlotsMock
+} = vi.hoisted(() => ({
+	createJointAppointmentMock: vi.fn(),
+	createManualAppointmentMock: vi.fn(),
+	findAppointmentCreationReplayMock: vi.fn(),
+	getAvailabilitySlotsMock: vi.fn()
+}));
 
 vi.mock('./availability', async (importOriginal) => {
 	const original = await importOriginal<typeof import('./availability')>();
@@ -27,7 +32,8 @@ vi.mock('./availability', async (importOriginal) => {
 });
 vi.mock('./appointments', () => ({
 	createJointAppointment: createJointAppointmentMock,
-	createManualAppointment: createManualAppointmentMock
+	createManualAppointment: createManualAppointmentMock,
+	findAppointmentCreationReplay: findAppointmentCreationReplayMock
 }));
 
 describe('public booking UX helpers', () => {
@@ -41,12 +47,15 @@ describe('public booking UX helpers', () => {
 		expect(getPublicBookingCdnCacheControl({ professionalId: 'pro-1' })).toBe(
 			'public, durable, s-maxage=10, stale-while-revalidate=30'
 		);
-		expect(
-			getPublicBookingCdnCacheControl({ professionalIds: ['pro-1', 'pro-2'] })
-		).toBe('public, durable, s-maxage=10, stale-while-revalidate=30');
-		expect(getPublicBookingCdnCacheControl({ professionalId: 'pro-1', date: '2026-07-21' })).toBe(
-			'public, durable, s-maxage=5, stale-while-revalidate=10'
+		expect(getPublicBookingCdnCacheControl({ professionalIds: ['pro-1', 'pro-2'] })).toBe(
+			'public, durable, s-maxage=10, stale-while-revalidate=30'
 		);
+		expect(
+			getPublicBookingCdnCacheControl({
+				professionalId: 'pro-1',
+				date: '2026-07-21'
+			})
+		).toBe('public, durable, s-maxage=5, stale-while-revalidate=10');
 	});
 
 	it('usa un mensaje claro cuando el horario público ya no está disponible', () => {
@@ -68,14 +77,8 @@ describe('public booking UX helpers', () => {
 		['SERVICE_NOT_FOUND', 'SERVICE_NOT_FOUND'],
 		['PROFESSIONAL_NOT_FOUND', 'PROFESSIONAL_NOT_FOUND'],
 		['PROFESSIONAL_SERVICE_NOT_ASSIGNED', 'PROFESSIONAL_SERVICE_NOT_ASSIGNED'],
-		[
-			'TEAM_PROFESSIONAL_SERVICE_NOT_ASSIGNED',
-			'TEAM_PROFESSIONAL_SERVICE_NOT_ASSIGNED'
-		],
-		[
-			'JOINT_APPOINTMENT_REQUIRES_TWO_PROFESSIONALS',
-			'PUBLIC_JOINT_REQUIRES_TWO_PROFESSIONALS'
-		]
+		['TEAM_PROFESSIONAL_SERVICE_NOT_ASSIGNED', 'TEAM_PROFESSIONAL_SERVICE_NOT_ASSIGNED'],
+		['JOINT_APPOINTMENT_REQUIRES_TWO_PROFESSIONALS', 'PUBLIC_JOINT_REQUIRES_TWO_PROFESSIONALS']
 	] as const)('no confunde la causa técnica %s con otro mensaje', (technicalCode, expectedCode) => {
 		const error = new Error(technicalCode);
 		expect(getPublicBookingErrorCode(error)).toBe(expectedCode);
@@ -90,8 +93,7 @@ describe('public booking UX helpers', () => {
 		}
 		expect(PUBLIC_BOOKING_ERROR_MESSAGES.PUBLIC_BOOKING_ACTIVE_LIMIT).toContain('4 turnos');
 		expect(PUBLIC_BOOKING_ERROR_MESSAGES.PUBLIC_BOOKING_ACTIVE_LIMIT).toContain('a futuro');
-		expect(PUBLIC_BOOKING_ERROR_MESSAGES.PUBLIC_BOOKING_ACTIVE_LIMIT).toContain('nombre');
-		expect(PUBLIC_BOOKING_ERROR_MESSAGES.PUBLIC_BOOKING_ACTIVE_LIMIT).not.toContain('teléfono');
+		expect(PUBLIC_BOOKING_ERROR_MESSAGES.PUBLIC_BOOKING_ACTIVE_LIMIT).toContain('persona');
 		expect(PUBLIC_BOOKING_ERROR_MESSAGES.PUBLIC_PATIENT_NAME_INVALID).toBe(
 			'Ingresá tu nombre y apellido para reservar.'
 		);
@@ -139,7 +141,7 @@ describe('public booking UX helpers', () => {
 });
 
 const createPatientPolicyMock = (input: {
-	patient: { id: string; blocked: boolean } | null;
+	patients: Array<{ id: string; full_name: string; blocked: boolean }>;
 	activeFutureCount?: number;
 }) => {
 	const calls: Array<{
@@ -157,13 +159,18 @@ const createPatientPolicyMock = (input: {
 		},
 		from: (table: string) => ({
 			select: () => {
-				const query = {
+				const query: Record<string, any> = {
 					eq: (column: string, value: unknown) => {
 						calls.push({ table, method: 'eq', column, value });
 						return query;
 					},
-					maybeSingle: async () => ({ data: input.patient, error: null })
+					is: (column: string, value: unknown) => {
+						calls.push({ table, method: 'is', column, value });
+						return query;
+					}
 				};
+				query.then = (resolve: (value: unknown) => unknown) =>
+					resolve({ data: input.patients, error: null });
 				return query;
 			}
 		})
@@ -176,7 +183,7 @@ describe('public booking patient capacity', () => {
 
 	it('permite el cuarto turno activo futuro', async () => {
 		const { supabase } = createPatientPolicyMock({
-			patient: { id: 'patient-1', blocked: false },
+			patients: [{ id: 'patient-1', full_name: 'Ana Gomez', blocked: false }],
 			activeFutureCount: 3
 		});
 
@@ -192,7 +199,7 @@ describe('public booking patient capacity', () => {
 
 	it('rechaza inequívocamente el quinto turno activo futuro', async () => {
 		const { supabase } = createPatientPolicyMock({
-			patient: { id: 'patient-1', blocked: false },
+			patients: [{ id: 'patient-1', full_name: 'Ana Gomez', blocked: false }],
 			activeFutureCount: 4
 		});
 
@@ -206,9 +213,9 @@ describe('public booking patient capacity', () => {
 		).rejects.toThrow('PUBLIC_BOOKING_ACTIVE_LIMIT');
 	});
 
-	it('consulta el cupo por nombre y no usa el teléfono como identidad', async () => {
+	it('consulta el cupo por ID y por el bucket antiabuso de una coincidencia exacta', async () => {
 		const { supabase, calls } = createPatientPolicyMock({
-			patient: null,
+			patients: [{ id: 'patient-1', full_name: 'Ana Gomez', blocked: false }],
 			activeFutureCount: 0
 		});
 
@@ -221,23 +228,75 @@ describe('public booking patient capacity', () => {
 
 		expect(calls).toContainEqual({
 			method: 'rpc',
-			fn: 'get_public_booking_active_future_count_by_name',
+			fn: 'get_public_booking_active_future_count_for_request',
 			args: {
 				p_business_id: 'business-1',
+				p_patient_id: 'patient-1',
 				p_patient_name: '  Ana   Gomez  ',
+				p_phone_e164: '+5493515559999',
 				p_now: now.toISOString()
 			}
 		});
-		expect(
-			calls.some(
-				(call) => call.table === 'appointments' || call.column === 'patient_id'
-			)
-		).toBe(false);
+	});
+
+	it('el mismo teléfono con otro nombre no hereda bloqueo ni cupo', async () => {
+		const { supabase, calls } = createPatientPolicyMock({
+			patients: [{ id: 'patient-juan', full_name: 'Juan Pedro', blocked: true }]
+		});
+
+		await expect(
+			assertPublicBookingPatientPolicy(supabase, {
+				businessId: 'business-1',
+				patientName: 'Carlos Gomez',
+				phoneE164: '+5493515550000',
+				now
+			})
+		).resolves.toBeUndefined();
+		expect(calls).toContainEqual({
+			method: 'rpc',
+			fn: 'get_public_booking_active_future_count_for_request',
+			args: {
+				p_business_id: 'business-1',
+				p_patient_id: null,
+				p_patient_name: 'Carlos Gomez',
+				p_phone_e164: '+5493515550000',
+				p_now: now.toISOString()
+			}
+		});
+	});
+
+	it('varias coincidencias exactas son ambiguas y nunca elige la primera', async () => {
+		const { supabase, calls } = createPatientPolicyMock({
+			patients: [
+				{ id: 'patient-1', full_name: 'Ana Gomez', blocked: false },
+				{ id: 'patient-2', full_name: 'Ana Gómez', blocked: true }
+			]
+		});
+
+		await expect(
+			assertPublicBookingPatientPolicy(supabase, {
+				businessId: 'business-1',
+				patientName: 'Ana Gomez',
+				phoneE164: '+5493515550000',
+				now
+			})
+		).resolves.toBeUndefined();
+		expect(calls).toContainEqual({
+			method: 'rpc',
+			fn: 'get_public_booking_active_future_count_for_request',
+			args: {
+				p_business_id: 'business-1',
+				p_patient_id: null,
+				p_patient_name: 'Ana Gomez',
+				p_phone_e164: '+5493515550000',
+				p_now: now.toISOString()
+			}
+		});
 	});
 
 	it('informa por separado cuando la ficha está bloqueada', async () => {
 		const { supabase } = createPatientPolicyMock({
-			patient: { id: 'patient-1', blocked: true }
+			patients: [{ id: 'patient-1', full_name: 'Ana Gomez', blocked: true }]
 		});
 
 		await expect(
@@ -255,6 +314,8 @@ describe('public joint booking creation', () => {
 	beforeEach(() => {
 		createJointAppointmentMock.mockReset();
 		createManualAppointmentMock.mockReset();
+		findAppointmentCreationReplayMock.mockReset();
+		findAppointmentCreationReplayMock.mockResolvedValue(null);
 		getAvailabilitySlotsMock.mockReset();
 	});
 
@@ -288,7 +349,7 @@ describe('public joint booking creation', () => {
 					return { select: () => queryBuilder(subscription) };
 				}
 				if (table === 'patients') {
-					return { select: () => queryBuilder(null) };
+					return { select: () => queryBuilder([]) };
 				}
 				if (table === 'public_booking_attempts') {
 					return {
@@ -302,10 +363,10 @@ describe('public joint booking creation', () => {
 				throw new Error(`Tabla inesperada en la prueba: ${table}`);
 			},
 			rpc: async (name: string) => {
-				if (name !== 'get_public_booking_active_future_count_by_name') {
-					throw new Error(`RPC inesperado en la prueba: ${name}`);
-				}
+				if (name === 'get_public_booking_active_future_count_for_request') {
 				return { data: 0, error: null };
+			}
+				throw new Error(`RPC inesperado en la prueba: ${name}`);
 			}
 		};
 
@@ -317,6 +378,7 @@ describe('public joint booking creation', () => {
 			slotStartsAt: slot.starts_at,
 			patientName: 'Ana Gomez',
 			patientPhone: '+54 9 351 555 0000',
+			idempotencyKey: 'a1000000-0000-4000-8000-000000000001',
 			now: new Date('2026-07-25T12:00:00.000Z')
 		});
 
@@ -339,7 +401,13 @@ describe('public joint booking creation', () => {
 				businessId: business.id,
 				serviceId: 'svc-1',
 				professionalIds: ['pro-1', 'pro-2'],
-				source: 'public_booking'
+				source: 'public_booking',
+				patient: expect.objectContaining({
+					mode: 'public',
+					name: 'Ana Gomez',
+					phone: '+54 9 351 555 0000'
+				}),
+				idempotencyKey: 'a1000000-0000-4000-8000-000000000001'
 			})
 		);
 		expect(createManualAppointmentMock).not.toHaveBeenCalled();
@@ -353,6 +421,42 @@ describe('public joint booking creation', () => {
 				professional_ids: ['pro-1', 'pro-2']
 			}
 		});
+	});
+
+	it('un reintento recupera el turno previo antes del cupo, rate limit y disponibilidad', async () => {
+		findAppointmentCreationReplayMock.mockResolvedValue({
+			id: 'appointment-existing',
+			confirmation_token: 'token-existing',
+			idempotent_replay: true
+		});
+		const supabase = {
+			from: (table: string) => {
+				if (table === 'businesses') return { select: () => queryBuilder(business) };
+				if (table === 'business_subscriptions') {
+					return { select: () => queryBuilder(subscription) };
+				}
+				throw new Error(`El replay no debe consultar ${table}`);
+			}
+		};
+
+		const result = await createPublicBooking(supabase as never, {
+			slug: business.slug,
+			serviceId: 'svc-1',
+			professionalId: 'pro-1',
+			slotStartsAt: '2026-07-30T12:23:00.000Z',
+			patientName: 'Ana Gomez',
+			patientPhone: '+54 9 351 555 0000',
+			idempotencyKey: 'a1000000-0000-4000-8000-000000000001'
+		});
+
+		expect(result.appointment).toMatchObject({
+			id: 'appointment-existing',
+			idempotent_replay: true
+		});
+		expect(findAppointmentCreationReplayMock).toHaveBeenCalledTimes(1);
+		expect(getAvailabilitySlotsMock).not.toHaveBeenCalled();
+		expect(createJointAppointmentMock).not.toHaveBeenCalled();
+		expect(createManualAppointmentMock).not.toHaveBeenCalled();
 	});
 });
 
@@ -394,7 +498,20 @@ const subscription = {
 
 const queryBuilder = (data: unknown) => {
 	const builder: Record<string, unknown> = {};
-	for (const method of ['eq', 'in', 'gte', 'lte', 'lt', 'gt', 'or', 'order', 'limit', 'is', 'neq', 'not']) {
+	for (const method of [
+		'eq',
+		'in',
+		'gte',
+		'lte',
+		'lt',
+		'gt',
+		'or',
+		'order',
+		'limit',
+		'is',
+		'neq',
+		'not'
+	]) {
 		builder[method] = () => builder;
 	}
 	builder.maybeSingle = async () => ({ data, error: null });
@@ -518,7 +635,10 @@ const createSupabaseMock = (
 					...(overrides.includeUnavailableFixtures
 						? [
 								{ service_id: 'svc-1', professional_id: 'pro-unavailable' },
-								{ service_id: 'svc-unavailable', professional_id: 'pro-unavailable' }
+										{
+											service_id: 'svc-unavailable',
+											professional_id: 'pro-unavailable'
+										}
 							]
 						: [])
 				]);
@@ -557,7 +677,8 @@ const createSupabaseMock = (
 		}
 	};
 	}
-}};
+	};
+};
 
 const slotsForRange = (fromDate: string, toDate: string): AvailabilitySlot[] => {
 	const slots: AvailabilitySlot[] = [];
@@ -589,7 +710,9 @@ describe('loadPublicBookingState (performance del flujo público)', () => {
 	it('muestra el catálogo inicial sin disparar el camino de consultas por servicio', async () => {
 		const supabase = createSupabaseMock();
 
-		const state = await loadPublicBookingState(supabase as never, { slug: business.slug });
+		const state = await loadPublicBookingState(supabase as never, {
+			slug: business.slug
+		});
 
 		expect(state.issue).toBeNull();
 		expect(state.services.map((service) => service.id)).toEqual(['svc-1']);
@@ -599,9 +722,13 @@ describe('loadPublicBookingState (performance del flujo público)', () => {
 	});
 
 	it('conserva ocultos servicios y profesionales sin un horario semanal activo', async () => {
-		const supabase = createSupabaseMock({ includeUnavailableFixtures: true }) as never;
+		const supabase = createSupabaseMock({
+			includeUnavailableFixtures: true
+		}) as never;
 
-		const initial = await loadPublicBookingState(supabase, { slug: business.slug });
+		const initial = await loadPublicBookingState(supabase, {
+			slug: business.slug
+		});
 		expect(initial.services.map((service) => service.id)).toEqual(['svc-1']);
 
 		const professionalStep = await loadPublicBookingState(supabase, {
@@ -631,7 +758,9 @@ describe('loadPublicBookingState (performance del flujo público)', () => {
 	});
 
 	it('calcula días y horarios únicamente cuando los dos integrantes están libres', async () => {
-		const supabase = createSupabaseMock({ includeSecondProfessional: true }) as never;
+		const supabase = createSupabaseMock({
+			includeSecondProfessional: true
+		}) as never;
 		const today = todayForBusiness(business);
 		const date = addDaysToDateString(today, 2);
 
@@ -658,9 +787,7 @@ describe('loadPublicBookingState (performance del flujo público)', () => {
 		expect(
 			slotState.slots.every(
 				(slot) =>
-					slot.is_joint &&
-					slot.professional_ids?.join(',') === 'pro-1,pro-2' &&
-					slot.date === date
+					slot.is_joint && slot.professional_ids?.join(',') === 'pro-1,pro-2' && slot.date === date
 			)
 		).toBe(true);
 		expect(slotState.slots[0]?.time).toBe('09:23');
@@ -705,7 +832,12 @@ describe('loadPublicBookingState (performance del flujo público)', () => {
 		const supabase = createSupabaseMock() as never;
 		const today = todayForBusiness(business);
 		const date = addDaysToDateString(today, 2);
-		const input = { slug: business.slug, serviceId: 'svc-1', professionalId: 'pro-1', date };
+		const input = {
+			slug: business.slug,
+			serviceId: 'svc-1',
+			professionalId: 'pro-1',
+			date
+		};
 
 		await loadPublicBookingState(supabase, input);
 		const callsAfterFirst = getAvailabilitySlotsMock.mock.calls.length;

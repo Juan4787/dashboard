@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
 	assertCanTransitionAppointment,
 	createJointAppointment,
-	createOrFindPatientForAppointment,
+	createManualAppointment,
+	findAppointmentCreationReplay,
 	getHumanAppointmentErrorMessage,
 	rescheduleAppointment
 } from './appointments';
@@ -17,13 +18,18 @@ const createRescheduleMock = (appointmentRow: Record<string, unknown>) => {
 					select: () => ({
 						eq: () => ({
 							eq: () => ({
-								maybeSingle: async () => ({ data: appointmentRow, error: null })
+								maybeSingle: async () => ({
+									data: appointmentRow,
+									error: null
+								})
 							})
 						})
 					}),
 					update: (payload: Record<string, unknown>) => {
 						updates.push(payload);
-						return { eq: () => ({ eq: () => Promise.resolve({ error: null }) }) };
+						return {
+							eq: () => ({ eq: () => Promise.resolve({ error: null }) })
+						};
 					}
 				};
 			}
@@ -121,226 +127,259 @@ describe('appointment error messages', () => {
 		expect(getHumanAppointmentErrorMessage(new Error('PATIENT_BLOCKED'))).toContain(
 			'Revisá su ficha'
 		);
+		expect(getHumanAppointmentErrorMessage(new Error('APPOINTMENT_CREATOR_INVALID'))).toContain(
+			'Recargá la agenda'
+		);
 	});
 });
 
-describe('patient identity during appointment creation', () => {
-	it('conserva el texto de un teléfono inválido sin usarlo como identidad ni WhatsApp', async () => {
-		const inserted: Record<string, unknown>[] = [];
-		let lookups = 0;
-		const supabase = {
-			from: (table: string) => {
-				if (table !== 'patients') throw new Error(`Tabla inesperada: ${table}`);
-				return {
-					select: () => {
-						lookups += 1;
-						throw new Error('No debía buscar identidad por un teléfono inválido');
-					},
-					insert: async (payload: Record<string, unknown>) => {
-						inserted.push(payload);
-						return { error: null };
-					}
-				};
-			}
-		};
+const requestKey = 'a1000000-0000-4000-8000-000000000001';
 
-		await createOrFindPatientForAppointment(supabase as never, {
+const createAtomicAppointmentMock = (options: { replayData?: Record<string, unknown> | null } = {}) => {
+	const rpcCalls: Array<{ name: string; payload: Record<string, unknown> }> = [];
+	let tableReads = 0;
+	const supabase = {
+		from: () => {
+			tableReads += 1;
+			throw new Error('La creación atómica no debe leer ni escribir tablas desde la aplicación');
+		},
+		rpc: (name: string, payload: Record<string, unknown>) => {
+			rpcCalls.push({ name, payload });
+			const generated = {
+				id: `appointment-${rpcCalls.length}`,
+				patient_id: `patient-${rpcCalls.length}`,
+				professional_name_snapshot: 'Dra. Uno, Dr. Dos',
+				patient_created: payload.p_patient_mode !== 'existing',
+				idempotent_replay: false
+			};
+			return {
+				single: async () => ({
+					data: generated,
+					error: null
+				}),
+				maybeSingle: async () => ({
+					data: Object.hasOwn(options, 'replayData') ? options.replayData : generated,
+					error: null
+				})
+			};
+		}
+	};
+	return {
+		supabase: supabase as never,
+		rpcCalls,
+		getTableReads: () => tableReads
+	};
+};
+
+describe('patient identity during appointment creation', () => {
+	it('consulta la idempotencia sin crear nada y recupera sólo una coincidencia previa', async () => {
+		const absent = createAtomicAppointmentMock({ replayData: null });
+		const input = {
 			businessId: 'business-1',
 			ownerId: 'owner-1',
-			name: 'Paciente nuevo',
-			phone: '123',
-			communicationPhoneE164: null
-		});
+			patient: { mode: 'new' as const, name: 'Juan Pedro', phone: '342 504 8209' },
+			serviceId: 'service-1',
+			professionalIds: ['professional-1'],
+			startsAt: new Date('2026-07-30T13:00:00.000Z'),
+			idempotencyKey: requestKey
+		};
+		await expect(findAppointmentCreationReplay(absent.supabase, input)).resolves.toBeNull();
+		expect(absent.rpcCalls[0]?.payload).toMatchObject({ p_replay_only: true });
 
-		expect(lookups).toBe(0);
-		expect(inserted).toHaveLength(1);
-		expect(inserted[0]).toMatchObject({
-			phone: '123',
-			phone_raw: '123',
-			phone_e164: null
+		const previous = createAtomicAppointmentMock({
+			replayData: {
+				id: 'appointment-existing',
+				patient_id: 'patient-existing',
+				confirmation_token: 'token-existing',
+				idempotent_replay: true
+			}
+		});
+		await expect(findAppointmentCreationReplay(previous.supabase, input)).resolves.toMatchObject({
+			id: 'appointment-existing',
+			idempotent_replay: true
 		});
 	});
 
-	it('reutiliza la ficha creada por otra reserva simultánea con el mismo teléfono', async () => {
-		let lookups = 0;
-		let inserts = 0;
-		const supabase = {
-			from: (table: string) => {
-				if (table !== 'patients') throw new Error(`Tabla inesperada: ${table}`);
-				return {
-					select: () => {
-						const query: any = {
-							eq: () => query,
-							maybeSingle: async () => {
-								lookups += 1;
-								return lookups === 1
-									? { data: null, error: null }
-									: { data: { id: 'patient-concurrent', blocked: false }, error: null };
-							}
-						};
-						return query;
-					},
-					insert: async () => {
-						inserts += 1;
-						return {
-							error: {
-								code: '23505',
-								message:
-									'duplicate key value violates unique constraint "patients_business_phone_e164_uq"'
-							}
-						};
-					}
-				};
-			}
-		};
-
-		const patientId = await createOrFindPatientForAppointment(supabase as never, {
+	it('dos altas explícitas con el mismo teléfono siguen siendo dos personas distintas', async () => {
+		const { supabase, rpcCalls, getTableReads } = createAtomicAppointmentMock();
+		await createManualAppointment(supabase, {
 			businessId: 'business-1',
 			ownerId: 'owner-1',
-			name: 'Juan Carlos',
-			phone: '351 555 0000'
+			patient: { mode: 'new', name: 'Juan Pedro', phone: '342 504 8209' },
+			serviceId: 'service-1',
+			professionalId: 'professional-1',
+			startsAt: new Date('2026-07-30T13:00:00.000Z'),
+			idempotencyKey: requestKey
+		});
+		await createManualAppointment(supabase, {
+			businessId: 'business-1',
+			ownerId: 'owner-1',
+			patient: { mode: 'new', name: 'Carlos', phone: '342 504 8209' },
+			serviceId: 'service-1',
+			professionalId: 'professional-1',
+			startsAt: new Date('2026-07-30T14:00:00.000Z'),
+			idempotencyKey: 'a1000000-0000-4000-8000-000000000002'
 		});
 
-		expect(patientId).toBe('patient-concurrent');
-		expect(lookups).toBe(2);
-		expect(inserts).toBe(1);
+		expect(getTableReads()).toBe(0);
+		expect(rpcCalls.map((call) => call.payload)).toEqual([
+			expect.objectContaining({
+				p_patient_mode: 'new',
+				p_replay_only: false,
+				p_patient_id: null,
+				p_patient_name: 'Juan Pedro',
+				p_patient_phone_e164: '+5493425048209'
+			}),
+			expect.objectContaining({
+				p_patient_mode: 'new',
+				p_patient_id: null,
+				p_patient_name: 'Carlos',
+				p_patient_phone_e164: '+5493425048209'
+			})
+		]);
+	});
+
+	it('una ficha existente se asocia exclusivamente por el patient_id elegido', async () => {
+		const { supabase, rpcCalls } = createAtomicAppointmentMock();
+		await createManualAppointment(supabase, {
+			businessId: 'business-1',
+			patient: {
+				mode: 'existing',
+				patientId: 'patient-selected',
+				phone: '342 504 8209',
+				updatePhone: true
+			},
+			serviceId: 'service-1',
+			professionalId: 'professional-1',
+			startsAt: new Date('2026-07-30T13:00:00.000Z'),
+			idempotencyKey: requestKey
+		});
+
+		expect(rpcCalls[0]).toMatchObject({
+			name: 'create_appointment_with_patient_identity',
+			payload: {
+				p_patient_mode: 'existing',
+				p_patient_id: 'patient-selected',
+				p_patient_name: null,
+				p_update_existing_phone: true
+			}
+		});
+	});
+
+	it('rechaza antes del RPC mezclar el modo público con una fuente interna', async () => {
+		const { supabase, rpcCalls } = createAtomicAppointmentMock();
+
+		await expect(
+			createManualAppointment(supabase, {
+				businessId: 'business-1',
+				patient: { mode: 'public', name: 'Ana Gomez', phone: '351 555 0000' },
+				serviceId: 'service-1',
+				professionalId: 'professional-1',
+				startsAt: new Date('2026-07-30T13:00:00.000Z'),
+				idempotencyKey: requestKey
+			})
+		).rejects.toThrow('PATIENT_MODE_SOURCE_MISMATCH');
+		expect(rpcCalls).toHaveLength(0);
 	});
 });
 
 describe('joint appointment creation', () => {
-	const createExistingPatientJointMock = () => {
-		const rpcCalls: Array<{ name: string; payload: Record<string, unknown> }> = [];
-		let tableReads = 0;
-		const supabase = {
-			from: (table: string) => {
-				tableReads += 1;
-				if (table !== 'patients') throw new Error(`Tabla inesperada: ${table}`);
-				return {
-					select: () => {
-						const query: any = {
-							eq: () => query,
-							maybeSingle: async () => ({
-								data: { id: 'patient-1', blocked: false },
-								error: null
-							})
-						};
-						return query;
-					}
-				};
-			},
-			rpc: (name: string, payload: Record<string, unknown>) => {
-				rpcCalls.push({ name, payload });
-				return {
-					single: async () => ({
-						data: {
-							id: 'appointment-1',
-							professional_name_snapshot: 'Dra. Uno, Dr. Dos'
-						},
-						error: null
-					})
-				};
-			}
-		};
-		return { supabase: supabase as never, rpcCalls, getTableReads: () => tableReads };
-	};
-
-	it('envía una sola operación atómica con todo el equipo y la excepción de descanso', async () => {
-		const { supabase, rpcCalls } = createExistingPatientJointMock();
-
+	it('envía paciente y equipo en una sola operación atómica e idempotente', async () => {
+		const { supabase, rpcCalls } = createAtomicAppointmentMock();
 		const created = await createJointAppointment(supabase, {
 			businessId: 'business-1',
 			createdByUserId: 'user-1',
-			patientId: 'patient-1',
+			patient: { mode: 'existing', patientId: 'patient-1' },
 			serviceId: 'service-1',
 			professionalIds: ['professional-1', 'professional-2'],
 			startsAt: new Date('2026-07-30T13:00:00.000Z'),
-			ignoreBreak: true
+			ignoreBreak: true,
+			idempotencyKey: requestKey
 		});
 
 		expect(created.id).toBe('appointment-1');
-		expect(rpcCalls).toEqual([
-			{
-					name: 'create_joint_appointment_with_phone_decision',
-				payload: {
-					p_business_id: 'business-1',
-					p_patient_id: 'patient-1',
-					p_service_id: 'service-1',
-					p_professional_ids: ['professional-1', 'professional-2'],
-					p_starts_at: '2026-07-30T13:00:00.000Z',
-					p_internal_note: null,
-					p_created_by_user_id: 'user-1',
-					p_ignore_break: true,
-						p_source: 'manual',
-						p_phone_communication_status: 'unknown',
-						p_phone_warning_acknowledged: false
-				}
-			}
-		]);
+		expect(rpcCalls[0]).toEqual({
+			name: 'create_appointment_with_patient_identity',
+			payload: expect.objectContaining({
+				p_business_id: 'business-1',
+				p_patient_mode: 'existing',
+				p_patient_id: 'patient-1',
+				p_professional_ids: ['professional-1', 'professional-2'],
+				p_ignore_break: true,
+				p_source: 'manual',
+				p_idempotency_key: requestKey
+			})
+		});
 	});
 
-	it('no toca pacientes ni crea el turno si falta aceptar la advertencia del teléfono', async () => {
-		const { supabase, rpcCalls, getTableReads } = createExistingPatientJointMock();
-
+	it('no llama a la base si falta aceptar la advertencia del teléfono', async () => {
+		const { supabase, rpcCalls, getTableReads } = createAtomicAppointmentMock();
 		await expect(
 			createJointAppointment(supabase, {
 				businessId: 'business-1',
-				patientId: 'patient-1',
-				patientPhone: '123',
+				patient: { mode: 'existing', patientId: 'patient-1', phone: '123' },
 				serviceId: 'service-1',
 				professionalIds: ['professional-1', 'professional-2'],
 				startsAt: new Date('2026-07-30T13:00:00.000Z'),
-				phoneCommunicationStatus: 'invalid'
+				phoneCommunicationStatus: 'invalid',
+				idempotencyKey: requestKey
 			})
 		).rejects.toThrow('PHONE_WARNING_ACKNOWLEDGEMENT_REQUIRED');
 		expect(getTableReads()).toBe(0);
 		expect(rpcCalls).toHaveLength(0);
 	});
 
-	it('persiste la aceptación explícita y no permite declarar válido un número inválido', async () => {
-		const acknowledged = createExistingPatientJointMock();
+	it('persiste la aceptación explícita y rechaza declarar válido un número inválido', async () => {
+		const acknowledged = createAtomicAppointmentMock();
 		await createJointAppointment(acknowledged.supabase, {
 			businessId: 'business-1',
-			patientId: 'patient-1',
-			patientPhone: '123',
+			patient: { mode: 'existing', patientId: 'patient-1', phone: '123' },
 			serviceId: 'service-1',
 			professionalIds: ['professional-1', 'professional-2'],
 			startsAt: new Date('2026-07-30T13:00:00.000Z'),
 			phoneCommunicationStatus: 'invalid',
-			phoneWarningAcknowledged: true
+			phoneWarningAcknowledged: true,
+			idempotencyKey: requestKey
 		});
 		expect(acknowledged.rpcCalls[0]?.payload).toMatchObject({
 			p_phone_communication_status: 'invalid',
 			p_phone_warning_acknowledged: true
 		});
 
-		const forged = createExistingPatientJointMock();
+		const forged = createAtomicAppointmentMock();
 		await expect(
 			createJointAppointment(forged.supabase, {
 				businessId: 'business-1',
-				patientId: 'patient-1',
-				patientPhone: '123',
+				patient: { mode: 'existing', patientId: 'patient-1', phone: '123' },
 				serviceId: 'service-1',
 				professionalIds: ['professional-1', 'professional-2'],
 				startsAt: new Date('2026-07-30T13:00:00.000Z'),
-				phoneCommunicationStatus: 'valid'
+				phoneCommunicationStatus: 'valid',
+				idempotencyKey: requestKey
 			})
 		).rejects.toThrow('PHONE_COMMUNICATION_STATUS_MISMATCH');
-		expect(forged.getTableReads()).toBe(0);
+		expect(forged.rpcCalls).toHaveLength(0);
 	});
 
-	it('mantiene compatibles las reservas públicas con teléfonos externos no clasificables', async () => {
-		const { supabase, rpcCalls } = createExistingPatientJointMock();
+	it('la reserva pública declara su estrategia sin inferir por teléfono en TypeScript', async () => {
+		const { supabase, rpcCalls } = createAtomicAppointmentMock();
 		await createJointAppointment(supabase, {
 			businessId: 'business-1',
-			patientId: 'patient-1',
-			patientPhone: '+598 99 123 456',
+			patient: {
+				mode: 'public',
+				name: 'Ana Gomez',
+				phone: '+598 99 123 456'
+			},
 			serviceId: 'service-1',
 			professionalIds: ['professional-1', 'professional-2'],
 			startsAt: new Date('2026-07-30T13:00:00.000Z'),
-			source: 'public_booking'
+			source: 'public_booking',
+			idempotencyKey: requestKey
 		});
 
 		expect(rpcCalls[0]?.payload).toMatchObject({
+			p_patient_mode: 'public',
+			p_patient_id: null,
 			p_source: 'public_booking',
 			p_phone_communication_status: 'unknown',
 			p_phone_warning_acknowledged: false

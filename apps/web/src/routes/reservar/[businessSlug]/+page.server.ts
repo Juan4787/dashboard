@@ -1,4 +1,5 @@
 import { env } from '$env/dynamic/private';
+import { randomUUID } from 'crypto';
 import { env as publicEnv } from '$env/dynamic/public';
 import { createSupabaseAdminClient } from '$lib/server/supabase';
 import { resolveMapsUrl } from '$lib/server/location';
@@ -24,6 +25,7 @@ const valuesFromForm = (form: FormData) => Object.fromEntries(form.entries());
 // trackea los search params accedidos: al no leerlo, elegir horario no re-ejecuta
 // el load (la página lo resuelve client-side desde page.url) y es instantáneo.
 export const load: PageServerLoad = async ({ params, fetch, url, setHeaders }) => {
+	const bookingRequestId = randomUUID();
 	const requestedProfessionalIds = [
 		...new Set(
 			url.searchParams
@@ -84,6 +86,7 @@ export const load: PageServerLoad = async ({ params, fetch, url, setHeaders }) =
 			selected,
 			mapsLink: resolveMapsUrl({ address: 'Av. Demo 123' }),
 			turnstileSiteKey: null,
+			bookingRequestId,
 			demo: true
 		};
 	}
@@ -110,6 +113,7 @@ export const load: PageServerLoad = async ({ params, fetch, url, setHeaders }) =
 				? resolveMapsUrl({ address: state.business.address, maps_url: state.business.maps_url })
 				: null,
 			turnstileSiteKey: publicEnv.PUBLIC_TURNSTILE_SITE_KEY ?? null,
+			bookingRequestId,
 			demo: false
 		};
 	} catch (error: any) {
@@ -133,6 +137,7 @@ export const load: PageServerLoad = async ({ params, fetch, url, setHeaders }) =
 			},
 			mapsLink: null,
 			turnstileSiteKey: null,
+			bookingRequestId,
 			demo: false
 		};
 	}
@@ -168,6 +173,7 @@ export const actions: Actions = {
 		const patientEmail = String(form.get('patient_email') ?? '').trim();
 		const note = String(form.get('note') ?? '').trim();
 		const turnstileToken = String(form.get('cf-turnstile-response') ?? '').trim();
+		const idempotencyKey = String(form.get('idempotency_key') ?? '').trim();
 		const userAgent = request.headers.get('user-agent') ?? null;
 		const ip = getClientAddress();
 
@@ -198,6 +204,17 @@ export const actions: Actions = {
 				values: { ...valuesFromForm(form), patient_name: patientName }
 			});
 		}
+		if (
+			!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+				idempotencyKey
+			)
+		) {
+			return fail(400, {
+				message:
+					'La sesión de reserva venció. Recargá la página, elegí nuevamente el horario y confirmá tus datos.',
+				values: valuesFromForm(form)
+			});
+		}
 
 		try {
 			await verifyTurnstileIfConfigured({
@@ -219,6 +236,7 @@ export const actions: Actions = {
 				patientPhone,
 				patientEmail,
 				note,
+				idempotencyKey,
 				ipHash: publicHash(ip),
 				userAgent
 			});

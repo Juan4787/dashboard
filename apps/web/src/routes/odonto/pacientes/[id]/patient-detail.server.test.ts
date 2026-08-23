@@ -363,7 +363,6 @@ describe('patient detail migrated actions', () => {
 			makeQueryBuilder({
 				maybeSingleResult: { data: { id: 'link-1', archived_at: null }, error: null }
 			}),
-			makeQueryBuilder({ rangeResult: { data: [], error: null } }),
 			makeQueryBuilder({
 				maybeSingleResult: {
 					data: {

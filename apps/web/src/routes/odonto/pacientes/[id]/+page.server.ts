@@ -146,22 +146,18 @@ const ensureProfessionalCanAccessPatient = async ({
 	return data ? { id: String((data as any).id), archived_at: (data as any).archived_at ?? null } : null;
 };
 
-const findPatientDuplicateForUpdate = async ({
+const findPatientDuplicateDniForUpdate = async ({
 	admin,
 	businessId,
 	patientId,
-	dni,
-	phoneE164,
-	onlyField
+	dni
 }: {
 	admin: Awaited<ReturnType<typeof createSupabaseAdminClient>>;
 	businessId: string;
 	patientId: string;
 	dni: string;
-	phoneE164: string | null;
-	onlyField?: PatientUniqueField;
 }): Promise<{ id: string; field: PatientUniqueField } | null> => {
-	if (dni && (!onlyField || onlyField === 'dni')) {
+	if (dni) {
 		const { data, error } = await admin
 			.from('patients')
 			.select('id')
@@ -172,19 +168,6 @@ const findPatientDuplicateForUpdate = async ({
 			.maybeSingle();
 		if (error) throw error;
 		if ((data as any)?.id) return { id: String((data as any).id), field: 'dni' };
-	}
-
-	if (phoneE164 && (!onlyField || onlyField === 'phone')) {
-		const { data, error } = await admin
-			.from('patients')
-			.select('id')
-			.eq('business_id', businessId)
-			.eq('phone_e164', phoneE164)
-			.neq('id', patientId)
-			.limit(1)
-			.maybeSingle();
-		if (error) throw error;
-		if ((data as any)?.id) return { id: String((data as any).id), field: 'phone' };
 	}
 
 	return null;
@@ -203,8 +186,7 @@ const mapDuplicatePatientError = async ({
 	admin,
 	businessId,
 	patientId,
-	dni,
-	phoneE164
+	dni
 }: {
 	error:
 		| { code?: string | null; message?: string | null; details?: string | null; hint?: string | null }
@@ -214,18 +196,15 @@ const mapDuplicatePatientError = async ({
 	businessId: string;
 	patientId: string;
 	dni: string;
-	phoneE164: string | null;
 }) => {
 	const conflictField = getPatientUniqueConflictField(error);
 	if (conflictField) {
 		try {
-			const duplicate = await findPatientDuplicateForUpdate({
+			const duplicate = await findPatientDuplicateDniForUpdate({
 				admin,
 				businessId,
 				patientId,
-				dni,
-				phoneE164,
-				onlyField: conflictField
+				dni
 			});
 			if (duplicate) return duplicatePatientActionResult(duplicate);
 		} catch (lookupError) {
@@ -777,17 +756,6 @@ export const actions: Actions = {
 				return duplicatePatientActionResult({ id: duplicateByDni.id, field: 'dni' });
 			}
 
-			const duplicateByPhone = updates.phone_e164
-				? demoPatients.find(
-						(patient) =>
-							patient.id !== params.id &&
-							normalizePhoneE164(patient.phone) === updates.phone_e164
-					)
-				: null;
-			if (duplicateByPhone) {
-				return duplicatePatientActionResult({ id: duplicateByPhone.id, field: 'phone' });
-			}
-
 			let updated = false;
 			updateDemoDb((db) => {
 				const patient = db.patients.find((p) => p.id === params.id);
@@ -842,19 +810,18 @@ export const actions: Actions = {
 		}
 
 		try {
-			const duplicate = await findPatientDuplicateForUpdate({
+			const duplicate = await findPatientDuplicateDniForUpdate({
 				admin,
 				businessId: context.business.id,
 				patientId: params.id,
-				dni,
-				phoneE164: updates.phone_e164
+				dni
 			});
 			if (duplicate) return duplicatePatientActionResult(duplicate);
 		} catch (duplicateError) {
 			console.error('Error verificando duplicados al editar paciente', duplicateError);
 			return fail(500, {
 				message:
-					'No pudimos comprobar si el DNI o el teléfono ya están asociados a otra ficha. Intentá de nuevo antes de guardar.'
+					'No pudimos comprobar si el DNI ya está asociado a otra ficha. Intentá de nuevo antes de guardar.'
 			});
 		}
 
@@ -900,8 +867,7 @@ export const actions: Actions = {
 				admin,
 				businessId: context.business.id,
 				patientId: params.id,
-				dni,
-				phoneE164: updates.phone_e164
+				dni
 			});
 			if (duplicateResult) return duplicateResult;
 			return fail(500, { message: 'No se pudo actualizar la ficha.' });

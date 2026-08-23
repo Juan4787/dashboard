@@ -29,7 +29,7 @@ export const GET: RequestHandler = async ({ url, locals, fetch, cookies }) => {
 
 	const { data, error } = await supabase
 		.from('patients')
-		.select('id, full_name, phone, phone_raw, phone_e164, blocked')
+		.select('id, full_name, phone, phone_raw, phone_e164, dni, birth_date, activity_at, blocked')
 		.eq('business_id', business.business.id)
 		.is('archived_at', null)
 		.or(filters.join(','))

@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import {
 	isValidPatientFullName,
 	normalizePatientFullName,
+	normalizePatientNameForComparison,
 	PATIENT_FULL_NAME_ERROR_MESSAGE
 } from '$lib/utils/patient-name';
 import type { Business } from './business';
@@ -18,12 +19,16 @@ import {
 	type AvailabilityServiceRow,
 	type AvailabilitySlot
 } from './availability';
-import { createJointAppointment, createManualAppointment } from './appointments';
+import {
+	createJointAppointment,
+	createManualAppointment,
+	findAppointmentCreationReplay
+} from './appointments';
 import {
 	getBusinessAccessState,
 	type BusinessSubscriptionRow
 } from './commercial-access';
-import { isLikelyPhoneE164, normalizePhoneE164, normalizePhoneRaw } from './phone';
+import { isLikelyPhoneE164, normalizePhoneE164 } from './phone';
 
 export type PublicService = {
 	id: string;
@@ -932,23 +937,32 @@ export const assertPublicBookingPatientPolicy = async (
 	}
 ) => {
 	const now = input.now ?? new Date();
-	const { data: patient, error: patientError } = await supabase
+	const { data: phoneMatches, error: patientError } = await supabase
 		.from('patients')
-		.select('id, blocked')
+		.select('id, full_name, blocked')
 		.eq('business_id', input.businessId)
 		.eq('phone_e164', input.phoneE164)
-		.maybeSingle();
+		.is('archived_at', null);
 	if (patientError) throw patientError;
+	const normalizedName = normalizePatientNameForComparison(input.patientName);
+	const exactMatches = (phoneMatches ?? []).filter(
+		(patient: { full_name?: string | null }) =>
+			normalizePatientNameForComparison(String(patient.full_name ?? '')) === normalizedName
+	);
+	// Zero or several matches are intentionally ambiguous. The atomic creation
+	// RPC will create a new row; it must never select an arbitrary first result.
+	// The contact bucket below is anti-abuse only and does not resolve identity.
+	const patient =
+		exactMatches.length === 1 ? (exactMatches[0] as { id: string; blocked?: boolean }) : null;
 	if (patient?.blocked) throw new Error('PUBLIC_BOOKING_BLOCKED_PATIENT');
 
-	// El teléfono sólo identifica una ficha explícitamente bloqueada. El cupo
-	// se calcula por nombre normalizado en PostgreSQL, sumando todas las fichas
-	// con ese nombre aunque tengan números distintos.
 	const { data: count, error } = await supabase.rpc(
-		'get_public_booking_active_future_count_by_name',
+		'get_public_booking_active_future_count_for_request',
 		{
 			p_business_id: input.businessId,
+			p_patient_id: patient?.id ?? null,
 			p_patient_name: input.patientName,
+			p_phone_e164: input.phoneE164,
 			p_now: now.toISOString()
 		}
 	);
@@ -973,6 +987,7 @@ export const createPublicBooking = async (
 		note?: string | null;
 		ipHash?: string | null;
 		userAgent?: string | null;
+		idempotencyKey: string;
 		now?: Date;
 	}
 ) => {
@@ -1004,7 +1019,6 @@ export const createPublicBooking = async (
 		}
 
 		const patientName = normalizePatientFullName(input.patientName);
-		const phoneRaw = normalizePhoneRaw(input.patientPhone);
 		phoneE164 = normalizePhoneE164(input.patientPhone);
 		const email = String(input.patientEmail ?? '').trim();
 		if (!isValidPatientFullName(patientName)) throw new Error('PUBLIC_PATIENT_NAME_INVALID');
@@ -1012,11 +1026,30 @@ export const createPublicBooking = async (
 		if (bookingMode === 'joint' && professionalIds.length < 2) {
 			throw new Error('PUBLIC_JOINT_REQUIRES_TWO_PROFESSIONALS');
 		}
-		if (bookingMode === 'individual' && !professionalId) {
-			throw new Error('PUBLIC_PROFESSIONAL_REQUIRED');
-		}
+			if (bookingMode === 'individual' && !professionalId) {
+				throw new Error('PUBLIC_PROFESSIONAL_REQUIRED');
+			}
+			const commonInput = {
+				businessId: business.id,
+				ownerId: null,
+				createdByUserId: null,
+				patient: {
+					mode: 'public' as const,
+					name: patientName,
+					phone: input.patientPhone,
+					email: email || null
+				},
+				serviceId: input.serviceId,
+				professionalIds,
+				startsAt: new Date(input.slotStartsAt),
+				internalNote: input.note?.trim() || null,
+				source: 'public_booking' as const,
+				idempotencyKey: input.idempotencyKey
+			};
+			const replay = await findAppointmentCreationReplay(supabase, commonInput);
+			if (replay) return { business, appointment: replay };
 
-		// La capacidad del paciente se evalúa antes que los límites temporales de
+			// La capacidad del paciente se evalúa antes que los límites temporales de
 		// intentos para no ocultar un 4/4 real detrás de un mensaje de rate limit.
 		await assertPublicBookingPatientPolicy(supabase, {
 			businessId: business.id,
@@ -1054,29 +1087,16 @@ export const createPublicBooking = async (
 		);
 		if (!selectedSlot) throw new Error('PUBLIC_SLOT_UNAVAILABLE');
 
-		const commonInput = {
-			businessId: business.id,
-			ownerId: null,
-			createdByUserId: null,
-			patientName,
-			patientPhone: phoneRaw,
-			patientEmail: email || null,
-			serviceId: input.serviceId,
-			startsAt: new Date(selectedSlot.starts_at),
-			internalNote: input.note?.trim() || null
-		};
-		const created =
-			bookingMode === 'joint'
-				? await createJointAppointment(supabase, {
-						...commonInput,
-						professionalIds,
-						source: 'public_booking'
-					})
-				: await createManualAppointment(supabase, {
-						...commonInput,
-						professionalId,
-						source: 'public_booking'
-					});
+			const created =
+				bookingMode === 'joint'
+					? await createJointAppointment(supabase, {
+							...commonInput,
+							professionalIds: commonInput.professionalIds
+						})
+					: await createManualAppointment(supabase, {
+							...commonInput,
+							professionalId
+						});
 		invalidatePublicBookingScans(business.id);
 
 		await recordPublicBookingAttempt(supabase, {
@@ -1138,7 +1158,7 @@ export const PUBLIC_BOOKING_ERROR_MESSAGES = {
 	PUBLIC_RATE_LIMIT_PHONE:
 		'Se alcanzó el máximo de 5 intentos para este teléfono en 30 minutos. Esperá unos minutos antes de volver a probar.',
 	PUBLIC_BOOKING_ACTIVE_LIMIT:
-		'Este nombre ya alcanzó el máximo permitido: 4 turnos activos a futuro. Podés reservar otro cuando uno pase o sea cancelado.',
+		'Esta persona ya alcanzó el máximo permitido: 4 turnos activos a futuro. Podés reservar otro cuando uno pase o sea cancelado.',
 	PUBLIC_BOOKING_BLOCKED_PATIENT:
 		'Las reservas online están deshabilitadas para esta ficha de paciente. Comunicate con el consultorio para que puedan ayudarte.',
 	PUBLIC_CAPTCHA_REQUIRED: 'Completá la verificación anti-spam para reservar el turno.',

@@ -165,7 +165,9 @@ vuelve al mismo asistente y el componente sincroniza la advertencia sin perder e
 - Una entrada inválida aceptada conserva el texto en `phone_raw`/`phone`, pero fuerza
   `phone_e164 = null`.
 - Un paciente nuevo sin teléfono puede crearse después de la aceptación explícita.
-- Un teléfono inválido nunca participa en la búsqueda o fusión de identidad de pacientes.
+- En Agenda, ningún teléfono —válido o inválido— identifica ni fusiona fichas. En reserva pública,
+  una asociación automática sólo puede reutilizar una única coincidencia exacta de nombre
+  normalizado + teléfono válido; cero o varias coincidencias crean una ficha separada.
 
 Cuando el teléfono se corrige más adelante y vuelve a generar un `phone_e164` válido, recordatorios
 y acciones de comunicación quedan habilitados normalmente.

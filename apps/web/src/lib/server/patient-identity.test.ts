@@ -16,13 +16,6 @@ describe('patient identity conflicts', () => {
 				message: 'duplicate key value violates unique constraint "patients_business_dni_uq"'
 			},
 			'dni'
-		],
-		[
-			{
-				code: '23505',
-				message: 'duplicate key value violates unique constraint "patients_business_phone_e164_uq"'
-			},
-			'phone'
 		]
 	] as const)('identifica sin ambigüedad el dato en conflicto', (error, expectedField) => {
 		expect(getPatientUniqueConflictField(error)).toBe(expectedField);
@@ -51,12 +44,24 @@ describe('patient identity conflicts', () => {
 		expect(LEGACY_PATIENT_NAME_CONFLICT_MESSAGE).not.toContain('PATIENT_');
 	});
 
-	it('mantiene mensajes diferentes, humanos y accionables para DNI y teléfono', () => {
+	it('mantiene el mensaje de DNI humano y accionable', () => {
 		const messages = Object.values(PATIENT_UNIQUE_CONFLICT_MESSAGES);
 		expect(new Set(messages).size).toBe(messages.length);
 		for (const message of messages) {
 			expect(message).toMatch(/Abrila|revisá/);
 			expect(message).not.toMatch(/23505|constraint|phone_e164|business_id/i);
 		}
+	});
+
+	it('no trata un teléfono repetido como conflicto de identidad', () => {
+		const legacyPhoneConstraint = {
+			code: '23505',
+			message: 'duplicate key value violates unique constraint "patients_business_phone_e164_uq"'
+		};
+
+		expect(getPatientUniqueConflictField(legacyPhoneConstraint)).toBeNull();
+		expect(getPatientWriteConflictMessage(legacyPhoneConstraint)).toBe(
+			UNKNOWN_PATIENT_UNIQUE_CONFLICT_MESSAGE
+		);
 	});
 });

@@ -1,4 +1,5 @@
 import { env } from '$env/dynamic/private';
+import { randomUUID } from 'crypto';
 import { demoBusinessContext } from '$lib/server/business';
 import { getAvailabilitySlots, zonedDateTimeToUtc } from '$lib/server/availability';
 import {
@@ -9,6 +10,7 @@ import {
 	APPOINTMENT_STATUSES,
 	createJointAppointment,
 	createManualAppointment,
+	findAppointmentCreationReplay,
 	getHumanAppointmentErrorMessage,
 	isAppointmentStatus,
 	updateAppointmentStatus
@@ -23,8 +25,6 @@ import {
 	isActiveAppointmentStatus
 } from '$lib/utils/appointment-visibility';
 import { resolveCommunicationPhoneDecision } from '$lib/utils/communication-phone';
-import { normalizePhoneRaw } from '$lib/server/phone';
-import { normalizePhone } from '$lib/utils/format';
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -54,6 +54,7 @@ const isIsoDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
 
 export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 	if (!locals.auth) throw redirect(303, '/login');
+	const appointmentRequestId = randomUUID();
 	if (env.DEMO_MODE === 'true') {
 		return {
 			context: demoBusinessContext(),
@@ -76,6 +77,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 			patientsLoaded: true,
 			referencesLoaded: true,
 			reminderCount: 0,
+			appointmentRequestId,
 			demo: true
 		};
 	}
@@ -213,7 +215,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 	if (patientId) {
 		const { data: selectedPatient } = await supabase
 			.from('patients')
-			.select('id, full_name, phone, phone_raw, phone_e164, blocked')
+			.select('id, full_name, phone, phone_raw, phone_e164, dni, birth_date, activity_at, blocked')
 			.eq('business_id', business.business.id)
 			.eq('id', patientId)
 			.maybeSingle();
@@ -241,6 +243,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 		patientsLoaded: false,
 		referencesLoaded: shouldLoadReferences,
 		reminderCount,
+		appointmentRequestId,
 		demo: false
 	};
 };
@@ -275,15 +278,18 @@ export const actions: Actions = {
 		const date = String(form.get('date') ?? '').trim();
 		const time = String(form.get('time') ?? '').trim();
 		const patientId = String(form.get('patient_id') ?? '').trim();
+		const patientMode = String(form.get('patient_mode') ?? '').trim();
 		const patientName = String(form.get('patient_name') ?? '').trim();
 		const patientPhone = String(form.get('patient_phone') ?? '').trim();
 		const patientEmail = String(form.get('patient_email') ?? '').trim();
 		const patientPhoneChanged = form.get('patient_phone_changed') === 'true';
 		const phoneWarningOverride = String(form.get('phone_warning_override') ?? '').trim();
+		const idempotencyKey = String(form.get('idempotency_key') ?? '').trim();
 		const ignoreBreak = form.get('ignore_break') === 'true';
 		const values = {
 			...Object.fromEntries(form),
 			booking_mode: bookingMode,
+			patient_mode: patientMode,
 			professional_id: professionalId,
 			professional_ids: professionalIds.join(',')
 		};
@@ -309,10 +315,35 @@ export const actions: Actions = {
 				values
 			});
 		}
-		if (!patientId && !patientName) {
+		if (patientMode !== 'existing' && patientMode !== 'new') {
 			return fail(400, {
 				message:
-					'Falta el paciente. Buscá una ficha existente o elegí “Nuevo paciente” y completá sus datos antes de crear el turno.',
+					'La selección del paciente quedó incompleta. Volvé al último paso y elegí “Buscar paciente” o “Nuevo paciente”.',
+				values
+			});
+		}
+		if (patientMode === 'existing' && (!patientId || patientName)) {
+			return fail(400, {
+				message:
+					'Para usar una ficha existente, buscá y seleccioná al paciente otra vez antes de confirmar.',
+				values
+			});
+		}
+		if (patientMode === 'new' && (patientId || !patientName)) {
+			return fail(400, {
+				message:
+					'Para crear una ficha nueva, elegí “Nuevo paciente” y completá el nombre antes de confirmar.',
+				values
+			});
+		}
+		if (
+			!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+				idempotencyKey
+			)
+		) {
+			return fail(400, {
+				message:
+					'La sesión para crear el turno venció. Cerrá el asistente, abrilo nuevamente y volvé a confirmar.',
 				values
 			});
 		}
@@ -325,11 +356,13 @@ export const actions: Actions = {
 			return fail(500, { message: 'No pudimos preparar el turno. Intentá de nuevo.', values });
 		}
 
-		let effectivePatientPhone = patientPhone;
-		if (patientId) {
+			let effectivePatientPhone = patientPhone;
+			let selectedPatientBlocked = false;
+			let selectedPatientArchived = false;
+			if (patientMode === 'existing') {
 			const { data: selectedPatient, error: selectedPatientError } = await admin
 				.from('patients')
-				.select('id, blocked, phone, phone_raw, phone_e164')
+				.select('id, blocked, archived_at, phone, phone_raw, phone_e164')
 				.eq('business_id', business.business.id)
 				.eq('id', patientId)
 				.maybeSingle();
@@ -340,9 +373,8 @@ export const actions: Actions = {
 			if (!selectedPatient) {
 				return fail(404, { message: 'No encontramos al paciente seleccionado.', values });
 			}
-			if (selectedPatient.blocked) {
-				return fail(400, { message: 'Ese paciente está bloqueado.', values });
-			}
+				selectedPatientBlocked = Boolean(selectedPatient.blocked);
+				selectedPatientArchived = Boolean(selectedPatient.archived_at);
 			if (!patientPhoneChanged) {
 				effectivePatientPhone = String(
 					selectedPatient.phone_raw ?? selectedPatient.phone ?? selectedPatient.phone_e164 ?? ''
@@ -364,10 +396,57 @@ export const actions: Actions = {
 					phone_warning_override: ''
 				}
 			});
-		}
-		const startsAt = zonedDateTimeToUtc(date, time, business.business.timezone);
+			}
+			const startsAt = zonedDateTimeToUtc(date, time, business.business.timezone);
+			const patient =
+				patientMode === 'existing'
+					? {
+							mode: 'existing' as const,
+							patientId,
+							phone: effectivePatientPhone,
+							updatePhone: patientPhoneChanged
+						}
+					: {
+							mode: 'new' as const,
+							name: patientName,
+							phone: effectivePatientPhone,
+							email: patientEmail
+						};
+			const commonInput = {
+				businessId: business.business.id,
+				ownerId: userId,
+				createdByUserId: userId,
+				patient,
+				serviceId,
+				professionalIds,
+				startsAt,
+				internalNote: String(form.get('internal_note') ?? '').trim() || null,
+				ignoreBreak,
+				phoneCommunicationStatus: phoneDecision.status,
+				phoneWarningAcknowledged: phoneDecision.acknowledged,
+				idempotencyKey
+			};
 
-		let slots;
+			try {
+				const replay = await findAppointmentCreationReplay(admin, commonInput);
+				if (replay) throw redirect(303, createdAppointmentDetailUrl(replay.id, date));
+			} catch (error: any) {
+				if (error?.status && error?.location) throw error;
+				console.error('Error recuperando un turno ya creado', error);
+				return fail(500, { message: getHumanAppointmentErrorMessage(error), values });
+			}
+			if (selectedPatientBlocked) {
+				return fail(400, { message: 'Ese paciente está bloqueado.', values });
+			}
+			if (selectedPatientArchived) {
+				return fail(400, {
+					message:
+						'La ficha seleccionada está archivada. Restaurala desde Pacientes o elegí otra ficha activa.',
+					values
+				});
+			}
+
+			let slots;
 		try {
 			slots = await getAvailabilitySlots(supabase, {
 				business: business.business,
@@ -405,50 +484,17 @@ export const actions: Actions = {
 			});
 		}
 
-		try {
-			if (patientId && patientPhoneChanged) {
-				const normalizedPhone = normalizePhone(effectivePatientPhone);
-				const { data: updatedPatient, error: updatePhoneError } = await admin
-					.from('patients')
-					.update({
-						phone:
-							phoneDecision.normalized?.replace(/\D/g, '') ?? (normalizedPhone || null),
-						phone_raw: normalizePhoneRaw(effectivePatientPhone),
-						phone_e164: phoneDecision.normalized,
-						updated_at: new Date().toISOString()
-					})
-					.eq('business_id', business.business.id)
-					.eq('id', patientId)
-					.select('id')
-					.maybeSingle();
-				if (updatePhoneError) throw updatePhoneError;
-				if (!updatedPatient?.id) throw new Error('PATIENT_NOT_FOUND');
-			}
-			const commonInput = {
-				businessId: business.business.id,
-				ownerId: userId,
-				createdByUserId: userId,
-				patientId: patientId || null,
-				patientName,
-				patientPhone: effectivePatientPhone,
-				patientEmail,
-				serviceId,
-				startsAt,
-				internalNote: String(form.get('internal_note') ?? '').trim() || null,
-				ignoreBreak,
-				phoneCommunicationStatus: phoneDecision.status,
-				phoneWarningAcknowledged: phoneDecision.acknowledged
-			};
-			const created =
-				bookingMode === 'joint'
-					? await createJointAppointment(admin, {
-							...commonInput,
-							professionalIds
-						})
-					: await createManualAppointment(admin, {
-							...commonInput,
-							professionalId
-						});
+			try {
+				const created =
+					bookingMode === 'joint'
+						? await createJointAppointment(admin, {
+								...commonInput,
+								professionalIds: commonInput.professionalIds
+							})
+						: await createManualAppointment(admin, {
+								...commonInput,
+								professionalId
+							});
 			throw redirect(303, createdAppointmentDetailUrl(created.id, date));
 		} catch (error: any) {
 			if (error?.status && error?.location) throw error;

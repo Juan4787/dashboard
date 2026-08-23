@@ -225,9 +225,11 @@ begin
 		raise exception 'TEST_OUTSIDER_CAN_READ_JOINT_APPOINTMENT';
 	end if;
 
-	select public.get_public_booking_active_future_count_by_name(
+	select public.get_public_booking_active_future_count_for_request(
 		v_business_id,
+		v_patient_joint,
 		'Paciente Conjunto',
+		null,
 		statement_timestamp()
 	)
 	into v_count;

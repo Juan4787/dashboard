@@ -391,9 +391,26 @@ const sendTrackedPush = async (
 			.single();
 		if (error) throw error;
 		deliveryId = data?.id ? String(data.id) : null;
-	} catch (trackingError) {
-		const errorCode = String((trackingError as { code?: string })?.code ?? '');
-		if (input.requestKeyHash && errorCode === '23505') {
+		} catch (trackingError) {
+			const typedTrackingError = trackingError as {
+				code?: string;
+				message?: string;
+				details?: string;
+			};
+			const errorCode = String(typedTrackingError?.code ?? '');
+			const errorText = `${errorCode} ${typedTrackingError?.message ?? ''} ${
+				typedTrackingError?.details ?? ''
+			}`;
+			if (
+				errorText.includes('PUSH_SUBSCRIPTION_REVOKED') ||
+				errorText.includes('PUSH_SUBSCRIPTION_MISMATCH') ||
+				errorText.includes('PUSH_SUBSCRIPTION_NOT_FOUND')
+			) {
+				// A repair or revocation won the race. Sending without a durable attempt
+				// here could notify the patient formerly associated with the appointment.
+				return { ok: false, deliveryId: null, error: trackingError };
+			}
+			if (input.requestKeyHash && errorCode === '23505') {
 			try {
 				const { data: existing, error: existingError } = await supabase
 					.from('push_delivery_attempts')

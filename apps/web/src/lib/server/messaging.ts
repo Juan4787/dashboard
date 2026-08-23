@@ -462,7 +462,8 @@ const hasActiveReminderDispatch = async (
 		.select('id, status')
 		.eq('business_id', businessId)
 		.eq('appointment_id', appointmentId)
-		.eq('type', REMINDER_TEMPLATE_NAME);
+		.eq('type', REMINDER_TEMPLATE_NAME)
+		.is('superseded_at', null);
 	if (error) throw error;
 	return (data ?? []).some((dispatch: any) => activeDispatchStatuses.has(dispatch.status));
 };

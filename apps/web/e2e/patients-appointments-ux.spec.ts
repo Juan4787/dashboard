@@ -7,6 +7,7 @@ const serviceRoleKey = process.env.ODONTO_SUPABASE_SERVICE_ROLE_KEY;
 const allowDestructive = process.env.E2E_ALLOW_DESTRUCTIVE === 'true';
 const password = 'E2ePatientsUx!2026';
 const suffix = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+const samePhonePatientName = `Paciente teléfono válido ${suffix}`;
 const partialFixture: { ownerUserId: string; ownerEmail: string; businessId: string } = {
 	ownerUserId: '',
 	ownerEmail: `e2e-patients-ux-${suffix}@example.com`,
@@ -411,7 +412,7 @@ test.describe('Pacientes, próximos turnos y teléfono — UX integrada', () => 
 		if (!fixture) throw new Error('Fixture no inicializado.');
 		await login(page, fixture);
 		const wizard = await openWizardAt(page, fixture, '09:00');
-		const patientName = `Paciente teléfono válido ${suffix}`;
+		const patientName = samePhonePatientName;
 		await wizard.getByLabel('Nombre del paciente').fill(patientName);
 		await wizard.getByLabel('Teléfono').fill('123');
 
@@ -459,15 +460,75 @@ test.describe('Pacientes, próximos turnos y teléfono — UX integrada', () => 
 		const patient = await must(
 			admin
 				.from('patients')
-				.select('id, phone_raw, phone_e164')
+				.select('id, full_name, phone_raw, phone_e164')
 				.eq('business_id', fixture.businessId)
 				.eq('id', appointment.patient_id)
 				.single()
 		);
+		expect(patient.id).not.toBe(fixture.patientId);
+		expect(patient.full_name).toBe(patientName);
 		expect(patient.phone_raw).toBe('351 123 4567');
 		expect(patient.phone_e164).toBe('+5493511234567');
 		expect(appointment.phone_communication_status_at_booking).toBe('valid');
 		expect(appointment.phone_warning_acknowledged_at).toBeNull();
+
+		const { data: samePhonePatients, error: samePhoneError } = await admin
+			.from('patients')
+			.select('id, full_name')
+			.eq('business_id', fixture.businessId)
+			.eq('phone_e164', '+5493511234567');
+		if (samePhoneError) throw samePhoneError;
+		expect(samePhonePatients).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ id: fixture.patientId, full_name: fixture.patientName }),
+				expect.objectContaining({ id: patient.id, full_name: patientName })
+			])
+		);
+		expect(samePhonePatients).toHaveLength(2);
+	});
+
+	test('muestra las fichas que comparten teléfono y conserva el ID elegido', async ({ page }) => {
+		if (!fixture) throw new Error('Fixture no inicializado.');
+		await login(page, fixture);
+		const wizard = await openWizardAt(page, fixture, '10:30');
+		await wizard.getByRole('button', { name: /Buscar paciente/ }).click();
+		await wizard.getByPlaceholder('Buscar paciente').fill('3511234567');
+
+		const originalPatient = wizard
+			.locator('button.ux-choice')
+			.filter({ hasText: fixture.patientName });
+		const duplicatePhonePatient = wizard
+			.locator('button.ux-choice')
+			.filter({ hasText: samePhonePatientName });
+		await expect(originalPatient).toBeVisible();
+		await expect(duplicatePhonePatient).toBeVisible();
+
+		await originalPatient.click();
+		await wizard.getByRole('button', { name: 'Confirmar turno', exact: true }).click();
+		await expect(page).toHaveURL(
+			(url) =>
+				/\/odonto\/turnos\/[0-9a-f-]+$/.test(url.pathname) &&
+				url.searchParams.get('created') === '1'
+		);
+
+		const createdAppointmentId = new URL(page.url()).pathname.split('/').at(-1);
+		expect(createdAppointmentId).toBeTruthy();
+		const appointment = await must(
+			admin
+				.from('appointments')
+				.select(
+					'patient_id, patient_name_at_booking, patient_phone_raw_at_booking, patient_resolution_strategy'
+				)
+				.eq('business_id', fixture.businessId)
+				.eq('id', createdAppointmentId)
+				.single()
+		);
+		expect(appointment).toMatchObject({
+			patient_id: fixture.patientId,
+			patient_name_at_booking: fixture.patientName,
+			patient_phone_raw_at_booking: '351 123 4567',
+			patient_resolution_strategy: 'existing_id'
+		});
 	});
 
 	test('confirmar sin teléfono registra la decisión y no vuelve a molestar', async ({ page }) => {

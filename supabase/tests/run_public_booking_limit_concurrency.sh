@@ -41,11 +41,6 @@ select id, 'Ana Concurrencia', '+5493510000198'
 from public.businesses
 where slug = 'e2e-public-booking-concurrency';
 
-insert into public.patients (business_id, full_name, phone_e164)
-select id, '  ANA   CONCURRENCIA ', '+5493510000199'
-from public.businesses
-where slug = 'e2e-public-booking-concurrency';
-
 insert into public.professional_services (business_id, professional_id, service_id)
 select b.id, p.id, s.id
 from public.businesses b
@@ -77,7 +72,6 @@ SQL
 
 insert_sql() {
 	local day="$1"
-	local phone="$2"
 	cat <<SQL
 begin;
 insert into public.appointments (
@@ -98,16 +92,16 @@ join public.patients patient on patient.business_id = b.id
 join public.services service on service.business_id = b.id
 join public.professionals professional on professional.business_id = b.id
 where b.slug = 'e2e-public-booking-concurrency'
-	and patient.phone_e164 = '$phone';
+	and patient.phone_e164 = '+5493510000198';
 select pg_sleep(1);
 commit;
 SQL
 }
 
 set +e
-psql "$database_url" -v ON_ERROR_STOP=1 -q -c "$(insert_sql 10 +5493510000198)" >"$tmpdir/a.log" 2>&1 &
+psql "$database_url" -v ON_ERROR_STOP=1 -q -c "$(insert_sql 10)" >"$tmpdir/a.log" 2>&1 &
 pid_a=$!
-psql "$database_url" -v ON_ERROR_STOP=1 -q -c "$(insert_sql 11 +5493510000199)" >"$tmpdir/b.log" 2>&1 &
+psql "$database_url" -v ON_ERROR_STOP=1 -q -c "$(insert_sql 11)" >"$tmpdir/b.log" 2>&1 &
 pid_b=$!
 wait "$pid_a"
 status_a=$?
@@ -135,7 +129,7 @@ active_count=$(psql "$database_url" -v ON_ERROR_STOP=1 -qAtc "
 		on patient.business_id = appointment.business_id
 		and patient.id = appointment.patient_id
 	where business.slug = '$slug'
-		and public.normalized_patient_name(patient.full_name) = 'ana concurrencia'
+		and patient.phone_e164 = '+5493510000198'
 		and appointment.status in ('reserved', 'confirmed', 'reschedule_requested')
 		and appointment.starts_at > statement_timestamp();
 ")
@@ -145,4 +139,4 @@ if [[ "$active_count" != '4' ]]; then
 	exit 1
 fi
 
-echo 'PASS: two simultaneous requests with the same normalized name and different phones produced exactly one success and one 4/4 rejection.'
+echo 'PASS: two simultaneous requests for the same patient_id produced exactly one success and one 4/4 rejection.'

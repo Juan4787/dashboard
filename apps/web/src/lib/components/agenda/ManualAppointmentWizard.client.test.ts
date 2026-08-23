@@ -9,7 +9,22 @@ import ManualAppointmentWizard from './ManualAppointmentWizard.svelte';
 const date = '2099-08-25';
 const startsAt = '2099-08-25T13:00:00.000Z';
 
-const renderWizard = (phone: string) => {
+type WizardPatient = {
+	id: string;
+	full_name: string;
+	phone: string;
+	phone_raw: string;
+	phone_e164: string | null;
+	dni: string | null;
+	birth_date: string | null;
+	activity_at: string;
+	blocked: boolean;
+};
+
+const renderWizard = (
+	phone: string,
+	options: { patients?: WizardPatient[]; initialPatientId?: string } = {}
+) => {
 	vi.stubGlobal(
 		'fetch',
 		vi.fn().mockResolvedValue(
@@ -30,25 +45,30 @@ const renderWizard = (phone: string) => {
 		)
 	);
 
+	const initialPatientId = options.initialPatientId ?? 'patient-1';
 	return render(ManualAppointmentWizard, {
 		services: [{ id: 'service-1', name: 'Consulta', duration_minutes: 30 }],
 		professionals: [
 			{ id: 'professional-1', name: 'Dra. Prueba', specialty: null, is_active: true }
 		],
 		serviceProfessionalIds: { 'service-1': ['professional-1'] },
-		patients: [
+		patients: options.patients ?? [
 			{
 				id: 'patient-1',
 				full_name: 'Paciente de prueba',
 				phone,
 				phone_raw: phone,
 				phone_e164: phone || null,
+				dni: '12345678',
+				birth_date: '1990-01-02',
+				activity_at: '2099-01-01T00:00:00.000Z',
 				blocked: false
 			}
 		],
 		patientsLoaded: true,
 		initialDate: date,
-		initialPatientId: 'patient-1',
+		initialPatientId,
+		appointmentRequestId: 'a1000000-0000-4000-8000-000000000001',
 		canOperate: true,
 		form: {
 			values: {
@@ -56,7 +76,7 @@ const renderWizard = (phone: string) => {
 				professional_id: 'professional-1',
 				date,
 				time: '10:00',
-				patient_id: 'patient-1',
+				patient_id: initialPatientId,
 				patient_phone: phone
 			}
 		}
@@ -112,6 +132,9 @@ describe('validación previa del teléfono al crear un turno', () => {
 		expect((container.querySelector('[name="patient_id"]') as HTMLInputElement).value).toBe(
 			'patient-1'
 		);
+		expect((container.querySelector('[name="patient_mode"]') as HTMLInputElement).value).toBe(
+			'existing'
+		);
 	});
 
 	it('permite confirmar sin teléfono sólo después de una decisión explícita', async () => {
@@ -131,5 +154,50 @@ describe('validación previa del teléfono al crear un turno', () => {
 		);
 		expect(HTMLFormElement.prototype.requestSubmit).toHaveBeenCalledTimes(1);
 		expect(screen.queryByText('Falta el número de teléfono')).not.toBeInTheDocument();
+	});
+
+	it('muestra y permite seleccionar por ID dos fichas con el mismo nombre y teléfono', async () => {
+		const user = userEvent.setup();
+		const sharedPhone = '342 504 8209';
+		const patients: WizardPatient[] = [
+			{
+				id: 'patient-1',
+				full_name: 'Persona compartida',
+				phone: sharedPhone,
+				phone_raw: sharedPhone,
+				phone_e164: '+5493425048209',
+				dni: '11111111',
+				birth_date: '1980-01-01',
+				activity_at: '2099-01-01T00:00:00.000Z',
+				blocked: false
+			},
+			{
+				id: 'patient-2',
+				full_name: 'Persona compartida',
+				phone: sharedPhone,
+				phone_raw: sharedPhone,
+				phone_e164: '+5493425048209',
+				dni: '22222222',
+				birth_date: '1990-02-02',
+				activity_at: '2099-02-02T00:00:00.000Z',
+				blocked: false
+			}
+		];
+		const { container } = renderWizard(sharedPhone, { patients });
+
+		expect(screen.getByText(/DNI 11111111/)).toBeInTheDocument();
+		expect(screen.getByText(/DNI 22222222/)).toBeInTheDocument();
+		const choices = screen.getAllByRole('button', {
+			name: /Persona compartida/
+		});
+		expect(choices).toHaveLength(2);
+		await user.click(choices[1]);
+
+		expect((container.querySelector('[name="patient_id"]') as HTMLInputElement).value).toBe(
+			'patient-2'
+		);
+		expect((container.querySelector('[name="patient_mode"]') as HTMLInputElement).value).toBe(
+			'existing'
+		);
 	});
 });

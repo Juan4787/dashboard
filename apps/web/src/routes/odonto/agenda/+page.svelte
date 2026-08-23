@@ -37,6 +37,9 @@
 		phone: string | null;
 		phone_raw: string | null;
 		phone_e164: string | null;
+		dni: string | null;
+		birth_date: string | null;
+		activity_at: string;
 		blocked: boolean;
 	};
 	type Stat = { status: string; count: number };
@@ -63,6 +66,7 @@
 			patientsLoaded?: boolean;
 			referencesLoaded?: boolean;
 			reminderCount?: number;
+			appointmentRequestId: string;
 			demo: boolean;
 		};
 			form?: {
@@ -594,6 +598,7 @@
 					onNeedPatients={loadPatientReferences}
 					initialDate={data.date}
 					initialPatientId={data.selectedPatientId}
+					appointmentRequestId={data.appointmentRequestId}
 					{canOperate}
 					{form}
 				/>

@@ -252,15 +252,21 @@ describe('loadReminderCandidates · exclusión por avisos activados', () => {
 	// Mock mínimo: from(tabla) entrega el siguiente resultado encolado para esa tabla;
 	// toda la cadena de filtros es no-op y la query se resuelve al await (.then).
 	const makeSupabase = (queues: Record<string, Array<{ data: unknown; error: unknown }>>) => {
+		const calls: Array<{ table: string; method: string; args: unknown[] }> = [];
 		const consume = (table: string) => queues[table]?.shift() ?? { data: null, error: null };
 		const chainFor = (table: string) => {
 			const result = consume(table);
 			const chain: any = {};
-			for (const m of ['select', 'eq', 'is', 'not', 'in', 'gte', 'lt', 'order']) chain[m] = () => chain;
+			for (const method of ['select', 'eq', 'is', 'not', 'in', 'gte', 'lt', 'order']) {
+				chain[method] = (...args: unknown[]) => {
+					calls.push({ table, method, args });
+					return chain;
+				};
+			}
 			chain.then = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve);
 			return chain;
 		};
-		return { from: (table: string) => chainFor(table) } as any;
+		return { from: (table: string) => chainFor(table), calls } as any;
 	};
 
 	it('excluye toda suscripción verificada, incluso si tuvo un fallo transitorio', async () => {
@@ -286,6 +292,11 @@ describe('loadReminderCandidates · exclusión por avisos activados', () => {
 		});
 		const ids = candidates.map((c) => c.appointment_id).sort();
 		expect(ids).toEqual(['c']);
+		expect(supabase.calls).toContainEqual({
+			table: 'message_dispatches',
+			method: 'is',
+			args: ['superseded_at', null]
+		});
 	});
 
 	it('mantiene visible el turno sin confirmación aunque exista telemetría displayed', async () => {

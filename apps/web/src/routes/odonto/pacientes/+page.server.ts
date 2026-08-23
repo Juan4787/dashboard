@@ -89,20 +89,16 @@ const duplicatePatientResult = ({
 	phone
 });
 
-const findExistingPatientIdentity = async ({
+const findExistingPatientByDni = async ({
 	admin,
 	businessId,
-	dni,
-	phoneE164,
-	onlyField
+	dni
 }: {
 	admin: Awaited<ReturnType<typeof createSupabaseAdminClient>>;
 	businessId: string;
 	dni: string;
-	phoneE164: string | null;
-	onlyField?: PatientUniqueField;
 }): Promise<{ id: string; field: PatientUniqueField } | null> => {
-	if (dni && (!onlyField || onlyField === 'dni')) {
+	if (dni) {
 		const { data, error } = await admin
 			.from('patients')
 			.select('id')
@@ -112,18 +108,6 @@ const findExistingPatientIdentity = async ({
 			.maybeSingle();
 		if (error) throw error;
 		if (data?.id) return { id: String(data.id), field: 'dni' };
-	}
-
-	if (phoneE164 && (!onlyField || onlyField === 'phone')) {
-		const { data, error } = await admin
-			.from('patients')
-			.select('id')
-			.eq('business_id', businessId)
-			.eq('phone_e164', phoneE164)
-			.limit(1)
-			.maybeSingle();
-		if (error) throw error;
-		if (data?.id) return { id: String(data.id), field: 'phone' };
 	}
 
 	return null;
@@ -244,19 +228,6 @@ const handleCreatePatient = async ({
 				return duplicatePatientResult({
 					field: 'dni',
 					existingId: existingByDni.id,
-					full_name,
-					dni,
-					phone
-				});
-			}
-
-			const existingByPhone = phone_e164
-				? demoPatients.find((patient) => normalizePhoneE164(patient.phone) === phone_e164)
-				: null;
-			if (existingByPhone) {
-				return duplicatePatientResult({
-					field: 'phone',
-					existingId: existingByPhone.id,
 					full_name,
 					dni,
 					phone
@@ -406,11 +377,10 @@ const handleCreatePatient = async ({
 
 		try {
 			admin = await createSupabaseAdminClient('odonto', fetch);
-			const existingPatient = await findExistingPatientIdentity({
+			const existingPatient = await findExistingPatientByDni({
 				admin,
 				businessId: context.business.id,
-				dni,
-				phoneE164: phone_e164
+				dni
 			});
 			if (existingPatient) {
 				return returnDuplicatePatient(existingPatient);
@@ -419,7 +389,7 @@ const handleCreatePatient = async ({
 			console.error('Error verificando duplicados de paciente', duplicateLookupError);
 			return fail(500, {
 				message:
-					'No pudimos comprobar si el DNI o el teléfono ya están asociados a otra ficha. Intentá de nuevo antes de crear el paciente.',
+					'No pudimos comprobar si el DNI ya está asociado a otra ficha. Intentá de nuevo antes de crear el paciente.',
 				full_name,
 				dni,
 				phone
@@ -465,12 +435,10 @@ const handleCreatePatient = async ({
 			const conflictField = getPatientUniqueConflictField(error ?? {});
 			if (conflictField) {
 				try {
-					const existingPatient = await findExistingPatientIdentity({
+					const existingPatient = await findExistingPatientByDni({
 						admin,
 						businessId: context.business.id,
-						dni,
-						phoneE164: phone_e164,
-						onlyField: conflictField
+						dni
 					});
 					if (existingPatient) {
 						return returnDuplicatePatient(existingPatient);

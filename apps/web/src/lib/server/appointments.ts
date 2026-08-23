@@ -1,4 +1,3 @@
-import crypto from 'crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { writeAuditLog } from './audit';
 import { normalizePhoneE164, normalizePhoneRaw } from './phone';
@@ -151,14 +150,36 @@ export const getHumanAppointmentErrorMessage = (error: unknown) => {
 	if (raw.includes('PATIENT_OWNER_REQUIRED')) {
 		return 'No pudimos identificar al responsable del consultorio para crear la ficha del paciente. Pedile a un administrador que revise la configuración del equipo y volvé a intentar.';
 	}
+	if (raw.includes('PATIENT_OWNER_INVALID') || raw.includes('APPOINTMENT_CREATOR_INVALID')) {
+		return 'Tu acceso al consultorio cambió mientras preparabas el turno. Recargá la agenda para actualizar tus permisos y volvé a intentarlo; si seguís sin poder crear el turno, pedile ayuda a un administrador.';
+	}
 	if (raw.includes('PATIENT_NOT_FOUND')) {
 		return 'No encontramos al paciente seleccionado. Buscalo otra vez en la lista o creá una ficha nueva antes de reservar.';
+	}
+	if (raw.includes('PATIENT_ARCHIVED')) {
+		return 'La ficha seleccionada está archivada y no puede recibir un turno nuevo. Restaurala desde Pacientes o elegí otra ficha activa.';
 	}
 	if (raw.includes('PATIENT_BLOCKED')) {
 		return 'Ese paciente está bloqueado y no puede recibir nuevos turnos. Revisá su ficha y quitá el bloqueo sólo si corresponde.';
 	}
 	if (raw.includes('SERVICE_NOT_FOUND')) {
 		return 'El procedimiento seleccionado ya no está disponible. Volvé al primer paso y elegí un procedimiento activo.';
+	}
+	if (
+		raw.includes('PATIENT_MODE_INVALID') ||
+		raw.includes('PATIENT_ID_REQUIRED') ||
+		raw.includes('PATIENT_ID_UNEXPECTED') ||
+		raw.includes('PATIENT_EXISTING_FIELDS_UNEXPECTED') ||
+		raw.includes('PATIENT_MODE_SOURCE_MISMATCH') ||
+		raw.includes('PATIENT_PHONE_UPDATE_MODE_INVALID')
+	) {
+		return 'La selección del paciente quedó inconsistente. Volvé al último paso, elegí de nuevo “Buscar paciente” o “Nuevo paciente” y confirmá el turno.';
+	}
+	if (raw.includes('APPOINTMENT_IDEMPOTENCY_CONFLICT')) {
+		return 'La solicitud ya se usó para otro turno y, por seguridad, no repetimos la operación. Cerrá el asistente, abrilo nuevamente y volvé a confirmar.';
+	}
+	if (raw.includes('APPOINTMENT_IDEMPOTENCY_KEY_INVALID')) {
+		return 'La sesión para crear el turno venció o quedó incompleta. Cerrá el asistente, abrilo nuevamente y volvé a confirmar.';
 	}
 	if (raw.includes('PROFESSIONAL_NOT_FOUND')) {
 		return 'Uno de los profesionales seleccionados ya no está activo. Volvé a elegir el equipo antes de reservar.';
@@ -214,112 +235,131 @@ export const getHumanAppointmentErrorMessage = (error: unknown) => {
 	return 'No pudimos completar la acción y no se guardó ningún cambio. Recargá la página y volvé a intentar; si vuelve a ocurrir, pedile a un administrador que revise el registro interno del error.';
 };
 
-const isPatientPhoneIdentityConflict = (error: unknown) => {
-	return getPatientUniqueConflictField(
-		error as { code?: string; message?: string; details?: string }
-	) === 'phone';
-};
-
-const findPatientByPhone = async (
-	supabase: SupabaseClient,
-	businessId: string,
-	phoneE164: string
-) => {
-	const { data, error } = await supabase
-		.from('patients')
-		.select('id, blocked')
-		.eq('business_id', businessId)
-		.eq('phone_e164', phoneE164)
-		.maybeSingle();
-	if (error) throw error;
-	return data as { id?: string; blocked?: boolean } | null;
-};
-
-export const createOrFindPatientForAppointment = async (
-	supabase: SupabaseClient,
-	input: {
-		businessId: string;
-		ownerId?: string | null;
-		patientId?: string | null;
-		name?: string | null;
+export type AppointmentPatientSelection =
+	| {
+			mode: 'existing';
+			patientId: string;
 		phone?: string | null;
-		communicationPhoneE164?: string | null;
-		email?: string | null;
+			updatePhone?: boolean;
 	}
-) => {
-	if (input.patientId) {
-		const { data: patient, error } = await supabase
-			.from('patients')
-			.select('id, blocked')
-			.eq('business_id', input.businessId)
-			.eq('id', input.patientId)
-			.maybeSingle();
-		if (error) throw error;
-		if (!patient?.id) throw new Error('PATIENT_NOT_FOUND');
-		if (patient.blocked) throw new Error('PATIENT_BLOCKED');
-		return input.patientId;
+	| {
+			mode: 'new';
+			name: string;
+			phone?: string | null;
+			email?: string | null;
 	}
+	| {
+			mode: 'public';
+			name: string;
+			phone: string;
+			email?: string | null;
+		};
 
-	const fullName = String(input.name ?? '').trim();
-	const phoneRaw = normalizePhoneRaw(input.phone);
-	const phoneE164 =
-		input.communicationPhoneE164 === undefined
-			? normalizePhoneE164(input.phone)
-			: input.communicationPhoneE164;
-	const email = String(input.email ?? '').trim();
-
-	if (!fullName) {
-		throw new Error('PATIENT_NAME_REQUIRED');
-	}
-
-	if (phoneE164) {
-		const existing = await findPatientByPhone(supabase, input.businessId, phoneE164);
-		if (existing?.blocked) throw new Error('PATIENT_BLOCKED');
-		if (existing?.id) return existing.id as string;
-	}
-
-	let ownerId = input.ownerId ?? null;
-	if (!ownerId) {
-		const { data: owner, error: ownerError } = await supabase
-			.from('business_users')
-			.select('user_id')
-			.eq('business_id', input.businessId)
-			.eq('role', 'owner')
-			.order('created_at', { ascending: true })
-			.limit(1)
-			.maybeSingle();
-		if (ownerError) throw ownerError;
-		ownerId = owner?.user_id ?? null;
-	}
-	if (!ownerId) throw new Error('PATIENT_OWNER_REQUIRED');
-
-	const newPatientId = crypto.randomUUID();
-	const { error } = await supabase
-		.from('patients')
-		.insert({
-			id: newPatientId,
-			business_id: input.businessId,
-			owner_id: ownerId,
-			full_name: fullName,
-			phone: phoneE164?.replace(/\D/g, '') ?? phoneRaw,
-			phone_raw: phoneRaw,
-			phone_e164: phoneE164,
-			email: email || null
-		});
-
-	if (error) {
-		// Dos reservas simultáneas con un teléfono nuevo pueden intentar crear la
-		// misma ficha. La restricción única decide cuál gana; la otra petición
-		// vuelve a leer esa ficha en lugar de fallar con un error técnico.
-		if (phoneE164 && isPatientPhoneIdentityConflict(error)) {
-			const concurrentPatient = await findPatientByPhone(supabase, input.businessId, phoneE164);
-			if (concurrentPatient?.blocked) throw new Error('PATIENT_BLOCKED');
-			if (concurrentPatient?.id) return concurrentPatient.id;
-		}
-		throw error;
-	}
-	return newPatientId;
+export type AtomicAppointmentInput = {
+	businessId: string;
+	ownerId?: string | null;
+	createdByUserId?: string | null;
+	patient: AppointmentPatientSelection;
+	serviceId: string;
+	professionalIds: string[];
+	startsAt: Date;
+	internalNote?: string | null;
+	source?: AppointmentSource;
+	ignoreBreak?: boolean;
+	phoneCommunicationStatus?: CommunicationPhoneStatus;
+	phoneWarningAcknowledged?: boolean;
+	idempotencyKey: string;
 };
+
+const APPOINTMENT_IDEMPOTENCY_KEY_PATTERN =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+type AtomicAppointmentResult = {
+	id: string;
+	patient_id?: string;
+	confirmation_token?: string;
+	starts_at?: string;
+	ends_at?: string;
+	service_name_snapshot?: string;
+	professional_name_snapshot?: string;
+	patient_created?: boolean;
+	idempotent_replay?: boolean;
+	patient_resolution_strategy?: string;
+};
+
+const runAtomicAppointmentRpc = async (
+	supabase: SupabaseClient,
+	input: AtomicAppointmentInput,
+	replayOnly: boolean
+): Promise<AtomicAppointmentResult | null> => {
+	const professionalIds = input.professionalIds.map((id) => id.trim()).filter(Boolean);
+	if (professionalIds.length === 0) throw new Error('PROFESSIONAL_NOT_FOUND');
+	if (new Set(professionalIds).size !== professionalIds.length) {
+		throw new Error('JOINT_APPOINTMENT_DUPLICATE_PROFESSIONAL');
+	}
+	if (!APPOINTMENT_IDEMPOTENCY_KEY_PATTERN.test(input.idempotencyKey)) {
+		throw new Error('APPOINTMENT_IDEMPOTENCY_KEY_INVALID');
+	}
+
+	const patientPhone = input.patient.phone ?? null;
+	const source = input.source ?? 'manual';
+	if ((input.patient.mode === 'public') !== (source === 'public_booking')) {
+		throw new Error('PATIENT_MODE_SOURCE_MISMATCH');
+	}
+	const phoneDecision = resolvePhoneDecision({
+		patientId: input.patient.mode === 'existing' ? input.patient.patientId : null,
+		patientPhone,
+		source,
+		phoneCommunicationStatus: input.phoneCommunicationStatus,
+		phoneWarningAcknowledged: input.phoneWarningAcknowledged
+	});
+	const patientPhoneE164 =
+		phoneDecision.status === 'valid'
+			? phoneDecision.normalized
+			: phoneDecision.status === 'unknown'
+				? normalizePhoneE164(patientPhone)
+				: null;
+
+	const rpc = supabase.rpc('create_appointment_with_patient_identity', {
+			p_business_id: input.businessId,
+			p_patient_mode: input.patient.mode,
+			p_patient_id: input.patient.mode === 'existing' ? input.patient.patientId : null,
+			p_patient_name: input.patient.mode === 'existing' ? null : input.patient.name.trim(),
+			p_patient_phone_raw: normalizePhoneRaw(patientPhone),
+			p_patient_phone_e164: patientPhoneE164,
+			p_patient_email:
+				input.patient.mode === 'existing' ? null : String(input.patient.email ?? '').trim() || null,
+			p_update_existing_phone:
+				input.patient.mode === 'existing' && input.patient.updatePhone === true,
+			p_owner_id: input.ownerId ?? null,
+			p_service_id: input.serviceId,
+			p_professional_ids: professionalIds,
+			p_starts_at: input.startsAt.toISOString(),
+			p_internal_note: input.internalNote?.trim() || null,
+			p_created_by_user_id: input.createdByUserId ?? null,
+			p_ignore_break: Boolean(input.ignoreBreak),
+			p_source: source,
+			p_phone_communication_status: phoneDecision.status,
+			p_phone_warning_acknowledged: phoneDecision.acknowledged,
+			p_idempotency_key: input.idempotencyKey.toLowerCase(),
+			p_replay_only: replayOnly
+		});
+	const { data, error } = replayOnly ? await rpc.maybeSingle() : await rpc.single();
+	if (error) throw error;
+	const appointment = data as AtomicAppointmentResult | null;
+	if (!appointment?.id) {
+		if (replayOnly) return null;
+		throw new Error('APPOINTMENT_NOT_CREATED');
+	}
+	return { ...appointment, id: appointment.id };
+};
+
+// Read-only idempotency probe used before mutable policy and availability
+// checks. A null result means the caller must continue with normal creation.
+export const findAppointmentCreationReplay = async (
+	supabase: SupabaseClient,
+	input: AtomicAppointmentInput
+) => runAtomicAppointmentRpc(supabase, input, true);
 
 export const createManualAppointment = async (
 	supabase: SupabaseClient,
@@ -327,10 +367,7 @@ export const createManualAppointment = async (
 		businessId: string;
 		ownerId?: string | null;
 		createdByUserId?: string | null;
-		patientId?: string | null;
-		patientName?: string | null;
-		patientPhone?: string | null;
-		patientEmail?: string | null;
+		patient: AppointmentPatientSelection;
 		serviceId: string;
 		professionalId: string;
 		startsAt: Date;
@@ -339,83 +376,15 @@ export const createManualAppointment = async (
 		ignoreBreak?: boolean;
 		phoneCommunicationStatus?: CommunicationPhoneStatus;
 		phoneWarningAcknowledged?: boolean;
+		idempotencyKey: string;
 	}
 ) => {
-	const phoneDecision = resolvePhoneDecision(input);
-	const patientId = await createOrFindPatientForAppointment(supabase, {
-		businessId: input.businessId,
-		ownerId: input.ownerId,
-		patientId: input.patientId,
-		name: input.patientName,
-		phone: input.patientPhone,
-		communicationPhoneE164:
-			phoneDecision.status === 'unknown' ? undefined : phoneDecision.normalized,
-		email: input.patientEmail
-	});
-
-	const { data: service, error: serviceError } = await supabase
-		.from('services')
-		.select('duration_minutes')
-		.eq('business_id', input.businessId)
-		.eq('id', input.serviceId)
-		.eq('is_active', true)
-		.maybeSingle();
-	if (serviceError) throw serviceError;
-	if (!service?.duration_minutes) throw new Error('SERVICE_NOT_FOUND');
-
-	const endsAt = addMinutes(input.startsAt, Number(service.duration_minutes));
-
-	const { data, error } = await supabase
-		.from('appointments')
-		.insert({
-			business_id: input.businessId,
-			patient_id: patientId,
-			service_id: input.serviceId,
-			professional_id: input.professionalId,
-			starts_at: input.startsAt.toISOString(),
-			ends_at: endsAt.toISOString(),
-			blocking_starts_at: input.startsAt.toISOString(),
-			blocking_ends_at: endsAt.toISOString(),
-			status: 'reserved',
-			source: input.source ?? 'manual',
-			reminder_due_at: null,
-			internal_note: input.internalNote || null,
-			ignore_break: Boolean(input.ignoreBreak),
-			created_by_user_id: input.createdByUserId ?? null,
-			updated_by_user_id: input.createdByUserId ?? null,
-			service_name_snapshot: 'Pendiente',
-			professional_name_snapshot: 'Pendiente',
-			duration_minutes_snapshot: Number(service.duration_minutes),
-			phone_communication_status_at_booking: phoneDecision.status,
-			phone_warning_acknowledged_at: phoneDecision.acknowledged
-				? new Date().toISOString()
-				: null
-		})
-		.select(
-			'id, confirmation_token, starts_at, ends_at, service_name_snapshot, professional_name_snapshot'
-		)
-		.single();
-
-	if (error) throw error;
-
-	await writeAuditLog(supabase, {
-		businessId: input.businessId,
-		userId: input.createdByUserId ?? null,
-		action: input.source === 'public_booking' ? 'appointment.public_created' : 'appointment.created',
-		entityType: 'appointment',
-		entityId: data?.id ?? null,
-		metadata: {
-			source: input.source ?? 'manual',
-			patient_id: patientId,
-			service_id: input.serviceId,
-			professional_id: input.professionalId,
-			starts_at: input.startsAt.toISOString(),
-			phone_communication_status_at_booking: phoneDecision.status,
-			phone_warning_acknowledged: phoneDecision.acknowledged
-		}
-	});
-
-	return data;
+	const created = await runAtomicAppointmentRpc(supabase, {
+		...input,
+		professionalIds: [input.professionalId]
+	}, false);
+	if (!created) throw new Error('APPOINTMENT_NOT_CREATED');
+	return created;
 };
 
 export const createJointAppointment = async (
@@ -424,10 +393,7 @@ export const createJointAppointment = async (
 		businessId: string;
 		ownerId?: string | null;
 		createdByUserId?: string | null;
-		patientId?: string | null;
-		patientName?: string | null;
-		patientPhone?: string | null;
-		patientEmail?: string | null;
+		patient: AppointmentPatientSelection;
 		serviceId: string;
 		professionalIds: string[];
 		startsAt: Date;
@@ -436,58 +402,18 @@ export const createJointAppointment = async (
 		source?: AppointmentSource;
 		phoneCommunicationStatus?: CommunicationPhoneStatus;
 		phoneWarningAcknowledged?: boolean;
+		idempotencyKey: string;
 	}
 ) => {
-	const phoneDecision = resolvePhoneDecision(input);
-	const professionalIds = [
-		...new Set(input.professionalIds.map((professionalId) => professionalId.trim()).filter(Boolean))
-	];
+	const professionalIds = input.professionalIds
+		.map((professionalId) => professionalId.trim())
+		.filter(Boolean);
 	if (professionalIds.length < 2) {
 		throw new Error('JOINT_APPOINTMENT_REQUIRES_TWO_PROFESSIONALS');
 	}
-
-	const patientId = await createOrFindPatientForAppointment(supabase, {
-		businessId: input.businessId,
-		ownerId: input.ownerId,
-		patientId: input.patientId,
-		name: input.patientName,
-		phone: input.patientPhone,
-		communicationPhoneE164:
-			phoneDecision.status === 'unknown' ? undefined : phoneDecision.normalized,
-		email: input.patientEmail
-	});
-
-	const { data, error } = await supabase
-		.rpc('create_joint_appointment_with_phone_decision', {
-			p_business_id: input.businessId,
-			p_patient_id: patientId,
-			p_service_id: input.serviceId,
-			p_professional_ids: professionalIds,
-			p_starts_at: input.startsAt.toISOString(),
-			p_internal_note: input.internalNote || null,
-			p_created_by_user_id: input.createdByUserId ?? null,
-			p_ignore_break: Boolean(input.ignoreBreak),
-			p_source: input.source ?? 'manual',
-			p_phone_communication_status: phoneDecision.status,
-			p_phone_warning_acknowledged: phoneDecision.acknowledged
-		})
-		.single();
-	if (error) throw error;
-	const appointment = data as
-		| {
-				id?: string;
-				professional_name_snapshot?: string;
-				service_name_snapshot?: string;
-				confirmation_token?: string;
-				starts_at?: string;
-				ends_at?: string;
-		  }
-		| null;
-	if (!appointment?.id) throw new Error('JOINT_APPOINTMENT_NOT_CREATED');
-	return {
-		...appointment,
-		id: appointment.id
-	};
+	const created = await runAtomicAppointmentRpc(supabase, { ...input, professionalIds }, false);
+	if (!created) throw new Error('APPOINTMENT_NOT_CREATED');
+	return created;
 };
 
 export const updateAppointmentStatus = async (

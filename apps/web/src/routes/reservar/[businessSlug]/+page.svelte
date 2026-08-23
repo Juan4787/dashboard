@@ -50,6 +50,7 @@
 			};
 			mapsLink: string | null;
 			turnstileSiteKey: string | null;
+			bookingRequestId: string;
 			demo: boolean;
 		};
 		form?: { message?: string; values?: Record<string, unknown> };
@@ -739,6 +740,11 @@
 						<input type="hidden" name="professional_ids" value={selection.professionalIds.join(',')} />
 					{/if}
 					<input type="hidden" name="slot_starts_at" value={selectedSlot.starts_at} />
+					<input
+						type="hidden"
+						name="idempotency_key"
+						value={String(values.idempotency_key ?? data.bookingRequestId)}
+					/>
 
 					<div class="mt-5 grid gap-4">
 						<label>

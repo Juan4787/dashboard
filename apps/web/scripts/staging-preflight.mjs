@@ -79,6 +79,9 @@ const REQUIRED_FILES = [
 	'supabase/migrations/20260711010000_limit_public_bookings_by_patient_name.sql',
 	'supabase/migrations/20260711013000_restore_audit_security_event.sql',
 	'supabase/migrations/20260802235900_push_delivery_observability.sql',
+	'supabase/migrations/20260823010000_decouple_patient_phone_identity.sql',
+	'supabase/migrations/20260823020000_safe_appointment_patient_reassignment.sql',
+	'supabase/migrations/20260823040000_protect_appointment_identity_fields.sql',
 	'apps/web/src/routes/internal/jobs/generate-reminder-dispatches/+server.ts',
 	'apps/web/src/routes/internal/jobs/process-message-dispatches/+server.ts',
 	'apps/web/src/routes/internal/jobs/send-push-reminders/+server.ts',
@@ -129,7 +132,9 @@ const REQUIRED_REMOTE_TABLES = [
 ];
 
 const REQUIRED_REMOTE_RPCS = [
-	'get_public_booking_active_future_count_by_name',
+	'create_appointment_with_patient_identity',
+	'get_public_booking_active_future_count_for_request',
+	'reassign_appointment_patient_safely',
 	'claim_due_push_reminders'
 ];
 

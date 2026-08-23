@@ -431,15 +431,24 @@ export type Database = {
           confirmed_at: string | null
           created_at: string
           created_by_user_id: string | null
+          creation_request_fingerprint: string | null
+          creation_request_key: string | null
           duration_minutes_snapshot: number
           ends_at: string
           id: string
           ignore_break: boolean
           internal_note: string | null
           no_show_at: string | null
-          patient_id: string
+		  patient_id: string
+		  patient_name_at_booking: string
+		  patient_phone_raw_at_booking: string | null
+		  patient_phone_e164_at_booking: string | null
+          patient_resolution_strategy: string
+          phone_communication_status_at_booking: string
+          phone_warning_acknowledged_at: string | null
           professional_id: string
           professional_name_snapshot: string
+          public_booking_contact_key: string | null
           reminder_due_at: string | null
           reschedule_requested_at: string | null
           service_id: string
@@ -479,15 +488,24 @@ export type Database = {
           confirmed_at?: string | null
           created_at?: string
           created_by_user_id?: string | null
+          creation_request_fingerprint?: string | null
+          creation_request_key?: string | null
           duration_minutes_snapshot: number
           ends_at: string
           id?: string
           ignore_break?: boolean
           internal_note?: string | null
           no_show_at?: string | null
-          patient_id: string
+		  patient_id: string
+		  patient_name_at_booking: string
+		  patient_phone_raw_at_booking?: string | null
+		  patient_phone_e164_at_booking?: string | null
+          patient_resolution_strategy?: string
+          phone_communication_status_at_booking?: string
+          phone_warning_acknowledged_at?: string | null
           professional_id: string
           professional_name_snapshot: string
+          public_booking_contact_key?: string | null
           reminder_due_at?: string | null
           reschedule_requested_at?: string | null
           service_id: string
@@ -527,15 +545,24 @@ export type Database = {
           confirmed_at?: string | null
           created_at?: string
           created_by_user_id?: string | null
+          creation_request_fingerprint?: string | null
+          creation_request_key?: string | null
           duration_minutes_snapshot?: number
           ends_at?: string
           id?: string
           ignore_break?: boolean
           internal_note?: string | null
           no_show_at?: string | null
-          patient_id?: string
+		  patient_id?: string
+		  patient_name_at_booking?: string
+		  patient_phone_raw_at_booking?: string | null
+		  patient_phone_e164_at_booking?: string | null
+          patient_resolution_strategy?: string
+          phone_communication_status_at_booking?: string
+          phone_warning_acknowledged_at?: string | null
           professional_id?: string
           professional_name_snapshot?: string
+          public_booking_contact_key?: string | null
           reminder_due_at?: string | null
           reschedule_requested_at?: string | null
           service_id?: string
@@ -1416,6 +1443,8 @@ export type Database = {
           sent_at: string | null
           skipped_at: string | null
           status: string
+          superseded_at: string | null
+          superseded_reason: string | null
           template_id: string | null
           template_variables: Json
           to_phone_e164: string
@@ -1451,6 +1480,8 @@ export type Database = {
           sent_at?: string | null
           skipped_at?: string | null
           status?: string
+          superseded_at?: string | null
+          superseded_reason?: string | null
           template_id?: string | null
           template_variables?: Json
           to_phone_e164: string
@@ -1486,6 +1517,8 @@ export type Database = {
           sent_at?: string | null
           skipped_at?: string | null
           status?: string
+          superseded_at?: string | null
+          superseded_reason?: string | null
           template_id?: string | null
           template_variables?: Json
           to_phone_e164?: string
@@ -2926,6 +2959,42 @@ export type Database = {
         Args: { target_business_id: string }
         Returns: number
       }
+      create_appointment_with_patient_identity: {
+        Args: {
+          p_business_id: string
+          p_created_by_user_id: string
+          p_idempotency_key: string
+          p_ignore_break: boolean
+          p_internal_note: string
+          p_owner_id: string
+          p_patient_email: string
+          p_patient_id: string
+          p_patient_mode: string
+          p_patient_name: string
+          p_patient_phone_e164: string
+          p_patient_phone_raw: string
+		  p_phone_communication_status: string
+		  p_phone_warning_acknowledged: boolean
+		  p_professional_ids: string[]
+		  p_replay_only?: boolean
+		  p_service_id: string
+          p_source: string
+          p_starts_at: string
+          p_update_existing_phone: boolean
+        }
+        Returns: {
+          confirmation_token: string
+          ends_at: string
+          id: string
+          idempotent_replay: boolean
+          patient_created: boolean
+          patient_id: string
+          patient_resolution_strategy: string
+          professional_name_snapshot: string
+          service_name_snapshot: string
+          starts_at: string
+        }[]
+      }
       create_clinical_entry_safely: {
         Args: {
           p_amount?: number
@@ -2948,6 +3017,29 @@ export type Database = {
           p_patient_id: string
           p_professional_ids: string[]
           p_service_id: string
+          p_starts_at: string
+        }
+        Returns: {
+          confirmation_token: string
+          ends_at: string
+          id: string
+          professional_name_snapshot: string
+          service_name_snapshot: string
+          starts_at: string
+        }[]
+      }
+      create_joint_appointment_with_phone_decision: {
+        Args: {
+          p_business_id: string
+          p_created_by_user_id: string
+          p_ignore_break: boolean
+          p_internal_note: string
+          p_patient_id: string
+          p_phone_communication_status: string
+          p_phone_warning_acknowledged: boolean
+          p_professional_ids: string[]
+          p_service_id: string
+          p_source: string
           p_starts_at: string
         }
         Returns: {
@@ -3046,8 +3138,14 @@ export type Database = {
         Args: { p_business_id: string; p_patient_id: string }
         Returns: string
       }
-      get_public_booking_active_future_count_by_name: {
-        Args: { p_business_id: string; p_now?: string; p_patient_name: string }
+      get_public_booking_active_future_count_for_request: {
+        Args: {
+          p_business_id: string
+          p_now?: string
+          p_patient_id: string
+          p_patient_name: string
+          p_phone_e164: string
+        }
         Returns: number
       }
       grant_business_access: {
@@ -3209,6 +3307,26 @@ export type Database = {
           target_status: string
         }
         Returns: undefined
+      }
+      reassign_appointment_patient_safely: {
+        Args: {
+          p_actor_user_id: string
+          p_appointment_id: string
+          p_business_id: string
+          p_new_patient_id: string
+          p_reason: string
+        }
+        Returns: {
+          appointment_id: string
+          cancelled_dispatches: number
+          invalidated_calendar_attempts: number
+          new_patient_id: string
+          old_patient_id: string
+          queued_calendar_deletions: number
+          revoked_push_subscriptions: number
+          superseded_dispatches: number
+          superseded_push_attempts: number
+        }[]
       }
       record_calendar_action: {
         Args: { p_action: string; p_appointment_id: string; p_provider: string }

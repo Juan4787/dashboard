@@ -22,7 +22,7 @@
 
 	type FormResult = {
 		duplicate?: boolean;
-		duplicateField?: 'dni' | 'phone';
+		duplicateField?: 'dni';
 		message?: string;
 		existingId?: string;
 		full_name?: string;

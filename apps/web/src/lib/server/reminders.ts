@@ -315,7 +315,8 @@ export const loadReminderCandidates = async (
 			.select('appointment_id, status')
 			.eq('business_id', business.id)
 			.eq('type', 'appointment_reminder_24h')
-			.in('appointment_id', ids),
+			.in('appointment_id', ids)
+			.is('superseded_at', null),
 		managedGoogleCalendarEnabled
 			? options.pushSubscriptionsSupabase
 					.from('appointment_google_calendar_events')

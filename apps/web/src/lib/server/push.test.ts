@@ -750,6 +750,28 @@ describe('sendDuePushReminders', () => {
 		expect(updates.some((u) => u.payload.push_24h_sent_at)).toBe(false);
 	});
 
+	it('no envía si una reasignación revocó la suscripción antes de crear la telemetría', async () => {
+		const { supabase } = createSupabaseMock(
+			{
+				push_delivery_attempts: [
+					{ data: null, error: null },
+					{ data: null, error: { message: 'PUSH_SUBSCRIPTION_REVOKED' } }
+				],
+				push_subscriptions: [
+					{ data: [] },
+					{ data: { failed_count: 0 }, error: null },
+					{ data: null, error: null }
+				],
+				appointments: [{ data: liveAppointment, error: null }]
+			},
+			{ data: [claimedRow], error: null }
+		);
+
+		const result = await sendDuePushReminders(supabase, { now });
+		expect(result).toMatchObject({ sent: 0, failed: 1 });
+		expect(webpush.sendNotification).not.toHaveBeenCalled();
+	});
+
 	it('turno cancelado tras el claim: no envía y libera el claim', async () => {
 		const { supabase, updates } = createSupabaseMock(
 			{
