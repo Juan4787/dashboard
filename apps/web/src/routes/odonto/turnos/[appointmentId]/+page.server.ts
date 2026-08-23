@@ -20,6 +20,7 @@ import {
 import { publicRescheduleUrl } from '$lib/server/messaging';
 import { shouldOfferCreatedAppointmentActivation } from '$lib/server/agenda-navigation';
 import { normalizeArgentineWhatsAppPhone } from '$lib/server/phone';
+import { classifyUserAgent } from '$lib/device';
 import { error as kitError, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -51,8 +52,9 @@ const canUseProfessionalStatusAction = (
 ): status is 'attended' | 'no_show' =>
 	role === 'professional' && (status === 'attended' || status === 'no_show');
 
-export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url }) => {
+export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url, request }) => {
 	if (!locals.auth) throw redirect(303, '/login');
+	const activationDevice = classifyUserAgent(request.headers.get('user-agent'));
 	if (env.DEMO_MODE === 'true') {
 		return {
 			context: demoBusinessContext(),
@@ -67,9 +69,11 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 			fromDate: '',
 			justRescheduled: false,
 			justCreated: false,
-				activationWhatsAppUrl: null,
-				activationPublicUrl: null,
-				phoneWarningAcknowledged: false,
+			activationWhatsAppUrl: null,
+			activationWhatsAppWebUrl: null,
+			activationDevice,
+			activationPublicUrl: null,
+			phoneWarningAcknowledged: false,
 			rescheduleWhatsAppUrl: null,
 			reschedulePublicUrl: null,
 			demo: true
@@ -207,6 +211,8 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 		justRescheduled: url.searchParams.get('rescheduled') === '1',
 		justCreated,
 		activationWhatsAppUrl: activation?.whatsappUrl ?? null,
+		activationWhatsAppWebUrl: activation?.whatsappWebUrl ?? null,
+		activationDevice,
 		activationPublicUrl: activation?.publicUrl ?? null,
 		phoneWarningAcknowledged,
 		rescheduleWhatsAppUrl,

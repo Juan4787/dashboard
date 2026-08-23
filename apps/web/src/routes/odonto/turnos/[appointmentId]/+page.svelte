@@ -1,7 +1,9 @@
 <script lang="ts">
 	import BackLink from '$lib/components/BackLink.svelte';
 	import { formatDateTime } from '$lib/utils/format';
+	import { refineDeviceClass, type DeviceClass } from '$lib/device';
 	import { enhance } from '$app/forms';
+	import { onMount } from 'svelte';
 	import type { SubmitFunction } from '@sveltejs/kit';
 
 	type Slot = { date: string; time: string; starts_at: string; professional_name: string };
@@ -27,15 +29,31 @@
 			fromDate: string;
 			justRescheduled: boolean;
 			justCreated: boolean;
-				activationWhatsAppUrl: string | null;
-				activationPublicUrl: string | null;
-				phoneWarningAcknowledged: boolean;
+			activationWhatsAppUrl: string | null;
+			activationWhatsAppWebUrl: string | null;
+			activationDevice: DeviceClass;
+			activationPublicUrl: string | null;
+			phoneWarningAcknowledged: boolean;
 			rescheduleWhatsAppUrl: string | null;
 			reschedulePublicUrl: string | null;
 			demo: boolean;
 		};
 		form?: { success?: boolean; message?: string };
 	}>();
+
+	let refinedActivationDevice = $state<DeviceClass | null>(null);
+	const activationDevice = $derived(refinedActivationDevice ?? data.activationDevice);
+	const activationWhatsAppHref = $derived(
+		activationDevice === 'android' || activationDevice === 'ios'
+			? data.activationWhatsAppUrl
+			: (data.activationWhatsAppWebUrl ?? data.activationWhatsAppUrl)
+	);
+
+	onMount(() => {
+		// iPadOS puede identificarse como macOS. Antes del clic refinamos el dato
+		// del servidor para mantener wa.me en tablets y WhatsApp Web sólo en PC.
+		refinedActivationDevice = refineDeviceClass(data.activationDevice, navigator);
+	});
 
 	const canOperate = $derived(data.context.canOperate && !data.demo);
 	const canProfessionalClose = $derived(data.context.role === 'professional' && !data.demo);
@@ -327,9 +345,9 @@
 				<h2 id="activation-title" class="mt-4 text-xl font-extrabold tracking-tight text-white sm:text-2xl">
 					Último paso
 				</h2>
-				{#if data.activationWhatsAppUrl}
+				{#if activationWhatsAppHref}
 					<a
-						href={data.activationWhatsAppUrl}
+						href={activationWhatsAppHref}
 						target="_blank"
 						rel="noreferrer"
 						class="group mt-5 flex min-h-[4.5rem] w-full items-center justify-center gap-3 rounded-2xl bg-emerald-500 px-5 py-4 text-center text-lg font-extrabold leading-tight text-white shadow-xl shadow-emerald-950/30 ring-1 ring-emerald-300/35 transition hover:bg-emerald-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-3 focus-visible:outline-emerald-300"

@@ -1,8 +1,8 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, render, screen } from '@testing-library/svelte';
+import { cleanup, render, screen, waitFor } from '@testing-library/svelte';
 import '@testing-library/jest-dom/vitest';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import Page from './+page.svelte';
 
 const appointment = {
@@ -48,6 +48,9 @@ const data = {
 	justCreated: true,
 	activationWhatsAppUrl:
 		'https://wa.me/5493511234567?text=Tu%20turno%20qued%C3%B3%20reservado.',
+	activationWhatsAppWebUrl:
+		'https://web.whatsapp.com/send?phone=5493511234567&text=Tu%20turno%20qued%C3%B3%20reservado.',
+	activationDevice: 'desktop' as const,
 	activationPublicUrl: 'https://cita-suite.test/turno/token-1?creado=1',
 	phoneWarningAcknowledged: false,
 	rescheduleWhatsAppUrl: null,
@@ -55,21 +58,64 @@ const data = {
 	demo: false
 };
 
-afterEach(cleanup);
+afterEach(() => {
+	cleanup();
+	vi.restoreAllMocks();
+	vi.unstubAllGlobals();
+});
 
 describe('último paso después de crear un turno desde Agenda', () => {
-	it('presenta WhatsApp como la acción dominante y explica qué recibe el paciente', () => {
+	it('en PC abre WhatsApp Web directo con destinatario y mensaje precargados', () => {
 		render(Page, { data });
 
 		expect(screen.getByRole('heading', { name: 'Último paso' })).toBeInTheDocument();
 		const action = screen.getByRole('link', { name: 'Enviar enlace de activación' });
-		expect(action).toHaveAttribute('href', data.activationWhatsAppUrl);
+		expect(action).toHaveAttribute('href', data.activationWhatsAppWebUrl);
 		expect(action).toHaveAttribute('target', '_blank');
 		expect(action.className).toContain('bg-emerald-500');
 		expect(action.className).toContain('min-h-[4.5rem]');
 		expect(
 			screen.getByText('El paciente recibirá un enlace para activar sus recordatorios.')
 		).toBeInTheDocument();
+	});
+
+	it.each(['android', 'ios'] as const)(
+		'en teléfono o tablet %s entrega el enlace mediante wa.me',
+		(activationDevice) => {
+			render(Page, { data: { ...data, activationDevice } });
+
+			expect(screen.getByRole('link', { name: 'Enviar enlace de activación' })).toHaveAttribute(
+				'href',
+				data.activationWhatsAppUrl
+			);
+		}
+	);
+
+	it('reconoce un iPad que se identifica como Mac y conserva wa.me', async () => {
+		vi.stubGlobal('navigator', {
+			maxTouchPoints: 5,
+			platform: 'MacIntel',
+			userAgent:
+				'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15) AppleWebKit/605.1.15 Version/17.0 Safari/605.1.15'
+		});
+		render(Page, { data: { ...data, activationDevice: 'desktop' } });
+
+		await waitFor(() =>
+			expect(screen.getByRole('link', { name: 'Enviar enlace de activación' })).toHaveAttribute(
+				'href',
+				data.activationWhatsAppUrl
+			)
+		);
+	});
+
+	it('si el número no es utilizable ofrece corregir la ficha en vez de generar un wa.me roto', () => {
+		render(Page, {
+			data: { ...data, activationWhatsAppUrl: null, activationWhatsAppWebUrl: null }
+		});
+
+		expect(screen.queryByRole('link', { name: 'Enviar enlace de activación' })).not.toBeInTheDocument();
+		expect(screen.getByText('Falta completar el teléfono del paciente')).toBeInTheDocument();
+		expect(screen.getByRole('heading', { name: 'Último paso' })).toBeInTheDocument();
 	});
 
 	it('no vuelve a advertir después de que el usuario confirmó sin un número utilizable', () => {
@@ -83,7 +129,9 @@ describe('último paso después de crear un turno desde Agenda', () => {
 	});
 
 	it('mantiene el fallback para un turno legado creado sin decisión previa', () => {
-		render(Page, { data: { ...data, activationWhatsAppUrl: null } });
+		render(Page, {
+			data: { ...data, activationWhatsAppUrl: null, activationWhatsAppWebUrl: null }
+		});
 
 		expect(screen.getByText('Falta completar el teléfono del paciente')).toBeInTheDocument();
 	});

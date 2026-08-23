@@ -107,17 +107,26 @@ export const POST: RequestHandler = async ({ params, request, fetch, setHeaders 
 					{ status: testResult.gone ? 410 : 502 }
 				);
 			}
-			const delivery = testResult.deliveryId
-				? await getPushDeliveryStatus(supabase, {
+			let delivery = null;
+			if (testResult.deliveryId) {
+				try {
+					delivery = await getPushDeliveryStatus(supabase, {
 						appointmentId: appointment.id,
 						deliveryId: testResult.deliveryId
-					})
-				: null;
+					});
+				} catch (statusError) {
+					// El proveedor ya aceptó la prueba y existe un identificador durable.
+					// Una lectura transitoria no debe convertir ese envío exitoso en un
+					// falso error de activación: el cliente puede volver a consultarlo.
+					console.error('Error consultando estado de prueba push recién enviada', statusError);
+				}
+			}
 			return json({
 				ok: true,
 				verified: false,
+				deliveryId: testResult.deliveryId,
 				delivery,
-				verificationAvailable: Boolean(delivery)
+				verificationAvailable: Boolean(testResult.deliveryId)
 			});
 		}
 

@@ -234,6 +234,30 @@ describe('activación de notificaciones en el teléfono', () => {
 		);
 	});
 
+	it('mantiene la pregunta si la prueba fue aceptada pero falta su primera lectura', async () => {
+		const environment = installNotificationEnvironment({
+			postResponses: [
+				{
+					status: 200,
+					body: {
+						ok: true,
+						verified: false,
+						deliveryId: 'delivery-accepted',
+						delivery: null,
+						verificationAvailable: true
+					}
+				}
+			]
+		});
+		render(Page, { data: { ...pageData, created: true } });
+
+		await fireEvent.click(screen.getByRole('button', { name: '🔔 Activar recordatorio' }));
+
+		expect(await screen.findByText('Notificación de prueba enviada')).toBeInTheDocument();
+		expect(await screen.findByText('¿Recibiste la notificación de prueba?')).toBeInTheDocument();
+		expect(environment.postRequests()).toBe(1);
+	});
+
 	it('si el permiso ya estaba concedido se activa solo, sin pedirlo otra vez', async () => {
 		const environment = installNotificationEnvironment({ initialPermission: 'granted' });
 		render(Page, { data: pageData });

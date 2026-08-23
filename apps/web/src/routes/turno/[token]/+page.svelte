@@ -94,6 +94,7 @@
 		code?: string;
 		message?: string;
 		verified?: boolean;
+		deliveryId?: string | null;
 		delivery?: PushDelivery | null;
 		verificationAvailable?: boolean;
 	};
@@ -604,6 +605,15 @@
 			activeTestPhase = phase;
 			const terminal = applyDelivery(result.body.delivery);
 			if (!terminal) void pollTestDelivery(result.body.delivery.deliveryId);
+		} else if (requestTest && result.body.deliveryId) {
+			// El envío ya fue aceptado, pero la primera lectura del estado puede
+			// fallar de forma transitoria. Conservamos su identificador y retomamos
+			// el sondeo en vez de mostrar un falso error de activación.
+			activeTestDeliveryId = result.body.deliveryId;
+			activeTestPhase = phase;
+			pushState = 'test_waiting';
+			pushMessage = '';
+			void pollTestDelivery(result.body.deliveryId);
 		} else if (requestTest) {
 			pushMessage = 'No pudimos comprobar la notificación de prueba.';
 			return false;

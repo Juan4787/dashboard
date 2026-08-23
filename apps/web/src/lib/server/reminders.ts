@@ -141,6 +141,9 @@ export const buildReminderWhatsAppMessage = (input: ReminderMessageInput): strin
 export const buildWaMeUrl = (phoneE164: string, message: string): string =>
 	`https://wa.me/${phoneE164.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
 
+export const buildWhatsAppWebUrl = (phoneE164: string, message: string): string =>
+	`https://web.whatsapp.com/send?phone=${phoneE164.replace(/\D/g, '')}&text=${encodeURIComponent(message)}`;
+
 export const buildArgentineWaMeUrl = (
 	phone: string | null | undefined,
 	message: string
@@ -154,6 +157,7 @@ export type AppointmentActivationDelivery = {
 	message: string;
 	phoneE164: string | null;
 	whatsappUrl: string | null;
+	whatsappWebUrl: string | null;
 };
 
 export const buildAppointmentActivationDelivery = (
@@ -171,7 +175,8 @@ export const buildAppointmentActivationDelivery = (
 		publicUrl,
 		message,
 		phoneE164,
-		whatsappUrl: phoneE164 ? buildWaMeUrl(phoneE164, message) : null
+		whatsappUrl: phoneE164 ? buildWaMeUrl(phoneE164, message) : null,
+		whatsappWebUrl: phoneE164 ? buildWhatsAppWebUrl(phoneE164, message) : null
 	};
 };
 

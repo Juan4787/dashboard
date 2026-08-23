@@ -138,6 +138,32 @@ describe('POST /turno/[token]/push', () => {
 		);
 	});
 
+	it('conserva la activación si falla la lectura posterior a una prueba ya aceptada', async () => {
+		const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		mocks.getPushDeliveryStatus.mockRejectedValueOnce(new Error('temporary read failure'));
+
+		const response = await callPost({
+			subscription,
+			test: true,
+			testRequestKey: 'push:session-1234567890:initial'
+		});
+
+		expect(response.status).toBe(200);
+		await expect(response.json()).resolves.toEqual({
+			ok: true,
+			verified: false,
+			deliveryId: 'delivery-id',
+			delivery: null,
+			verificationAvailable: true
+		});
+		expect(mocks.sendTestPushNotification).toHaveBeenCalledOnce();
+		expect(consoleError).toHaveBeenCalledWith(
+			'Error consultando estado de prueba push recién enviada',
+			expect.any(Error)
+		);
+		consoleError.mockRestore();
+	});
+
 	it('rechaza una clave inválida antes de guardar o enviar', async () => {
 		mocks.isValidPushTestRequestKey.mockReturnValueOnce(false);
 

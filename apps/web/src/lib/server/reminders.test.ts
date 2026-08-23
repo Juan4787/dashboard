@@ -200,6 +200,9 @@ describe('enlace de activación para un turno creado desde Agenda', () => {
 		expect(delivery.whatsappUrl).toBe(
 			`https://wa.me/5493511234567?text=${encodeURIComponent(delivery.message)}`
 		);
+		expect(delivery.whatsappWebUrl).toBe(
+			`https://web.whatsapp.com/send?phone=5493511234567&text=${encodeURIComponent(delivery.message)}`
+		);
 		expect(delivery.message).not.toMatch(/consulta|profesional|diagn|tratamiento/i);
 	});
 
@@ -209,6 +212,7 @@ describe('enlace de activación para un turno creado desde Agenda', () => {
 		expect(delivery.publicUrl).toMatch(/\/turno\/tok-activation\?creado=1$/);
 		expect(delivery.phoneE164).toBeNull();
 		expect(delivery.whatsappUrl).toBeNull();
+		expect(delivery.whatsappWebUrl).toBeNull();
 	});
 
 	it('normaliza también el destinatario de los recordatorios manuales', () => {
