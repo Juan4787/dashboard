@@ -32,10 +32,11 @@
 			activationWhatsAppUrl: string | null;
 			activationWhatsAppWebUrl: string | null;
 			activationDevice: DeviceClass;
-			activationPublicUrl: string | null;
-			phoneWarningAcknowledged: boolean;
-			rescheduleWhatsAppUrl: string | null;
-			reschedulePublicUrl: string | null;
+		activationPublicUrl: string | null;
+		phoneWarningAcknowledged: boolean;
+		rescheduleWhatsAppUrl: string | null;
+		rescheduleWhatsAppWebUrl: string | null;
+		reschedulePublicUrl: string | null;
 			demo: boolean;
 		};
 		form?: { success?: boolean; message?: string };
@@ -43,10 +44,15 @@
 
 	let refinedActivationDevice = $state<DeviceClass | null>(null);
 	const activationDevice = $derived(refinedActivationDevice ?? data.activationDevice);
-	const activationWhatsAppHref = $derived(
+	const whatsappHrefFor = (whatsAppUrl: string | null, whatsAppWebUrl: string | null) =>
 		activationDevice === 'android' || activationDevice === 'ios'
-			? data.activationWhatsAppUrl
-			: (data.activationWhatsAppWebUrl ?? data.activationWhatsAppUrl)
+			? whatsAppUrl
+			: (whatsAppWebUrl ?? whatsAppUrl);
+	const activationWhatsAppHref = $derived(
+		whatsappHrefFor(data.activationWhatsAppUrl, data.activationWhatsAppWebUrl)
+	);
+	const rescheduleWhatsAppHref = $derived(
+		whatsappHrefFor(data.rescheduleWhatsAppUrl, data.rescheduleWhatsAppWebUrl)
 	);
 
 	onMount(() => {
@@ -390,10 +396,10 @@
 				Los avisos del horario anterior se invalidaron y los recordatorios se recalcularon para
 				la nueva fecha. Avisale al paciente del cambio.
 			</p>
-			{#if data.rescheduleWhatsAppUrl}
+			{#if rescheduleWhatsAppHref}
 				<div class="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
 					<a
-						href={data.rescheduleWhatsAppUrl}
+						href={rescheduleWhatsAppHref}
 						target="_blank"
 						rel="noreferrer"
 						class="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-5 py-3 text-sm font-bold text-white transition hover:bg-emerald-400"

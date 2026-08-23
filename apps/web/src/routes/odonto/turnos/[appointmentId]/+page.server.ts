@@ -15,7 +15,8 @@ import { resetPushRemindersForReschedule, sendReschedulePushNotice } from '$lib/
 import {
 	buildAppointmentActivationDelivery,
 	buildArgentineWaMeUrl,
-	buildRescheduleWhatsAppMessage
+	buildRescheduleWhatsAppMessage,
+	buildWhatsAppWebUrl
 } from '$lib/server/reminders';
 import { publicRescheduleUrl } from '$lib/server/messaging';
 import { shouldOfferCreatedAppointmentActivation } from '$lib/server/agenda-navigation';
@@ -73,9 +74,10 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 			activationWhatsAppWebUrl: null,
 			activationDevice,
 			activationPublicUrl: null,
-			phoneWarningAcknowledged: false,
-			rescheduleWhatsAppUrl: null,
-			reschedulePublicUrl: null,
+		phoneWarningAcknowledged: false,
+		rescheduleWhatsAppUrl: null,
+		rescheduleWhatsAppWebUrl: null,
+		reschedulePublicUrl: null,
 			demo: true
 		};
 	}
@@ -153,19 +155,22 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 	const token = (data as any).confirmation_token ? String((data as any).confirmation_token) : null;
 	const canNotifyReschedule = ['reserved', 'confirmed', 'reschedule_requested'].includes(data.status);
 	let rescheduleWhatsAppUrl: string | null = null;
+	let rescheduleWhatsAppWebUrl: string | null = null;
 	let reschedulePublicUrl: string | null = null;
 	if (canNotifyReschedule && token) {
 		reschedulePublicUrl = publicRescheduleUrl(token);
+		const message = buildRescheduleWhatsAppMessage({
+			patientName: String(patient?.full_name ?? 'Paciente'),
+			startsAt: String(data.starts_at),
+			timezone: business.business.timezone,
+			businessName: business.business.name,
+			rescheduleUrl: reschedulePublicUrl
+		});
 		rescheduleWhatsAppUrl = buildArgentineWaMeUrl(
 			phone,
-			buildRescheduleWhatsAppMessage({
-				patientName: String(patient?.full_name ?? 'Paciente'),
-				startsAt: String(data.starts_at),
-				timezone: business.business.timezone,
-				businessName: business.business.name,
-				rescheduleUrl: reschedulePublicUrl
-			})
+			message
 		);
+		rescheduleWhatsAppWebUrl = phone ? buildWhatsAppWebUrl(phone, message) : null;
 	}
 
 	const phoneWarningAcknowledged =
@@ -216,6 +221,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 		activationPublicUrl: activation?.publicUrl ?? null,
 		phoneWarningAcknowledged,
 		rescheduleWhatsAppUrl,
+		rescheduleWhatsAppWebUrl,
 		reschedulePublicUrl,
 		demo: false
 	};

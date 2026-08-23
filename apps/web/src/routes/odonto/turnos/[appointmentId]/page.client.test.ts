@@ -54,6 +54,7 @@ const data = {
 	activationPublicUrl: 'https://cita-suite.test/turno/token-1?creado=1',
 	phoneWarningAcknowledged: false,
 	rescheduleWhatsAppUrl: null,
+	rescheduleWhatsAppWebUrl: null,
 	reschedulePublicUrl: null,
 	demo: false
 };
@@ -107,6 +108,49 @@ describe('último paso después de crear un turno desde Agenda', () => {
 			)
 		);
 	});
+
+	it('en PC abre WhatsApp Web directo al avisar una reprogramación', () => {
+		const rescheduleWhatsAppUrl = 'https://wa.me/5493511234567?text=Tu%20turno%20cambi%C3%B3.';
+		const rescheduleWhatsAppWebUrl =
+			'https://web.whatsapp.com/send?phone=5493511234567&text=Tu%20turno%20cambi%C3%B3.';
+		render(Page, {
+			data: {
+				...data,
+				justCreated: false,
+				justRescheduled: true,
+				rescheduleWhatsAppUrl,
+				rescheduleWhatsAppWebUrl
+			}
+		});
+
+		expect(screen.getByRole('link', { name: 'Enviar actualización por WhatsApp' })).toHaveAttribute(
+			'href',
+			rescheduleWhatsAppWebUrl
+		);
+	});
+
+	it.each(['android', 'ios'] as const)(
+		'en teléfono o tablet %s usa wa.me al avisar una reprogramación',
+		(activationDevice) => {
+			const rescheduleWhatsAppUrl = 'https://wa.me/5493511234567?text=Tu%20turno%20cambi%C3%B3.';
+			render(Page, {
+				data: {
+					...data,
+					activationDevice,
+					justCreated: false,
+					justRescheduled: true,
+					rescheduleWhatsAppUrl,
+					rescheduleWhatsAppWebUrl:
+						'https://web.whatsapp.com/send?phone=5493511234567&text=Tu%20turno%20cambi%C3%B3.'
+				}
+			});
+
+			expect(screen.getByRole('link', { name: 'Enviar actualización por WhatsApp' })).toHaveAttribute(
+				'href',
+				rescheduleWhatsAppUrl
+			);
+		}
+	);
 
 	it('si el número no es utilizable ofrece corregir la ficha en vez de generar un wa.me roto', () => {
 		render(Page, {
