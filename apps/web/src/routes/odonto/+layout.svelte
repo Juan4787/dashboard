@@ -645,22 +645,22 @@
 							<span aria-hidden="true">×</span>
 						</button>
 					</div>
+					{#if isMasterPage}
+						<div class="mx-4 mt-4 rounded-xl border border-violet-300/25 bg-violet-500/10 px-4 py-3 text-sm">
+							<p class="text-xs font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-200/70">Modo actual</p>
+							<p class="mt-1 font-semibold text-neutral-900 dark:text-white">Administración Cita Suite</p>
+						</div>
+					{:else if activeBusiness?.business}
+						<div class="mx-4 mt-4 rounded-xl border border-neutral-200 px-4 py-3 text-sm dark:border-white/10">
+							<p class="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
+								Consultorio activo
+							</p>
+							<p class="mt-1 font-semibold text-neutral-900 dark:text-white">
+								{activeBusiness.business.name}
+							</p>
+						</div>
+					{/if}
 					<nav class="mt-4 min-h-0 flex-1 overflow-y-auto px-4 pb-3">
-						{#if isMasterPage}
-							<div class="rounded-xl border border-violet-300/25 bg-violet-500/10 px-4 py-3 text-sm">
-								<p class="text-xs font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-200/70">Modo actual</p>
-								<p class="mt-1 font-semibold text-neutral-900 dark:text-white">Administración Cita Suite</p>
-							</div>
-						{:else if activeBusiness?.business}
-							<div class="rounded-xl border border-neutral-200 px-4 py-3 text-sm dark:border-white/10">
-								<p class="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
-									Consultorio activo
-								</p>
-								<p class="mt-1 font-semibold text-neutral-900 dark:text-white">
-									{activeBusiness.business.name}
-								</p>
-							</div>
-						{/if}
 						<div class="flex flex-col gap-2">
 							{#if primaryMobileNav.length > 0}
 								<p class="mt-2 px-1 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">

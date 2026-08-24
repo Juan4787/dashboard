@@ -95,10 +95,10 @@
 			<svg viewBox="0 0 20 20" fill="none" aria-hidden="true" class="h-4 w-4 shrink-0">
 				<path d="M12.5 5 7.5 10l5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
 			</svg>
-			<span>Semana anterior</span>
+			<span class="truncate">Semana anterior</span>
 		</a>
 		<a href={shiftedWeekHref(7)} class="ux-btn-secondary min-w-0 flex-1 px-3 text-sm sm:min-w-44 sm:flex-none sm:px-5">
-			<span>Semana siguiente</span>
+			<span class="truncate">Semana siguiente</span>
 			<svg viewBox="0 0 20 20" fill="none" aria-hidden="true" class="h-4 w-4 shrink-0">
 				<path d="m7.5 5 5 5-5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
 			</svg>

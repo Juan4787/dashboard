@@ -503,7 +503,7 @@
 {#snippet appointmentRow(appointment: Appointment, showDate: boolean)}
 	<a
 		href={`/odonto/turnos/${appointment.id}?from_date=${showDate ? localDateOf(appointment.starts_at) : data.date}`}
-		class="ux-choice flex items-center gap-3 p-3 sm:gap-4 sm:p-4"
+		class="ux-choice flex min-w-0 items-center gap-3 p-3 sm:gap-4 sm:p-4"
 	>
 		<div class={`shrink-0 text-center ${showDate ? 'w-16 sm:w-24' : 'w-14 sm:w-20'}`}>
 			{#if showDate}
@@ -721,7 +721,7 @@
 		</div>
 	{/if}
 
-	<div class="ux-card p-6 sm:p-6">
+	<div class="ux-card p-4 sm:p-6">
 		<div class="flex items-center justify-between gap-3">
 			<div class="min-w-0">
 				<h2 class="ux-section-title">

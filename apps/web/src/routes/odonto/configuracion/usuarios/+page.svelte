@@ -681,10 +681,10 @@
 						<p class="mt-1 text-sm text-white/55">Estos servicios estarán disponibles para reservar con este profesional.</p>
 						<div class="mt-5 grid gap-3">
 							{#each defaultServiceRows as service}
-								<div class="ux-choice ux-choice-active flex items-center gap-4 p-4">
+								<div class="ux-choice ux-choice-active flex min-w-0 items-center gap-4 p-4">
 									<input type="checkbox" checked disabled class="accent-[#7c3aed]" />
 									<span class="min-w-0 flex-1">
-										<span class="block font-black text-white">{service.name}</span>
+										<span class="block truncate font-black text-white">{service.name}</span>
 										<span class="mt-1 block text-sm text-white/55">
 											{durationLabel(service.duration_minutes)}{service.price_label ? ` · ${service.price_label}` : ''}
 										</span>
@@ -692,7 +692,7 @@
 								</div>
 							{/each}
 							{#each customServices as service}
-								<label class={`ux-choice flex items-center gap-4 p-4 ${selectedServiceIds.includes(service.id) ? 'ux-choice-active' : ''}`}>
+								<label class={`ux-choice flex min-w-0 items-center gap-4 p-4 ${selectedServiceIds.includes(service.id) ? 'ux-choice-active' : ''}`}>
 									<input
 										type="checkbox"
 										checked={selectedServiceIds.includes(service.id)}
@@ -701,7 +701,7 @@
 										onchange={() => toggleService(service.id)}
 									/>
 									<span class="min-w-0 flex-1">
-										<span class="block font-black text-white">{service.name}</span>
+										<span class="block truncate font-black text-white">{service.name}</span>
 										<span class="mt-1 block text-sm text-white/55">
 											{durationLabel(service.duration_minutes)}{service.price_label ? ` · ${service.price_label}` : ''}
 										</span>
@@ -709,10 +709,10 @@
 								</label>
 							{/each}
 							{#each newServices as service, index}
-								<div class="ux-choice ux-choice-active flex items-center gap-4 p-4">
+								<div class="ux-choice ux-choice-active flex min-w-0 items-center gap-4 p-4">
 									<input type="checkbox" checked disabled class="accent-[#7c3aed]" />
 									<span class="min-w-0 flex-1">
-										<span class="block font-black text-white">{service.name}</span>
+										<span class="block truncate font-black text-white">{service.name}</span>
 										<span class="mt-1 block text-sm text-white/55">
 											{durationLabel(service.duration_minutes)}{service.price_label ? ` · ${service.price_label}` : ''}
 										</span>
@@ -1021,7 +1021,7 @@
 			{#if attendingActive.length > 0}
 				<div class="mt-4 grid gap-2">
 					{#each attendingActive as m (m.id)}
-						<div class="ux-choice flex items-center justify-between gap-3 p-4">
+						<div class="ux-choice flex min-w-0 items-center justify-between gap-3 p-4">
 							<span class="min-w-0 truncate font-bold text-white">{m.email}</span>
 							<a href={`/odonto/profesionales/${m.professional_id}`} class="ux-btn-secondary shrink-0 text-sm">
 								Ver profesional
@@ -1097,13 +1097,13 @@
 		</div>
 	{/if}
 
-	<div class="grid gap-4">
+		<div class="grid gap-4">
 		{#each categories as category}
 			{@const categoryMembers = membersByRole(category.role)}
-			<article class="ux-card p-0">
+			<article class="ux-card overflow-hidden p-0">
 				<button
 					type="button"
-					class="flex w-full items-center justify-between gap-4 px-6 py-5 text-left"
+					class="flex w-full items-center justify-between gap-4 px-4 py-4 text-left sm:px-6 sm:py-5"
 					onclick={() => toggleCategory(category.id)}
 					aria-expanded={Boolean(openCategories[category.id])}
 				>
@@ -1123,18 +1123,18 @@
 				</button>
 
 				{#if openCategories[category.id]}
-					<div class="grid gap-3 px-6 pb-6">
+					<div class="grid gap-3 px-4 pb-4 sm:px-6 sm:pb-6">
 						{#each categoryMembers as member}
-							<div class="ux-soft-card p-4">
-								<div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-									<div class="min-w-0">
-										<div class="flex flex-wrap items-center gap-2">
-											<h3 class="truncate text-lg font-bold text-white">{member.email}</h3>
+							<div class="ux-soft-card min-w-0 p-4">
+								<div class="flex flex-col gap-4 min-w-0 lg:flex-row lg:items-center lg:justify-between">
+									<div class="min-w-0 flex-1">
+										<div class="flex min-w-0 flex-wrap items-center gap-2">
+											<h3 class="min-w-0 max-w-full break-all text-lg font-bold text-white sm:truncate">{member.email}</h3>
 											{#if member.user_id === data.currentUserId}
-												<span class="ux-badge">Vos</span>
+												<span class="ux-badge shrink-0">Vos</span>
 											{/if}
 											{#if member.status === 'pending'}
-												<span class="ux-badge ux-badge-warning">Pendiente</span>
+												<span class="ux-badge ux-badge-warning shrink-0">Pendiente</span>
 											{/if}
 										</div>
 										<p class="mt-2 text-sm text-white/55">
@@ -1151,9 +1151,9 @@
 										{/if}
 									</div>
 
-									<div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+									<div class="flex flex-col gap-2 min-w-0 sm:flex-row sm:items-center sm:flex-wrap">
 										{#if member.professional_id && (member.role === 'professional' || member.role === 'owner' || member.role === 'admin')}
-											<a href={`/odonto/profesionales/${member.professional_id}`} class="ux-btn-primary text-center">
+											<a href={`/odonto/profesionales/${member.professional_id}`} class="ux-btn-primary text-center w-full sm:w-auto shrink-0">
 												Ver profesional
 											</a>
 										{/if}
@@ -1161,7 +1161,7 @@
 											<form
 												method="POST"
 												action="?/update_role"
-												class="flex gap-2"
+												class="flex w-full flex-col gap-2 min-w-0 sm:w-auto sm:flex-row sm:items-center"
 												use:enhance={() => {
 													teamActionBusy = `update-${member.id}`;
 													return async ({ update }) => {
@@ -1172,12 +1172,12 @@
 												}}
 											>
 												<input type="hidden" name="membership_id" value={member.id} />
-												<select name="role" disabled={!canManage} class="ux-select min-w-44">
+												<select name="role" disabled={!canManage} class="ux-select w-full min-w-0 sm:w-auto sm:min-w-44">
 													{#each memberRoleOptions(member) as option}
 														<option value={option} selected={member.role === option}>{roleLabels[option]}</option>
 													{/each}
 												</select>
-												<button type="submit" disabled={!canManage || teamActionBusy === `update-${member.id}`} class="ux-btn-secondary">
+												<button type="submit" disabled={!canManage || teamActionBusy === `update-${member.id}`} class="ux-btn-secondary w-full sm:w-auto shrink-0">
 													{teamActionBusy === `update-${member.id}` ? 'Guardando...' : 'Guardar'}
 												</button>
 											</form>

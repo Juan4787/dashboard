@@ -624,7 +624,7 @@
 		{:else}
 			<div class="mt-6 grid gap-3">
 				{#each items as item (item.id)}
-					<article class="flex flex-col gap-4 rounded-xl border border-white/10 bg-white/[0.04] p-4 sm:flex-row sm:items-center">
+					<article class="flex min-w-0 flex-col gap-4 rounded-xl border border-white/10 bg-white/[0.04] p-4 sm:flex-row sm:items-center">
 						<div class="h-20 w-full shrink-0 overflow-hidden rounded-xl border border-white/10 bg-[#0b1626] sm:w-24">
 							{#if item.thumbnail_url && !thumbnailFailures[item.id]}
 								<img
