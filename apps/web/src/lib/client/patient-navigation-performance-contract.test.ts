@@ -35,4 +35,17 @@ describe('patient navigation performance contracts', () => {
 		expect(patientDetailSource).toContain('mergeSavedClinicalEntry(savedEntry)');
 		expect(patientDetailSource).toContain('await update({ invalidateAll: false })');
 	});
+
+	it('warms radiograph metadata and thumbnails on the client without adding originals to profile load', () => {
+		const patientDetailSource = readSource('../../routes/odonto/pacientes/[id]/+page.svelte');
+		const patientDetailServerSource = readSource(
+			'../../routes/odonto/pacientes/[id]/+page.server.ts'
+		);
+		const radiographCacheSource = readSource('./patient-radiographs-cache.ts');
+
+		expect(patientDetailSource).toContain('schedulePatientRadiographPreload({');
+		expect(patientDetailServerSource).toContain('radiographs: []');
+		expect(radiographCacheSource).toContain('THUMBNAIL_PRELOAD_CONCURRENCY = 2');
+		expect(radiographCacheSource).not.toContain('access-grants');
+	});
 });

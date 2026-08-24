@@ -8,23 +8,17 @@
 		uploadClinicalFileWithProgress,
 		validateClinicalImageFile
 	} from '$lib/client/clinical-files';
+	import {
+		getCachedPatientRadiographOriginal,
+		getOrLoadPatientRadiographOriginal,
+		invalidatePatientRadiographListing,
+		loadPatientRadiographPage,
+		removePatientRadiographFromCache,
+		type PatientRadiographItem
+	} from '$lib/client/patient-radiographs-cache';
 	import { formatDate } from '$lib/utils/format';
 
-	type RadiographItem = {
-		id: string;
-		patient_id?: string;
-		status?: 'uploading' | 'ready' | 'failed' | 'trashed' | string;
-		original_filename?: string | null;
-		mime_type?: string | null;
-		bytes?: number | null;
-		taken_at?: string | null;
-		note?: string | null;
-		created_at?: string | null;
-		ready_at?: string | null;
-		integrity_status?: string | null;
-		thumbnail_url?: string | null;
-		is_mine?: boolean;
-	};
+	type RadiographItem = PatientRadiographItem;
 
 	class ClinicalRequestError extends Error {
 		status: number;
@@ -40,6 +34,7 @@
 
 	let {
 		patientId,
+		cacheScope,
 		initialItems = [],
 		canView = false,
 		canUpload = false,
@@ -49,6 +44,7 @@
 		demo = false
 	} = $props<{
 		patientId: string;
+		cacheScope: string;
 		initialItems?: RadiographItem[];
 		canView?: boolean;
 		canUpload?: boolean;
@@ -94,7 +90,7 @@
 
 	const endpoint = $derived(`/odonto/pacientes/${patientId}/radiografias`);
 	$effect(() => {
-		const scope = `${patientId}:${demo ? 'demo' : 'live'}:${canView ? 'view' : 'hidden'}`;
+		const scope = `${cacheScope}:${patientId}:${demo ? 'demo' : 'live'}:${canView ? 'view' : 'hidden'}`;
 		const demoItems = initialItems;
 		if (scope === activeScope) {
 			if (demo && demoItems !== activeDemoItems) {
@@ -180,20 +176,22 @@
 
 	const loadItems = async ({
 		append = false,
-		generation = patientGeneration
-	}: { append?: boolean; generation?: number } = {}) => {
+		generation = patientGeneration,
+		refresh = false
+	}: { append?: boolean; generation?: number; refresh?: boolean } = {}) => {
 		if (demo || !canView || (append ? loadingMore : loading)) return;
 		if (append && !nextCursor) return;
 		const requestEndpoint = `/odonto/pacientes/${patientId}/radiografias`;
+		const requestedCursor = append ? nextCursor : null;
+		if (refresh) invalidatePatientRadiographListing(cacheScope);
 		append ? (loadingMore = true) : (loading = true);
 		loadError = '';
 		try {
-			const query = append && nextCursor ? `?cursor=${encodeURIComponent(nextCursor)}` : '';
-			const payload = await fetchJson<{
-				items?: RadiographItem[];
-				has_more?: boolean;
-				next_cursor?: string | null;
-			}>(`${requestEndpoint}${query}`);
+			const payload = await loadPatientRadiographPage({
+				cacheScope,
+				endpoint: requestEndpoint,
+				cursor: requestedCursor
+			});
 			if (generation !== patientGeneration) return;
 			const incoming = Array.isArray(payload.items) ? payload.items : [];
 			if (append) {
@@ -202,8 +200,8 @@
 			} else {
 				items = incoming;
 			}
-			hasMore = Boolean(payload.has_more);
-			nextCursor = payload.next_cursor ?? null;
+			hasMore = payload.has_more;
+			nextCursor = payload.next_cursor;
 			loaded = true;
 		} catch (error) {
 			if (generation !== patientGeneration) return;
@@ -310,7 +308,7 @@
 					pendingCompletionId = '';
 					pendingThumbnailUploaded = false;
 					resetPicker();
-					await loadItems({ generation });
+					await loadItems({ generation, refresh: true });
 				}
 			} catch (error) {
 				if (generation === patientGeneration) {
@@ -359,7 +357,7 @@
 					selectedFile = null;
 					clientRequestId = '';
 					resetPicker();
-					await loadItems({ generation });
+					await loadItems({ generation, refresh: true });
 				}
 				return;
 			}
@@ -411,7 +409,7 @@
 				takenAt = '';
 				note = '';
 				resetPicker();
-				await loadItems({ generation });
+				await loadItems({ generation, refresh: true });
 			}
 		} catch (error) {
 			if (radiographId && originalUploadStarted && !completionStarted) {
@@ -435,11 +433,32 @@
 		viewerError = '';
 		viewerBusy = true;
 		try {
-			const payload = await fetchJson<{ url: string }>(`${requestEndpoint}/${item.id}/access-grants`, {
-				method: 'POST'
+			const url = await getOrLoadPatientRadiographOriginal({
+				cacheScope,
+				radiographId: item.id,
+				load: async (signal) => {
+					const payload = await fetchJson<{ url: string }>(
+						`${requestEndpoint}/${item.id}/access-grants`,
+						{ method: 'POST', signal }
+					);
+					const response = await fetch(payload.url, {
+						signal,
+						credentials: 'omit',
+						cache: 'no-store',
+						referrerPolicy: 'no-referrer'
+					});
+					if (!response.ok) {
+						throw new Error('No pudimos descargar la imagen. Probá de nuevo.');
+					}
+					const blob = await response.blob();
+					if (blob.type && !blob.type.startsWith('image/')) {
+						throw new Error('El archivo recibido no es una imagen válida. Probá de nuevo.');
+					}
+					return blob;
+				}
 			});
 			if (generation === patientGeneration && sequence === viewerRequestSequence) {
-				viewerUrl = payload.url;
+				viewerUrl = url;
 			}
 		} catch (error) {
 			if (generation === patientGeneration && sequence === viewerRequestSequence) {
@@ -463,7 +482,15 @@
 		}
 		viewerTrigger = trigger;
 		viewerItem = item;
-		void requestViewerAccess(item);
+		const cachedUrl = getCachedPatientRadiographOriginal(cacheScope, item.id);
+		if (cachedUrl) {
+			viewerRequestSequence += 1;
+			viewerUrl = cachedUrl;
+			viewerBusy = false;
+			viewerError = '';
+		} else {
+			void requestViewerAccess(item);
+		}
 	};
 
 	const retryViewer = () => {
@@ -491,6 +518,7 @@
 		try {
 			await fetchJson(`${requestEndpoint}/${target.id}/trash`, { method: 'POST' });
 			if (generation === patientGeneration) {
+				removePatientRadiographFromCache(cacheScope, target.id);
 				items = items.filter((item) => item.id !== target.id);
 				message = 'Imagen movida a la papelera. Podés restaurarla cuando la necesites.';
 				trashTarget = null;

@@ -2,12 +2,17 @@
 	import { enhance } from '$app/forms';
 	import { page } from '$app/stores';
 	import { invalidate } from '$app/navigation';
+	import { onDestroy } from 'svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import FollowUpComposer from '$lib/components/seguimientos/FollowUpComposer.svelte';
 	import DateTimePartsInput from '$lib/components/DateTimePartsInput.svelte';
 	import DatePartsInput from '$lib/components/DatePartsInput.svelte';
 	import RadiographsPanel from '$lib/components/patients/RadiographsPanel.svelte';
 	import { markPatientRevisionUnverified } from '$lib/client/patient-list-cache';
+	import {
+		activatePatientRadiographCache,
+		schedulePatientRadiographPreload
+	} from '$lib/client/patient-radiographs-cache';
 	import { CLINICAL_ENTRY_TYPES } from '$lib/constants';
 	import { formatDate, formatDateTime } from '$lib/utils/format';
 	import { formatMoneyInteger, moneyDigits } from '$lib/utils/money-input';
@@ -94,6 +99,29 @@
 		}
 	);
 	const isProfessional = $derived(data.role === 'professional');
+	const radiographCacheScope = $derived(
+		`${data.currentUserId ?? 'session'}:${data.patient.id}:${data.demo ? 'demo' : 'live'}:${permissions.canViewRadiographs ? 'view' : 'hidden'}`
+	);
+	let scheduledRadiographCacheScope = '';
+	let cancelRadiographPreload: (() => void) | null = null;
+	$effect(() => {
+		const cacheScope = radiographCacheScope;
+		const patientId = String(data.patient.id);
+		const canPreload = !data.demo && permissions.canViewRadiographs;
+		if (cacheScope === scheduledRadiographCacheScope) return;
+
+		cancelRadiographPreload?.();
+		cancelRadiographPreload = null;
+		scheduledRadiographCacheScope = cacheScope;
+		activatePatientRadiographCache(cacheScope);
+		if (canPreload) {
+			cancelRadiographPreload = schedulePatientRadiographPreload({
+				cacheScope,
+				endpoint: `/odonto/pacientes/${patientId}/radiografias`
+			});
+		}
+	});
+	onDestroy(() => cancelRadiographPreload?.());
 	$effect(() => {
 		if (
 			requestedTab === 'historial' ||
@@ -966,6 +994,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 	{:else if tab === 'radiografias'}
 		<RadiographsPanel
 			patientId={data.patient.id}
+			cacheScope={radiographCacheScope}
 			initialItems={data.demo ? data.radiographs : []}
 			canView={permissions.canViewRadiographs}
 			canUpload={permissions.canUploadRadiographs}
