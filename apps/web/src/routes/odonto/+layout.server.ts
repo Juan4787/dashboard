@@ -35,10 +35,14 @@ export const load: LayoutServerLoad = async ({
 	cookies,
 	getClientAddress,
 	url,
-	depends
+	depends,
+	untrack
 }) => {
 	depends('app:odonto-shell');
 	depends('app:follow-ups');
+	// El shell tiene invalidaciones propias para negocio y seguimientos. Leer la
+	// ruta sin registrarla evita repetir todo el layout al cambiar sólo de sección.
+	const pathname = untrack(() => url.pathname);
 	const auth = locals.auth;
 	if (!auth) {
 		throw redirect(303, '/login');
@@ -66,17 +70,20 @@ export const load: LayoutServerLoad = async ({
 			let adminClientPromise: ReturnType<typeof createSupabaseAdminClient> | null = null;
 			const getAdminClient = () =>
 				(adminClientPromise ??= createSupabaseAdminClient('odonto', fetch));
-			const isMasterDashboard = isMaster && url.pathname.startsWith('/odonto/maestro');
+			const isMasterDashboard = isMaster && pathname.startsWith('/odonto/maestro');
 
 			// El panel maestro no consume un consultorio activo. Evitar resolverlo acá
 			// elimina trabajo duplicado antes de cargar su propia vista global.
 			if (!isMasterDashboard) {
 				const useShortMembershipCache = [
+					'/odonto/agenda',
+					'/odonto/mis-turnos',
 					'/odonto/pacientes',
 					'/odonto/recordatorios',
 					'/odonto/seguimientos',
-					'/odonto/mensajes'
-				].some((prefix) => url.pathname.startsWith(prefix));
+					'/odonto/mensajes',
+					'/odonto/turnos'
+				].some((prefix) => pathname.startsWith(prefix));
 				activeBusiness = await resolveActiveBusiness({
 					supabase,
 					accessToken: auth.access_token,

@@ -82,7 +82,12 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 		};
 	}
 
-	const { supabase, business } = await getOdontoContext({ locals, fetch, cookies });
+	const { supabase, business } = await getOdontoContext({
+		locals,
+		fetch,
+		cookies,
+		membershipCache: 'short'
+	});
 	if (business.role === 'professional') throw redirect(303, '/odonto/mis-turnos');
 	const dateParam = String(url.searchParams.get('date') ?? '').trim();
 	const anyDay = dateParam === 'any';

@@ -31,7 +31,12 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 		};
 	}
 
-	const { supabase, business, userId } = await getOdontoContext({ locals, fetch, cookies });
+	const { supabase, business, userId } = await getOdontoContext({
+		locals,
+		fetch,
+		cookies,
+		membershipCache: 'short'
+	});
 	const { data: links } = await supabase
 		.from('professional_users')
 		.select('professional_id, professionals!inner(id, name, specialty, is_active)')

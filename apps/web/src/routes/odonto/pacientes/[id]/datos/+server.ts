@@ -9,7 +9,12 @@ export const GET: RequestHandler = async ({ params, locals, fetch, cookies, setH
 	setHeaders({ 'cache-control': 'private, no-store' });
 	if (env.DEMO_MODE === 'true') return json({ change_events: [] });
 
-	const { supabase, business } = await getOdontoContext({ locals, fetch, cookies });
+	const { supabase, business } = await getOdontoContext({
+		locals,
+		fetch,
+		cookies,
+		membershipCache: 'short'
+	});
 	// El cliente de usuario conserva RLS como primera barrera antes de usar el
 	// cliente administrativo para leer el registro de auditoría.
 	const { data: visiblePatient, error: patientError } = await supabase

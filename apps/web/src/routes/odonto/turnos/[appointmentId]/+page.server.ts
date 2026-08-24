@@ -82,7 +82,12 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 		};
 	}
 
-	const { supabase, business } = await getOdontoContext({ locals, fetch, cookies });
+	const { supabase, business } = await getOdontoContext({
+		locals,
+		fetch,
+		cookies,
+		membershipCache: 'short'
+	});
 	const { data, error } = await supabase
 		.from('appointments')
 		.select(

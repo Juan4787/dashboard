@@ -330,7 +330,8 @@ const handleCreatePatient = async ({
 		const context = await resolveActiveBusiness({
 			supabase,
 			accessToken: locals.auth.access_token,
-			cookies
+			cookies,
+			membershipCache: 'short'
 		});
 		if (!context) {
 			return fail(500, { message: 'No se pudo resolver el negocio activo.', full_name, dni, phone });
