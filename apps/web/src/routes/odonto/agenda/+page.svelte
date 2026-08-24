@@ -732,7 +732,12 @@
 					{liveActive ? 'Resultado del buscador' : hasActiveSearch ? 'Resultado de búsqueda' : 'Turnos del día'}
 				</h2>
 				{#if liveActive}
-					<p class="mt-1 truncate text-sm font-semibold text-white/50">“{liveQuery}”</p>
+					<div class="mt-1 flex h-5 min-w-0 items-center gap-2 text-sm font-semibold text-white/50">
+						<p class="min-w-0 truncate">“{liveQuery}”</p>
+						<span class="w-20 shrink-0 text-white/45" aria-live="polite">
+							{liveLoading ? 'Buscando…' : ''}
+						</span>
+					</div>
 				{:else if searchSummary}
 					<p class="mt-1 truncate text-sm font-semibold text-white/50">{searchSummary}</p>
 				{/if}
@@ -740,9 +745,6 @@
 			<span class="ux-badge shrink-0">{resultLabel}</span>
 		</div>
 
-		{#if liveActive && liveLoading}
-			<p class="mt-4 text-sm font-semibold text-white/45" aria-live="polite">Buscando…</p>
-		{/if}
 		{#if liveActive && liveError}
 			<p class="ux-alert mt-4">{liveError}</p>
 		{/if}
