@@ -69,11 +69,13 @@ const currentValue = (value: unknown) => {
 const resolveBusinessActionContext = async ({
 	locals,
 	fetch,
-	cookies
+	cookies,
+	membershipCache = 'fresh'
 }: {
 	locals: App.Locals;
 	fetch: typeof globalThis.fetch;
 	cookies: import('@sveltejs/kit').Cookies;
+	membershipCache?: 'fresh' | 'short';
 }) => {
 	const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
 	const ownerId = await getAuthUserId(supabase, locals.auth?.access_token);
@@ -81,7 +83,7 @@ const resolveBusinessActionContext = async ({
 		supabase,
 		accessToken: locals.auth?.access_token,
 		cookies,
-		membershipCache: 'short'
+		membershipCache
 	});
 
 	if (!ownerId || !context) {
@@ -597,7 +599,14 @@ export const actions: Actions = {
 			return { savedEntry };
 		}
 
-		const session = await resolveBusinessActionContext({ locals, fetch, cookies });
+		// La RPC vuelve a validar rol, acceso comercial y vínculo con el paciente en
+		// PostgreSQL. Sólo esta escritura crítica puede reutilizar la lectura breve.
+		const session = await resolveBusinessActionContext({
+			locals,
+			fetch,
+			cookies,
+			membershipCache: 'short'
+		});
 		if (!session) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });
 		}

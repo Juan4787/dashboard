@@ -40,9 +40,6 @@ export const load: LayoutServerLoad = async ({
 }) => {
 	depends('app:odonto-shell');
 	depends('app:follow-ups');
-	// El shell tiene invalidaciones propias para negocio y seguimientos. Leer la
-	// ruta sin registrarla evita repetir todo el layout al cambiar sólo de sección.
-	const pathname = untrack(() => url.pathname);
 	const auth = locals.auth;
 	if (!auth) {
 		throw redirect(303, '/login');
@@ -53,6 +50,10 @@ export const load: LayoutServerLoad = async ({
 	}
 	const email = getEmailFromAccessToken(auth.access_token);
 	const isMaster = isMasterEmail(email);
+	// El shell cotidiano tiene invalidaciones propias para negocio y seguimientos.
+	// Las cuentas maestras sí rastrean la ruta porque al entrar/salir de su panel
+	// cambia si corresponde resolver un consultorio activo.
+	const pathname = isMaster ? url.pathname : untrack(() => url.pathname);
 	let activeBusiness = null;
 	let businessError: string | null = null;
 	let pendingManualSetup = false;

@@ -5,14 +5,16 @@ const readSource = (relativePath: string) =>
 	readFileSync(new URL(relativePath, import.meta.url), 'utf8');
 
 describe('daily navigation performance contracts', () => {
-	it('keeps the odontological shell across section-only URL changes', () => {
+	it('keeps the daily shell across routine URLs while preserving the master boundary', () => {
 		const layout = readSource('../../routes/odonto/+layout.server.ts');
 		const pathnameReads = layout.match(/url\.pathname/g) ?? [];
 
 		expect(layout).toContain("depends('app:odonto-shell')");
 		expect(layout).toContain("depends('app:follow-ups')");
-		expect(layout).toContain('const pathname = untrack(() => url.pathname)');
-		expect(pathnameReads).toHaveLength(1);
+		expect(layout).toContain(
+			'const pathname = isMaster ? url.pathname : untrack(() => url.pathname)'
+		);
+		expect(pathnameReads).toHaveLength(2);
 	});
 
 	it('reuses a recently verified membership for high-frequency read routes', () => {
