@@ -187,9 +187,9 @@
 	};
 
 	// Buscador en vivo: independiente de los filtros, busca próximos turnos
-	// activos por nombre o teléfono a medida que se escribe. Al abrirlo se carga
-	// una instantánea compacta que no se muestra hasta que haya una consulta; la
-	// respuesta remota sigue siendo siempre la fuente definitiva.
+	// activos por nombre o teléfono a medida que se escribe. Al entrar en Agenda
+	// se carga en segundo plano una instantánea compacta que no se muestra hasta
+	// que haya una consulta; la respuesta remota sigue siendo la fuente definitiva.
 	const MAX_VISIBLE_LIVE_RESULTS = 60;
 	let searchInput = $state('');
 	let liveResults = $state<AppointmentGroups | null>(null);
@@ -343,7 +343,7 @@
 		liveLoading = false;
 		liveError = '';
 		clearLiveSnapshot();
-		if (showSearch && to?.url.pathname === '/odonto/agenda') void loadLiveSnapshot();
+		if (to?.url.pathname === '/odonto/agenda') void loadLiveSnapshot();
 	});
 
 	const upcomingOnly = (list: Appointment[]): AppointmentGroups => ({
@@ -495,7 +495,6 @@
 		// Recepción usa esta pantalla para operar: empezamos el snapshot en
 		// background apenas abre /agenda, antes de que elija el primer servicio.
 		if (canOperate || showCreate || showSearch) void loadReferences();
-		if (showSearch) void loadLiveSnapshot();
 		initialized = true;
 	});
 
@@ -574,7 +573,13 @@
 			{#if !isToday}
 				<a href={buildAgendaHref(todayStr)} class="ux-btn-secondary">Hoy</a>
 			{/if}
-			<button type="button" class="ux-btn-secondary" onclick={toggleSearch}>
+			<button
+				type="button"
+				class="ux-btn-secondary"
+				onclick={toggleSearch}
+				onpointerenter={() => void loadLiveSnapshot()}
+				onfocus={() => void loadLiveSnapshot()}
+			>
 				{showSearch ? 'Ocultar búsqueda' : 'Buscar'}
 			</button>
 			<a href={weekHref} class="ux-btn-secondary">Ver turnos de la semana</a>
