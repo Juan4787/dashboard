@@ -1,12 +1,20 @@
+import cloudflareAdapter from '@sveltejs/adapter-cloudflare';
 import netlifyAdapter from '@sveltejs/adapter-netlify';
 import vercelAdapter from '@sveltejs/adapter-vercel';
 import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
+import { fileURLToPath } from 'node:url';
 
 /** @type {import('@sveltejs/kit').Config} */
 const isProd = process.env.NODE_ENV === 'production';
-// Vercel expone esta variable durante sus builds. En cualquier otro entorno
-// conservamos el adaptador de Netlify para que los dos hosts sigan siendo válidos.
-const adapter = process.env.VERCEL === '1' ? vercelAdapter() : netlifyAdapter();
+const cloudflareConfig = fileURLToPath(new URL('../../wrangler.jsonc', import.meta.url));
+// Cada proveedor construye su propio artefacto. El flag de Workers solo lo define
+// el script de Cloudflare; Vercel y Netlify conservan exactamente sus selecciones.
+const adapter =
+	process.env.CLOUDFLARE_WORKERS === '1'
+		? cloudflareAdapter({ config: cloudflareConfig })
+		: process.env.VERCEL === '1'
+			? vercelAdapter()
+			: netlifyAdapter();
 
 const config = {
 	// Consult https://svelte.dev/docs/kit/integrations

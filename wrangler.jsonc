@@ -1,0 +1,11 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "cita-suite",
+	"main": "apps/web/.svelte-kit/cloudflare/_worker.js",
+	"assets": {
+		"binding": "ASSETS",
+		"directory": "apps/web/.svelte-kit/cloudflare"
+	},
+	"compatibility_date": "2026-05-03",
+	"compatibility_flags": ["nodejs_compat"]
+}

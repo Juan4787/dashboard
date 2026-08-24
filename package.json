@@ -6,7 +6,11 @@
 	"packageManager": "pnpm@10.13.1",
 	"scripts": {
 		"dev": "pnpm --filter web dev",
+		"dev:cloudflare": "pnpm --filter web dev:cloudflare",
 		"build": "pnpm --filter web build",
+		"build:cloudflare": "pnpm --filter web build:cloudflare",
+		"deploy:cloudflare": "pnpm --filter web deploy:cloudflare",
+		"deploy:cloudflare:preview": "pnpm --filter web deploy:cloudflare:preview",
 		"check": "pnpm --filter @turnos-saas/shared check && pnpm --filter web check",
 		"test": "pnpm --filter web test",
 		"test:e2e": "pnpm --filter web test:e2e",
