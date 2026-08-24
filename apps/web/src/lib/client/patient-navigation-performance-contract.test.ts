@@ -24,4 +24,11 @@ describe('patient navigation performance contracts', () => {
 
 		expect(shortReads).toHaveLength(2);
 	});
+
+	it('adds a saved clinical entry without invalidating and reloading the whole patient page', () => {
+		const patientDetailSource = readSource('../../routes/odonto/pacientes/[id]/+page.svelte');
+
+		expect(patientDetailSource).toContain('mergeSavedClinicalEntry(savedEntry)');
+		expect(patientDetailSource).toContain('await update({ invalidateAll: false })');
+	});
 });

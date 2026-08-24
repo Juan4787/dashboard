@@ -41,7 +41,12 @@
 			};
 			demo?: boolean;
 		};
-		form: { message?: string; duplicate?: boolean; existingId?: string };
+		form: {
+			message?: string;
+			duplicate?: boolean;
+			existingId?: string;
+			savedEntry?: Record<string, unknown>;
+		};
 	}>();
 
 	let showEntryModal = $state(false);
@@ -308,6 +313,22 @@ const formatAmountInput = (value: string) => {
 	return { digits, formatted };
 };
 
+const mergeSavedClinicalEntry = (savedEntry: Record<string, unknown>) => {
+	if (typeof savedEntry.id !== 'string' || typeof savedEntry.created_at !== 'string') return;
+
+	const merged = [savedEntry, ...entries.filter((entry) => entry.id !== savedEntry.id)].sort(
+		(left, right) => {
+			const timeDifference =
+				Date.parse(String(right.created_at)) - Date.parse(String(left.created_at));
+			if (Number.isFinite(timeDifference) && timeDifference !== 0) return timeDifference;
+			return String(right.id).localeCompare(String(left.id));
+		}
+	);
+	const exceededFirstPage = merged.length > 30;
+	entries = merged.slice(0, 30);
+	hasMoreEntries = hasMoreEntries || exceededFirstPage;
+};
+
 const enhanceEntry: SubmitFunction = ({ cancel, formElement }) => {
 	showEntryErrors = true;
 	const hidden = formElement.querySelector<HTMLInputElement>('input[name="created_at"]');
@@ -318,10 +339,21 @@ const enhanceEntry: SubmitFunction = ({ cancel, formElement }) => {
 	savingEntry = true;
 	return async ({ update, result }) => {
 		try {
-			if (result.type === 'success' || result.type === 'redirect') {
+			if (result.type === 'success') {
+				const savedEntry = result.data?.savedEntry;
+				if (savedEntry && typeof savedEntry === 'object' && !Array.isArray(savedEntry)) {
+					mergeSavedClinicalEntry(savedEntry);
+				}
 				markPatientRevisionUnverified();
+				showEntryModal = false;
+				showEntryErrors = false;
+				await update({ invalidateAll: false });
+				return;
 			}
-			if (result.type === 'redirect') showEntryModal = false;
+			if (result.type === 'redirect') {
+				markPatientRevisionUnverified();
+				showEntryModal = false;
+			}
 			await update();
 		} finally {
 			savingEntry = false;

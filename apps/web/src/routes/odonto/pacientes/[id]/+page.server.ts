@@ -286,6 +286,51 @@ const clinicalEntryRpcError = (error: { message?: string; code?: string } | null
 	return { status: 500, message: 'No se pudo guardar la entrada.' };
 };
 
+type SavedClinicalEntry = {
+	id: string;
+	patient_id: string;
+	created_at: string;
+	entry_type: string;
+	description: string;
+	teeth: string | null;
+	internal_note: string | null;
+	created_by_user_id: string | null;
+	locked_after: string | null;
+	amount: number | null;
+};
+
+const normalizeSavedClinicalEntry = (value: unknown): SavedClinicalEntry | null => {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+	const row = value as Record<string, unknown>;
+	if (
+		typeof row.id !== 'string' ||
+		typeof row.patient_id !== 'string' ||
+		typeof row.created_at !== 'string' ||
+		typeof row.entry_type !== 'string' ||
+		typeof row.description !== 'string'
+	) {
+		return null;
+	}
+
+	const parsedAmount = row.amount == null ? null : Number(row.amount);
+	return {
+		id: row.id,
+		patient_id: row.patient_id,
+		created_at: row.created_at,
+		entry_type: row.entry_type,
+		description: row.description,
+		teeth: typeof row.teeth === 'string' ? row.teeth : null,
+		internal_note: typeof row.internal_note === 'string' ? row.internal_note : null,
+		created_by_user_id:
+			typeof row.created_by_user_id === 'string' ? row.created_by_user_id : null,
+		locked_after: typeof row.locked_after === 'string' ? row.locked_after : null,
+		amount: parsedAmount != null && Number.isFinite(parsedAmount) ? parsedAmount : null
+	};
+};
+
+const isEnhancedActionRequest = (request: Request) =>
+	request.headers.get('x-sveltekit-action') === 'true';
+
 export const load: PageServerLoad = async ({ params, locals, fetch, cookies, depends }) => {
 	depends(`app:patient:${params.id}`);
 	if (!locals.auth) {
@@ -473,6 +518,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, dep
 export const actions: Actions = {
 	add_entry: async ({ request, params, locals, fetch, cookies }) => {
 		if (!locals.auth) throw redirect(303, '/login');
+		const enhancedRequest = isEnhancedActionRequest(request);
 		const form = await request.formData();
 		const entry_type = String(form.get('entry_type') ?? '').trim() as ClinicalEntry['entry_type'];
 		const description = String(form.get('description') ?? '').trim();
@@ -518,12 +564,12 @@ export const actions: Actions = {
 		const amount = parseMoneyInteger(amountRaw);
 
 		if (env.DEMO_MODE === 'true') {
-			let saved = false;
+			let savedEntry: SavedClinicalEntry | null = null;
 			updateDemoDb((db) => {
 				const patient = db.patients.find((p) => p.id === params.id);
 				if (!patient) return;
 
-				db.clinicalEntries.unshift({
+				const entry = {
 					id: newId('e'),
 					patient_id: params.id,
 					entry_type,
@@ -532,17 +578,23 @@ export const actions: Actions = {
 					teeth: teeth || null,
 					amount,
 					internal_note: internal_note || null
-				});
+				};
+				db.clinicalEntries.unshift(entry);
 				patient.last_entry_at = getLatestEntryDate(params.id, db.clinicalEntries);
 				patient.updated_at = new Date().toISOString();
-				saved = true;
+				savedEntry = {
+					...entry,
+					created_by_user_id: null,
+					locked_after: null
+				};
 			});
 
-			if (!saved) {
+			if (!savedEntry) {
 				return fail(404, { message: 'Paciente no encontrado' });
 			}
 
-			throw redirect(303, `/odonto/pacientes/${params.id}`);
+			if (!enhancedRequest) throw redirect(303, `/odonto/pacientes/${params.id}`);
+			return { savedEntry };
 		}
 
 		const session = await resolveBusinessActionContext({ locals, fetch, cookies });
@@ -562,16 +614,19 @@ export const actions: Actions = {
 		}
 		const { supabase, context } = session;
 
-		const { error } = await supabase.rpc('create_clinical_entry_safely', {
-			p_business_id: context.business.id,
-			p_patient_id: params.id,
-			p_entry_type: entry_type,
-			p_description: description,
-			p_created_at: created_at,
-			p_teeth: teeth || null,
-			p_internal_note: internal_note || null,
-			p_amount: amount
-		});
+		const { data: savedEntryRaw, error } = await supabase.rpc(
+			'create_clinical_entry_with_result_safely',
+			{
+				p_business_id: context.business.id,
+				p_patient_id: params.id,
+				p_entry_type: entry_type,
+				p_description: description,
+				p_created_at: created_at,
+				p_teeth: teeth || null,
+				p_internal_note: internal_note || null,
+				p_amount: amount
+			}
+		);
 
 		if (error) {
 			console.error('Error guardando entrada', error);
@@ -579,7 +634,14 @@ export const actions: Actions = {
 			return fail(mapped.status, { message: mapped.message });
 		}
 
-		throw redirect(303, `/odonto/pacientes/${params.id}`);
+		const savedEntry = normalizeSavedClinicalEntry(savedEntryRaw);
+		if (!savedEntry) {
+			console.error('La entrada se guardó sin una respuesta clínica utilizable');
+			throw redirect(303, `/odonto/pacientes/${params.id}`);
+		}
+
+		if (!enhancedRequest) throw redirect(303, `/odonto/pacientes/${params.id}`);
+		return { savedEntry };
 	},
 	update_entry: async ({ request, params, locals, fetch, cookies }) => {
 		if (!locals.auth) throw redirect(303, '/login');

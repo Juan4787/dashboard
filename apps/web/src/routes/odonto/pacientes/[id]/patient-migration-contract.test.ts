@@ -26,7 +26,25 @@ describe('patient migration contracts', () => {
 
 		expect(detailSource).not.toMatch(/from\('clinical_entries'\)[\s\S]{0,120}\.insert\(/);
 		expect(detailSource).not.toMatch(/from\('clinical_entries'\)[\s\S]{0,120}\.update\(/);
-		expect(detailSource).toContain("rpc('create_clinical_entry_safely'");
+		expect(detailSource).toContain("'create_clinical_entry_with_result_safely'");
 		expect(detailSource).toContain("rpc('update_clinical_entry_safely'");
+	});
+
+	it('persists a clinical entry with one patient metadata update and returns the saved row', () => {
+		const migration = readPeer(
+			'../../../../../../../supabase/migrations/20260823120000_fast_clinical_entry_result.sql'
+		);
+
+		expect(migration).toContain(
+			'drop trigger if exists clinical_entries_sync_patient on public.clinical_entries'
+		);
+		expect(migration).toContain(
+			'function public.create_clinical_entry_with_result_safely('
+		);
+		expect(migration).toContain("'locked_after', v_entry.locked_after");
+		expect(migration).toContain('last_entry_at = greatest(');
+		expect(migration).toContain(
+			'v_result := public.create_clinical_entry_with_result_safely('
+		);
 	});
 });

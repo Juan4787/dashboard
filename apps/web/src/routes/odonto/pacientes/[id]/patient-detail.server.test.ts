@@ -52,10 +52,11 @@ const allCapabilities = {
 	canViewSubscription: true
 };
 
-const makeEvent = (formData = new FormData()) =>
+const makeEvent = (formData = new FormData(), options: { enhanced?: boolean } = {}) =>
 	({
 		request: new Request('http://localhost/odonto/pacientes/test', {
 			method: 'POST',
+			headers: options.enhanced ? { 'x-sveltekit-action': 'true' } : undefined,
 			body: formData
 		}),
 		params: { id: patientId },
@@ -166,7 +167,19 @@ describe('patient detail migrated actions', () => {
 	});
 
 	it('creates clinical entries through the safe RPC instead of direct table writes', async () => {
-		mocks.supabase.rpc.mockResolvedValue({ data: 'entry-1', error: null });
+		const savedEntry = {
+			id: 'entry-1',
+			patient_id: patientId,
+			created_at: '2026-06-05T12:30:00.000Z',
+			entry_type: 'Consulta',
+			description: 'Control clinico',
+			teeth: '11',
+			internal_note: 'nota interna',
+			created_by_user_id: ownerId,
+			locked_after: '2026-06-06T12:30:00.000Z',
+			amount: 12000
+		};
+		mocks.supabase.rpc.mockResolvedValue({ data: savedEntry, error: null });
 
 		const form = new FormData();
 		form.set('entry_type', 'Consulta');
@@ -176,9 +189,9 @@ describe('patient detail migrated actions', () => {
 		form.set('amount', '12.000');
 		form.set('internal_note', 'nota interna');
 
-		await expectRedirectToPatient(actions.add_entry!(makeEvent(form)));
+		const result = await actions.add_entry!(makeEvent(form, { enhanced: true }));
 
-		expect(mocks.supabase.rpc).toHaveBeenCalledWith('create_clinical_entry_safely', {
+		expect(mocks.supabase.rpc).toHaveBeenCalledWith('create_clinical_entry_with_result_safely', {
 			p_business_id: businessId,
 			p_patient_id: patientId,
 			p_entry_type: 'Consulta',
@@ -188,7 +201,33 @@ describe('patient detail migrated actions', () => {
 			p_internal_note: 'nota interna',
 			p_amount: 12000
 		});
+		expect(result).toEqual({ savedEntry });
 		expect(mocks.supabase.from).not.toHaveBeenCalled();
+	});
+
+	it('keeps the redirect fallback for clinical entry submissions without JavaScript', async () => {
+		mocks.supabase.rpc.mockResolvedValue({
+			data: {
+				id: 'entry-1',
+				patient_id: patientId,
+				created_at: '2026-06-05T12:30:00.000Z',
+				entry_type: 'Consulta',
+				description: 'Control clinico',
+				teeth: null,
+				internal_note: null,
+				created_by_user_id: ownerId,
+				locked_after: '2026-06-06T12:30:00.000Z',
+				amount: null
+			},
+			error: null
+		});
+
+		const form = new FormData();
+		form.set('entry_type', 'Consulta');
+		form.set('description', 'Control clinico');
+		form.set('created_at', '2026-06-05T09:30');
+
+		await expectRedirectToPatient(actions.add_entry!(makeEvent(form)));
 	});
 
 	it('returns a specific patient error when the clinical entry RPC rejects the patient scope', async () => {
@@ -203,7 +242,10 @@ describe('patient detail migrated actions', () => {
 
 		expect(result.status).toBe(404);
 		expect(result.data.message).toBe('Paciente no encontrado en este consultorio.');
-		expect(mocks.supabase.rpc).toHaveBeenCalledWith('create_clinical_entry_safely', expect.any(Object));
+		expect(mocks.supabase.rpc).toHaveBeenCalledWith(
+			'create_clinical_entry_with_result_safely',
+			expect.any(Object)
+		);
 		expect(mocks.supabase.from).not.toHaveBeenCalled();
 	});
 
