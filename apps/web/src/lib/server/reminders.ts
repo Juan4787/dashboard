@@ -2,7 +2,7 @@
 // para refuerzo manual por WhatsApp desde recepción.
 //
 // Criterios de inclusión (ver plan, Fase 8):
-// - status reserved/confirmed, dentro de la ventana Hoy/Mañana (TZ del negocio), futuro.
+// - turno activo, dentro de la ventana Hoy/Mañana (TZ del negocio), futuro.
 // - sin acción de calendario (not_offered/offered) → "Sin recordatorio confirmado",
 //   o reprogramado después de una acción → "Calendario pendiente de actualizar".
 // - sin notificación confirmada por la persona y sin dispatch automático activo
@@ -20,6 +20,7 @@
 // externa.
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { ACTIVE_APPOINTMENT_STATUSES } from '$lib/utils/appointment-visibility';
 import { formatInTimeZone } from '$lib/utils/format';
 import { publicAppointmentUrl } from './messaging';
 import { resolveMapsUrl } from './location';
@@ -244,15 +245,44 @@ export const classifyReminderCoverage = (input: CoverageInput): ReminderCoverage
 };
 
 export type ConfirmedPushSubscriptionInput = {
-	revoked_at: string | null;
-	verified_at: string | null;
+	detached_at: string | null;
+	push_devices:
+		| {
+				last_test_confirmed_at: string | null;
+				last_notification_clicked_at: string | null;
+				verification_required_at: string | null;
+				provider_gone_at: string | null;
+		  }
+		| Array<{
+				last_test_confirmed_at: string | null;
+				last_notification_clicked_at: string | null;
+				verification_required_at: string | null;
+				provider_gone_at: string | null;
+		  }>
+		| null;
 };
 
-// `verified_at` conserva una semántica estricta: hubo una confirmación positiva
-// ("Sí, la recibí" o clic real en el aviso). No se usa para decidir si el sistema
-// debe ENVIAR recordatorios.
-export const hasConfirmedPushSubscription = (row: ConfirmedPushSubscriptionInput): boolean =>
-	row.revoked_at == null && Boolean(row.verified_at);
+// La cobertura manual es una señal del dispositivo, no del turno. Un cambio
+// técnico conserva el bloqueo absoluto de 48 h tras "Sí, la recibí"; fuera de ese
+// período debe existir una señal positiva posterior a la razón técnica.
+export const hasConfirmedPushSubscription = (
+	row: ConfirmedPushSubscriptionInput,
+	now: Date = new Date()
+): boolean => {
+	if (row.detached_at != null) return false;
+	const device = Array.isArray(row.push_devices) ? row.push_devices[0] : row.push_devices;
+	if (!device || device.provider_gone_at != null) return false;
+	const testConfirmedAt = Date.parse(String(device.last_test_confirmed_at ?? ''));
+	const clickedAt = Date.parse(String(device.last_notification_clicked_at ?? ''));
+	const verificationRequiredAt = Date.parse(String(device.verification_required_at ?? ''));
+	const positiveAt = Math.max(
+		Number.isFinite(testConfirmedAt) ? testConfirmedAt : Number.NEGATIVE_INFINITY,
+		Number.isFinite(clickedAt) ? clickedAt : Number.NEGATIVE_INFINITY
+	);
+	if (!Number.isFinite(positiveAt)) return false;
+	if (!Number.isFinite(verificationRequiredAt) || positiveAt >= verificationRequiredAt) return true;
+	return Number.isFinite(testConfirmedAt) && testConfirmedAt >= now.getTime() - 48 * 60 * 60 * 1000;
+};
 
 // --- Carga principal ----------------------------------------------------------
 
@@ -291,7 +321,7 @@ export const loadReminderCandidates = async (
 		`
 		)
 		.eq('business_id', business.id)
-		.in('status', ['reserved', 'confirmed'])
+		.in('status', [...ACTIVE_APPOINTMENT_STATUSES])
 		.gte('starts_at', windowStart.toISOString())
 		.lt('starts_at', end.toISOString())
 		.order('starts_at', { ascending: true });
@@ -305,11 +335,13 @@ export const loadReminderCandidates = async (
 	const [pushResult, dispatchResult, googleCalendarResult] = await Promise.all([
 		options.pushSubscriptionsSupabase
 			.from('push_subscriptions')
-			.select('appointment_id, revoked_at, verified_at')
+			.select(
+				'appointment_id, detached_at, push_devices!inner(last_test_confirmed_at, last_notification_clicked_at, verification_required_at, provider_gone_at)'
+			)
 			.eq('business_id', business.id)
 			.in('appointment_id', ids)
-			.is('revoked_at', null)
-			.not('verified_at', 'is', null),
+			.is('detached_at', null)
+			.is('push_devices.provider_gone_at', null),
 		supabase
 			.from('message_dispatches')
 			.select('appointment_id, status')
@@ -334,7 +366,7 @@ export const loadReminderCandidates = async (
 
 	const confirmedPushAppointments = new Set(
 		(pushRows ?? [])
-			.filter((row: any) => hasConfirmedPushSubscription(row))
+			.filter((row: any) => hasConfirmedPushSubscription(row, now))
 			.map((row: any) => String(row.appointment_id))
 	);
 	const dispatched = new Set(

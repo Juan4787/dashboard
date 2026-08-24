@@ -80,9 +80,14 @@ const createSupabaseMock = (queues: Record<string, Queued[]>, rpcResult: Queued)
 	return {
 		supabase: {
 			from: (table: string) => makeChain(table),
-			rpc: async (name: string, args?: Record<string, unknown>) => {
+			rpc: (name: string, args?: Record<string, unknown>) => {
 				rpcCalls.push({ name, args });
-				return rpcResult;
+				return {
+					single: async () => rpcResult,
+					maybeSingle: async () => rpcResult,
+					then: (resolve: (value: Queued) => unknown) =>
+						Promise.resolve(rpcResult).then(resolve)
+				};
 			}
 		} as any,
 		updates,
@@ -214,68 +219,66 @@ describe('persistencia de la suscripción', () => {
 
 	it('conserva la verificación al recargar la misma suscripción sana', async () => {
 		const verifiedAt = '2026-06-11T11:00:00.000Z';
-		const { supabase, upserts } = createSupabaseMock(
-			{
-				push_subscriptions: [
-					{
-						data: {
-							id: 'sub-1',
-							p256dh: payload.keys.p256dh,
-							auth: payload.keys.auth,
-							revoked_at: null,
-							verified_at: verifiedAt
-						},
-						error: null
-					},
-					{ data: { id: 'sub-1', endpoint: payload.endpoint, verified_at: verifiedAt }, error: null }
-				]
+		const { supabase, rpcCalls } = createSupabaseMock({}, {
+			data: {
+				subscription_id: 'sub-1',
+				endpoint: payload.endpoint,
+				verification_confirmed_at: verifiedAt,
+				provider_gone: false
 			},
-			{ data: null, error: null }
-		);
+			error: null
+		});
 
 		const saved = await saveAppointmentPushSubscription(supabase, appointment, payload, 'Android');
-		expect(upserts[0].payload.verified_at).toBe(verifiedAt);
+		expect(rpcCalls[0]).toMatchObject({
+			name: 'save_appointment_push_subscription',
+			args: {
+				target_business_id: 'biz-1',
+				target_appointment_id: 'apt-1',
+				target_endpoint: payload.endpoint,
+				target_p256dh: payload.keys.p256dh,
+				target_auth: payload.keys.auth,
+				target_user_agent: 'Android'
+			}
+		});
 		expect(saved.verifiedAt).toBe(verifiedAt);
 	});
 
-	it('exige otra prueba si la suscripción estaba revocada', async () => {
-		const { supabase, upserts } = createSupabaseMock(
-			{
-				push_subscriptions: [
-					{
-						data: {
-							id: 'sub-1',
-							p256dh: payload.keys.p256dh,
-							auth: payload.keys.auth,
-							revoked_at: '2026-06-11T11:00:00.000Z',
-							verified_at: '2026-06-11T10:00:00.000Z'
-						},
-						error: null
-					},
-					{ data: { id: 'sub-1', endpoint: payload.endpoint, verified_at: null }, error: null }
-				]
+	it('devuelve una comprobación pendiente sin marcar muerto el dispositivo', async () => {
+		const { supabase } = createSupabaseMock({}, {
+			data: {
+				subscription_id: 'sub-1',
+				endpoint: payload.endpoint,
+				verification_confirmed_at: null,
+				provider_gone: false
 			},
-			{ data: null, error: null }
-		);
+			error: null
+		});
 
-		await saveAppointmentPushSubscription(supabase, appointment, payload, 'Android');
-		expect(upserts[0].payload.verified_at).toBeNull();
+		const saved = await saveAppointmentPushSubscription(
+			supabase,
+			appointment,
+			payload,
+			'Android'
+		);
+		expect(saved).toMatchObject({ verifiedAt: null, providerGone: false });
 	});
 
-	it('asocia el mismo endpoint a un turno nuevo aunque la confirmación pertenezca al turno anterior', async () => {
+	it('reutiliza la confirmación del mismo dispositivo al asociarlo con otro turno', async () => {
 		const newAppointment = {
 			id: 'apt-2',
 			business: { id: 'biz-1' }
 		} as any;
-		const { supabase, upserts } = createSupabaseMock(
-			{
-				push_subscriptions: [
-					{ data: null, error: null },
-					{ data: { id: 'sub-2', endpoint: payload.endpoint, verified_at: null }, error: null }
-				]
+		const verifiedAt = '2026-06-11T11:00:00.000Z';
+		const { supabase, rpcCalls } = createSupabaseMock({}, {
+			data: {
+				subscription_id: 'sub-2',
+				endpoint: payload.endpoint,
+				verification_confirmed_at: verifiedAt,
+				provider_gone: false
 			},
-			{ data: null, error: null }
-		);
+			error: null
+		});
 
 		const saved = await saveAppointmentPushSubscription(
 			supabase,
@@ -284,14 +287,24 @@ describe('persistencia de la suscripción', () => {
 			'Android'
 		);
 
-		expect(upserts[0].payload).toMatchObject({
-			business_id: 'biz-1',
-			appointment_id: 'apt-2',
-			endpoint: payload.endpoint,
-			verified_at: null,
-			revoked_at: null
+		expect(rpcCalls[0].args?.target_appointment_id).toBe('apt-2');
+		expect(saved).toMatchObject({ id: 'sub-2', verifiedAt, providerGone: false });
+	});
+
+	it('conserva como muerto solamente un endpoint rechazado explícitamente por el proveedor', async () => {
+		const { supabase } = createSupabaseMock({}, {
+			data: {
+				subscription_id: 'sub-1',
+				endpoint: payload.endpoint,
+				verification_confirmed_at: null,
+				provider_gone: true
+			},
+			error: null
 		});
-		expect(saved).toMatchObject({ id: 'sub-2', verifiedAt: null });
+
+		await expect(
+			saveAppointmentPushSubscription(supabase, appointment, payload, 'Android')
+		).resolves.toMatchObject({ providerGone: true, verifiedAt: null });
 	});
 });
 
@@ -715,9 +728,9 @@ describe('sendDuePushReminders', () => {
 		expect(sentUpdate).toBeTruthy();
 	});
 
-	it('revoca el endpoint ante 410 del push service', async () => {
+	it('marca el dispositivo como muerto solamente ante 410 del push service', async () => {
 		vi.mocked(webpush.sendNotification).mockRejectedValue({ statusCode: 410 });
-		const { supabase, updates } = createSupabaseMock(
+		const { supabase, updates, rpcCalls } = createSupabaseMock(
 			{
 				push_subscriptions: [{ data: [] }, { data: null }],
 				appointments: [{ data: liveAppointment, error: null }]
@@ -727,15 +740,17 @@ describe('sendDuePushReminders', () => {
 
 		const result = await sendDuePushReminders(supabase, { now });
 		expect(result.failed).toBe(1);
-		expect(result.revoked).toBe(1);
-		const revokeUpdate = updates.find((u) => u.payload.revoked_at);
-		expect(revokeUpdate).toBeTruthy();
+		expect(result.deadEndpoints).toBe(1);
+		expect(rpcCalls).toContainEqual({
+			name: 'mark_push_device_gone',
+			args: { target_endpoint: claimedRow.endpoint, gone_time: now.toISOString() }
+		});
 		expect(updates.some((u) => u.payload.push_24h_sent_at)).toBe(false);
 	});
 
 	it('error transitorio: libera el claim e incrementa failed_count (reintenta luego)', async () => {
 		vi.mocked(webpush.sendNotification).mockRejectedValue(new Error('timeout'));
-		const { supabase, updates } = createSupabaseMock(
+		const { supabase, updates, rpcCalls } = createSupabaseMock(
 			{
 				push_subscriptions: [{ data: [] }, { data: { failed_count: 0 } }, { data: null }],
 				appointments: [{ data: liveAppointment, error: null }]
@@ -748,14 +763,15 @@ describe('sendDuePushReminders', () => {
 		expect(release).toBeTruthy();
 		expect(release?.payload.push_24h_claimed_at).toBeNull();
 		expect(updates.some((u) => u.payload.push_24h_sent_at)).toBe(false);
+		expect(rpcCalls.some((call) => call.name === 'mark_push_device_gone')).toBe(false);
 	});
 
-	it('no envía si una reasignación revocó la suscripción antes de crear la telemetría', async () => {
+	it('no envía si una reasignación desvinculó el turno antes de crear la telemetría', async () => {
 		const { supabase } = createSupabaseMock(
 			{
 				push_delivery_attempts: [
 					{ data: null, error: null },
-					{ data: null, error: { message: 'PUSH_SUBSCRIPTION_REVOKED' } }
+					{ data: null, error: { message: 'PUSH_SUBSCRIPTION_DETACHED' } }
 				],
 				push_subscriptions: [
 					{ data: [] },
@@ -821,9 +837,12 @@ describe('sendDuePushReminders', () => {
 describe('sendReschedulePushNotice', () => {
 	const subscriptionRow = {
 		id: 'sub-1',
-		endpoint: 'https://push.example/ep-1',
-		p256dh: 'p256dh-key',
-		auth: 'auth-key'
+		push_devices: {
+			endpoint: 'https://push.example/ep-1',
+			p256dh: 'p256dh-key',
+			auth: 'auth-key',
+			provider_gone_at: null
+		}
 	};
 
 	it('envía aunque falte confirmar la prueba, sin tocar flags sent/claimed', async () => {
@@ -888,9 +907,9 @@ describe('sendReschedulePushNotice', () => {
 		expect(webpush.sendNotification).not.toHaveBeenCalled();
 	});
 
-	it('endpoint muerto (410): revoca la suscripción', async () => {
+	it('endpoint muerto (410): registra el dispositivo sin desvincular el turno', async () => {
 		vi.mocked(webpush.sendNotification).mockRejectedValue({ statusCode: 410 });
-		const { supabase, updates } = createSupabaseMock(
+		const { supabase, updates, rpcCalls } = createSupabaseMock(
 			{
 				appointments: [{ data: liveAppointment, error: null }],
 				push_subscriptions: [{ data: [subscriptionRow], error: null }, { data: null }]
@@ -904,8 +923,9 @@ describe('sendReschedulePushNotice', () => {
 			now
 		});
 		expect(result.failed).toBe(1);
-		expect(result.revoked).toBe(1);
-		expect(updates.some((u) => u.payload.revoked_at)).toBe(true);
+		expect(result.deadEndpoints).toBe(1);
+		expect(rpcCalls.some((call) => call.name === 'mark_push_device_gone')).toBe(true);
+		expect(updates.some((update) => 'detached_at' in update.payload)).toBe(false);
 	});
 });
 
@@ -944,7 +964,7 @@ describe('resetPushRemindersForReschedule', () => {
 		return { supabase, calls };
 	};
 
-	it('limpia sent/claimed de 24h y 2h del turno, sin tocar revocadas', async () => {
+	it('limpia sent/claimed de 24h y 2h sólo en vínculos asociados', async () => {
 		const { supabase, calls } = makeMock([{ id: 'sub-1' }, { id: 'sub-2' }]);
 		const count = await resetPushRemindersForReschedule(supabase, {
 			businessId: 'biz-1',
@@ -965,7 +985,7 @@ describe('resetPushRemindersForReschedule', () => {
 			['business_id', 'biz-1'],
 			['appointment_id', 'apt-1']
 		]);
-		expect(calls.is).toEqual([['revoked_at', null]]);
+		expect(calls.is).toEqual([['detached_at', null]]);
 	});
 
 	it('propaga el error de Supabase', async () => {

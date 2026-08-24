@@ -1,4 +1,4 @@
-// Service worker SOLO para recordatorios push de turnos.
+// Service worker para avisos push de turnos y solicitudes de reseña.
 // Se registra manualmente cuando el paciente toca "Recibir recordatorio" (nunca al
 // cargar la página) y no cachea nada: no es una PWA, no intercepta fetch.
 
@@ -57,6 +57,22 @@ self.addEventListener('push', (event) => {
 	}
 	const title = payload.title || 'Recordatorio de turno';
 	const delivery = normalizeDelivery(payload.delivery);
+	const actions = Array.isArray(payload.actions)
+		? payload.actions
+				.filter(
+					(action) =>
+						action &&
+						typeof action.action === 'string' &&
+						/^[A-Za-z0-9_-]{1,40}$/.test(action.action) &&
+						typeof action.title === 'string' &&
+						action.title.trim().length > 0
+				)
+				.slice(0, 2)
+				.map((action) => ({
+					action: action.action,
+					title: action.title.trim().slice(0, 60)
+				}))
+		: [];
 	const options = {
 		body: payload.body || 'Tenés un turno próximo.',
 		// El secreto queda dentro de los datos privados de la notificación, nunca en
@@ -64,7 +80,8 @@ self.addEventListener('push', (event) => {
 		data: { url: payload.url || '/', ...(delivery ? { delivery } : {}) },
 		// El contenido es neutral (sin datos clínicos): puede aparecer en pantalla bloqueada.
 		tag: payload.tag || 'turno-recordatorio',
-		renotify: true
+		renotify: true,
+		...(actions.length > 0 ? { actions } : {})
 	};
 	// `group` agrupa las notificaciones del mismo turno: antes de mostrar la nueva se
 	// cierran las viejas del grupo (p.ej. el aviso de 24h con el horario anterior a una

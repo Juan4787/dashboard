@@ -2,9 +2,7 @@ export const APPOINTMENT_STATUSES = [
 	'reserved',
 	'confirmed',
 	'cancelled',
-	'reschedule_requested',
-	'attended',
-	'no_show'
+	'reschedule_requested'
 ] as const;
 
 export type AppointmentStatus = (typeof APPOINTMENT_STATUSES)[number];

@@ -128,26 +128,65 @@ describe('classifyReminderCoverage', () => {
 });
 
 describe('hasConfirmedPushSubscription', () => {
-	it('activa: confirmada y sin revocar', () => {
+	const checkedAt = '2026-06-11T10:00:00.000Z';
+	const checkedDevice = {
+		last_test_confirmed_at: checkedAt,
+		last_notification_clicked_at: null,
+		verification_required_at: null,
+		provider_gone_at: null
+	};
+
+	it('reutiliza la confirmación positiva del dispositivo mientras siga disponible', () => {
 		expect(
 			hasConfirmedPushSubscription({
-				revoked_at: null,
-				verified_at: '2026-06-11T10:00:00.000Z'
+				detached_at: null,
+				push_devices: checkedDevice
 			})
 		).toBe(true);
 	});
 
-	it('inactiva: revocada (endpoint muerto / turno terminal)', () => {
+	it('un vínculo separado o un 404/410 del proveedor no cuenta como cobertura', () => {
 		expect(
 			hasConfirmedPushSubscription({
-				revoked_at: '2026-06-11T10:00:00.000Z',
-				verified_at: '2026-06-11T09:00:00.000Z'
+				detached_at: '2026-06-11T11:00:00.000Z',
+				push_devices: checkedDevice
+			})
+		).toBe(false);
+		expect(
+			hasConfirmedPushSubscription({
+				detached_at: null,
+				push_devices: {
+					...checkedDevice,
+					provider_gone_at: '2026-06-11T11:00:00.000Z'
+				}
 			})
 		).toBe(false);
 	});
 
-	it('inactiva: el endpoint existe pero la prueba no fue confirmada', () => {
-		expect(hasConfirmedPushSubscription({ revoked_at: null, verified_at: null })).toBe(false);
+	it('una razón técnica no repite la prueba dentro de 48 h y sí exige comprobarla después', () => {
+		const row = {
+			detached_at: null,
+			push_devices: {
+				...checkedDevice,
+				verification_required_at: '2026-06-11T11:00:00.000Z'
+			}
+		};
+		expect(hasConfirmedPushSubscription(row, new Date('2026-06-13T09:59:59.000Z'))).toBe(true);
+		expect(hasConfirmedPushSubscription(row, new Date('2026-06-13T10:00:01.000Z'))).toBe(false);
+	});
+
+	it('sin señal positiva el dispositivo todavía no está comprobado', () => {
+		expect(
+			hasConfirmedPushSubscription({
+				detached_at: null,
+				push_devices: {
+					last_test_confirmed_at: null,
+					last_notification_clicked_at: null,
+					verification_required_at: checkedAt,
+					provider_gone_at: null
+				}
+			})
+		).toBe(false);
 	});
 });
 
@@ -248,6 +287,19 @@ describe('loadReminderCandidates · exclusión por avisos activados', () => {
 		whatsapp_reminder_marked_sent_at: null,
 		patients: { id: `pat-${id}`, full_name: `Paciente ${id}`, phone_e164: '+5493510000001', blocked: false }
 	});
+	const pushCoverageRow = (
+		appointmentId: string,
+		options: { confirmed?: boolean; detached?: boolean; gone?: boolean } = {}
+	) => ({
+		appointment_id: appointmentId,
+		detached_at: options.detached ? now.toISOString() : null,
+		push_devices: {
+			last_test_confirmed_at: options.confirmed === false ? null : now.toISOString(),
+			last_notification_clicked_at: null,
+			verification_required_at: options.confirmed === false ? now.toISOString() : null,
+			provider_gone_at: options.gone ? now.toISOString() : null
+		}
+	});
 
 	// Mock mínimo: from(tabla) entrega el siguiente resultado encolado para esa tabla;
 	// toda la cadena de filtros es no-op y la query se resuelve al await (.then).
@@ -275,8 +327,8 @@ describe('loadReminderCandidates · exclusión por avisos activados', () => {
 			push_subscriptions: [
 				{
 					data: [
-						{ appointment_id: 'a', revoked_at: null, verified_at: now.toISOString(), failed_count: 0 },
-						{ appointment_id: 'b', revoked_at: null, verified_at: now.toISOString(), failed_count: 2 }
+						pushCoverageRow('a'),
+						pushCoverageRow('b')
 						// 'c' no tiene suscripción → NO excluido
 					],
 					error: null
@@ -303,7 +355,7 @@ describe('loadReminderCandidates · exclusión por avisos activados', () => {
 		const supabase = makeSupabase({
 			appointments: [{ data: [appointmentRow('a')], error: null }],
 			push_subscriptions: [
-				{ data: [{ id: 'sub-a', appointment_id: 'a', revoked_at: null, verified_at: null }], error: null }
+				{ data: [pushCoverageRow('a', { confirmed: false })], error: null }
 			],
 			push_delivery_attempts: [
 				{
@@ -422,14 +474,14 @@ describe('loadReminderCandidates · exclusión por avisos activados', () => {
 		expect(candidates[0].whatsapp_opened_at).toBe('2026-06-11T11:30:00.000Z');
 	});
 
-	it('una suscripción activa basta para excluir aunque coexista una revocada', async () => {
+	it('un dispositivo comprobado basta aunque coexista un vínculo separado', async () => {
 		const supabase = makeSupabase({
 			appointments: [{ data: [appointmentRow('a')], error: null }],
 			push_subscriptions: [
 				{
 					data: [
-						{ appointment_id: 'a', revoked_at: '2026-06-11T10:00:00.000Z', verified_at: now.toISOString() },
-						{ appointment_id: 'a', revoked_at: null, verified_at: now.toISOString() }
+						pushCoverageRow('a', { detached: true }),
+						pushCoverageRow('a')
 					],
 					error: null
 				}
@@ -445,11 +497,11 @@ describe('loadReminderCandidates · exclusión por avisos activados', () => {
 		expect(candidates).toEqual([]);
 	});
 
-	it('vuelve a incluir una suscripción revocada si no hay calendario', async () => {
+	it('vuelve a incluir un vínculo separado si no hay otra cobertura', async () => {
 		const supabase = makeSupabase({
 			appointments: [{ data: [appointmentRow('a')], error: null }],
 			push_subscriptions: [
-				{ data: [{ appointment_id: 'a', revoked_at: '2026-06-11T10:00:00.000Z', verified_at: now.toISOString() }], error: null }
+				{ data: [pushCoverageRow('a', { detached: true })], error: null }
 			],
 			message_dispatches: [{ data: [], error: null }]
 		});
@@ -468,8 +520,8 @@ describe('loadReminderCandidates · exclusión por avisos activados', () => {
 			push_subscriptions: [
 				{
 					data: [
-						{ appointment_id: 'a', revoked_at: null, verified_at: now.toISOString(), failed_count: 1 },
-						{ appointment_id: 'b', revoked_at: '2026-06-11T10:00:00.000Z', verified_at: now.toISOString() }
+						pushCoverageRow('a'),
+						pushCoverageRow('b', { gone: true })
 					],
 					error: null
 				}
@@ -497,22 +549,16 @@ describe('loadReminderCandidates · exclusión por avisos activados', () => {
 				{
 					data: [
 						{
-							id: 'sub-confirmado',
-							appointment_id: 'push-confirmado',
-							revoked_at: null,
-							verified_at: now.toISOString()
+							...pushCoverageRow('push-confirmado'),
+							id: 'sub-confirmado'
 						},
 						{
-							id: 'sub-auto',
-							appointment_id: 'push-displayed-sin-confirmar',
-							revoked_at: null,
-							verified_at: null
+							...pushCoverageRow('push-displayed-sin-confirmar', { confirmed: false }),
+							id: 'sub-auto'
 						},
 						{
-							id: 'sub-sin-confirmar',
-							appointment_id: 'push-sin-confirmar',
-							revoked_at: null,
-							verified_at: null
+							...pushCoverageRow('push-sin-confirmar', { confirmed: false }),
+							id: 'sub-sin-confirmar'
 						}
 					],
 					error: null
@@ -598,7 +644,7 @@ describe('loadReminderCandidates · exclusión por avisos activados', () => {
 		});
 		const pushSubscriptionsSupabase = makeSupabase({
 			push_subscriptions: [
-				{ data: [{ appointment_id: 'a', revoked_at: null, verified_at: now.toISOString() }], error: null }
+				{ data: [pushCoverageRow('a')], error: null }
 			],
 			appointment_google_calendar_events: [{ data: [], error: null }]
 		});

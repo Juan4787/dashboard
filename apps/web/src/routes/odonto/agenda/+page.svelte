@@ -108,18 +108,14 @@
 		reserved: 'Reservado',
 		confirmed: 'Confirmado',
 		cancelled: 'Cancelado',
-		reschedule_requested: 'Reprogramar',
-		attended: 'Asistió',
-		no_show: 'No asistió'
+		reschedule_requested: 'Reprogramar'
 	};
 
 	const statusTone: Record<string, string> = {
 		reserved: 'ux-badge',
 		confirmed: 'ux-badge ux-badge-success',
 		cancelled: 'ux-badge ux-badge-danger',
-		reschedule_requested: 'ux-badge ux-badge-warning',
-		attended: 'ux-badge ux-badge-success',
-		no_show: 'ux-badge ux-badge-danger'
+		reschedule_requested: 'ux-badge ux-badge-warning'
 	};
 
 	const timeOnly = (value: string) =>

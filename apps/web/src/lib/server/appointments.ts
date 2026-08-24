@@ -16,9 +16,7 @@ export const APPOINTMENT_STATUSES = [
 	'reserved',
 	'confirmed',
 	'cancelled',
-	'reschedule_requested',
-	'attended',
-	'no_show'
+	'reschedule_requested'
 ] as const;
 export type AppointmentStatus = (typeof APPOINTMENT_STATUSES)[number];
 
@@ -29,9 +27,7 @@ export const APPOINTMENT_STATUS_LABELS: Record<AppointmentStatus, string> = {
 	reserved: 'Reservado',
 	confirmed: 'Confirmado',
 	cancelled: 'Cancelado',
-	reschedule_requested: 'Quiere reprogramar',
-	attended: 'Asistió',
-	no_show: 'No asistió'
+	reschedule_requested: 'Quiere reprogramar'
 };
 
 export const APPOINTMENT_SOURCE_LABELS: Record<AppointmentSource, string> = {
@@ -48,16 +44,14 @@ export const addMinutes = (date: Date, minutes: number) =>
 	new Date(date.getTime() + minutes * 60_000);
 
 const transitionMap: Record<AppointmentStatus, AppointmentStatus[]> = {
-	reserved: ['confirmed', 'cancelled', 'reschedule_requested', 'attended', 'no_show'],
-	confirmed: ['cancelled', 'reschedule_requested', 'attended', 'no_show'],
-	reschedule_requested: ['cancelled', 'attended', 'no_show'],
-	cancelled: [],
-	attended: [],
-	no_show: []
+	reserved: ['confirmed', 'cancelled', 'reschedule_requested'],
+	confirmed: ['cancelled', 'reschedule_requested'],
+	reschedule_requested: ['cancelled'],
+	cancelled: []
 };
 
 export const isTerminalAppointmentStatus = (status: AppointmentStatus) =>
-	status === 'cancelled' || status === 'attended' || status === 'no_show';
+	status === 'cancelled';
 
 const resolvePhoneDecision = (input: {
 	patientId?: string | null;
@@ -105,8 +99,6 @@ export const assertCanTransitionAppointment = (input: {
 	endsAt: Date;
 	now?: Date;
 }) => {
-	const now = input.now ?? new Date();
-
 	if (input.currentStatus === input.nextStatus) {
 		throw new Error('APPOINTMENT_STATUS_UNCHANGED');
 	}
@@ -117,14 +109,6 @@ export const assertCanTransitionAppointment = (input: {
 
 	if (!transitionMap[input.currentStatus].includes(input.nextStatus)) {
 		throw new Error('APPOINTMENT_INVALID_TRANSITION');
-	}
-
-	if (input.nextStatus === 'attended' && input.startsAt > now) {
-		throw new Error('APPOINTMENT_CANNOT_ATTEND_IN_FUTURE');
-	}
-
-	if (input.nextStatus === 'no_show' && input.endsAt > now) {
-		throw new Error('APPOINTMENT_CANNOT_NO_SHOW_BEFORE_END');
 	}
 };
 
@@ -205,14 +189,8 @@ export const getHumanAppointmentErrorMessage = (error: unknown) => {
 	) {
 		return 'El equipo cambió desde que se abrió este turno y su disponibilidad debe calcularse de nuevo. Volvé a la agenda, revisá que todos sigan activos y asignados al procedimiento, y elegí un horario nuevo.';
 	}
-	if (raw.includes('APPOINTMENT_CANNOT_ATTEND_IN_FUTURE')) {
-		return 'No podés marcar asistencia antes del horario del turno.';
-	}
-	if (raw.includes('APPOINTMENT_CANNOT_NO_SHOW_BEFORE_END')) {
-		return 'No podés marcar no asistió antes de que termine el turno.';
-	}
 	if (raw.includes('APPOINTMENT_TERMINAL_STATUS')) {
-		return 'Ese turno ya está cerrado porque fue cancelado o se registró su asistencia. No se puede volver a modificar.';
+		return 'Ese turno ya está cancelado y no se puede volver a modificar.';
 	}
 	if (raw.includes('APPOINTMENT_INVALID_TRANSITION')) {
 		return 'Ese cambio de estado no corresponde al estado actual del turno. Recargá la página y elegí una de las acciones disponibles.';
@@ -228,9 +206,6 @@ export const getHumanAppointmentErrorMessage = (error: unknown) => {
 	}
 	if (raw.includes('BUSINESS_ACCESS_RESTRICTED')) {
 		return 'Tu acceso a Cita Suite venció. Activá tu suscripción para volver a usar la plataforma.';
-	}
-	if (raw.includes('INVALID_PROFESSIONAL_STATUS')) {
-		return 'Desde el perfil profesional sólo se puede marcar si el paciente asistió o no asistió. Para otro cambio, pedile ayuda a recepción.';
 	}
 	return 'No pudimos completar la acción y no se guardó ningún cambio. Recargá la página y volvé a intentar; si vuelve a ocurrir, pedile a un administrador que revise el registro interno del error.';
 };
@@ -459,8 +434,6 @@ export const updateAppointmentStatus = async (
 		updates.cancelled_reason = input.reason || null;
 	}
 	if (input.status === 'reschedule_requested') updates.reschedule_requested_at = now.toISOString();
-	if (input.status === 'attended') updates.attended_at = now.toISOString();
-	if (input.status === 'no_show') updates.no_show_at = now.toISOString();
 
 	const { error } = await supabase
 		.from('appointments')
@@ -561,20 +534,4 @@ export const rescheduleAppointment = async (
 			calendar_update_required: hadCalendarAction
 		}
 	});
-};
-
-export const updateProfessionalAppointmentStatus = async (
-	supabase: SupabaseClient,
-	input: {
-		businessId: string;
-		appointmentId: string;
-		status: Extract<AppointmentStatus, 'attended' | 'no_show'>;
-	}
-) => {
-	const { error } = await supabase.rpc('professional_update_appointment_status', {
-		target_business_id: input.businessId,
-		target_appointment_id: input.appointmentId,
-		target_status: input.status
-	});
-	if (error) throw error;
 };

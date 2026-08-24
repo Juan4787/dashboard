@@ -65,9 +65,7 @@
 		reserved: 'Reservado',
 		confirmed: 'Confirmado',
 		cancelled: 'Cancelado',
-		reschedule_requested: 'Quiere reprogramar',
-		attended: 'Asistió',
-		no_show: 'No asistió'
+		reschedule_requested: 'Quiere reprogramar'
 	};
 	let entries = $state<any[]>([]);
 	let changeEvents = $state<any[]>([]);

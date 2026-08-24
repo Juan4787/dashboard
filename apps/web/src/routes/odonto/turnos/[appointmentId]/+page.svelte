@@ -62,8 +62,7 @@
 	});
 
 	const canOperate = $derived(data.context.canOperate && !data.demo);
-	const canProfessionalClose = $derived(data.context.role === 'professional' && !data.demo);
-	const isClosed = $derived(['cancelled', 'attended', 'no_show'].includes(data.appointment?.status));
+	const isClosed = $derived(data.appointment?.status === 'cancelled');
 	const appointmentProfessionals = $derived(data.appointment?.professionals ?? []);
 	const isJoint = $derived(appointmentProfessionals.length > 1);
 
@@ -71,9 +70,7 @@
 		reserved: 'Reservado',
 		confirmed: 'Confirmado',
 		cancelled: 'Cancelado',
-		reschedule_requested: 'Quiere reprogramar',
-		attended: 'Asistió',
-		no_show: 'No asistió'
+		reschedule_requested: 'Quiere reprogramar'
 	};
 
 	const sourceLabels: Record<string, string> = {
@@ -87,9 +84,7 @@
 		reserved: 'bg-[#7c3aed]/25 text-[#c4b5fd]',
 		confirmed: 'bg-emerald-400/15 text-emerald-200',
 		cancelled: 'bg-red-500/15 text-red-200',
-		reschedule_requested: 'bg-amber-400/15 text-amber-100',
-		attended: 'bg-sky-400/15 text-sky-100',
-		no_show: 'bg-zinc-400/15 text-zinc-200'
+		reschedule_requested: 'bg-amber-400/15 text-amber-100'
 	};
 
 	const timeOnly = (value: string) =>
@@ -125,8 +120,7 @@
 		if (log.action === 'appointment.cancelled') return `${user} canceló el turno`;
 		if (log.action === 'appointment.confirmed') return `${user} confirmó el turno`;
 		if (log.action === 'appointment.reschedule_requested') return `${user} marcó pedido de reprogramación`;
-		if (log.action === 'appointment.attended') return `${user} marcó asistió`;
-		if (log.action === 'appointment.no_show') return `${user} marcó no asistió`;
+		if (log.action === 'appointment.updated') return `${user} actualizó el turno`;
 		return `${user} registró ${log.action}`;
 	};
 
@@ -146,8 +140,7 @@
 
 	const canUseStatusAction = (status: string) => {
 		if (isClosed || data.appointment.status === status) return false;
-		if (canOperate) return true;
-		return canProfessionalClose && (status === 'attended' || status === 'no_show');
+		return canOperate;
 	};
 
 	// --- Reprogramar: calendario inline + chips de horario ---

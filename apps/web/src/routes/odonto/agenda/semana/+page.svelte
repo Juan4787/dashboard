@@ -22,9 +22,7 @@
 		reserved: 'Reservados',
 		confirmed: 'Confirmados',
 		cancelled: 'Cancelados',
-		reschedule_requested: 'Reprogramar',
-		attended: 'Asistieron',
-		no_show: 'No asistieron'
+		reschedule_requested: 'Reprogramar'
 	};
 
 	const statusText = (day: DaySummary) =>

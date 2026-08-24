@@ -44,6 +44,11 @@
 			<h2 class="mt-4 text-2xl font-bold text-white">Link de reserva</h2>
 			<p class="mt-2 text-sm text-white/55">Copiá o abrí el enlace que compartís con tus pacientes.</p>
 		</a>
+		<a href="/odonto/configuracion/resena-google" class="ux-choice p-6">
+			<span class="ux-badge">Opinión</span>
+			<h2 class="mt-4 text-2xl font-bold text-white">Reseña de Google</h2>
+			<p class="mt-2 text-sm text-white/55">Configurá el enlace y el mensaje automático.</p>
+		</a>
 		{#if !data.isMaster}
 			<a href="/odonto/configuracion/ayuda" class="ux-choice p-6">
 				<span class="ux-badge">Ayuda</span>

@@ -8,12 +8,27 @@ const migration = readFileSync(
 	),
 	'utf8'
 );
+const pushDeviceExpansion = readFileSync(
+	new URL(
+		'../../../../../supabase/migrations/20260824010000_push_devices_expand.sql',
+		import.meta.url
+	),
+	'utf8'
+);
+const pushDeviceContract = readFileSync(
+	new URL(
+		'../../../../../supabase/migrations/20260824031000_push_device_contract.sql',
+		import.meta.url
+	),
+	'utf8'
+);
 
 describe('contrato de la migración Google Calendar', () => {
-	it('guarda la confirmación explícita para distinguir la cobertura manual', () => {
-		expect(migration).toContain('add column if not exists verified_at timestamptz');
-		expect(migration).toContain('max(user_confirmed_at) as last_confirmed_at');
-		expect(migration).toContain('idx_push_subscriptions_verified_appointment');
+	it('conserva la cobertura manual en el dispositivo y no en el turno', () => {
+		expect(pushDeviceExpansion).toContain('last_test_confirmed_at timestamptz');
+		expect(pushDeviceExpansion).toContain('last_notification_clicked_at timestamptz');
+		expect(pushDeviceContract).toContain('drop column if exists verified_at');
+		expect(pushDeviceContract).toContain('drop column if exists revoked_at');
 	});
 
 	it('aísla secretos y telemetría de clientes públicos', () => {

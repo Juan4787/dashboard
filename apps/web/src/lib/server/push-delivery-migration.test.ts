@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 const migration = readFileSync(
 	new URL(
-		'../../../../../supabase/migrations/20260805163000_decouple_push_delivery_from_feedback.sql',
+		'../../../../../supabase/migrations/20260824010000_push_devices_expand.sql',
 		import.meta.url
 	),
 	'utf8'
@@ -17,11 +17,18 @@ describe('contrato de entrega push independiente de la respuesta', () => {
 		);
 
 		expect(claimFunction).not.toContain('verified_at');
-		expect(claimFunction.match(/ps\.revoked_at is null/g)).toHaveLength(2);
-		expect(claimFunction).toContain("a.status in ('reserved', 'confirmed')");
-		expect(claimFunction).toContain("a.starts_at <= claim_now + interval '24 hours'");
-		expect(claimFunction).toContain("a.starts_at <= claim_now + interval '2 hours'");
-		expect(claimFunction.match(/for update of ps skip locked/g)).toHaveLength(2);
+		expect(claimFunction.match(/subscription\.detached_at is null/g)).toHaveLength(2);
+		expect(claimFunction.match(/device\.provider_gone_at is null/g)).toHaveLength(2);
+		expect(claimFunction).toContain(
+			"appointment.status in ('reserved', 'confirmed', 'reschedule_requested')"
+		);
+		expect(claimFunction).toContain(
+			"appointment.starts_at <= claim_now + interval '24 hours'"
+		);
+		expect(claimFunction).toContain(
+			"appointment.starts_at <= claim_now + interval '2 hours'"
+		);
+		expect(claimFunction.match(/for update of subscription skip locked/g)).toHaveLength(2);
 	});
 
 	it('mantiene la RPC restringida al servicio interno', () => {

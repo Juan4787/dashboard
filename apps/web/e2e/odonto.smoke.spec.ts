@@ -24,6 +24,7 @@ test.describe('Odontologia - flujo base', () => {
 			await expect(configMenu).toHaveAttribute('aria-expanded', 'true', { timeout: 1000 });
 		}).toPass();
 		await expect(page.getByRole('menuitem', { name: 'Equipo' })).toBeVisible();
+		await expect(page.getByRole('menuitem', { name: 'Reseña de Google' })).toBeVisible();
 
 		await page.goto('/odonto/configuracion/comunicacion');
 		await expect(page.getByRole('heading', { name: 'Link de reserva', level: 1 })).toBeVisible();
@@ -38,6 +39,24 @@ test.describe('Odontologia - flujo base', () => {
 		await expect(page.getByText('El enlace está en “Link de reserva”.')).toBeVisible();
 		await expect(page.locator('a[href*="/reservar/"]')).toHaveCount(0);
 		await expect(page.getByRole('link', { name: 'Abrir link' })).toHaveCount(0);
+
+		await page.goto('/odonto/configuracion/resena-google');
+		await expect(page.getByRole('heading', { name: 'Reseña de Google', level: 1 })).toBeVisible();
+		await expect(page.getByLabel('Solicitar reseñas automáticamente')).toBeVisible();
+		await expect(page.getByLabel('Enlace directo para dejar una reseña')).toBeVisible();
+
+		const title = page.getByLabel('Título', { exact: true });
+		const body = page.getByLabel('Texto', { exact: true });
+		const action = page.getByLabel('Texto del botón', { exact: true });
+		await title.fill('Cambio sin guardar');
+		await body.fill('Cambio sin guardar');
+		await action.fill('Cambio sin guardar');
+		await page.getByRole('button', { name: 'Restablecer frase original' }).click();
+		await expect(title).toHaveValue('✨ Esperamos que hayas tenido una buena experiencia con nosotros.');
+		await expect(body).toHaveValue(
+			'Si querés, compartí tu opinión en Google. Puede ayudar a otros que estén buscando dónde atenderse.'
+		);
+		await expect(action).toHaveValue('Compartir mi opinión');
 	});
 });
 

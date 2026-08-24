@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { formatDateTime, formatInTimeZone } from '$lib/utils/format';
+	import { isActiveAppointmentStatus } from '$lib/utils/appointment-visibility';
 	import {
 		refineDeviceClass,
 		samsungAppNotificationToggleStep,
@@ -85,7 +86,7 @@
 			| 'superseded'
 			| 'failed'
 			| 'expired';
-		kind: 'test' | '24h' | '2h' | 'reschedule';
+		kind: 'test' | '24h' | '2h' | 'reschedule' | 'review';
 		createdAt: string;
 		expiresAt: string;
 	};
@@ -687,13 +688,18 @@
 					requestTest,
 					phase
 				);
-				if (requestTest && result?.response.status === 410) {
+				if (result?.response.status === 410) {
 					await subscription.unsubscribe();
 					subscription = await registration.pushManager.subscribe({
 						userVisibleOnly: true,
 						applicationServerKey: urlBase64ToUint8Array(data.vapidPublicKey)
 					});
-					result = await savePushSubscriptionForAppointment(subscription, true, phase, true);
+					result = await savePushSubscriptionForAppointment(
+						subscription,
+						requestTest,
+						phase,
+						true
+					);
 				}
 				if (!useSaveResult(result, requestTest, phase)) {
 					pushState = phase === 'recovery' ? 'needs_device_check' : 'error';
@@ -925,9 +931,8 @@
 		appointment ? formatInTimeZone(appointment.starts_at, timezone) : null
 	);
 
-	const ACTIVE_STATUSES = ['reserved', 'confirmed', 'reschedule_requested'];
 	const isActive = $derived(
-		Boolean(appointment) && !appointment.is_past && ACTIVE_STATUSES.includes(appointment.status)
+		Boolean(appointment) && !appointment.is_past && isActiveAppointmentStatus(appointment.status)
 	);
 	const isCancelled = $derived(appointment?.status === 'cancelled');
 	const hasCalendarAction = $derived(

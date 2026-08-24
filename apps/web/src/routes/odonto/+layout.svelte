@@ -91,6 +91,7 @@
 		{ label: 'Equipo', href: '/odonto/configuracion/usuarios' },
 		{ label: 'Suscripción', href: '/odonto/configuracion/suscripcion' },
 		{ label: 'Link de reserva', href: '/odonto/configuracion/comunicacion' },
+		{ label: 'Reseña de Google', href: '/odonto/configuracion/resena-google' },
 		{ label: 'Ayuda', href: '/odonto/configuracion/ayuda' }
 	];
 

@@ -16,6 +16,7 @@ declare
 	v_appointment record;
 	v_public_appointment record;
 	v_subscription_id uuid;
+	v_device_id uuid;
 	v_superseded_queue_id uuid;
 	v_calendar_connection_id uuid;
 	v_result record;
@@ -103,15 +104,24 @@ begin
 		'manual_test', '+5493425048209', 'sent', statement_timestamp(), '[]'::jsonb
 	);
 
-	insert into public.push_subscriptions (
-		business_id, appointment_id, endpoint, p256dh, auth,
-		push_24h_claimed_at, push_24h_sent_at, push_2h_claimed_at, push_2h_sent_at
-	)
-	values (
-		v_business_id, v_appointment.id, 'https://push.example.test/reassignment', 'p256dh', 'auth',
-		statement_timestamp(), statement_timestamp(), statement_timestamp(), statement_timestamp()
-	)
-	returning id into v_subscription_id;
+	select saved.subscription_id, saved.device_id
+	into v_subscription_id, v_device_id
+	from public.save_appointment_push_subscription(
+		v_business_id,
+		v_appointment.id,
+		'https://push.example.test/reassignment',
+		'p256dh',
+		'auth',
+		'Android test',
+		statement_timestamp()
+	) saved;
+	update public.push_subscriptions
+	set
+		push_24h_claimed_at = statement_timestamp(),
+		push_24h_sent_at = statement_timestamp(),
+		push_2h_claimed_at = statement_timestamp(),
+		push_2h_sent_at = statement_timestamp()
+	where id = v_subscription_id;
 
 	insert into public.push_delivery_attempts (
 		business_id, appointment_id, subscription_id, kind, receipt_token_hash,
@@ -174,7 +184,7 @@ begin
 		or v_result.new_patient_id <> v_new_patient_id
 		or v_result.cancelled_dispatches <> 1
 		or v_result.superseded_dispatches <> 2
-		or v_result.revoked_push_subscriptions <> 1
+		or v_result.detached_push_subscriptions <> 1
 		or v_result.superseded_push_attempts <> 1
 		or v_result.invalidated_calendar_attempts <> 1
 		or v_result.queued_calendar_deletions <> 1
@@ -230,13 +240,22 @@ begin
 		where subscription.id = v_subscription_id
 			and (
 				subscription.push_24h_claimed_at is not null
-				or subscription.push_24h_sent_at is not null
 				or subscription.push_2h_claimed_at is not null
-				or subscription.push_2h_sent_at is not null
-				or subscription.revoked_at is null
+				or subscription.push_24h_sent_at is null
+				or subscription.push_2h_sent_at is null
+				or subscription.detached_at is null
+				or subscription.detached_reason <> 'patient_reassigned'
 			)
 	) then
-		raise exception 'TEST_PUSH_SUBSCRIPTION_NOT_REVOKED';
+		raise exception 'TEST_PUSH_SUBSCRIPTION_NOT_SAFELY_DETACHED';
+	end if;
+	if not exists (
+		select 1
+		from public.push_devices device
+		where device.id = v_device_id
+			and device.provider_gone_at is null
+	) then
+		raise exception 'TEST_PATIENT_REASSIGNMENT_INVALIDATED_DEVICE';
 	end if;
 	if not exists (
 		select 1 from public.push_delivery_attempts attempt
@@ -253,11 +272,11 @@ begin
 			v_business_id, v_appointment.id, v_subscription_id, 'test', repeat('b', 64),
 			statement_timestamp() + interval '5 minutes'
 		);
-		raise exception 'TEST_EXPECTED_REVOKED_PUSH_REJECTION';
+		raise exception 'TEST_EXPECTED_DETACHED_PUSH_REJECTION';
 	exception when others then
 		v_error := sqlerrm;
-		if v_error <> 'PUSH_SUBSCRIPTION_REVOKED' then
-			raise exception 'TEST_WRONG_REVOKED_PUSH_ERROR_%', v_error;
+		if v_error <> 'PUSH_SUBSCRIPTION_DETACHED' then
+			raise exception 'TEST_WRONG_DETACHED_PUSH_ERROR_%', v_error;
 		end if;
 	end;
 	if exists (
@@ -358,7 +377,8 @@ begin
 		and dispatch.status = 'sending';
 	update public.push_subscriptions subscription
 	set
-		revoked_at = null,
+		detached_at = null,
+		detached_reason = null,
 		push_24h_claimed_at = statement_timestamp(),
 		push_24h_sent_at = null
 	where subscription.id = v_subscription_id;
@@ -378,7 +398,10 @@ begin
 		end if;
 	end;
 	update public.push_subscriptions subscription
-	set revoked_at = statement_timestamp(), push_24h_claimed_at = null
+	set
+		detached_at = statement_timestamp(),
+		detached_reason = 'patient_reassigned',
+		push_24h_claimed_at = null
 	where subscription.id = v_subscription_id;
 
 	update public.appointment_google_calendar_events event_link

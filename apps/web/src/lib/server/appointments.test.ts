@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+	APPOINTMENT_STATUSES,
 	assertCanTransitionAppointment,
 	createJointAppointment,
 	createManualAppointment,
@@ -92,26 +93,22 @@ describe('appointment transitions', () => {
 		).toThrow('APPOINTMENT_TERMINAL_STATUS');
 	});
 
-	it('blocks attendance before start and no-show before end', () => {
+	it('el paso natural del tiempo no cierra ni agrega un estado al turno', () => {
+		expect(APPOINTMENT_STATUSES).toEqual([
+			'reserved',
+			'confirmed',
+			'cancelled',
+			'reschedule_requested'
+		]);
 		expect(() =>
 			assertCanTransitionAppointment({
 				currentStatus: 'reserved',
-				nextStatus: 'attended',
-				startsAt: new Date('2026-05-13T13:00:00.000Z'),
-				endsAt: new Date('2026-05-13T14:00:00.000Z'),
+				nextStatus: 'reschedule_requested',
+				startsAt: pastStart,
+				endsAt: pastEnd,
 				now
 			})
-		).toThrow('APPOINTMENT_CANNOT_ATTEND_IN_FUTURE');
-
-		expect(() =>
-			assertCanTransitionAppointment({
-				currentStatus: 'reserved',
-				nextStatus: 'no_show',
-				startsAt: new Date('2026-05-13T11:30:00.000Z'),
-				endsAt: new Date('2026-05-13T12:30:00.000Z'),
-				now
-			})
-		).toThrow('APPOINTMENT_CANNOT_NO_SHOW_BEFORE_END');
+		).not.toThrow();
 	});
 });
 

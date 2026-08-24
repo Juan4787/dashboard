@@ -1,11 +1,10 @@
 import { env } from '$env/dynamic/private';
 import { demoBusinessContext } from '$lib/server/business';
-import { getHumanAppointmentErrorMessage, updateProfessionalAppointmentStatus } from '$lib/server/appointments';
 import { getOdontoContext } from '$lib/server/odonto-context';
 import { zonedDateTimeToUtc } from '$lib/server/availability';
 import { ACTIVE_APPOINTMENT_STATUSES } from '$lib/utils/appointment-visibility';
-import { fail, redirect } from '@sveltejs/kit';
-import type { Actions, PageServerLoad } from './$types';
+import { redirect } from '@sveltejs/kit';
+import type { PageServerLoad } from './$types';
 
 const todayForTimezone = (timeZone: string) => {
 	const formatter = new Intl.DateTimeFormat('en-CA', {
@@ -91,37 +90,4 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 		upcomingAppointments: upcomingAppointments ?? [],
 		demo: false
 	};
-};
-
-export const actions: Actions = {
-	update_status: async ({ request, locals, fetch, cookies }) => {
-		if (!locals.auth) throw redirect(303, '/login');
-		if (env.DEMO_MODE === 'true') return fail(400, { message: 'No disponible en modo demo.' });
-		const { supabase, business } = await getOdontoContext({ locals, fetch, cookies });
-
-		const form = await request.formData();
-		const appointmentId = String(form.get('appointment_id') ?? '').trim();
-		const status = String(form.get('status') ?? '').trim();
-		if (!appointmentId || (status !== 'attended' && status !== 'no_show')) {
-			return fail(400, { message: 'El profesional solo puede marcar asistencia o ausencia.' });
-		}
-		if (!business.access.allowedCapabilities.canEditAppointment) {
-			return fail(403, {
-				message: 'Tu acceso a Cita Suite venció. Activá tu suscripción para volver a usar la plataforma.'
-			});
-		}
-
-		try {
-			await updateProfessionalAppointmentStatus(supabase, {
-				businessId: business.business.id,
-				appointmentId,
-				status
-			});
-		} catch (error: any) {
-			console.error('Error actualizando turno profesional', error);
-			return fail(400, { message: getHumanAppointmentErrorMessage(error) });
-		}
-
-		return { success: true, message: 'Turno actualizado.' };
-	}
 };

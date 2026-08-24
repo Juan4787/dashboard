@@ -6,6 +6,7 @@ const envState = vi.hoisted(() => ({
 const mocks = vi.hoisted(() => ({
 	createSupabaseAdminClient: vi.fn(),
 	sendDuePushReminders: vi.fn(),
+	sendDueGoogleReviewRequests: vi.fn(),
 	processGoogleCalendarSyncJobs: vi.fn()
 }));
 
@@ -15,6 +16,9 @@ vi.mock('$lib/server/supabase', () => ({
 }));
 vi.mock('$lib/server/push', () => ({
 	sendDuePushReminders: mocks.sendDuePushReminders
+}));
+vi.mock('$lib/server/google-reviews', () => ({
+	sendDueGoogleReviewRequests: mocks.sendDueGoogleReviewRequests
 }));
 vi.mock('$lib/server/google-calendar', () => ({
 	processGoogleCalendarSyncJobs: mocks.processGoogleCalendarSyncJobs
@@ -39,6 +43,7 @@ beforeEach(() => {
 	envState.privateEnv.INTERNAL_JOB_SECRET = 'job-secret';
 	mocks.createSupabaseAdminClient.mockResolvedValue({ admin: true });
 	mocks.sendDuePushReminders.mockResolvedValue({ claimed: 1, sent: 1 });
+	mocks.sendDueGoogleReviewRequests.mockResolvedValue({ claimed: 1, sent: 1 });
 	mocks.processGoogleCalendarSyncJobs.mockResolvedValue({
 		configured: true,
 		claimed: 1,
@@ -54,15 +59,17 @@ describe('POST /internal/jobs/send-push-reminders', () => {
 		const response = await callPost(JOB_URL, 'incorrecto');
 		expect(response.status).toBe(401);
 		expect(mocks.sendDuePushReminders).not.toHaveBeenCalled();
+		expect(mocks.sendDueGoogleReviewRequests).not.toHaveBeenCalled();
 		expect(mocks.processGoogleCalendarSyncJobs).not.toHaveBeenCalled();
 	});
 
-	it('procesa push y calendario con límites independientes', async () => {
-		const response = await callPost(`${JOB_URL}?limit=40&calendar_limit=12`);
+	it('procesa recordatorios, reseñas y calendario con límites independientes', async () => {
+		const response = await callPost(`${JOB_URL}?limit=40&review_limit=9&calendar_limit=12`);
 		expect(response.status).toBe(200);
 		await expect(response.json()).resolves.toMatchObject({
 			ok: true,
 			push: { claimed: 1, sent: 1 },
+			googleReviews: { claimed: 1, sent: 1 },
 			googleCalendar: { claimed: 1, active: 1 }
 		});
 		expect(mocks.sendDuePushReminders).toHaveBeenCalledWith(
@@ -74,6 +81,10 @@ describe('POST /internal/jobs/send-push-reminders', () => {
 			expect.any(Function),
 			{ limit: 12 }
 		);
+		expect(mocks.sendDueGoogleReviewRequests).toHaveBeenCalledWith(
+			{ admin: true },
+			{ limit: 9 }
+		);
 	});
 
 	it('continúa con calendario aunque push falle', async () => {
@@ -81,9 +92,24 @@ describe('POST /internal/jobs/send-push-reminders', () => {
 		const response = await callPost();
 		expect(response.status).toBe(500);
 		expect(mocks.processGoogleCalendarSyncJobs).toHaveBeenCalledOnce();
+		expect(mocks.sendDueGoogleReviewRequests).toHaveBeenCalledOnce();
 		await expect(response.json()).resolves.toMatchObject({
 			ok: false,
 			push: null,
+			googleCalendar: { active: 1 }
+		});
+	});
+
+	it('continúa las otras colas aunque falle la solicitud de reseña', async () => {
+		mocks.sendDueGoogleReviewRequests.mockRejectedValue(new Error('review temporal'));
+		const response = await callPost();
+		expect(response.status).toBe(500);
+		expect(mocks.sendDuePushReminders).toHaveBeenCalledOnce();
+		expect(mocks.processGoogleCalendarSyncJobs).toHaveBeenCalledOnce();
+		await expect(response.json()).resolves.toMatchObject({
+			ok: false,
+			push: { sent: 1 },
+			googleReviews: null,
 			googleCalendar: { active: 1 }
 		});
 	});

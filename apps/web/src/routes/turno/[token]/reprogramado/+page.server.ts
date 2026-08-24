@@ -6,9 +6,8 @@
 import { env } from '$env/dynamic/private';
 import { createSupabaseAdminClient } from '$lib/server/supabase';
 import { demoPublicAppointment, loadPublicAppointmentByToken } from '$lib/server/public-appointments';
+import { isActiveAppointmentStatus } from '$lib/utils/appointment-visibility';
 import type { PageServerLoad } from './$types';
-
-const ACTIVE_STATUSES = ['reserved', 'confirmed', 'reschedule_requested'];
 
 export const load: PageServerLoad = async ({ params, fetch, setHeaders }) => {
 	setHeaders({ 'cache-control': 'no-store' });
@@ -23,7 +22,7 @@ export const load: PageServerLoad = async ({ params, fetch, setHeaders }) => {
 		const now = new Date();
 		const appointment = await loadPublicAppointmentByToken(supabase, params.token, now);
 		const active = Boolean(
-			appointment && !appointment.is_past && ACTIVE_STATUSES.includes(appointment.status)
+			appointment && !appointment.is_past && isActiveAppointmentStatus(appointment.status)
 		);
 		return { appointment, active, demo: false };
 	} catch (error) {

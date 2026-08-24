@@ -410,7 +410,6 @@ export type Database = {
       }
       appointments: {
         Row: {
-          attended_at: string | null
           blocking_ends_at: string
           blocking_starts_at: string
           break_minutes_snapshot: number
@@ -438,11 +437,10 @@ export type Database = {
           id: string
           ignore_break: boolean
           internal_note: string | null
-          no_show_at: string | null
-		  patient_id: string
-		  patient_name_at_booking: string
-		  patient_phone_raw_at_booking: string | null
-		  patient_phone_e164_at_booking: string | null
+          patient_id: string
+          patient_name_at_booking: string
+          patient_phone_e164_at_booking: string | null
+          patient_phone_raw_at_booking: string | null
           patient_resolution_strategy: string
           phone_communication_status_at_booking: string
           phone_warning_acknowledged_at: string | null
@@ -467,7 +465,6 @@ export type Database = {
           whatsapp_reminder_opened_by: string | null
         }
         Insert: {
-          attended_at?: string | null
           blocking_ends_at: string
           blocking_starts_at: string
           break_minutes_snapshot?: number
@@ -495,11 +492,10 @@ export type Database = {
           id?: string
           ignore_break?: boolean
           internal_note?: string | null
-          no_show_at?: string | null
-		  patient_id: string
-		  patient_name_at_booking: string
-		  patient_phone_raw_at_booking?: string | null
-		  patient_phone_e164_at_booking?: string | null
+          patient_id: string
+          patient_name_at_booking: string
+          patient_phone_e164_at_booking?: string | null
+          patient_phone_raw_at_booking?: string | null
           patient_resolution_strategy?: string
           phone_communication_status_at_booking?: string
           phone_warning_acknowledged_at?: string | null
@@ -524,7 +520,6 @@ export type Database = {
           whatsapp_reminder_opened_by?: string | null
         }
         Update: {
-          attended_at?: string | null
           blocking_ends_at?: string
           blocking_starts_at?: string
           break_minutes_snapshot?: number
@@ -552,11 +547,10 @@ export type Database = {
           id?: string
           ignore_break?: boolean
           internal_note?: string | null
-          no_show_at?: string | null
-		  patient_id?: string
-		  patient_name_at_booking?: string
-		  patient_phone_raw_at_booking?: string | null
-		  patient_phone_e164_at_booking?: string | null
+          patient_id?: string
+          patient_name_at_booking?: string
+          patient_phone_e164_at_booking?: string | null
+          patient_phone_raw_at_booking?: string | null
           patient_resolution_strategy?: string
           phone_communication_status_at_booking?: string
           phone_warning_acknowledged_at?: string | null
@@ -1356,6 +1350,204 @@ export type Database = {
           },
         ]
       }
+      google_review_patient_delivery_state: {
+        Row: {
+          active_request_id: string | null
+          business_id: string
+          claim_expires_at: string | null
+          created_at: string
+          last_sent_at: string | null
+          patient_id: string
+          updated_at: string
+        }
+        Insert: {
+          active_request_id?: string | null
+          business_id: string
+          claim_expires_at?: string | null
+          created_at?: string
+          last_sent_at?: string | null
+          patient_id: string
+          updated_at?: string
+        }
+        Update: {
+          active_request_id?: string | null
+          business_id?: string
+          claim_expires_at?: string | null
+          created_at?: string
+          last_sent_at?: string | null
+          patient_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "google_review_patient_delivery_stat_business_id_patient_id_fkey"
+            columns: ["business_id", "patient_id"]
+            isOneToOne: true
+            referencedRelation: "patients"
+            referencedColumns: ["business_id", "id"]
+          },
+        ]
+      }
+      google_review_requests: {
+        Row: {
+          appointment_ends_at: string
+          appointment_id: string
+          attempt_count: number
+          business_id: string
+          claim_expires_at: string | null
+          claim_token: string | null
+          claimed_at: string | null
+          click_token_hash: string | null
+          clicked_at: string | null
+          created_at: string
+          id: string
+          last_error_kind: string | null
+          next_attempt_at: string | null
+          notification_action_label_snapshot: string | null
+          notification_body_snapshot: string | null
+          notification_title_snapshot: string | null
+          patient_id: string
+          prepared_at: string | null
+          push_delivery_id: string | null
+          push_service_status: number | null
+          push_subscription_id: string | null
+          review_url_snapshot: string | null
+          scheduled_for: string
+          sent_at: string | null
+          status: string
+          status_reason: string | null
+          updated_at: string
+        }
+        Insert: {
+          appointment_ends_at: string
+          appointment_id: string
+          attempt_count?: number
+          business_id: string
+          claim_expires_at?: string | null
+          claim_token?: string | null
+          claimed_at?: string | null
+          click_token_hash?: string | null
+          clicked_at?: string | null
+          created_at?: string
+          id?: string
+          last_error_kind?: string | null
+          next_attempt_at?: string | null
+          notification_action_label_snapshot?: string | null
+          notification_body_snapshot?: string | null
+          notification_title_snapshot?: string | null
+          patient_id: string
+          prepared_at?: string | null
+          push_delivery_id?: string | null
+          push_service_status?: number | null
+          push_subscription_id?: string | null
+          review_url_snapshot?: string | null
+          scheduled_for: string
+          sent_at?: string | null
+          status?: string
+          status_reason?: string | null
+          updated_at?: string
+        }
+        Update: {
+          appointment_ends_at?: string
+          appointment_id?: string
+          attempt_count?: number
+          business_id?: string
+          claim_expires_at?: string | null
+          claim_token?: string | null
+          claimed_at?: string | null
+          click_token_hash?: string | null
+          clicked_at?: string | null
+          created_at?: string
+          id?: string
+          last_error_kind?: string | null
+          next_attempt_at?: string | null
+          notification_action_label_snapshot?: string | null
+          notification_body_snapshot?: string | null
+          notification_title_snapshot?: string | null
+          patient_id?: string
+          prepared_at?: string | null
+          push_delivery_id?: string | null
+          push_service_status?: number | null
+          push_subscription_id?: string | null
+          review_url_snapshot?: string | null
+          scheduled_for?: string
+          sent_at?: string | null
+          status?: string
+          status_reason?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "google_review_requests_business_id_appointment_id_fkey"
+            columns: ["business_id", "appointment_id"]
+            isOneToOne: false
+            referencedRelation: "appointments"
+            referencedColumns: ["business_id", "id"]
+          },
+          {
+            foreignKeyName: "google_review_requests_business_id_patient_id_fkey"
+            columns: ["business_id", "patient_id"]
+            isOneToOne: false
+            referencedRelation: "patients"
+            referencedColumns: ["business_id", "id"]
+          },
+          {
+            foreignKeyName: "google_review_requests_push_delivery_id_fkey"
+            columns: ["push_delivery_id"]
+            isOneToOne: false
+            referencedRelation: "push_delivery_attempts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "google_review_requests_push_subscription_id_fkey"
+            columns: ["push_subscription_id"]
+            isOneToOne: false
+            referencedRelation: "push_subscriptions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      google_review_settings: {
+        Row: {
+          business_id: string
+          created_at: string
+          enabled: boolean
+          notification_action_label: string
+          notification_body: string
+          notification_title: string
+          review_url: string | null
+          updated_at: string
+        }
+        Insert: {
+          business_id: string
+          created_at?: string
+          enabled?: boolean
+          notification_action_label?: string
+          notification_body?: string
+          notification_title?: string
+          review_url?: string | null
+          updated_at?: string
+        }
+        Update: {
+          business_id?: string
+          created_at?: string
+          enabled?: boolean
+          notification_action_label?: string
+          notification_body?: string
+          notification_title?: string
+          review_url?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "google_review_settings_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: true
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       inbound_messages: {
         Row: {
           business_id: string
@@ -1847,48 +2039,6 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "patients"
             referencedColumns: ["id"]
-          },
-        ]
-      }
-      patient_drive_folders: {
-        Row: {
-          business_id: string
-          created_at: string
-          drive_folder_id: string
-          patient_id: string
-          updated_at: string
-          user_id: string
-        }
-        Insert: {
-          business_id: string
-          created_at?: string
-          drive_folder_id: string
-          patient_id: string
-          updated_at?: string
-          user_id: string
-        }
-        Update: {
-          business_id?: string
-          created_at?: string
-          drive_folder_id?: string
-          patient_id?: string
-          updated_at?: string
-          user_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "patient_drive_folders_business_id_fkey"
-            columns: ["business_id"]
-            isOneToOne: false
-            referencedRelation: "businesses"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "patient_drive_folders_business_id_patient_id_fkey"
-            columns: ["business_id", "patient_id"]
-            isOneToOne: false
-            referencedRelation: "patients"
-            referencedColumns: ["business_id", "id"]
           },
         ]
       }
@@ -2431,6 +2581,7 @@ export type Database = {
           expires_at: string
           failed_at: string | null
           failure_kind: string | null
+          google_review_request_id: string | null
           id: string
           kind: string
           push_service_status: number | null
@@ -2453,6 +2604,7 @@ export type Database = {
           expires_at: string
           failed_at?: string | null
           failure_kind?: string | null
+          google_review_request_id?: string | null
           id?: string
           kind: string
           push_service_status?: number | null
@@ -2475,6 +2627,7 @@ export type Database = {
           expires_at?: string
           failed_at?: string | null
           failure_kind?: string | null
+          google_review_request_id?: string | null
           id?: string
           kind?: string
           push_service_status?: number | null
@@ -2503,6 +2656,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "push_delivery_attempts_google_review_request_id_fkey"
+            columns: ["google_review_request_id"]
+            isOneToOne: false
+            referencedRelation: "google_review_requests"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "push_delivery_attempts_subscription_id_fkey"
             columns: ["subscription_id"]
             isOneToOne: false
@@ -2511,60 +2671,96 @@ export type Database = {
           },
         ]
       }
+      push_devices: {
+        Row: {
+          auth: string
+          created_at: string
+          endpoint: string
+          id: string
+          last_notification_clicked_at: string | null
+          last_seen_at: string
+          last_test_confirmed_at: string | null
+          p256dh: string
+          provider_gone_at: string | null
+          updated_at: string
+          user_agent: string | null
+          verification_required_at: string | null
+        }
+        Insert: {
+          auth: string
+          created_at?: string
+          endpoint: string
+          id?: string
+          last_notification_clicked_at?: string | null
+          last_seen_at?: string
+          last_test_confirmed_at?: string | null
+          p256dh: string
+          provider_gone_at?: string | null
+          updated_at?: string
+          user_agent?: string | null
+          verification_required_at?: string | null
+        }
+        Update: {
+          auth?: string
+          created_at?: string
+          endpoint?: string
+          id?: string
+          last_notification_clicked_at?: string | null
+          last_seen_at?: string
+          last_test_confirmed_at?: string | null
+          p256dh?: string
+          provider_gone_at?: string | null
+          updated_at?: string
+          user_agent?: string | null
+          verification_required_at?: string | null
+        }
+        Relationships: []
+      }
       push_subscriptions: {
         Row: {
           appointment_id: string
-          auth: string
           business_id: string
           created_at: string
-          endpoint: string
+          detached_at: string | null
+          detached_reason: string | null
+          device_id: string
           failed_count: number
           id: string
-          p256dh: string
           push_24h_claimed_at: string | null
           push_24h_sent_at: string | null
           push_2h_claimed_at: string | null
           push_2h_sent_at: string | null
-          revoked_at: string | null
           updated_at: string
-          user_agent: string | null
-          verified_at: string | null
         }
         Insert: {
           appointment_id: string
-          auth: string
           business_id: string
           created_at?: string
-          endpoint: string
+          detached_at?: string | null
+          detached_reason?: string | null
+          device_id: string
           failed_count?: number
           id?: string
-          p256dh: string
           push_24h_claimed_at?: string | null
           push_24h_sent_at?: string | null
           push_2h_claimed_at?: string | null
           push_2h_sent_at?: string | null
-          revoked_at?: string | null
           updated_at?: string
-          user_agent?: string | null
-          verified_at?: string | null
         }
         Update: {
           appointment_id?: string
-          auth?: string
           business_id?: string
           created_at?: string
-          endpoint?: string
+          detached_at?: string | null
+          detached_reason?: string | null
+          device_id?: string
           failed_count?: number
           id?: string
-          p256dh?: string
           push_24h_claimed_at?: string | null
           push_24h_sent_at?: string | null
           push_2h_claimed_at?: string | null
           push_2h_sent_at?: string | null
-          revoked_at?: string | null
           updated_at?: string
-          user_agent?: string | null
-          verified_at?: string | null
         }
         Relationships: [
           {
@@ -2579,6 +2775,13 @@ export type Database = {
             columns: ["business_id"]
             isOneToOne: false
             referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "push_subscriptions_device_id_fkey"
+            columns: ["device_id"]
+            isOneToOne: false
+            referencedRelation: "push_devices"
             referencedColumns: ["id"]
           },
         ]
@@ -2822,6 +3025,23 @@ export type Database = {
         Args: { target_invite_id: string }
         Returns: undefined
       }
+      claim_due_google_review_requests: {
+        Args: { claim_limit?: number; claim_now: string }
+        Returns: {
+          appointment_ends_at: string
+          appointment_id: string
+          auth: string
+          business_id: string
+          claim_token: string
+          confirmation_token: string
+          endpoint: string
+          p256dh: string
+          patient_id: string
+          request_id: string
+          scheduled_for: string
+          subscription_id: string
+        }[]
+      }
       claim_due_push_reminders: {
         Args: { claim_limit?: number; claim_now: string }
         Returns: {
@@ -2871,6 +3091,8 @@ export type Database = {
           sent_at: string | null
           skipped_at: string | null
           status: string
+          superseded_at: string | null
+          superseded_reason: string | null
           template_id: string | null
           template_variables: Json
           to_phone_e164: string
@@ -2900,6 +3122,16 @@ export type Database = {
           p_synced_sequence: number
         }
         Returns: string
+      }
+      complete_google_review_request: {
+        Args: {
+          complete_time?: string
+          target_claim_token: string
+          target_push_delivery_id: string
+          target_push_service_status: number
+          target_request_id: string
+        }
+        Returns: boolean
       }
       complete_patient_radiograph_upload: {
         Args: {
@@ -2973,11 +3205,11 @@ export type Database = {
           p_patient_name: string
           p_patient_phone_e164: string
           p_patient_phone_raw: string
-		  p_phone_communication_status: string
-		  p_phone_warning_acknowledged: boolean
-		  p_professional_ids: string[]
-		  p_replay_only?: boolean
-		  p_service_id: string
+          p_phone_communication_status: string
+          p_phone_warning_acknowledged: boolean
+          p_professional_ids: string[]
+          p_replay_only?: boolean
+          p_service_id: string
           p_source: string
           p_starts_at: string
           p_update_existing_phone: boolean
@@ -3007,6 +3239,19 @@ export type Database = {
           p_teeth?: string
         }
         Returns: string
+      }
+      create_clinical_entry_with_result_safely: {
+        Args: {
+          p_amount?: number
+          p_business_id: string
+          p_created_at?: string
+          p_description: string
+          p_entry_type: string
+          p_internal_note?: string
+          p_patient_id: string
+          p_teeth?: string
+        }
+        Returns: Json
       }
       create_joint_appointment: {
         Args: {
@@ -3257,6 +3502,10 @@ export type Database = {
           thumbnail_path: string
         }[]
       }
+      list_upcoming_active_appointments_snapshot: {
+        Args: { p_business_id: string; p_limit?: number }
+        Returns: Json
+      }
       list_user_business_contexts: {
         Args: never
         Returns: {
@@ -3265,6 +3514,10 @@ export type Database = {
           role: string
           subscription: Json
         }[]
+      }
+      mark_push_device_gone: {
+        Args: { gone_time?: string; target_endpoint: string }
+        Returns: number
       }
       normalize_patient_search_digits: {
         Args: { p_value: string }
@@ -3292,6 +3545,21 @@ export type Database = {
           total_count: number
         }[]
       }
+      prepare_google_review_request_delivery: {
+        Args: {
+          prepare_time?: string
+          target_claim_token: string
+          target_click_token_hash: string
+          target_request_id: string
+          target_subscription_id: string
+        }
+        Returns: {
+          notification_action_label: string
+          notification_body: string
+          notification_title: string
+          review_url: string
+        }[]
+      }
       professional_break_minutes_at: {
         Args: {
           target_business_id: string
@@ -3299,14 +3567,6 @@ export type Database = {
           target_starts_at: string
         }
         Returns: number
-      }
-      professional_update_appointment_status: {
-        Args: {
-          target_appointment_id: string
-          target_business_id: string
-          target_status: string
-        }
-        Returns: undefined
       }
       reassign_appointment_patient_safely: {
         Args: {
@@ -3319,11 +3579,11 @@ export type Database = {
         Returns: {
           appointment_id: string
           cancelled_dispatches: number
+          detached_push_subscriptions: number
           invalidated_calendar_attempts: number
           new_patient_id: string
           old_patient_id: string
           queued_calendar_deletions: number
-          revoked_push_subscriptions: number
           superseded_dispatches: number
           superseded_push_attempts: number
         }[]
@@ -3331,6 +3591,12 @@ export type Database = {
       record_calendar_action: {
         Args: { p_action: string; p_appointment_id: string; p_provider: string }
         Returns: undefined
+      }
+      record_google_review_click: {
+        Args: { click_time?: string; target_click_token_hash: string }
+        Returns: {
+          review_url: string
+        }[]
       }
       record_push_notification_click: {
         Args: {
@@ -3347,6 +3613,19 @@ export type Database = {
           feedback_visible: boolean
           target_appointment_id: string
           target_delivery_id: string
+        }
+        Returns: boolean
+      }
+      recover_expired_google_review_request_claims: {
+        Args: { recover_time?: string }
+        Returns: number
+      }
+      release_google_review_request: {
+        Args: {
+          release_time?: string
+          target_claim_token: string
+          target_error_kind: string
+          target_request_id: string
         }
         Returns: boolean
       }
@@ -3408,6 +3687,29 @@ export type Database = {
           support_user_id: string
           updated_at: string
         }[]
+      }
+      save_appointment_push_subscription: {
+        Args: {
+          save_time?: string
+          target_appointment_id: string
+          target_auth: string
+          target_business_id: string
+          target_endpoint: string
+          target_p256dh: string
+          target_user_agent: string
+        }
+        Returns: {
+          device_id: string
+          endpoint: string
+          provider_gone: boolean
+          subscription_id: string
+          test_suppressed: boolean
+          verification_confirmed_at: string
+        }[]
+      }
+      search_upcoming_active_appointments: {
+        Args: { p_business_id: string; p_limit?: number; p_query: string }
+        Returns: Json
       }
       set_patient_archive_state_safely: {
         Args: {

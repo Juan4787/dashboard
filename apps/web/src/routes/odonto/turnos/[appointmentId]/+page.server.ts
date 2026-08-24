@@ -5,8 +5,7 @@ import {
 	getHumanAppointmentErrorMessage,
 	isAppointmentStatus,
 	rescheduleAppointment,
-	updateAppointmentStatus,
-	updateProfessionalAppointmentStatus
+	updateAppointmentStatus
 } from '$lib/server/appointments';
 import { getOdontoContext } from '$lib/server/odonto-context';
 import { createSupabaseAdminClient } from '$lib/server/supabase';
@@ -22,6 +21,7 @@ import { publicRescheduleUrl } from '$lib/server/messaging';
 import { shouldOfferCreatedAppointmentActivation } from '$lib/server/agenda-navigation';
 import { normalizeArgentineWhatsAppPhone } from '$lib/server/phone';
 import { classifyUserAgent } from '$lib/device';
+import { isActiveAppointmentStatus } from '$lib/utils/appointment-visibility';
 import { error as kitError, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -46,12 +46,6 @@ const todayForTimezone = (timeZone: string) => {
 	const parts = Object.fromEntries(formatter.formatToParts(new Date()).map((part) => [part.type, part.value]));
 	return `${parts.year}-${parts.month}-${parts.day}`;
 };
-
-const canUseProfessionalStatusAction = (
-	role: string,
-	status: string
-): status is 'attended' | 'no_show' =>
-	role === 'professional' && (status === 'attended' || status === 'no_show');
 
 export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url, request }) => {
 	if (!locals.auth) throw redirect(303, '/login');
@@ -91,7 +85,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 	const { data, error } = await supabase
 		.from('appointments')
 		.select(
-			'id, business_id, patient_id, service_id, professional_id, starts_at, ends_at, blocking_starts_at, blocking_ends_at, status, source, confirmation_token, service_name_snapshot, professional_name_snapshot, duration_minutes_snapshot, buffer_before_minutes_snapshot, buffer_after_minutes_snapshot, break_minutes_snapshot, ignore_break, confirmed_at, cancelled_at, cancelled_reason, reschedule_requested_at, attended_at, no_show_at, internal_note, phone_communication_status_at_booking, phone_warning_acknowledged_at, created_by_user_id, updated_by_user_id, cancelled_by_user_id, created_at, updated_at, patients(id, full_name, phone_e164, email, blocked)'
+			'id, business_id, patient_id, service_id, professional_id, starts_at, ends_at, blocking_starts_at, blocking_ends_at, status, source, confirmation_token, service_name_snapshot, professional_name_snapshot, duration_minutes_snapshot, buffer_before_minutes_snapshot, buffer_after_minutes_snapshot, break_minutes_snapshot, ignore_break, confirmed_at, cancelled_at, cancelled_reason, reschedule_requested_at, internal_note, phone_communication_status_at_booking, phone_warning_acknowledged_at, created_by_user_id, updated_by_user_id, cancelled_by_user_id, created_at, updated_at, patients(id, full_name, phone_e164, email, blocked)'
 		)
 		.eq('business_id', business.business.id)
 		.eq('id', params.appointmentId)
@@ -158,7 +152,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 	const patient = (data as any).patients;
 	const phone = normalizeArgentineWhatsAppPhone(patient?.phone_e164);
 	const token = (data as any).confirmation_token ? String((data as any).confirmation_token) : null;
-	const canNotifyReschedule = ['reserved', 'confirmed', 'reschedule_requested'].includes(data.status);
+	const canNotifyReschedule = isActiveAppointmentStatus(data.status);
 	let rescheduleWhatsAppUrl: string | null = null;
 	let rescheduleWhatsAppWebUrl: string | null = null;
 	let reschedulePublicUrl: string | null = null;
@@ -245,24 +239,18 @@ export const actions: Actions = {
 			return fail(400, { message: 'La confirmación queda reservada al paciente desde su enlace.' });
 		}
 
+		if (!business.canOperate) {
+			return fail(403, { message: 'No tenés permiso para modificar este turno.' });
+		}
+
 		try {
-			if (business.canOperate) {
-				await updateAppointmentStatus(supabase, {
-					businessId: business.business.id,
-					appointmentId: params.appointmentId,
-					status,
-					userId,
-					reason: String(form.get('reason') ?? '').trim() || null
-				});
-			} else if (canUseProfessionalStatusAction(business.role, status)) {
-				await updateProfessionalAppointmentStatus(supabase, {
-					businessId: business.business.id,
-					appointmentId: params.appointmentId,
-					status
-				});
-			} else {
-				return fail(403, { message: 'No tenés permiso para modificar este turno.' });
-			}
+			await updateAppointmentStatus(supabase, {
+				businessId: business.business.id,
+				appointmentId: params.appointmentId,
+				status,
+				userId,
+				reason: String(form.get('reason') ?? '').trim() || null
+			});
 		} catch (error: any) {
 			console.error('Error actualizando turno', error);
 			return fail(400, { message: getHumanAppointmentErrorMessage(error) });

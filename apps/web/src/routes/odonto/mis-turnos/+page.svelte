@@ -16,7 +16,7 @@
 		patients?: { id: string; full_name: string; phone_e164: string | null } | null;
 	};
 
-	let { data, form } = $props<{
+	let { data } = $props<{
 		data: {
 			professionalLinks: ProfessionalLink[];
 			selectedProfessionalId: string;
@@ -24,25 +24,20 @@
 			upcomingAppointments: Appointment[];
 			demo: boolean;
 		};
-		form?: { success?: boolean; message?: string };
 	}>();
 
 	const statusLabels: Record<string, string> = {
 		reserved: 'Reservado',
 		confirmed: 'Confirmado',
 		cancelled: 'Cancelado',
-		reschedule_requested: 'Reprogramar',
-		attended: 'Asistió',
-		no_show: 'No asistió'
+		reschedule_requested: 'Reprogramar'
 	};
 
 	const statusTone: Record<string, string> = {
 		reserved: 'ux-badge',
 		confirmed: 'ux-badge ux-badge-success',
 		cancelled: 'ux-badge ux-badge-danger',
-		reschedule_requested: 'ux-badge ux-badge-warning',
-		attended: 'ux-badge ux-badge-success',
-		no_show: 'ux-badge ux-badge-danger'
+		reschedule_requested: 'ux-badge ux-badge-warning'
 	};
 
 	const timeOnly = (value: string) =>
@@ -76,10 +71,6 @@
 			</div>
 		</div>
 	</div>
-
-	{#if form?.message}
-		<p class={form.success ? 'ux-alert ux-alert-success' : 'ux-alert'}>{form.message}</p>
-	{/if}
 
 	{#if data.professionalLinks.length === 0}
 		<div class="ux-empty">Tu usuario no está asociado a ningún profesional.</div>

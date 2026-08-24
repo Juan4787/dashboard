@@ -86,7 +86,7 @@ export const GET: RequestHandler = async ({ params, url, locals, fetch, cookies 
 			{ status: 404 }
 		);
 	}
-	if (['cancelled', 'attended', 'no_show'].includes(appointment.status)) {
+	if (appointment.status === 'cancelled') {
 		return json({ slots: [] });
 	}
 

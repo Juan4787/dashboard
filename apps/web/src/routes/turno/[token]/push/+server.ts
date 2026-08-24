@@ -17,8 +17,7 @@ import {
 	sendTestPushNotification
 } from '$lib/server/push';
 import type { RequestHandler } from './$types';
-
-const ACTIVE_STATUSES = ['reserved', 'confirmed', 'reschedule_requested'];
+import { isActiveAppointmentStatus } from '$lib/utils/appointment-visibility';
 
 export const POST: RequestHandler = async ({ params, request, fetch, setHeaders }) => {
 	setHeaders({ 'cache-control': 'no-store' });
@@ -35,7 +34,7 @@ export const POST: RequestHandler = async ({ params, request, fetch, setHeaders 
 		!appointment ||
 		!supabase ||
 		appointment.is_past ||
-		!ACTIVE_STATUSES.includes(appointment.status)
+		!isActiveAppointmentStatus(appointment.status)
 	) {
 		return json({ ok: false, message: 'El turno no admite recordatorios.' }, { status: 404 });
 	}
@@ -79,8 +78,21 @@ export const POST: RequestHandler = async ({ params, request, fetch, setHeaders 
 			payload,
 			request.headers.get('user-agent')
 		);
-		// Una suscripción que ya fue confirmada para este turno se reutiliza sin
-		// interrumpir ni volver a mandar la prueba.
+		// Un 404/410 previo es una razón técnica concreta. El permiso del navegador
+		// no se toca en el servidor: el cliente reemplaza esa suscripción y vuelve a
+		// asociar el endpoint sano al turno.
+		if (saved.providerGone) {
+			return json(
+				{
+					ok: false,
+					code: 'subscription_expired',
+					message: 'El teléfono rechazó la configuración anterior de avisos.'
+				},
+				{ status: 410 }
+			);
+		}
+		// La confirmación pertenece al dispositivo. Se reutiliza en este u otro
+		// turno sin volver a preguntar ni mandar otra prueba automáticamente.
 		if (saved.verifiedAt) {
 			return json({ ok: true, verified: true, delivery: null, verificationAvailable: true });
 		}

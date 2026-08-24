@@ -31,9 +31,7 @@
 		reserved: 'Reservado',
 		confirmed: 'Confirmado',
 		cancelled: 'Cancelado',
-		reschedule_requested: 'Reprogramar',
-		attended: 'Asistió',
-		no_show: 'No asistió'
+		reschedule_requested: 'Reprogramar'
 	};
 </script>
 

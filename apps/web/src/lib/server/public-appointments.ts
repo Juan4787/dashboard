@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { isActiveAppointmentStatus } from '$lib/utils/appointment-visibility';
 import { writeAuditLog } from './audit';
 import { resolveMapsUrl } from './location';
 import {
@@ -110,7 +111,6 @@ const appointmentSelect = `
 	appointment_professionals(professional_id)
 `;
 
-const activePublicStatuses = ['reserved', 'confirmed', 'reschedule_requested'] as const;
 const publicActionAttempt: Record<
 	PublicAppointmentAction,
 	'token_confirm' | 'token_cancel' | 'token_reschedule'
@@ -203,9 +203,6 @@ export const getPublicAppointmentMessage = (appointment: PublicAppointmentView |
 	if (appointment.status === 'reschedule_requested') {
 		return 'Recibimos tu pedido de reprogramación. El consultorio lo gestionará.';
 	}
-	if (appointment.status === 'attended' || appointment.status === 'no_show') {
-		return 'Este turno ya no admite cambios online.';
-	}
 	return 'Tu turno está reservado.';
 };
 
@@ -216,7 +213,7 @@ const assertCanApplyPublicAction = (
 	if (!appointment.business.is_active) throw new Error('PUBLIC_TOKEN_BUSINESS_DISABLED');
 	if (!appointment.public_actions_available) throw new Error('PUBLIC_TOKEN_COMMERCIAL_UNAVAILABLE');
 	if (appointment.is_past) throw new Error('PUBLIC_TOKEN_APPOINTMENT_PAST');
-	if (!activePublicStatuses.includes(appointment.status as any)) {
+	if (!isActiveAppointmentStatus(appointment.status)) {
 		throw new Error('PUBLIC_TOKEN_APPOINTMENT_CLOSED');
 	}
 	if (action === 'confirm' && appointment.status === 'confirmed') return;
