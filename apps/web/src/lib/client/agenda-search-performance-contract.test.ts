@@ -38,11 +38,10 @@ describe('agenda search performance contracts', () => {
 		expect(preloadEndpoint).toContain("rpc('list_upcoming_active_appointments_snapshot'");
 	});
 
-	it('keeps the live loading status inside the fixed query row', () => {
+	it('reconciles live results without a visual loading indicator', () => {
 		const agenda = readSource('../../routes/odonto/agenda/+page.svelte');
 
-		expect(agenda).toContain('flex h-5 min-w-0 items-center gap-2');
-		expect(agenda).toContain("{liveLoading ? 'Buscando…' : ''}");
+		expect(agenda).not.toContain('Buscando…');
 		expect(agenda).not.toContain('{#if liveActive && liveLoading}');
 	});
 });
