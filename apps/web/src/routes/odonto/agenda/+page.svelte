@@ -7,7 +7,8 @@
 		snapshotContainsRange,
 		type AvailabilitySnapshot
 	} from '$lib/availability/snapshot';
-	import { tick } from 'svelte';
+	import { filterAgendaAppointmentSnapshot } from '$lib/utils/agenda-search';
+	import { onDestroy, tick } from 'svelte';
 	import { slide } from 'svelte/transition';
 	import {
 		ACTIVE_APPOINTMENT_STATUSES,
@@ -25,7 +26,7 @@
 		source: string;
 		service_name_snapshot: string;
 		professional_name_snapshot: string;
-		internal_note: string | null;
+		internal_note?: string | null;
 		patients?: { full_name: string; phone_e164: string | null; dni?: string | null; email?: string | null } | null;
 	};
 	type AppointmentGroups = { upcoming: Appointment[]; past: Appointment[] };
@@ -186,16 +187,90 @@
 	};
 
 	// Buscador en vivo: independiente de los filtros, busca próximos turnos
-	// activos por nombre o teléfono a medida que se escribe.
+	// activos por nombre o teléfono a medida que se escribe. Al abrirlo se carga
+	// una instantánea compacta que no se muestra hasta que haya una consulta; la
+	// respuesta remota sigue siendo siempre la fuente definitiva.
+	const MAX_VISIBLE_LIVE_RESULTS = 60;
 	let searchInput = $state('');
 	let liveResults = $state<AppointmentGroups | null>(null);
+	let liveResolvedQuery = $state('');
 	let liveLoading = $state(false);
 	let liveError = $state('');
 	let liveRequest = 0;
 	let liveController: AbortController | null = null;
+	let liveSnapshot = $state<Appointment[] | null>(null);
+	let liveSnapshotLoading = false;
+	let liveSnapshotBusinessId = '';
+	let liveSnapshotRequest = 0;
+	let liveSnapshotController: AbortController | null = null;
 
 	const liveQuery = $derived(searchInput.trim());
 	const liveActive = $derived(liveQuery.length > 0);
+	const liveSnapshotGroups = $derived.by((): AppointmentGroups | null => {
+		if (!liveActive || liveSnapshot === null) return null;
+		return {
+			upcoming: filterAgendaAppointmentSnapshot(
+				liveSnapshot,
+				liveQuery,
+				MAX_VISIBLE_LIVE_RESULTS
+			),
+			past: []
+		};
+	});
+
+	const clearLiveSnapshot = () => {
+		liveSnapshotRequest += 1;
+		liveSnapshotController?.abort();
+		liveSnapshotController = null;
+		liveSnapshot = null;
+		liveSnapshotLoading = false;
+		liveSnapshotBusinessId = '';
+	};
+
+	const loadLiveSnapshot = async () => {
+		const businessId = String(data.context.business?.id ?? '').trim();
+		if (!businessId || data.demo) return;
+		if (liveSnapshotBusinessId === businessId && liveSnapshot !== null) return;
+		if (liveSnapshotLoading && liveSnapshotBusinessId === businessId) return;
+
+		const request = ++liveSnapshotRequest;
+		liveSnapshotController?.abort();
+		const controller = new AbortController();
+		liveSnapshotController = controller;
+		liveSnapshotLoading = true;
+		liveSnapshotBusinessId = businessId;
+		liveSnapshot = null;
+		try {
+			const response = await fetch('/odonto/agenda/buscar/precarga', {
+				headers: { accept: 'application/json' },
+				cache: 'no-store',
+				signal: controller.signal
+			});
+			const payload = await response.json().catch(() => ({}));
+			if (
+				request !== liveSnapshotRequest ||
+				businessId !== String(data.context.business?.id ?? '').trim()
+			) {
+				return;
+			}
+			if (!response.ok) return;
+			liveSnapshot = Array.isArray(payload?.appointments)
+				? payload.appointments.filter((appointment: Appointment) =>
+						isUpcomingActiveAppointment(appointment)
+					)
+				: [];
+		} catch (error) {
+			if ((error as Error)?.name !== 'AbortError' && request === liveSnapshotRequest) {
+				// La precarga es oportunista: la búsqueda remota normal sigue activa.
+				liveSnapshot = null;
+			}
+		} finally {
+			if (request === liveSnapshotRequest) {
+				liveSnapshotLoading = false;
+				if (liveSnapshotController === controller) liveSnapshotController = null;
+			}
+		}
+	};
 
 	const loadLiveResults = async (query: string, request: number) => {
 		const controller = new AbortController();
@@ -210,6 +285,7 @@
 			if (request !== liveRequest) return;
 			if (!response.ok) {
 				liveResults = { upcoming: [], past: [] };
+				liveResolvedQuery = query;
 				liveError = payload?.message ?? 'No se pudo buscar. Probá de nuevo.';
 				return;
 			}
@@ -221,10 +297,12 @@
 					: [],
 				past: []
 			};
+			liveResolvedQuery = query;
 		} catch (error) {
 			if ((error as Error)?.name === 'AbortError') return;
 			if (request !== liveRequest) return;
 			liveResults = { upcoming: [], past: [] };
+			liveResolvedQuery = query;
 			liveError = 'No se pudo buscar. Probá de nuevo.';
 		} finally {
 			if (request === liveRequest) {
@@ -239,10 +317,11 @@
 		const request = ++liveRequest;
 		liveController?.abort();
 		liveController = null;
+		liveResults = null;
+		liveResolvedQuery = '';
+		liveLoading = false;
+		liveError = '';
 		if (!query) {
-			liveResults = null;
-			liveLoading = false;
-			liveError = '';
 			return;
 		}
 		const timeout = window.setTimeout(() => void loadLiveResults(query, request), 120);
@@ -254,22 +333,29 @@
 
 	// Al navegar (botón "Buscar", flechas de día, "Hoy") mandan los filtros:
 	// se limpia el buscador y la lista vuelve a los resultados del servidor.
-	afterNavigate(() => {
+	afterNavigate(({ to }) => {
 		liveRequest += 1;
 		liveController?.abort();
 		liveController = null;
 		searchInput = '';
 		liveResults = null;
+		liveResolvedQuery = '';
 		liveLoading = false;
 		liveError = '';
+		clearLiveSnapshot();
+		if (showSearch && to?.url.pathname === '/odonto/agenda') void loadLiveSnapshot();
 	});
 
 	const upcomingOnly = (list: Appointment[]): AppointmentGroups => ({
 		upcoming: list.filter((appointment: Appointment) => isUpcomingActiveAppointment(appointment)),
 		past: []
 	});
+	const livePending = $derived(liveActive && liveResolvedQuery !== liveQuery);
 	const displayGroups = $derived.by((): AppointmentGroups | null => {
-		if (liveActive) return liveResults ?? { upcoming: [], past: [] };
+		if (liveActive) {
+			if (liveResolvedQuery === liveQuery && liveResults) return liveResults;
+			return liveSnapshotGroups ?? { upcoming: [], past: [] };
+		}
 		if (data.anyDay) return upcomingOnly(data.appointments);
 		return null;
 	});
@@ -277,7 +363,9 @@
 		displayGroups ? displayGroups.upcoming.length + displayGroups.past.length : data.appointments.length
 	);
 	const resultLabel = $derived(
-		liveActive && liveResults === null ? '…' : `${visibleCount} ${visibleCount === 1 ? 'turno' : 'turnos'}`
+		liveActive && livePending && visibleCount === 0
+			? '…'
+			: `${visibleCount} ${visibleCount === 1 ? 'turno' : 'turnos'}`
 	);
 
 	const needsSetup = $derived(
@@ -363,14 +451,18 @@
 	const toggleSearch = async () => {
 		showSearch = !showSearch;
 		if (showSearch) {
+			void loadLiveSnapshot();
 			void loadReferences();
 			await scrollToElement(searchSection);
+		} else {
+			clearLiveSnapshot();
 		}
 	};
 
 	$effect(() => {
 		const businessId = String(data.context.business?.id ?? '');
 		if (businessId && referencesBusinessId && businessId !== referencesBusinessId) {
+			clearLiveSnapshot();
 			professionals = [];
 			services = [];
 			patients = [];
@@ -403,7 +495,13 @@
 		// Recepción usa esta pantalla para operar: empezamos el snapshot en
 		// background apenas abre /agenda, antes de que elija el primer servicio.
 		if (canOperate || showCreate || showSearch) void loadReferences();
+		if (showSearch) void loadLiveSnapshot();
 		initialized = true;
+	});
+
+	onDestroy(() => {
+		liveController?.abort();
+		liveSnapshotController?.abort();
 	});
 </script>
 
@@ -527,6 +625,7 @@
 					placeholder="Ej: Juan Carlos"
 					autocomplete="off"
 					class="ux-input"
+					onfocus={() => void loadLiveSnapshot()}
 				/>
 			</label>
 			<p class="mt-2 text-xs font-semibold text-white/40">Busca próximos turnos mientras escribís.</p>
@@ -662,7 +761,7 @@
 						Mostramos los turnos más cercanos a hoy. Refiná los filtros para acotar la búsqueda.
 					</p>
 				{/if}
-			{:else if liveActive && (liveLoading || liveResults === null)}
+			{:else if liveActive && livePending}
 				<!-- Esperando la primera respuesta del buscador. -->
 			{:else if liveActive}
 				<div class="mt-5">

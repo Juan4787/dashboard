@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeSearchText, patientMatchesAgendaQuery } from './agenda-search';
+import {
+	filterAgendaAppointmentSnapshot,
+	normalizeSearchText,
+	patientMatchesAgendaQuery
+} from './agenda-search';
 
 describe('normalizeSearchText', () => {
 	it('lowercases, trims, strips diacritics and collapses spaces', () => {
@@ -54,5 +58,55 @@ describe('patientMatchesAgendaQuery', () => {
 		expect(patientMatchesAgendaQuery(patient, '')).toBe(false);
 		expect(patientMatchesAgendaQuery(patient, '   ')).toBe(false);
 		expect(patientMatchesAgendaQuery({ full_name: null, phone_e164: null }, 'ana')).toBe(false);
+	});
+});
+
+describe('filterAgendaAppointmentSnapshot', () => {
+	const now = new Date('2026-08-23T12:00:00.000Z');
+	const appointments = [
+		{
+			id: 'matching-future',
+			starts_at: '2026-08-24T12:00:00.000Z',
+			status: 'reserved',
+			patients: { full_name: 'Juan Perez', phone_e164: '+5491112345678' }
+		},
+		{
+			id: 'matching-cancelled',
+			starts_at: '2026-08-25T12:00:00.000Z',
+			status: 'cancelled',
+			patients: { full_name: 'Juan Cancelado', phone_e164: null }
+		},
+		{
+			id: 'matching-second',
+			starts_at: '2026-08-25T13:00:00.000Z',
+			status: 'confirmed',
+			patients: { full_name: 'Juanita Gomez', phone_e164: null }
+		},
+		{
+			id: 'other-future',
+			starts_at: '2026-08-26T12:00:00.000Z',
+			status: 'confirmed',
+			patients: { full_name: 'Maria Lopez', phone_e164: '+5491199999999' }
+		}
+	];
+
+	it('returns no rows before the professional types anything', () => {
+		expect(filterAgendaAppointmentSnapshot(appointments, '  ', 60, now)).toEqual([]);
+	});
+
+	it('returns only upcoming active matches with the same patient semantics', () => {
+		expect(filterAgendaAppointmentSnapshot(appointments, 'ju', 60, now).map(({ id }) => id)).toEqual([
+			'matching-future',
+			'matching-second'
+		]);
+		expect(filterAgendaAppointmentSnapshot(appointments, '1234', 60, now).map(({ id }) => id)).toEqual([
+			'matching-future'
+		]);
+	});
+
+	it('keeps the snapshot order and obeys the visible result limit', () => {
+		expect(filterAgendaAppointmentSnapshot(appointments, 'ju', 1, now).map(({ id }) => id)).toEqual([
+			'matching-future'
+		]);
 	});
 });

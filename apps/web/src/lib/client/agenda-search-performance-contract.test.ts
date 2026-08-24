@@ -20,4 +20,20 @@ describe('agenda search performance contracts', () => {
 		expect(agenda).toContain('liveController?.abort()');
 		expect(agenda).toContain('loadLiveResults(query, request), 120');
 	});
+
+	it('preloads a private bounded snapshot only when search is opened and keeps server reconciliation', () => {
+		const agenda = readSource('../../routes/odonto/agenda/+page.svelte');
+		const preloadEndpoint = readSource(
+			'../../routes/odonto/agenda/buscar/precarga/+server.ts'
+		);
+
+		expect(agenda).toContain("fetch('/odonto/agenda/buscar/precarga'");
+		expect(agenda).toContain('filterAgendaAppointmentSnapshot(');
+		expect(agenda).toContain('if (showSearch)');
+		expect(agenda).toContain('void loadLiveSnapshot();');
+		expect(agenda).toContain('liveResolvedQuery === liveQuery && liveResults');
+		expect(agenda).not.toContain('localStorage');
+		expect(preloadEndpoint).toContain("'cache-control': 'private, no-store'");
+		expect(preloadEndpoint).toContain("rpc('list_upcoming_active_appointments_snapshot'");
+	});
 });
