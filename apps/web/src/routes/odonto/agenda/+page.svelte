@@ -192,16 +192,20 @@
 	let liveLoading = $state(false);
 	let liveError = $state('');
 	let liveRequest = 0;
+	let liveController: AbortController | null = null;
 
 	const liveQuery = $derived(searchInput.trim());
 	const liveActive = $derived(liveQuery.length > 0);
 
-	const loadLiveResults = async (query: string) => {
-		const request = ++liveRequest;
+	const loadLiveResults = async (query: string, request: number) => {
+		const controller = new AbortController();
+		liveController = controller;
 		liveLoading = true;
 		liveError = '';
 		try {
-			const response = await fetch(`/odonto/agenda/buscar?q=${encodeURIComponent(query)}`);
+			const response = await fetch(`/odonto/agenda/buscar?q=${encodeURIComponent(query)}`, {
+				signal: controller.signal
+			});
 			const payload = await response.json();
 			if (request !== liveRequest) return;
 			if (!response.ok) {
@@ -217,32 +221,43 @@
 					: [],
 				past: []
 			};
-		} catch {
+		} catch (error) {
+			if ((error as Error)?.name === 'AbortError') return;
 			if (request !== liveRequest) return;
 			liveResults = { upcoming: [], past: [] };
 			liveError = 'No se pudo buscar. Probá de nuevo.';
 		} finally {
-			if (request === liveRequest) liveLoading = false;
+			if (request === liveRequest) {
+				liveLoading = false;
+				if (liveController === controller) liveController = null;
+			}
 		}
 	};
 
 	$effect(() => {
 		const query = liveQuery;
+		const request = ++liveRequest;
+		liveController?.abort();
+		liveController = null;
 		if (!query) {
-			liveRequest += 1;
 			liveResults = null;
 			liveLoading = false;
 			liveError = '';
 			return;
 		}
-		const timeout = window.setTimeout(() => void loadLiveResults(query), 200);
-		return () => window.clearTimeout(timeout);
+		const timeout = window.setTimeout(() => void loadLiveResults(query, request), 120);
+		return () => {
+			window.clearTimeout(timeout);
+			if (request === liveRequest) liveController?.abort();
+		};
 	});
 
 	// Al navegar (botón "Buscar", flechas de día, "Hoy") mandan los filtros:
 	// se limpia el buscador y la lista vuelve a los resultados del servidor.
 	afterNavigate(() => {
 		liveRequest += 1;
+		liveController?.abort();
+		liveController = null;
 		searchInput = '';
 		liveResults = null;
 		liveLoading = false;
