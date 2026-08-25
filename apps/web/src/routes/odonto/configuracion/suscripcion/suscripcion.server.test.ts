@@ -67,7 +67,10 @@ type QueuedResult = { data?: unknown; error?: { message: string } | null };
 // puede await-ear y resuelve el resultado encolado para esa tabla.
 const createDbMock = (
 	queues: Record<string, QueuedResult[]> = {},
-	opts?: { rpcResult?: { data?: unknown; error?: { message: string } | null } }
+	opts?: {
+		rpcResult?: { data?: unknown; error?: { message: string } | null };
+		rateLimitResult?: { data?: unknown; error?: { message: string } | null };
+	}
 ) => {
 	const calls: Array<{ table: string; method: string; args: unknown[] }> = [];
 	const tableQueues: Record<string, QueuedResult[]> = {};
@@ -93,10 +96,15 @@ const createDbMock = (
 			) => Promise.resolve(result).then(resolve, reject);
 			return q;
 		}),
-		rpc: vi.fn(async (fn: string, args: Record<string, unknown>) => {
-			rpcCalls.push({ fn, args });
-			if (fn === 'consume_server_rate_limits') {
-				return { data: [{ allowed: true, used: 1, retry_after_seconds: 0 }], error: null };
+			rpc: vi.fn(async (fn: string, args: Record<string, unknown>) => {
+				rpcCalls.push({ fn, args });
+				if (fn === 'consume_server_rate_limits') {
+					return (
+						opts?.rateLimitResult ?? {
+							data: [{ allowed: true, used: 1, retry_after_seconds: 0 }],
+							error: null
+						}
+					);
 			}
 			return (
 				opts?.rpcResult ?? {
@@ -218,6 +226,118 @@ describe('action subscribe', () => {
 			status: 'pending',
 			transaction_amount: 50000
 		});
+	});
+
+	it('no crea ningún cobro si falta el cliente administrativo', async () => {
+		const server = createDbMock();
+		mocks.createSupabaseServerClient.mockResolvedValue(server.client);
+		mocks.createSupabaseAdminClient.mockRejectedValueOnce(new Error('service role ausente'));
+		mocks.resolveActiveBusiness.mockResolvedValue(ownerContext());
+		const { fetchMock, requests } = createMpFetch([]);
+		const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+		const result = (await actions.subscribe(makeEvent({ fetchMock }) as never)) as {
+			status: number;
+			data: { message?: string };
+		};
+
+		expect(result).toMatchObject({
+			status: 503,
+			data: {
+				message:
+					'No pudimos preparar el ingreso a Mercado Pago. No se generó ningún cobro. Probá de nuevo en unos minutos; si continúa, contactá a soporte.'
+			}
+		});
+		expect(requests).toHaveLength(0);
+		expect(log).toHaveBeenCalledOnce();
+		log.mockRestore();
+	});
+
+	it('mantiene el error dentro del formulario si no puede cargar el contexto', async () => {
+		mocks.createSupabaseServerClient.mockRejectedValueOnce(new Error('Supabase no disponible'));
+		const { fetchMock, requests } = createMpFetch([]);
+		const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+		const result = (await actions.subscribe(makeEvent({ fetchMock }) as never)) as {
+			status: number;
+			data: { message?: string };
+		};
+
+		expect(result.status).toBe(503);
+		expect(result.data.message).toContain('No se generó ningún cobro');
+		expect(requests).toHaveLength(0);
+		expect(mocks.createSupabaseAdminClient).not.toHaveBeenCalled();
+		log.mockRestore();
+	});
+
+	it('no continúa si la sesión no tiene un consultorio activo', async () => {
+		const server = createDbMock();
+		mocks.createSupabaseServerClient.mockResolvedValue(server.client);
+		mocks.resolveActiveBusiness.mockResolvedValue(null);
+		const { fetchMock, requests } = createMpFetch([]);
+
+		const result = (await actions.subscribe(makeEvent({ fetchMock }) as never)) as {
+			status: number;
+			data: { message?: string };
+		};
+
+		expect(result.status).toBe(503);
+		expect(result.data.message).toContain('No se generó ningún cobro');
+		expect(requests).toHaveLength(0);
+		expect(mocks.createSupabaseAdminClient).not.toHaveBeenCalled();
+	});
+
+	it('no abre Mercado Pago si el control de suscripción no se puede comprobar', async () => {
+		const server = createDbMock();
+		const admin = createDbMock(
+			{ mp_subscriptions: [{ data: [], error: null }] },
+			{ rateLimitResult: { data: null, error: { message: 'RPC no disponible' } } }
+		);
+		mocks.createSupabaseServerClient.mockResolvedValue(server.client);
+		mocks.createSupabaseAdminClient.mockResolvedValue(admin.client);
+		mocks.resolveActiveBusiness.mockResolvedValue(ownerContext());
+		const { fetchMock, requests } = createMpFetch([]);
+		const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+		const result = (await actions.subscribe(makeEvent({ fetchMock }) as never)) as {
+			status: number;
+			data: { message?: string };
+		};
+
+		expect(result.status).toBe(503);
+		expect(result.data.message).toContain('No se generó ningún cobro');
+		expect(requests).toHaveLength(0);
+		expect(log).toHaveBeenCalledWith(
+			'Error validando rate limit de suscripción MP',
+			expect.any(Error)
+		);
+		log.mockRestore();
+	});
+
+	it('informa un límite real y tampoco genera un cobro', async () => {
+		const server = createDbMock();
+		const admin = createDbMock(
+			{ mp_subscriptions: [{ data: [], error: null }] },
+			{
+				rateLimitResult: {
+					data: [{ allowed: false, used: 1, retry_after_seconds: 60 }],
+					error: null
+				}
+			}
+		);
+		mocks.createSupabaseServerClient.mockResolvedValue(server.client);
+		mocks.createSupabaseAdminClient.mockResolvedValue(admin.client);
+		mocks.resolveActiveBusiness.mockResolvedValue(ownerContext());
+		const { fetchMock, requests } = createMpFetch([]);
+
+		const result = (await actions.subscribe(makeEvent({ fetchMock }) as never)) as {
+			status: number;
+			data: { message?: string };
+		};
+
+		expect(result.status).toBe(429);
+		expect(result.data.message).toContain('No se generó ningún cobro');
+		expect(requests).toHaveLength(0);
 	});
 
 	it('reutiliza el preapproval pendiente en vez de crear otra suscripción', async () => {
@@ -475,8 +595,8 @@ describe('action subscribe', () => {
 			data: { message?: string };
 		};
 
-		expect(result.status).toBe(500);
-		expect(result.data.message).toContain('Mercado Pago no está configurado');
+		expect(result.status).toBe(503);
+		expect(result.data.message).toContain('No se generó ningún cobro');
 		expect(mocks.createSupabaseAdminClient).not.toHaveBeenCalled();
 		expect(requests).toHaveLength(0);
 	});
@@ -525,7 +645,8 @@ describe('action subscribe', () => {
 		};
 
 		expect(result.status).toBe(429);
-		expect(result.data.message).toContain('Hay demasiados intentos de activar la suscripción');
+		expect(result.data.message).toContain('Hicimos varios intentos de activar la suscripción');
+		expect(result.data.message).toContain('No se generó ningún cobro');
 		expect(requests).toHaveLength(0);
 		expect(admin.rpcCalls.find((call) => call.fn === 'consume_server_rate_limits')?.args).toMatchObject({
 			p_action: 'mp_subscription_create_by_business'

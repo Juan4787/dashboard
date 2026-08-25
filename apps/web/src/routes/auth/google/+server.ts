@@ -1,6 +1,6 @@
 import { env } from '$env/dynamic/private';
 import {
-	enforceRateLimits,
+	enforceRateLimitsFailOpen,
 	googleAuthRateLimitRules,
 	RateLimitExceededError
 } from '$lib/server/rate-limits';
@@ -31,32 +31,45 @@ export const GET: RequestHandler = async ({ url, cookies, fetch, getClientAddres
 	}
 
 	try {
-		await enforceRateLimits(googleAuthRateLimitRules(getClientAddress()), fetch);
+		await enforceRateLimitsFailOpen(googleAuthRateLimitRules(getClientAddress()), {
+			fetchImpl: fetch,
+			logContext: 'No se pudo aplicar el control de intentos de Google Auth'
+		});
 	} catch (error) {
-		if (!(error instanceof RateLimitExceededError)) {
-			console.error('Error validando rate limit de Google Auth', error);
-			return loginWithError(url, 'google_start');
+		if (error instanceof RateLimitExceededError) {
+			return loginWithError(url, 'google_rate_limited');
 		}
-		return loginWithError(url, 'google_rate_limited');
+		console.error('Fallo inesperado aplicando el control de intentos de Google Auth', error);
+		return loginWithError(url, 'google_start');
 	}
 
-	clearSupabaseOAuthCookies(cookies);
-	const supabase = await createSupabaseOAuthClient('odonto', cookies, fetch);
-	const { data, error } = await supabase.auth.signInWithOAuth({
-		provider: 'google',
-		options: {
-			redirectTo: `${url.origin}/auth/callback`,
-			scopes: 'openid email profile',
-			queryParams: {
-				prompt: 'select_account'
+	try {
+		clearSupabaseOAuthCookies(cookies);
+		const supabase = await createSupabaseOAuthClient('odonto', cookies, fetch);
+		const { data, error } = await supabase.auth.signInWithOAuth({
+			provider: 'google',
+			options: {
+				redirectTo: `${url.origin}/auth/callback`,
+				scopes: 'openid email profile',
+				queryParams: {
+					prompt: 'select_account'
+				}
 			}
-		}
-	});
+		});
 
-	if (!error && typeof data.url === 'string' && data.url) {
-		return redirectResponse(data.url);
+		if (!error && typeof data.url === 'string' && data.url) {
+			return redirectResponse(data.url);
+		}
+
+		console.error('Supabase Auth no pudo iniciar OAuth con Google', {
+			code:
+				typeof error === 'object' && error !== null && 'code' in error
+					? String((error as { code?: unknown }).code ?? '')
+					: ''
+		});
+	} catch (error) {
+		console.error('No se pudo conectar con Supabase Auth para iniciar Google OAuth', error);
 	}
 
-	console.error('Error iniciando OAuth con Google', error);
 	return loginWithError(url, 'google_start');
 };

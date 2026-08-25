@@ -1,5 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+const rateLimitMocks = vi.hoisted(() => ({
+	enforceRateLimits: vi.fn(),
+	pendingBusinessCreationRateLimitRules: vi.fn((userId: string, ip?: string | null) => [
+		{ action: 'pending_business_creation_by_user', subject: userId },
+		...(ip ? [{ action: 'pending_business_creation_by_ip', subject: ip }] : [])
+	])
+}));
+
 vi.mock('./supabase', async () => {
 	const actual = await vi.importActual<typeof import('./supabase')>('./supabase');
 	return {
@@ -10,7 +18,21 @@ vi.mock('./supabase', async () => {
 	};
 });
 
-import { clearBusinessMembershipReadCache, resolveActiveBusiness } from './business';
+vi.mock('./rate-limits', async () => {
+	const actual = await vi.importActual<typeof import('./rate-limits')>('./rate-limits');
+	return {
+		...actual,
+		enforceRateLimits: rateLimitMocks.enforceRateLimits,
+		pendingBusinessCreationRateLimitRules: rateLimitMocks.pendingBusinessCreationRateLimitRules
+	};
+});
+
+import {
+	clearBusinessMembershipReadCache,
+	DefaultBusinessSetupUnavailableError,
+	resolveActiveBusiness
+} from './business';
+import { RateLimitUnavailableError } from './rate-limits';
 
 const accessTokenFor = (userId: string) => {
 	const payload = Buffer.from(JSON.stringify({ sub: userId })).toString('base64url');
@@ -81,6 +103,9 @@ const missingContextsRpc = () =>
 describe('resolveActiveBusiness', () => {
 	beforeEach(() => {
 		clearBusinessMembershipReadCache();
+		rateLimitMocks.enforceRateLimits.mockReset();
+		rateLimitMocks.enforceRateLimits.mockResolvedValue(undefined);
+		rateLimitMocks.pendingBusinessCreationRateLimitRules.mockClear();
 	});
 
 	it('loads the auto-created owner business after allowed-email bootstrap', async () => {
@@ -137,6 +162,102 @@ describe('resolveActiveBusiness', () => {
 			p_name: 'Consultorio',
 			p_industry: 'odontology'
 		});
+		expect(rateLimitMocks.pendingBusinessCreationRateLimitRules).toHaveBeenCalledWith(
+			userId,
+			undefined
+		);
+		expect(rateLimitMocks.enforceRateLimits).toHaveBeenCalledOnce();
+	});
+
+	it('detiene el alta con un error específico si no puede comprobar su límite', async () => {
+		const supabase = {
+			from: vi.fn(),
+			rpc: vi.fn(async (name: string) => {
+				if (name === 'list_user_business_contexts') return { data: [], error: null };
+				throw new Error(`No debía ejecutar ${name}`);
+			})
+		} as any;
+		rateLimitMocks.enforceRateLimits.mockRejectedValueOnce(
+			new RateLimitUnavailableError(new Error('service role ausente'))
+		);
+
+		await expect(
+			resolveActiveBusiness({
+				supabase,
+				accessToken: accessTokenFor('user-sin-control')
+			})
+		).rejects.toBeInstanceOf(DefaultBusinessSetupUnavailableError);
+		expect(supabase.rpc).not.toHaveBeenCalledWith('ensure_user_default_business', expect.anything());
+	});
+
+	it('no devuelve null silenciosamente si el alta terminó pero la membresía no aparece', async () => {
+		const supabase = {
+			from: vi.fn(),
+			rpc: vi.fn(async (name: string) => {
+				if (name === 'list_user_business_contexts') return { data: [], error: null };
+				if (name === 'ensure_user_default_business') {
+					return { data: [{ business_id: 'business-1', role: 'owner' }], error: null };
+				}
+				throw new Error(`Unexpected RPC ${name}`);
+			})
+		} as any;
+
+		await expect(
+			resolveActiveBusiness({
+				supabase,
+				accessToken: accessTokenFor('user-sin-membresia-visible')
+			})
+		).rejects.toBeInstanceOf(DefaultBusinessSetupUnavailableError);
+	});
+
+	it('coalesce dos cargas concurrentes para no crear ni contabilizar el consultorio dos veces', async () => {
+		let membershipReads = 0;
+		let ensureCalls = 0;
+		let releaseEnsure: () => void = () => {};
+		const ensurePending = new Promise<void>((resolve) => {
+			releaseEnsure = resolve;
+		});
+		const supabase = {
+			from: vi.fn(),
+			rpc: vi.fn(async (name: string) => {
+				if (name === 'list_user_business_contexts') {
+					membershipReads += 1;
+					return {
+						data:
+							membershipReads <= 2
+								? []
+								: [
+										{
+											business: businessRow,
+											role: 'owner',
+											assistance: null,
+											subscription: subscriptionRow
+										}
+									],
+						error: null
+					};
+				}
+				if (name === 'ensure_user_default_business') {
+					ensureCalls += 1;
+					await ensurePending;
+					return { data: [{ business_id: 'business-1', role: 'owner' }], error: null };
+				}
+				throw new Error(`Unexpected RPC ${name}`);
+			})
+		} as any;
+		const options = () => ({
+			supabase,
+			accessToken: accessTokenFor('concurrent-bootstrap-user')
+		});
+
+		const first = resolveActiveBusiness(options());
+		const second = resolveActiveBusiness(options());
+		await vi.waitFor(() => expect(ensureCalls).toBe(1));
+		releaseEnsure();
+
+		await expect(Promise.all([first, second])).resolves.toHaveLength(2);
+		expect(ensureCalls).toBe(1);
+		expect(rateLimitMocks.enforceRateLimits).toHaveBeenCalledOnce();
 	});
 
 	it('recovers an accepted invite membership after bootstrap race', async () => {

@@ -11,7 +11,7 @@
 		const message = $page.error?.message ?? '';
 		// Errores de servidor (5xx): nunca exponer detalles internos al usuario.
 		if (status >= 500) {
-			return 'Hubo una falla de conexión con el servidor. Reintentá en unos segundos.';
+			return 'Ocurrió un problema al cargar esta página. Volvé a intentarlo. Si continúa, contactá a soporte.';
 		}
 		// 404 / otros 4xx: mostramos el mensaje propio si es claro.
 		if (message && message !== 'Internal Error' && message !== 'Not Found') {
@@ -29,7 +29,10 @@
 		<h1 class="ux-title mt-4">{title}</h1>
 		<p class="ux-subtitle mx-auto">{detail}</p>
 		<div class="mt-6 flex flex-wrap justify-center gap-3">
-			<a href={homeHref} class="ux-btn-primary">Volver al inicio</a>
+			<button type="button" class="ux-btn-primary" onclick={() => window.location.reload()}>
+				Volver a intentar
+			</button>
+			<a href={homeHref} class="ux-btn-secondary">Volver al inicio</a>
 			<a href="/odonto/pacientes" class="ux-btn-secondary">Ver pacientes</a>
 		</div>
 	</div>

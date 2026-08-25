@@ -8,7 +8,7 @@
 		const message = $page.error?.message ?? '';
 		// Errores de servidor (5xx): nunca exponer detalles internos al usuario.
 		if (status >= 500) {
-			return 'Hubo una falla de conexión con el servidor. Reintentá en unos segundos.';
+			return 'Ocurrió un problema al cargar esta página. Volvé a intentarlo. Si continúa, contactá a soporte.';
 		}
 		// 404 / otros 4xx: mostramos el mensaje propio si es claro (ej. enlaces inválidos).
 		if (message && message !== 'Internal Error' && message !== 'Not Found') {
@@ -37,6 +37,11 @@
 		</picture>
 		<h1 class="ux-title mt-5">{title}</h1>
 		<p class="ux-subtitle mx-auto">{detail}</p>
-		<a href="/" class="ux-btn-primary mt-6 inline-flex">Volver al inicio</a>
+		<div class="mt-6 flex flex-wrap justify-center gap-3">
+			<button type="button" class="ux-btn-primary" onclick={() => window.location.reload()}>
+				Volver a intentar
+			</button>
+			<a href="/" class="ux-btn-secondary">Ir al inicio</a>
+		</div>
 	</section>
 </div>

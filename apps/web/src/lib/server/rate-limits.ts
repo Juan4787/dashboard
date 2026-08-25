@@ -47,6 +47,13 @@ export class RateLimitExceededError extends Error {
 	}
 }
 
+export class RateLimitUnavailableError extends Error {
+	constructor(cause?: unknown) {
+		super('RATE_LIMIT_UNAVAILABLE', { cause });
+		this.name = 'RateLimitUnavailableError';
+	}
+}
+
 const normalizeSubject = (value: string | null | undefined) => {
 	const normalized = String(value ?? '').trim().toLowerCase();
 	return normalized || 'unknown';
@@ -102,27 +109,51 @@ export const enforceRateLimits = async (
 ): Promise<void> => {
 	if (rules.length === 0 || env.DEMO_MODE === 'true') return;
 
-	const admin = await createSupabaseAdminClient('odonto', fetchImpl);
-	const groups = new Map<
-		string,
-		{ action: RateLimitAction; subject: string | null | undefined; rules: RateLimitRule[] }
-	>();
-	for (const rule of rules) {
-		const key = `${rule.action}:${hashRateLimitSubject(rule.subject)}`;
-		const group = groups.get(key) ?? { action: rule.action, subject: rule.subject, rules: [] };
-		group.rules.push(rule);
-		groups.set(key, group);
-	}
-
-	for (const group of groups.values()) {
-		const result = await consumeRateLimit(admin, group);
-		if (!result.allowed) {
-			const rule = group.rules[0];
-			throw new RateLimitExceededError(
-				`${rule.message} Volvé a intentar en ${formatRetry(result.retry_after_seconds)}.`,
-				result.retry_after_seconds
-			);
+	try {
+		const admin = await createSupabaseAdminClient('odonto', fetchImpl);
+		const groups = new Map<
+			string,
+			{ action: RateLimitAction; subject: string | null | undefined; rules: RateLimitRule[] }
+		>();
+		for (const rule of rules) {
+			const key = `${rule.action}:${hashRateLimitSubject(rule.subject)}`;
+			const group = groups.get(key) ?? { action: rule.action, subject: rule.subject, rules: [] };
+			group.rules.push(rule);
+			groups.set(key, group);
 		}
+
+		for (const group of groups.values()) {
+			const result = await consumeRateLimit(admin, group);
+			if (!result.allowed) {
+				const rule = group.rules[0];
+				throw new RateLimitExceededError(
+					`${rule.message} Volvé a intentar en ${formatRetry(result.retry_after_seconds)}.`,
+					result.retry_after_seconds
+				);
+			}
+		}
+	} catch (error) {
+		if (error instanceof RateLimitExceededError || error instanceof RateLimitUnavailableError) {
+			throw error;
+		}
+		throw new RateLimitUnavailableError(error);
+	}
+};
+
+/**
+ * Para operaciones que ya tienen una protección propia en el proveedor
+ * (Supabase Auth / Google). Un fallo del contador interno no debe bloquear a
+ * todos los usuarios, pero un límite realmente alcanzado siempre se respeta.
+ */
+export const enforceRateLimitsFailOpen = async (
+	rules: RateLimitRule[],
+	options: { fetchImpl?: typeof fetch; logContext: string }
+): Promise<void> => {
+	try {
+		await enforceRateLimits(rules, options.fetchImpl);
+	} catch (error) {
+		if (error instanceof RateLimitExceededError) throw error;
+		console.error(options.logContext, error);
 	}
 };
 
@@ -201,8 +232,22 @@ export const pendingBusinessIpRateLimitRules = (ip: string): RateLimitRule[] => 
 		subject: ip,
 		limit: 20,
 		windowSeconds: ONE_DAY,
-		message: 'Hay demasiadas altas pendientes desde esta conexión.'
+		message: 'Hicimos varios intentos de preparar consultorios desde esta conexión.'
 	}
+];
+
+export const pendingBusinessCreationRateLimitRules = (
+	userId: string,
+	ip?: string | null
+): RateLimitRule[] => [
+	{
+		action: 'pending_business_creation_by_user',
+		subject: userId,
+		limit: 10,
+		windowSeconds: ONE_HOUR,
+		message: 'Hicimos varios intentos de preparar tu consultorio.'
+	},
+	...(ip ? pendingBusinessIpRateLimitRules(ip) : [])
 ];
 
 export const mpSubscriptionRateLimitRules = (businessId: string): RateLimitRule[] => [
@@ -211,14 +256,14 @@ export const mpSubscriptionRateLimitRules = (businessId: string): RateLimitRule[
 		subject: businessId,
 		limit: 1,
 		windowSeconds: 60,
-		message: 'Hay demasiados intentos de activar la suscripción.'
+		message: 'Hicimos varios intentos de activar la suscripción. No se generó ningún cobro.'
 	},
 	{
 		action: 'mp_subscription_create_by_business',
 		subject: businessId,
 		limit: 10,
 		windowSeconds: ONE_DAY,
-		message: 'Hay demasiados intentos de activar la suscripción.'
+		message: 'Hicimos varios intentos de activar la suscripción. No se generó ningún cobro.'
 	}
 ];
 
@@ -269,13 +314,16 @@ export const radiographRestoreRateLimitRules = (userId: string): RateLimitRule[]
 	}
 ];
 
-export const rateLimitFail = (error: unknown, fallbackMessage: string) => {
+export const rateLimitFail = (
+	error: unknown,
+	options: { logContext: string; unavailableMessage: string }
+) => {
 	if (error instanceof RateLimitExceededError) {
 		return { status: error.status, message: error.userMessage };
 	}
-	console.error(fallbackMessage, error);
+	console.error(options.logContext, error);
 	return {
-		status: 500,
-		message: 'No pudimos validar los límites de seguridad. Probá de nuevo en unos minutos.'
+		status: 503,
+		message: options.unavailableMessage
 	};
 };

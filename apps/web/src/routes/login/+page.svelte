@@ -215,7 +215,9 @@
 			</button>
 			<p class="text-center text-xs font-semibold text-white/45">
 				{mode === 'register'
-					? 'Para crear cuenta con Google, aceptá primero los términos y condiciones.'
+					? acceptedTerms
+						? 'Al continuar con Google confirmás que aceptaste los términos y condiciones.'
+						: 'Para crear cuenta con Google, aceptá primero los términos y condiciones.'
 					: 'Al continuar con Google aceptás los términos y condiciones vigentes.'}
 			</p>
 		</form>

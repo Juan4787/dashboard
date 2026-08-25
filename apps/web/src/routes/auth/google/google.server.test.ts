@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({
 	env: {} as Record<string, string | undefined>,
 	clearSupabaseOAuthCookies: vi.fn(),
 	createSupabaseOAuthClient: vi.fn(),
-	enforceRateLimits: vi.fn(),
+	enforceRateLimitsFailOpen: vi.fn(),
 	googleAuthRateLimitRules: vi.fn((ip: string) => [{ action: 'signup_google_by_ip', subject: ip }])
 }));
 
@@ -14,7 +14,7 @@ vi.mock('$lib/server/supabase', () => ({
 	createSupabaseOAuthClient: mocks.createSupabaseOAuthClient
 }));
 vi.mock('$lib/server/rate-limits', () => ({
-	enforceRateLimits: mocks.enforceRateLimits,
+	enforceRateLimitsFailOpen: mocks.enforceRateLimitsFailOpen,
 	googleAuthRateLimitRules: mocks.googleAuthRateLimitRules,
 	RateLimitExceededError: class RateLimitExceededError extends Error {}
 }));
@@ -34,7 +34,7 @@ const makeEvent = (url: string) => ({
 beforeEach(() => {
 	vi.clearAllMocks();
 	mocks.env.DEMO_MODE = undefined;
-	mocks.enforceRateLimits.mockResolvedValue(undefined);
+	mocks.enforceRateLimitsFailOpen.mockResolvedValue(undefined);
 	mocks.createSupabaseOAuthClient.mockResolvedValue({
 		auth: {
 			signInWithOAuth: vi.fn(async () => ({
@@ -57,9 +57,12 @@ describe('/auth/google OAuth start', () => {
 		);
 
 		expect(mocks.clearSupabaseOAuthCookies).toHaveBeenCalledWith(event.cookies);
-		expect(mocks.enforceRateLimits).toHaveBeenCalledWith(
+		expect(mocks.enforceRateLimitsFailOpen).toHaveBeenCalledWith(
 			[{ action: 'signup_google_by_ip', subject: '203.0.113.10' }],
-			event.fetch
+			expect.objectContaining({
+				fetchImpl: event.fetch,
+				logContext: 'No se pudo aplicar el control de intentos de Google Auth'
+			})
 		);
 		const client = await mocks.createSupabaseOAuthClient.mock.results[0].value;
 		expect(client.auth.signInWithOAuth).toHaveBeenCalledWith({
@@ -98,5 +101,37 @@ describe('/auth/google OAuth start', () => {
 		expect(response.headers.get('location')).toBe(
 			'https://app.test/login?auth_error=google_start'
 		);
+	});
+
+	it('redirige al login en vez de arrojar 500 si falta la configuración OAuth', async () => {
+		mocks.createSupabaseOAuthClient.mockRejectedValueOnce(
+			new Error('Faltan variables de entorno de Supabase')
+		);
+		const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+		const response = await GET(makeEvent('https://app.test/auth/google?mode=login') as never);
+
+		expect(response.status).toBe(303);
+		expect(response.headers.get('location')).toBe(
+			'https://app.test/login?auth_error=google_start'
+		);
+		expect(log).toHaveBeenCalledWith(
+			'No se pudo conectar con Supabase Auth para iniciar Google OAuth',
+			expect.any(Error)
+		);
+		log.mockRestore();
+	});
+
+	it('bloquea Google únicamente cuando el límite real fue alcanzado', async () => {
+		const { RateLimitExceededError } = await import('$lib/server/rate-limits');
+		mocks.enforceRateLimitsFailOpen.mockRejectedValueOnce(new RateLimitExceededError('límite', 60));
+
+		const response = await GET(makeEvent('https://app.test/auth/google?mode=login') as never);
+
+		expect(response.status).toBe(303);
+		expect(response.headers.get('location')).toBe(
+			'https://app.test/login?auth_error=google_rate_limited'
+		);
+		expect(mocks.createSupabaseOAuthClient).not.toHaveBeenCalled();
 	});
 });

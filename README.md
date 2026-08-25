@@ -61,7 +61,7 @@ node scripts/vercel-build.mjs
 ### Cloudflare Workers (producción comercial)
 
 Workers es la plataforma prevista para la producción comercial. El Worker se
-llama `cita-suite` y usa el artefacto de SvelteKit generado exclusivamente por
+llama `app` y usa el artefacto de SvelteKit generado exclusivamente por
 el adaptador de Cloudflare. Vercel mantiene su adaptador y configuración.
 
 Antes del primer despliegue, configurá el proyecto de Workers con **Root
@@ -74,7 +74,7 @@ Deploy command: pnpm exec wrangler deploy
 Non-production branch deploy command: pnpm exec wrangler versions upload
 ```
 
-El nombre del Worker creado en el panel debe ser exactamente `cita-suite`, como
+El nombre del Worker creado en el panel debe ser exactamente `app`, como
 en `apps/web/wrangler.jsonc`. Para un despliegue desde una máquina autorizada:
 
 ```sh
@@ -89,6 +89,12 @@ sin definir o con valor distinto de `true` en producción. Definí también
 `PUBLIC_SITE_URL` con el dominio final de Cloudflare y agregalo a las Redirect
 URLs de Supabase, a los redirect URIs de Google Calendar y a los retornos y
 webhooks de Mercado Pago que estén habilitados.
+
+Las variables y los secretos pertenecen al Worker, no al repositorio. Cambiar
+`name` en `wrangler.jsonc` apunta a otro Worker y **no** copia su configuración.
+Después de cualquier cambio de nombre, cargá y verificá como mínimo
+`ODONTO_SUPABASE_URL`, `ODONTO_SUPABASE_ANON_KEY` y
+`ODONTO_SUPABASE_SERVICE_ROLE_KEY` en el nuevo destino antes de dirigir tráfico.
 
 Para una vista previa de Workers desde la terminal, tras cargar secretos locales
 en un archivo no versionado `.dev.vars`, ejecutá:

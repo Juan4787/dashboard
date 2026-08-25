@@ -8,7 +8,11 @@ import {
 	type BusinessAccessState,
 	type BusinessSubscriptionRow
 } from './commercial-access';
-import { enforceRateLimits, pendingBusinessIpRateLimitRules } from './rate-limits';
+import {
+	enforceRateLimits,
+	pendingBusinessCreationRateLimitRules,
+	RateLimitExceededError
+} from './rate-limits';
 import { isEmailAlreadyAssociatedWithOtherBusinessError } from './business-email-association';
 
 export const BUSINESS_ROLES = ['owner', 'admin', 'reception', 'professional', 'readonly'] as const;
@@ -451,7 +455,15 @@ const getFreshMembershipRead = (key: string, now = Date.now()) => {
 	return cached.pending;
 };
 
-export const clearBusinessMembershipReadCache = () => membershipReadCache.clear();
+const defaultBusinessBootstrapByUser = new Map<
+	string,
+	Promise<{ error: unknown | null }>
+>();
+
+export const clearBusinessMembershipReadCache = () => {
+	membershipReadCache.clear();
+	defaultBusinessBootstrapByUser.clear();
+};
 
 const loadMembershipsForRequest = (
 	supabase: SupabaseClient,
@@ -499,7 +511,24 @@ export const isDefaultBusinessCreationDisabledError = (error: unknown) =>
 	errorMessage(error).includes('DEFAULT_BUSINESS_CREATION_DISABLED');
 
 export const isDefaultBusinessPendingManualSetupError = (error: unknown) =>
-	errorMessage(error).includes('DEFAULT_BUSINESS_PENDING_MANUAL_SETUP');
+	[
+		'DEFAULT_BUSINESS_PENDING_MANUAL_SETUP',
+		'DEFAULT_BUSINESS_CREATION_DISABLED',
+		'DEFAULT_BUSINESS_PENDING_LIMIT_REACHED'
+	].some((code) => errorMessage(error).includes(code));
+
+export class DefaultBusinessSetupUnavailableError extends Error {
+	mayHaveCompleted: boolean;
+
+	constructor(cause?: unknown, mayHaveCompleted = false) {
+		super('DEFAULT_BUSINESS_SETUP_UNAVAILABLE', { cause });
+		this.name = 'DefaultBusinessSetupUnavailableError';
+		this.mayHaveCompleted = mayHaveCompleted;
+	}
+}
+
+export const isDefaultBusinessSetupUnavailableError = (error: unknown) =>
+	error instanceof DefaultBusinessSetupUnavailableError;
 
 const isRecoverableDefaultBusinessBootstrapRace = (error: unknown) =>
 	isDefaultBusinessCreationDisabledError(error) ||
@@ -518,6 +547,51 @@ const reloadMembershipsAfterBootstrap = async (
 		if (memberships.length > 0) return memberships;
 	}
 	return [];
+};
+
+const ensureDefaultBusinessOnce = ({
+	supabase,
+	userId,
+	ip,
+	fetch
+}: {
+	supabase: SupabaseClient;
+	userId: string;
+	ip?: string | null;
+	fetch?: typeof globalThis.fetch;
+}) => {
+	const existing = defaultBusinessBootstrapByUser.get(userId);
+	if (existing) return existing;
+
+	const pending = (async () => {
+		try {
+			// Crear un consultorio sí consume recursos: si este control no se puede
+			// comprobar, la operación se detiene con un estado específico.
+			await enforceRateLimits(pendingBusinessCreationRateLimitRules(userId, ip), fetch);
+		} catch (error) {
+			if (error instanceof RateLimitExceededError) throw error;
+			throw new DefaultBusinessSetupUnavailableError(error);
+		}
+
+		try {
+			const { error } = await supabase.rpc('ensure_user_default_business', {
+				p_name: 'Consultorio',
+				p_industry: 'odontology'
+			});
+			return { error };
+		} catch (error) {
+			// La llamada pudo haberse confirmado en la base antes de perder la
+			// respuesta; el caller hará una relectura antes de informar el fallo.
+			throw new DefaultBusinessSetupUnavailableError(error, true);
+		}
+	})().finally(() => {
+		if (defaultBusinessBootstrapByUser.get(userId) === pending) {
+			defaultBusinessBootstrapByUser.delete(userId);
+		}
+	});
+
+	defaultBusinessBootstrapByUser.set(userId, pending);
+	return pending;
 };
 
 export const resolveActiveBusiness = async ({
@@ -547,20 +621,40 @@ export const resolveActiveBusiness = async ({
 	});
 
 	if (memberships.length === 0 && ensureDefault) {
-		if (defaultBusinessCreationIp) {
-			await enforceRateLimits(pendingBusinessIpRateLimitRules(defaultBusinessCreationIp), fetch);
+		let error: unknown | null = null;
+		try {
+			({ error } = await ensureDefaultBusinessOnce({
+				supabase,
+				userId,
+				ip: defaultBusinessCreationIp,
+				fetch
+			}));
+		} catch (bootstrapError) {
+			if (bootstrapError instanceof RateLimitExceededError) throw bootstrapError;
+			if (
+				bootstrapError instanceof DefaultBusinessSetupUnavailableError &&
+				!bootstrapError.mayHaveCompleted
+			) {
+				throw bootstrapError;
+			}
+			// Una desconexión puede ocurrir después de que la transacción terminó.
+			// Releer evita informar un fallo (o reintentar) si el alta sí quedó completa.
+			memberships = await reloadMembershipsAfterBootstrap(supabase, userId, requestKey);
+			if (memberships.length === 0) throw bootstrapError;
 		}
-		const { error } = await supabase.rpc('ensure_user_default_business', {
-			p_name: 'Consultorio',
-			p_industry: 'odontology'
-		});
 		if (error) {
 			memberships = await reloadMembershipsAfterBootstrap(supabase, userId, requestKey);
 			if (memberships.length === 0 || !isRecoverableDefaultBusinessBootstrapRace(error)) {
-				throw error;
+				if (isDefaultBusinessPendingManualSetupError(error)) throw error;
+				throw new DefaultBusinessSetupUnavailableError(error);
 			}
-		} else {
+		} else if (memberships.length === 0) {
 			memberships = await reloadMembershipsAfterBootstrap(supabase, userId, requestKey);
+			if (memberships.length === 0) {
+				throw new DefaultBusinessSetupUnavailableError(
+					new Error('DEFAULT_BUSINESS_NOT_VISIBLE_AFTER_BOOTSTRAP')
+				);
+			}
 		}
 	}
 

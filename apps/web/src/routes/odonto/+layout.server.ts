@@ -1,6 +1,7 @@
 import {
 	demoBusinessContext,
 	isDefaultBusinessPendingManualSetupError,
+	isDefaultBusinessSetupUnavailableError,
 	resolveActiveBusiness
 } from '$lib/server/business';
 import {
@@ -157,9 +158,22 @@ export const load: LayoutServerLoad = async ({
 			followUpsTodayISO = nextFollowUps.todayISO;
 		} catch (err) {
 			if (isDefaultBusinessPendingManualSetupError(err)) {
+				if (!pathname.startsWith('/odonto/pendiente')) {
+					throw redirect(303, '/odonto/pendiente?reason=manual_setup');
+				}
 				pendingManualSetup = true;
 			} else if (err instanceof RateLimitExceededError) {
+				if (!pathname.startsWith('/odonto/pendiente')) {
+					throw redirect(303, '/odonto/pendiente?reason=rate_limited');
+				}
+				pendingManualSetup = true;
 				businessError = err.userMessage;
+			} else if (isDefaultBusinessSetupUnavailableError(err)) {
+				console.error('No se pudo preparar el consultorio inicial', err);
+				if (!pathname.startsWith('/odonto/pendiente')) {
+					throw redirect(303, '/odonto/pendiente?reason=temporarily_unavailable');
+				}
+				pendingManualSetup = true;
 			} else {
 				console.error('Error resolviendo negocio activo', err);
 				businessError =

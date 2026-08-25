@@ -35,6 +35,8 @@ export type MpSubscriptionView = {
 };
 
 const PENDING_PREAPPROVAL_REUSE_MS = 15 * 60 * 1000;
+const SUBSCRIPTION_PREPARATION_UNAVAILABLE =
+	'No pudimos preparar el ingreso a Mercado Pago. No se generó ningún cobro. Probá de nuevo en unos minutos; si continúa, contactá a soporte.';
 
 const loadMpSubscription = async (
 	admin: Awaited<ReturnType<typeof createSupabaseAdminClient>>,
@@ -149,14 +151,21 @@ export const actions: Actions = {
 			return fail(400, { message: 'No disponible en modo demo.' });
 		}
 
-		const supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
-		const context = await resolveActiveBusiness({
-			supabase,
-			accessToken: locals.auth.access_token,
-			cookies
-		});
+		let supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+		let context: Awaited<ReturnType<typeof resolveActiveBusiness>>;
+		try {
+			supabase = await createSupabaseServerClient('odonto', locals.auth, fetch);
+			context = await resolveActiveBusiness({
+				supabase,
+				accessToken: locals.auth.access_token,
+				cookies
+			});
+		} catch (error) {
+			console.error('No se pudo preparar el contexto para suscribir', error);
+			return fail(503, { message: SUBSCRIPTION_PREPARATION_UNAVAILABLE });
+		}
 		if (!context) {
-			return fail(500, { message: 'No se pudo resolver el negocio activo.' });
+			return fail(503, { message: SUBSCRIPTION_PREPARATION_UNAVAILABLE });
 		}
 		if (context.role !== 'owner' && context.role !== 'admin') {
 			return fail(403, { message: 'No tenés permisos para gestionar la suscripción.' });
@@ -178,9 +187,21 @@ export const actions: Actions = {
 			});
 		}
 
-		const { data: userData } = await supabase.auth.getUser();
+		let authEmail = '';
+		try {
+			const { data: userData, error: userError } = await supabase.auth.getUser();
+			if (userError) {
+				console.warn('No se pudo leer el email autenticado para la suscripción', {
+					status: userError.status
+				});
+			} else {
+				authEmail = userData?.user?.email?.trim() ?? '';
+			}
+		} catch (error) {
+			console.error('No se pudo consultar el email autenticado para la suscripción', error);
+		}
 		const payerEmail =
-			userData?.user?.email?.trim() || context.business.email?.trim() || '';
+			authEmail || context.business.email?.trim() || '';
 		if (!payerEmail) {
 			return fail(400, {
 				message: 'No encontramos un email para asociar la suscripción. Cargá un email en la configuración del negocio.'
@@ -194,10 +215,7 @@ export const actions: Actions = {
 			console.error('Mercado Pago no está configurado para crear suscripciones', {
 				missing: mpConfigIssue
 			});
-			return fail(500, {
-				message:
-					'Mercado Pago no está configurado para activar suscripciones. Contactá soporte para completar la activación.'
-			});
+			return fail(503, { message: SUBSCRIPTION_PREPARATION_UNAVAILABLE });
 		}
 
 		// El cliente admin se crea ANTES de tocar Mercado Pago: si falta el
@@ -208,9 +226,7 @@ export const actions: Actions = {
 			admin = await createSupabaseAdminClient('odonto', fetch);
 		} catch (error) {
 			console.error('No se pudo crear el cliente admin para suscribir', error);
-			return fail(500, {
-				message: 'El sistema no está listo para procesar suscripciones. Avisá al administrador.'
-			});
+			return fail(503, { message: SUBSCRIPTION_PREPARATION_UNAVAILABLE });
 		}
 
 		// Nunca dos débitos para el mismo negocio. Además de bloquear una activa,
@@ -224,7 +240,7 @@ export const actions: Actions = {
 			.order('created_at', { ascending: false });
 		if (existingError) {
 			console.error('No se pudo verificar suscripciones existentes', existingError);
-			return fail(500, { message: 'No se pudo verificar el estado de la suscripción.' });
+			return fail(503, { message: SUBSCRIPTION_PREPARATION_UNAVAILABLE });
 		}
 		const blockingSubscription = (existingRows ?? []).find((row) =>
 			['authorized', 'paused'].includes(String(row.status))
@@ -355,7 +371,10 @@ export const actions: Actions = {
 		try {
 			await enforceRateLimits(mpSubscriptionRateLimitRules(context.business.id), fetch);
 		} catch (error) {
-			const result = rateLimitFail(error, 'Error validando rate limit de suscripción MP');
+			const result = rateLimitFail(error, {
+				logContext: 'Error validando rate limit de suscripción MP',
+				unavailableMessage: SUBSCRIPTION_PREPARATION_UNAVAILABLE
+			});
 			return fail(result.status, { message: result.message });
 		}
 

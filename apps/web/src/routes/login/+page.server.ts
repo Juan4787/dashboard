@@ -6,15 +6,29 @@ import {
 	MASTER_EMAIL
 } from '$lib/server/supabase';
 import {
-	enforceRateLimits,
+	enforceRateLimitsFailOpen,
 	loginPasswordRateLimitRules,
-	rateLimitFail,
 	RateLimitExceededError,
 	signupEmailRateLimitRules
 } from '$lib/server/rate-limits';
 import { dev } from '$app/environment';
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
+
+const LOGIN_UNAVAILABLE_MESSAGE =
+	'El ingreso no está disponible en este momento. Probá de nuevo en unos minutos. Si continúa, contactá a soporte.';
+const REGISTER_UNAVAILABLE_MESSAGE =
+	'No podemos crear tu cuenta en este momento. Probá de nuevo en unos minutos. Si continúa, contactá a soporte.';
+
+const authErrorStatus = (error: unknown) =>
+	typeof error === 'object' && error !== null && 'status' in error
+		? Number((error as { status?: unknown }).status)
+		: 0;
+
+const authErrorCode = (error: unknown) =>
+	typeof error === 'object' && error !== null && 'code' in error
+		? String((error as { code?: unknown }).code ?? '')
+		: '';
 
 const authErrorMessage = (value?: string | null) => {
 	if (value === 'google_callback') {
@@ -27,7 +41,7 @@ const authErrorMessage = (value?: string | null) => {
 		return 'Para crear la cuenta con Google tenés que aceptar los términos y condiciones.';
 	}
 	if (value === 'google_start') {
-		return 'No pudimos iniciar el ingreso con Google. Probá de nuevo en unos minutos.';
+		return 'El ingreso con Google no está disponible en este momento. Probá de nuevo en unos minutos o ingresá con correo y contraseña.';
 	}
 	if (value === 'google_demo') {
 		return 'Ingreso con Google no disponible en modo demo.';
@@ -84,40 +98,56 @@ export const actions: Actions = {
 		}
 
 		try {
-			await enforceRateLimits(loginPasswordRateLimitRules(email, getClientAddress()), fetch);
+			await enforceRateLimitsFailOpen(loginPasswordRateLimitRules(email, getClientAddress()), {
+				fetchImpl: fetch,
+				logContext: 'No se pudo aplicar el control de intentos de ingreso'
+			});
 		} catch (error) {
 			if (error instanceof RateLimitExceededError) {
 				return loginFail(error.status, error.userMessage, email);
 			}
-
-			// La protección de frecuencia no debe dejar a todos sin acceso si falla una
-			// dependencia interna. Supabase Auth conserva sus propias protecciones.
-			console.error('No se pudo aplicar el control de intentos de ingreso', error);
+			console.error('Fallo inesperado aplicando el control de intentos de ingreso', error);
+			return loginFail(503, LOGIN_UNAVAILABLE_MESSAGE, email);
 		}
 
-		const supabase = await createSupabaseServerClient('odonto', null, fetch);
-
-		const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+		let authResult;
+		try {
+			const supabase = await createSupabaseServerClient('odonto', null, fetch);
+			authResult = await supabase.auth.signInWithPassword({ email, password });
+		} catch (error) {
+			console.error('No se pudo conectar con Supabase Auth durante el ingreso', error);
+			return loginFail(503, LOGIN_UNAVAILABLE_MESSAGE, email);
+		}
+		const { data, error } = authResult;
 
 		if (error || !data.session) {
-			console.error('Error login Supabase', { email, error });
+			const code = authErrorCode(error);
+			const status = authErrorStatus(error);
 			const msg = error?.message?.toLowerCase() ?? '';
 			if ((error as any)?.code === 'email_provider_disabled' || msg.includes('email logins are disabled')) {
-				return loginFail(
-					400,
-					'El ingreso con correo electrónico está desactivado en la configuración de acceso.',
-					email
-				);
+				console.error('El proveedor de ingreso por email no está disponible', { code, status });
+				return loginFail(503, LOGIN_UNAVAILABLE_MESSAGE, email);
 			}
 			if (msg.includes('email not confirmed')) {
 				return loginFail(400, 'Tu correo electrónico todavía no está confirmado.', email);
 			}
 			if (msg.includes('invalid api key') || msg.includes('invalid jwt') || msg.includes('jwt')) {
+				console.error('Supabase Auth rechazó la configuración del ingreso', { code, status });
+				return loginFail(503, LOGIN_UNAVAILABLE_MESSAGE, email);
+			}
+			if (status === 429) {
 				return loginFail(
-					400,
-					'La conexión con la base de datos no está configurada correctamente.',
+					429,
+					'Hay demasiados intentos de ingreso. Esperá unos minutos antes de volver a probar.',
 					email
 				);
+			}
+			if (status >= 500) {
+				console.error('Supabase Auth no pudo completar el ingreso', { code, status });
+				return loginFail(503, LOGIN_UNAVAILABLE_MESSAGE, email);
+			}
+			if (code && code !== 'invalid_credentials') {
+				console.warn('Supabase Auth rechazó el ingreso', { code, status });
 			}
 			return loginFail(400, 'Credenciales inválidas', email);
 		}
@@ -185,16 +215,30 @@ export const actions: Actions = {
 		}
 
 		try {
-			await enforceRateLimits(signupEmailRateLimitRules(email, getClientAddress()), fetch);
+			await enforceRateLimitsFailOpen(signupEmailRateLimitRules(email, getClientAddress()), {
+				fetchImpl: fetch,
+				logContext: 'No se pudo aplicar el control de intentos de registro'
+			});
 		} catch (error) {
-			const result = rateLimitFail(error, 'Error validando rate limit de registro');
-			return registerFail(result.status, result.message, email, acceptedTerms);
+			if (error instanceof RateLimitExceededError) {
+				return registerFail(error.status, error.userMessage, email, acceptedTerms);
+			}
+			console.error('Fallo inesperado aplicando el control de intentos de registro', error);
+			return registerFail(503, REGISTER_UNAVAILABLE_MESSAGE, email, acceptedTerms);
 		}
 
-		const supabase = await createSupabaseServerClient('odonto', null, fetch);
-		const { data, error } = await supabase.auth.signUp({ email, password });
+		let authResult;
+		try {
+			const supabase = await createSupabaseServerClient('odonto', null, fetch);
+			authResult = await supabase.auth.signUp({ email, password });
+		} catch (error) {
+			console.error('No se pudo conectar con Supabase Auth durante el registro', error);
+			return registerFail(503, REGISTER_UNAVAILABLE_MESSAGE, email, acceptedTerms);
+		}
+		const { data, error } = authResult;
 		if (error) {
-			console.error('Error registro Supabase', { email, error });
+			const code = authErrorCode(error);
+			const status = authErrorStatus(error);
 			const msg = error?.message?.toLowerCase() ?? '';
 			if (msg.includes('user already registered') || msg.includes('already registered')) {
 				return registerFail(
@@ -204,6 +248,24 @@ export const actions: Actions = {
 					acceptedTerms
 				);
 			}
+			if (status === 429) {
+				return registerFail(
+					429,
+					'Hay demasiados intentos de registro. Esperá unos minutos antes de volver a probar.',
+					email,
+					acceptedTerms
+				);
+			}
+			if (
+				status >= 500 ||
+				msg.includes('invalid api key') ||
+				msg.includes('invalid jwt') ||
+				msg.includes('email provider is disabled')
+			) {
+				console.error('Supabase Auth no pudo completar el registro', { code, status });
+				return registerFail(503, REGISTER_UNAVAILABLE_MESSAGE, email, acceptedTerms);
+			}
+			console.warn('Supabase Auth rechazó el registro', { code, status });
 			return registerFail(
 				400,
 				'No pudimos crear la cuenta. Revisá los datos e intentá de nuevo.',

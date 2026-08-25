@@ -15,14 +15,18 @@ vi.mock('./supabase', () => ({
 
 const {
 	enforceRateLimits,
+	enforceRateLimitsFailOpen,
 	hashRateLimitSubject,
 	loginPasswordRateLimitRules,
+	pendingBusinessCreationRateLimitRules,
 	radiographOriginalAccessRateLimitRules,
 	radiographRestoreRateLimitRules,
 	radiographTrashRateLimitRules,
 	radiographUploadRateLimitRules,
+	rateLimitFail,
 	signupEmailRateLimitRules,
-	RateLimitExceededError
+	RateLimitExceededError,
+	RateLimitUnavailableError
 } = await import('./rate-limits');
 
 beforeEach(() => {
@@ -96,6 +100,65 @@ describe('rate limits server helper', () => {
 		await expect(
 			enforceRateLimits(loginPasswordRateLimitRules('cliente@example.com', '203.0.113.10'))
 		).rejects.toBeInstanceOf(RateLimitExceededError);
+	});
+
+	it('clasifica una dependencia caída sin confundirla con un límite alcanzado', async () => {
+		mocks.createSupabaseAdminClient.mockRejectedValueOnce(new Error('service role ausente'));
+
+		await expect(
+			enforceRateLimits(loginPasswordRateLimitRules('cliente@example.com', '203.0.113.10'))
+		).rejects.toBeInstanceOf(RateLimitUnavailableError);
+	});
+
+	it('permite continuar sólo en la política fail-open y conserva los límites reales', async () => {
+		const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		mocks.createSupabaseAdminClient.mockRejectedValueOnce(new Error('RPC no disponible'));
+
+		await expect(
+			enforceRateLimitsFailOpen(
+				loginPasswordRateLimitRules('cliente@example.com', '203.0.113.10'),
+				{ logContext: 'control de ingreso' }
+			)
+		).resolves.toBeUndefined();
+		expect(log).toHaveBeenCalledWith('control de ingreso', expect.any(RateLimitUnavailableError));
+
+		const rpc = vi.fn(async () => ({
+			data: [{ allowed: false, used: 5, retry_after_seconds: 120 }],
+			error: null
+		}));
+		mocks.createSupabaseAdminClient.mockResolvedValueOnce({ rpc });
+		await expect(
+			enforceRateLimitsFailOpen(
+				loginPasswordRateLimitRules('cliente@example.com', '203.0.113.10'),
+				{ logContext: 'control de ingreso' }
+			)
+		).rejects.toBeInstanceOf(RateLimitExceededError);
+		log.mockRestore();
+	});
+
+	it('usa un mensaje específico y 503 cuando una operación fail-closed no puede validar', () => {
+		const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		const result = rateLimitFail(new RateLimitUnavailableError(new Error('RPC caída')), {
+			logContext: 'control de suscripción',
+			unavailableMessage: 'No pudimos preparar la suscripción. No se generó ningún cobro.'
+		});
+
+		expect(result).toEqual({
+			status: 503,
+			message: 'No pudimos preparar la suscripción. No se generó ningún cobro.'
+		});
+		expect(log).toHaveBeenCalledOnce();
+		log.mockRestore();
+	});
+
+	it('protege el alta inicial siempre por usuario y suma IP cuando está disponible', () => {
+		expect(pendingBusinessCreationRateLimitRules('user-1')).toEqual([
+			expect.objectContaining({ action: 'pending_business_creation_by_user', subject: 'user-1' })
+		]);
+		expect(pendingBusinessCreationRateLimitRules('user-1', '203.0.113.10')).toEqual([
+			expect.objectContaining({ action: 'pending_business_creation_by_user', subject: 'user-1' }),
+			expect.objectContaining({ action: 'pending_business_creation_by_ip', subject: '203.0.113.10' })
+		]);
 	});
 
 	it('define límites clínicos acotados por usuario y agrupa las dos ventanas de carga', async () => {
