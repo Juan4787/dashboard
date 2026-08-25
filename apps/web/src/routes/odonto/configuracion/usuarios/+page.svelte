@@ -6,12 +6,12 @@
 	} from '$lib/utils/team-permissions';
 	import { formatPriceLabel } from '$lib/utils/money-input';
 	import { normalizeTimeRangesForCommit, normalizeTimeRangesInput, parseTimeRanges } from '$lib/utils/time-ranges';
-	import {
-		createEmptyScheduleBlock,
+	import { createEmptyScheduleBlock,
 		serializeScheduleBlocks,
 		validateScheduleBlocks,
 		type ScheduleBlockDraft
 	} from '$lib/utils/schedule-blocks';
+	import Modal from '$lib/components/Modal.svelte';
 	import { enhance } from '$app/forms';
 	import { invalidate } from '$app/navigation';
 	import type { SubmitFunction } from '@sveltejs/kit';
@@ -163,6 +163,7 @@
 	let wizardSubmitting = $state(false);
 	let attendingSubmitting = $state(false);
 	let teamActionBusy = $state('');
+	let memberToRemove = $state<RoleAccess | null>(null);
 
 	const hasProfessionalProfile = $derived(
 		shouldConfigureProfessionalProfile({ role, requested: professionalProfileRequested })
@@ -1183,24 +1184,14 @@
 											</form>
 										{/if}
 										{#if canRemoveMember(member)}
-											<form
-												method="POST"
-												action="?/remove_user"
-												use:enhance={() => {
-													teamActionBusy = `remove-${member.id}`;
-													return async ({ update }) => {
-														teamActionBusy = '';
-												await update({ reset: false, invalidateAll: false });
-												await invalidate('app:team');
-													};
-												}}
+											<button
+												type="button"
+												disabled={!canManage || member.user_id === data.currentUserId || teamActionBusy === `remove-${member.id}`}
+												class="ux-btn-danger w-full sm:w-auto shrink-0"
+												onclick={() => (memberToRemove = member)}
 											>
-												<input type="hidden" name="access_id" value={member.id} />
-												<input type="hidden" name="status" value={member.status} />
-												<button type="submit" disabled={!canManage || member.user_id === data.currentUserId || teamActionBusy === `remove-${member.id}`} class="ux-btn-danger">
-													{teamActionBusy === `remove-${member.id}` ? 'Quitando...' : 'Quitar'}
-												</button>
-											</form>
+												Quitar
+											</button>
 										{/if}
 									</div>
 								</div>
@@ -1219,3 +1210,57 @@
 		{/each}
 	</div>
 </section>
+
+<Modal
+	open={Boolean(memberToRemove)}
+	title="Eliminar rol"
+	dismissible={!teamActionBusy}
+	on:close={() => {
+		if (!teamActionBusy) memberToRemove = null;
+	}}
+>
+	{#if memberToRemove}
+		<div class="space-y-4 text-neutral-800 dark:text-neutral-100">
+			<p class="text-base font-semibold text-neutral-900 dark:text-white">
+				¿Seguro querés eliminar este rol?
+			</p>
+			<p class="text-sm text-neutral-600 dark:text-white/70">
+				Se quitará el rol de <strong class="text-neutral-900 dark:text-white">{roleLabels[memberToRemove.role]}</strong> para <strong class="text-neutral-900 dark:text-white">{memberToRemove.email}</strong>{memberToRemove.status === 'pending' ? ' (invitación pendiente)' : ''}. Esta acción no se puede deshacer.
+			</p>
+			<div class="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+				<button
+					type="button"
+					class="ux-btn-secondary"
+					disabled={Boolean(teamActionBusy)}
+					onclick={() => (memberToRemove = null)}
+				>
+					Cancelar
+				</button>
+				<form
+					method="POST"
+					action="?/remove_user"
+					use:enhance={() => {
+						const removingId = memberToRemove?.id;
+						teamActionBusy = `remove-${removingId}`;
+						return async ({ update }) => {
+							teamActionBusy = '';
+							memberToRemove = null;
+							await update({ reset: false, invalidateAll: false });
+							await invalidate('app:team');
+						};
+					}}
+				>
+					<input type="hidden" name="access_id" value={memberToRemove.id} />
+					<input type="hidden" name="status" value={memberToRemove.status} />
+					<button
+						type="submit"
+						disabled={!canManage || Boolean(teamActionBusy)}
+						class="ux-btn-danger w-full sm:w-auto"
+					>
+						{teamActionBusy === `remove-${memberToRemove.id}` ? 'Quitando...' : 'Quitar rol'}
+					</button>
+				</form>
+			</div>
+		</div>
+	{/if}
+</Modal>
