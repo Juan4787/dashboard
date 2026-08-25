@@ -13,7 +13,16 @@ const mocks = vi.hoisted(() => ({
 	signupEmailRateLimitRules: vi.fn((email: string, ip: string) => [
 		{ action: 'signup_email_by_email', subject: email, ip }
 	]),
-	rateLimitFail: vi.fn(() => ({ status: 429, message: 'rate limited' }))
+	rateLimitFail: vi.fn(() => ({ status: 429, message: 'rate limited' })),
+	RateLimitExceededError: class RateLimitExceededError extends Error {
+		status = 429;
+		userMessage: string;
+
+		constructor(message: string) {
+			super(message);
+			this.userMessage = message;
+		}
+	}
 }));
 
 vi.mock('$env/dynamic/private', () => ({ env: mocks.env }));
@@ -28,7 +37,8 @@ vi.mock('$lib/server/rate-limits', () => ({
 	enforceRateLimits: mocks.enforceRateLimits,
 	loginPasswordRateLimitRules: mocks.loginPasswordRateLimitRules,
 	signupEmailRateLimitRules: mocks.signupEmailRateLimitRules,
-	rateLimitFail: mocks.rateLimitFail
+	rateLimitFail: mocks.rateLimitFail,
+	RateLimitExceededError: mocks.RateLimitExceededError
 }));
 
 const { actions } = await import('./+page.server');
@@ -128,5 +138,63 @@ describe('login/register server actions', () => {
 			password: 'secret123'
 		});
 		expect(supabase.rpc).not.toHaveBeenCalledWith('is_email_enabled', expect.anything());
+	});
+
+	it('mantiene disponible el ingreso si falla el control interno de intentos', async () => {
+		const auth = {
+			signInWithPassword: vi.fn(async () => ({
+				data: { session: { access_token: 'access', refresh_token: 'refresh' } },
+				error: null
+			}))
+		};
+		mocks.createSupabaseServerClient.mockResolvedValue({ auth });
+		mocks.enforceRateLimits.mockRejectedValueOnce(new Error('RPC no disponible'));
+		const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+		await expect(
+			actions.login(
+				makeEvent({
+					email: 'cliente@example.com',
+					password: 'secret123'
+				}) as never
+			)
+		).rejects.toMatchObject({ status: 303, location: '/odonto/agenda' });
+
+		expect(auth.signInWithPassword).toHaveBeenCalledWith({
+			email: 'cliente@example.com',
+			password: 'secret123'
+		});
+		expect(error).toHaveBeenCalledWith(
+			'No se pudo aplicar el control de intentos de ingreso',
+			expect.any(Error)
+		);
+		error.mockRestore();
+	});
+
+	it('informa el límite real de intentos sin intentar autenticar', async () => {
+		const auth = { signInWithPassword: vi.fn() };
+		mocks.createSupabaseServerClient.mockResolvedValue({ auth });
+		mocks.enforceRateLimits.mockRejectedValueOnce(
+			new mocks.RateLimitExceededError(
+				'Hay demasiados intentos de ingreso para este correo. Volvé a intentar en 15 min.'
+			)
+		);
+
+		const result = (await actions.login(
+			makeEvent({
+				email: 'cliente@example.com',
+				password: 'secret123'
+			}) as never
+		)) as { status: number; data: { mode?: string; message?: string; email?: string } };
+
+		expect(result).toMatchObject({
+			status: 429,
+			data: {
+				mode: 'login',
+				message: 'Hay demasiados intentos de ingreso para este correo. Volvé a intentar en 15 min.',
+				email: 'cliente@example.com'
+			}
+		});
+		expect(auth.signInWithPassword).not.toHaveBeenCalled();
 	});
 });

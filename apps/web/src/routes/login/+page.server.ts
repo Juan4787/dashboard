@@ -9,6 +9,7 @@ import {
 	enforceRateLimits,
 	loginPasswordRateLimitRules,
 	rateLimitFail,
+	RateLimitExceededError,
 	signupEmailRateLimitRules
 } from '$lib/server/rate-limits';
 import { dev } from '$app/environment';
@@ -85,8 +86,13 @@ export const actions: Actions = {
 		try {
 			await enforceRateLimits(loginPasswordRateLimitRules(email, getClientAddress()), fetch);
 		} catch (error) {
-			const result = rateLimitFail(error, 'Error validando rate limit de login');
-			return loginFail(result.status, result.message, email);
+			if (error instanceof RateLimitExceededError) {
+				return loginFail(error.status, error.userMessage, email);
+			}
+
+			// La protección de frecuencia no debe dejar a todos sin acceso si falla una
+			// dependencia interna. Supabase Auth conserva sus propias protecciones.
+			console.error('No se pudo aplicar el control de intentos de ingreso', error);
 		}
 
 		const supabase = await createSupabaseServerClient('odonto', null, fetch);
