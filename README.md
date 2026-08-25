@@ -35,10 +35,9 @@ Las variables de entorno viven en la raíz. `apps/web/vite.config.ts` usa `envDi
 
 ## Despliegues
 
-El repositorio admite Netlify, Vercel y Cloudflare Workers. Netlify conserva su
-configuración en `netlify.toml`; Vercel usa `vercel.json`; y Workers usa
-`wrangler.jsonc`. El adaptador se selecciona durante el build según la
-plataforma, sin compartir artefactos entre proveedores.
+El repositorio admite Cloudflare Workers y Vercel. Workers usa
+`apps/web/wrangler.jsonc`; Vercel usa `vercel.json`. El adaptador se selecciona
+durante el build según la plataforma, sin compartir artefactos entre proveedores.
 
 Para crear el proyecto en Vercel, configurá `apps/web` como **Root Directory**
 y mantené habilitada la opción para incluir archivos fuera de esa raíz. Así
@@ -63,21 +62,20 @@ node scripts/vercel-build.mjs
 
 Workers es la plataforma prevista para la producción comercial. El Worker se
 llama `cita-suite` y usa el artefacto de SvelteKit generado exclusivamente por
-el adaptador de Cloudflare. Netlify y Vercel no cambian de configuración ni de
-adaptador.
+el adaptador de Cloudflare. Vercel mantiene su adaptador y configuración.
 
 Antes del primer despliegue, configurá el proyecto de Workers con **Root
-Directory** en la raíz del repositorio y Node 20.3 o superior. En **Settings →
-Builds** usá estos comandos:
+Directory** en `apps/web` y Node 20.3 o superior. En **Settings → Builds** usá
+estos comandos:
 
 ```text
-Build command: pnpm build:cloudflare
-Deploy command: pnpm --filter web exec wrangler deploy --config ../../wrangler.jsonc
-Non-production branch deploy command: pnpm --filter web exec wrangler versions upload --config ../../wrangler.jsonc
+Build command: pnpm run build
+Deploy command: pnpm exec wrangler deploy
+Non-production branch deploy command: pnpm exec wrangler versions upload
 ```
 
 El nombre del Worker creado en el panel debe ser exactamente `cita-suite`, como
-en `wrangler.jsonc`. Para un despliegue desde una máquina autorizada:
+en `apps/web/wrangler.jsonc`. Para un despliegue desde una máquina autorizada:
 
 ```sh
 pnpm deploy:cloudflare
