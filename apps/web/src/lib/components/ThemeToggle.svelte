@@ -44,5 +44,5 @@ onMount(() => {
 			</svg>
 		{/if}
 	</span>
-	<span class="whitespace-nowrap">{theme === 'dark' ? 'Activar modo claro' : 'Activar modo oscuro'}</span>
+	<span>{theme === 'dark' ? 'Activar modo claro' : 'Activar modo oscuro'}</span>
 </button>

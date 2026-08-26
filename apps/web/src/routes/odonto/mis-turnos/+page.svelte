@@ -60,11 +60,11 @@
 				</p>
 			</div>
 			<div class="grid grid-cols-2 gap-3">
-				<div class="ux-soft-card min-w-32 p-4 text-center">
+				<div class="ux-soft-card min-w-0 p-4 text-center">
 					<p class="text-sm font-bold text-white/55">Hoy</p>
 					<p class="mt-1 text-3xl font-bold text-white">{data.todayAppointments.length}</p>
 				</div>
-				<div class="ux-soft-card min-w-32 p-4 text-center">
+				<div class="ux-soft-card min-w-0 p-4 text-center">
 					<p class="text-sm font-bold text-white/55">Próximos</p>
 					<p class="mt-1 text-3xl font-bold text-white">{data.upcomingAppointments.length}</p>
 				</div>

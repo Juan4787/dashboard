@@ -1188,7 +1188,7 @@
 			{:else if renderedPushState === 'awaiting_permission'}
 				<button
 					type="button"
-					class={primary ? 'ux-btn-primary ux-btn-cta w-full whitespace-nowrap px-3 text-[1.075rem] font-extrabold' : 'ux-btn-secondary w-full whitespace-nowrap px-3 text-[1.075rem] font-extrabold'}
+					class={primary ? 'ux-btn-primary ux-btn-cta w-full px-3 text-[1.075rem] font-extrabold' : 'ux-btn-secondary w-full px-3 text-[1.075rem] font-extrabold'}
 					onclick={enablePush}
 				>
 					🔔 Activar recordatorio
@@ -1210,7 +1210,7 @@
 			{:else}
 				<button
 					type="button"
-					class={primary ? 'ux-btn-primary ux-btn-cta w-full whitespace-nowrap px-3 text-[1.075rem] font-extrabold' : 'ux-btn-secondary w-full whitespace-nowrap px-3 text-[1.075rem] font-extrabold'}
+					class={primary ? 'ux-btn-primary ux-btn-cta w-full px-3 text-[1.075rem] font-extrabold' : 'ux-btn-secondary w-full px-3 text-[1.075rem] font-extrabold'}
 					onclick={enablePush}
 				>
 					🔔 Activar recordatorio
@@ -1308,7 +1308,7 @@
 							</p>
 							<button
 								type="button"
-								class="ux-btn-primary ux-btn-cta mt-4 w-full whitespace-nowrap px-3 text-[1.075rem] font-extrabold"
+								class="ux-btn-primary ux-btn-cta mt-4 w-full px-3 text-[1.075rem] font-extrabold"
 								disabled={syncing}
 								onclick={enablePush}
 							>
@@ -1414,7 +1414,7 @@
 				<a
 					href={`${base}/calendario.ics?p=phone`}
 					onclick={() => beginCalendarHandoff('iphone')}
-					class="ux-btn-primary ux-btn-cta mt-5 flex w-full whitespace-nowrap px-3 text-center text-[1.075rem] font-extrabold"
+					class="ux-btn-primary ux-btn-cta mt-5 flex w-full px-3 text-center text-[1.075rem] font-extrabold"
 				>
 					📅 Agregar al calendario
 				</a>

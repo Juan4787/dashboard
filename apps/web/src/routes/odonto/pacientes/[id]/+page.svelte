@@ -579,7 +579,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 		<div class="mt-4 flex flex-wrap gap-3">
 			{#each chips as chip}
 				<div
-					class={`flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold ${
+					class={`flex min-w-0 max-w-full items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold ${
 						{
 							neutral: 'bg-white/60 text-neutral-800 dark:bg-white/10 dark:text-neutral-100',
 							alert: 'bg-amber-100 text-amber-900 dark:bg-amber-500/15 dark:text-amber-100',
@@ -587,8 +587,8 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 						}[chip.intent]
 					}`}
 				>
-					<span class="text-[11px] uppercase tracking-wide">{chip.label}:</span>
-					<span>{chip.value}</span>
+					<span class="shrink-0 text-[11px] uppercase tracking-wide">{chip.label}:</span>
+					<span class="min-w-0 break-words">{chip.value}</span>
 				</div>
 			{/each}
 		</div>
@@ -813,7 +813,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 								Alergias
 							</div>
 							<p
-								class={`flex-1 break-words text-right text-[15px] font-semibold ${
+								class={`min-w-0 flex-1 break-words text-right text-[15px] font-semibold ${
 									data.patient.allergies ? 'text-amber-900 dark:text-amber-100' : 'text-amber-700/70 dark:text-amber-200/70'
 								}`}
 							>
@@ -829,7 +829,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 								Medicación
 							</div>
 							<p
-								class={`flex-1 break-words text-left text-[15px] font-semibold ${
+								class={`min-w-0 flex-1 break-words text-left text-[15px] font-semibold ${
 									data.patient.medication ? 'text-neutral-800 dark:text-white' : 'text-neutral-400 dark:text-neutral-500'
 								}`}
 							>
@@ -844,7 +844,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 								Antecedentes
 							</div>
 							<p
-								class={`flex-1 break-words text-left text-[15px] font-semibold whitespace-pre-wrap ${
+								class={`min-w-0 flex-1 break-words text-left text-[15px] font-semibold whitespace-pre-wrap ${
 									data.patient.background ? 'text-neutral-800 dark:text-white' : 'text-neutral-400 dark:text-neutral-500'
 								}`}
 							>
@@ -871,7 +871,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 						<div class="space-y-1">
 							<p class="text-xs font-semibold text-neutral-500 dark:text-neutral-300">Teléfono</p>
 							<div class="flex items-center gap-2">
-								<p class={`text-[15px] font-semibold ${data.patient.phone ? 'text-neutral-800 dark:text-white' : 'text-neutral-400 dark:text-neutral-500'}`}>
+								<p class={`min-w-0 flex-1 break-words text-[15px] font-semibold ${data.patient.phone ? 'text-neutral-800 dark:text-white' : 'text-neutral-400 dark:text-neutral-500'}`}>
 									{data.patient.phone ?? 'Sin registrar'}
 								</p>
 								{#if data.patient.phone}
@@ -889,7 +889,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 						<div class="space-y-1">
 							<p class="text-xs font-semibold text-neutral-500 dark:text-neutral-300">Correo electrónico</p>
 							<div class="flex items-center gap-2">
-								<p class={`text-[15px] font-semibold break-all ${data.patient.email ? 'text-neutral-800 dark:text-white' : 'text-neutral-400 dark:text-neutral-500'}`}>
+								<p class={`min-w-0 flex-1 break-all text-[15px] font-semibold ${data.patient.email ? 'text-neutral-800 dark:text-white' : 'text-neutral-400 dark:text-neutral-500'}`}>
 									{data.patient.email ?? 'Sin registrar'}
 								</p>
 								{#if data.patient.email}
@@ -907,7 +907,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 						<div class="space-y-1 md:col-span-2">
 							<p class="text-xs font-semibold text-neutral-500 dark:text-neutral-300">Dirección</p>
 							<div class="flex items-center gap-2">
-								<p class={`text-[15px] font-semibold ${data.patient.address ? 'text-neutral-800 dark:text-white' : 'text-neutral-400 dark:text-neutral-500'}`}>
+								<p class={`min-w-0 flex-1 break-words text-[15px] font-semibold ${data.patient.address ? 'text-neutral-800 dark:text-white' : 'text-neutral-400 dark:text-neutral-500'}`}>
 									{data.patient.address ?? 'Sin registrar'}
 								</p>
 								{#if data.patient.address}

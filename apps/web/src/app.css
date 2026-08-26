@@ -74,6 +74,41 @@ body {
 	text-rendering: optimizeLegibility;
 }
 
+/*
+ * Los datos ingresados por las personas pueden no tener espacios (correos,
+ * nombres de archivo o notas clínicas). En pantallas angostas deben ocupar
+ * más líneas, nunca ensanchar la página ni salirse de una tarjeta.
+ */
+@layer base {
+	*,
+	*::before,
+	*::after {
+		box-sizing: border-box;
+	}
+
+	html {
+		overflow-x: clip;
+	}
+
+	body {
+		min-inline-size: 0;
+		max-inline-size: 100%;
+		overflow-wrap: break-word;
+		overflow-wrap: anywhere;
+	}
+
+	img,
+	video,
+	canvas {
+		max-inline-size: 100%;
+	}
+
+	/* Flex y grid conservan un ancho mínimo de contenido por defecto. */
+	:is(.flex, .inline-flex, .grid, .inline-grid, .ux-page) > :where(*:not(svg, img, video, canvas)) {
+		min-inline-size: 0;
+	}
+}
+
 a {
 	color: inherit;
 	text-decoration: none;
@@ -398,6 +433,7 @@ a {
 	.ux-btn-secondary,
 	.ux-btn-danger {
 		display: inline-flex;
+		max-width: 100%;
 		min-height: var(--tap);
 		align-items: center;
 		justify-content: center;
@@ -407,6 +443,8 @@ a {
 		font-size: 0.95rem;
 		font-weight: 700;
 		line-height: 1;
+		white-space: normal;
+		overflow-wrap: anywhere;
 		cursor: pointer;
 		transition:
 			transform 140ms ease,
@@ -475,6 +513,7 @@ a {
 	/* ------------------------------- Badges ------------------------------- */
 	.ux-badge {
 		display: inline-flex;
+		max-width: 100%;
 		width: fit-content;
 		align-items: center;
 		gap: 0.35rem;
@@ -484,6 +523,8 @@ a {
 		color: var(--accent-text);
 		font-size: 0.78rem;
 		font-weight: 700;
+		white-space: normal;
+		overflow-wrap: anywhere;
 	}
 
 	.ux-badge-success {
@@ -503,6 +544,7 @@ a {
 
 	.ux-mini-badge {
 		display: inline-flex;
+		max-width: 100%;
 		width: fit-content;
 		align-items: center;
 		justify-content: center;
@@ -511,7 +553,9 @@ a {
 		font-size: 0.68rem;
 		font-weight: 800;
 		line-height: 1.1;
-		white-space: nowrap;
+		text-align: center;
+		white-space: normal;
+		overflow-wrap: anywhere;
 	}
 
 	.ux-mini-badge-warning {
