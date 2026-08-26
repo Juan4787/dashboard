@@ -90,6 +90,10 @@ sin definir o con valor distinto de `true` en producción. Definí también
 URLs de Supabase, a los redirect URIs de Google Calendar y a los retornos y
 webhooks de Mercado Pago que estén habilitados.
 
+`keep_vars: true` en `apps/web/wrangler.jsonc` evita que un despliegue automático
+borre los bindings cargados desde el panel. No lo elimines mientras las variables
+y los secretos de producción se administren fuera del repositorio.
+
 Las variables y los secretos pertenecen al Worker, no al repositorio. Cambiar
 `name` en `wrangler.jsonc` apunta a otro Worker y **no** copia su configuración.
 Después de cualquier cambio de nombre, cargá y verificá como mínimo
