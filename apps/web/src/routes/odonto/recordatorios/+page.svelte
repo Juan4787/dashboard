@@ -1,5 +1,7 @@
 <script lang="ts">
 	import type { ReminderCandidate, ReminderDay } from '$lib/server/reminders';
+	import { classifyUserAgent, refineDeviceClass, type DeviceClass } from '$lib/device';
+	import { onMount } from 'svelte';
 
 	let { data, form } = $props<{
 		data: {
@@ -20,6 +22,11 @@
 	);
 
 	const dayLabel = $derived(data.day === 'hoy' ? 'hoy' : 'mañana');
+	let whatsappDevice = $state<DeviceClass | null>(null);
+
+	onMount(() => {
+		whatsappDevice = refineDeviceClass(classifyUserAgent(navigator.userAgent), navigator);
+	});
 
 	const relativeTime = (iso: string) => {
 		const minutes = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
@@ -29,8 +36,14 @@
 		return `hace ${hours} h`;
 	};
 
-	const openHref = (candidate: ReminderCandidate, confirm = false) =>
-		`/odonto/recordatorios/abrir/${candidate.appointment_id}?dia=${data.day}${confirm ? '&confirmar=1' : ''}`;
+	const openHref = (candidate: ReminderCandidate, confirm = false) => {
+		const params = new URLSearchParams({ dia: data.day });
+		if (confirm) params.set('confirmar', '1');
+		// Sin JavaScript el servidor clasifica el navegador. Con JavaScript mandamos
+		// el dato refinado para no confundir un iPad que se anuncia como una Mac.
+		if (whatsappDevice) params.set('dispositivo', whatsappDevice);
+		return `/odonto/recordatorios/abrir/${candidate.appointment_id}?${params}`;
+	};
 </script>
 
 {#snippet reminderRow(candidate: ReminderCandidate)}

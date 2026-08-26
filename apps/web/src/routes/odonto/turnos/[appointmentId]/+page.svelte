@@ -1,7 +1,7 @@
 <script lang="ts">
 	import BackLink from '$lib/components/BackLink.svelte';
 	import { formatDateTime } from '$lib/utils/format';
-	import { refineDeviceClass, type DeviceClass } from '$lib/device';
+	import { refineDeviceClass, whatsappHrefFor, type DeviceClass } from '$lib/device';
 	import { enhance } from '$app/forms';
 	import { onMount } from 'svelte';
 	import type { SubmitFunction } from '@sveltejs/kit';
@@ -44,15 +44,11 @@
 
 	let refinedActivationDevice = $state<DeviceClass | null>(null);
 	const activationDevice = $derived(refinedActivationDevice ?? data.activationDevice);
-	const whatsappHrefFor = (whatsAppUrl: string | null, whatsAppWebUrl: string | null) =>
-		activationDevice === 'android' || activationDevice === 'ios'
-			? whatsAppUrl
-			: (whatsAppWebUrl ?? whatsAppUrl);
 	const activationWhatsAppHref = $derived(
-		whatsappHrefFor(data.activationWhatsAppUrl, data.activationWhatsAppWebUrl)
+		whatsappHrefFor(activationDevice, data.activationWhatsAppUrl, data.activationWhatsAppWebUrl)
 	);
 	const rescheduleWhatsAppHref = $derived(
-		whatsappHrefFor(data.rescheduleWhatsAppUrl, data.rescheduleWhatsAppWebUrl)
+		whatsappHrefFor(activationDevice, data.rescheduleWhatsAppUrl, data.rescheduleWhatsAppWebUrl)
 	);
 
 	onMount(() => {

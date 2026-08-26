@@ -9,13 +9,23 @@ import { resolveActiveBusiness } from '$lib/server/business';
 import { writeAuditLog } from '$lib/server/audit';
 import { resolveMapsUrl } from '$lib/server/location';
 import { normalizeArgentineWhatsAppPhone } from '$lib/server/phone';
-import { buildReminderWhatsAppMessage, buildWaMeUrl } from '$lib/server/reminders';
+import {
+	buildReminderWhatsAppMessage,
+	buildWaMeUrl,
+	buildWhatsAppWebUrl
+} from '$lib/server/reminders';
+import { classifyUserAgent, type DeviceClass, whatsappHrefFor } from '$lib/device';
 import type { RequestHandler } from './$types';
 
 const backTo = (day: string | null) =>
 	`/odonto/recordatorios${day === 'hoy' ? '?dia=hoy' : ''}`;
 
-export const GET: RequestHandler = async ({ params, locals, fetch, cookies, url }) => {
+const requestedDevice = (value: string | null): DeviceClass | null =>
+	value === 'android' || value === 'ios' || value === 'desktop' || value === 'unknown'
+		? value
+		: null;
+
+export const GET: RequestHandler = async ({ params, locals, fetch, cookies, url, request }) => {
 	if (!locals.auth) throw redirect(303, '/login');
 	const day = url.searchParams.get('dia');
 	if (env.DEMO_MODE === 'true') throw redirect(303, backTo(day));
@@ -89,10 +99,14 @@ export const GET: RequestHandler = async ({ params, locals, fetch, cookies, url 
 		token: String(appointment.confirmation_token)
 	});
 
+	const device = requestedDevice(url.searchParams.get('dispositivo')) ?? classifyUserAgent(request.headers.get('user-agent'));
+	const whatsAppUrl = buildWaMeUrl(phone, message);
+	const whatsAppWebUrl = buildWhatsAppWebUrl(phone, message);
+
 	return new Response(null, {
 		status: 302,
 		headers: {
-			location: buildWaMeUrl(phone, message),
+			location: whatsappHrefFor(device, whatsAppUrl, whatsAppWebUrl) ?? whatsAppUrl,
 			'cache-control': 'no-store'
 		}
 	});

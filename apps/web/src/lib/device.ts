@@ -207,6 +207,17 @@ export const classifyUserAgent = (userAgent: string | null | undefined): DeviceC
 	return 'unknown';
 };
 
+// En teléfonos y tablets usamos wa.me para que el sistema abra WhatsApp. En PC
+// usamos WhatsApp Web directo y evitamos su pantalla intermedia de elección.
+export const whatsappHrefFor = (
+	device: DeviceClass,
+	whatsAppUrl: string | null,
+	whatsAppWebUrl: string | null
+): string | null =>
+	device === 'android' || device === 'ios'
+		? whatsAppUrl
+		: (whatsAppWebUrl ?? whatsAppUrl);
+
 // Previews de mensajería y crawlers fetchean el link del turno para mostrar la
 // tarjeta del chat: no deben marcar el turno como "ofrecido".
 export const isLikelyBotUserAgent = (userAgent: string | null | undefined): boolean => {

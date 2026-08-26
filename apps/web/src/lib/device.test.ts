@@ -5,7 +5,8 @@ import {
 	notificationBrowserProfile,
 	refineDeviceClass,
 	samsungAppNotificationToggleStep,
-	supportsAndroidCalendarIntent
+	supportsAndroidCalendarIntent,
+	whatsappHrefFor
 } from './device';
 
 const UA = {
@@ -158,6 +159,19 @@ describe('classifyUserAgent', () => {
 	it('desconocido ante UA vacío o raro', () => {
 		expect(classifyUserAgent(null)).toBe('unknown');
 		expect(classifyUserAgent('CurlClient/1.0')).toBe('unknown');
+	});
+});
+
+describe('whatsappHrefFor', () => {
+	const mobileUrl = 'https://wa.me/5493511234567?text=Hola';
+	const desktopUrl = 'https://web.whatsapp.com/send?phone=5493511234567&text=Hola';
+
+	it.each(['android', 'ios'] as const)('usa wa.me en %s', (device) => {
+		expect(whatsappHrefFor(device, mobileUrl, desktopUrl)).toBe(mobileUrl);
+	});
+
+	it.each(['desktop', 'unknown'] as const)('abre WhatsApp Web directo en %s', (device) => {
+		expect(whatsappHrefFor(device, mobileUrl, desktopUrl)).toBe(desktopUrl);
 	});
 });
 
