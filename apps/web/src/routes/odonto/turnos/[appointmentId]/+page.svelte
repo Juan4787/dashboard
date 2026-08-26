@@ -493,23 +493,25 @@
 				{/if}
 			</div>
 
-			<div class="mt-7 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-				<details class="rounded-2xl border border-red-400/20 bg-red-500/10 md:col-span-2 xl:col-span-3">
-					<summary class="cursor-pointer list-none px-5 py-5 text-lg font-bold text-red-100">Cancelar turno</summary>
-					<form method="POST" action="?/update_status" class="border-t border-red-400/20 p-5">
-						<input type="hidden" name="status" value="cancelled" />
-						<label>
-							<span class="ux-label">Motivo (opcional)</span>
-							<textarea name="reason" rows="2" disabled={!canUseStatusAction('cancelled')} class="ux-textarea"></textarea>
-						</label>
-						<label class="mt-4 flex items-start gap-3 text-sm font-bold text-red-100">
-							<input type="checkbox" required disabled={!canUseStatusAction('cancelled')} class="mt-1 h-4 w-4 accent-red-600 disabled:opacity-60" />
-							<span>Confirmo que quiero cancelar este turno.</span>
-						</label>
-						<button disabled={!canUseStatusAction('cancelled')} class="ux-btn-danger mt-4 w-full">Cancelar turno</button>
-					</form>
-				</details>
-			</div>
+			{#if !isClosed}
+				<div class="mt-7 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+					<details class="rounded-2xl border border-red-400/20 bg-red-500/10 md:col-span-2 xl:col-span-3">
+						<summary class="cursor-pointer list-none px-5 py-5 text-lg font-bold text-red-100">Cancelar turno</summary>
+						<form method="POST" action="?/update_status" class="border-t border-red-400/20 p-5">
+							<input type="hidden" name="status" value="cancelled" />
+							<label>
+								<span class="ux-label">Motivo (opcional)</span>
+								<textarea name="reason" rows="2" disabled={!canUseStatusAction('cancelled')} class="ux-textarea"></textarea>
+							</label>
+							<label class="mt-4 flex items-start gap-3 text-sm font-bold text-red-100">
+								<input type="checkbox" required disabled={!canUseStatusAction('cancelled')} class="mt-1 h-4 w-4 accent-red-600 disabled:opacity-60" />
+								<span>Confirmo que quiero cancelar este turno.</span>
+							</label>
+							<button disabled={!canUseStatusAction('cancelled')} class="ux-btn-danger mt-4 w-full">Cancelar turno</button>
+						</form>
+					</details>
+				</div>
+			{/if}
 
 			<div class="mt-7 grid gap-4 rounded-2xl border border-white/10 bg-white/[0.035] p-5 lg:grid-cols-3">
 				<div>

@@ -65,14 +65,14 @@ const makeEvent = (formData = new FormData(), options: { enhanced?: boolean } = 
 		cookies: {}
 	}) as any;
 
-const expectRedirectToPatient = async (promise: unknown) => {
+const expectRedirectToPatient = async (promise: unknown, tab: 'historial' | 'datos') => {
 	try {
 		await promise;
 		throw new Error('Expected redirect');
 	} catch (err) {
 		expect(err).toMatchObject({
 			status: 303,
-			location: `/odonto/pacientes/${patientId}`
+			location: `/odonto/pacientes/${patientId}?tab=${tab}`
 		});
 	}
 };
@@ -227,7 +227,7 @@ describe('patient detail migrated actions', () => {
 		form.set('description', 'Control clinico');
 		form.set('created_at', '2026-06-05T09:30');
 
-		await expectRedirectToPatient(actions.add_entry!(makeEvent(form)));
+		await expectRedirectToPatient(actions.add_entry!(makeEvent(form)), 'historial');
 	});
 
 	it('returns a specific patient error when the clinical entry RPC rejects the patient scope', async () => {
@@ -297,7 +297,7 @@ describe('patient detail migrated actions', () => {
 		form.set('amount', '18.500');
 		form.set('internal_note', 'seguimiento');
 
-		await expectRedirectToPatient(actions.update_entry!(makeEvent(form)));
+		await expectRedirectToPatient(actions.update_entry!(makeEvent(form)), 'historial');
 
 		expect(mocks.supabase.rpc).toHaveBeenCalledWith('update_clinical_entry_safely', {
 			p_business_id: businessId,
@@ -435,7 +435,7 @@ describe('patient detail migrated actions', () => {
 		form.set('full_name', 'Paciente Nuevo');
 		form.set('phone', '112233');
 
-		await expectRedirectToPatient(actions.update_patient!(makeEvent(form)));
+		await expectRedirectToPatient(actions.update_patient!(makeEvent(form)), 'datos');
 
 		expect(patientUpdateBuilder.update).toHaveBeenCalledWith(
 			expect.objectContaining({

@@ -66,6 +66,9 @@ const currentValue = (value: unknown) => {
 	return text ? text : null;
 };
 
+const patientDetailUrl = (patientId: string, tab: 'historial' | 'datos') =>
+	`/odonto/pacientes/${patientId}?tab=${tab}`;
+
 const resolveBusinessActionContext = async ({
 	locals,
 	fetch,
@@ -595,7 +598,7 @@ export const actions: Actions = {
 				return fail(404, { message: 'Paciente no encontrado' });
 			}
 
-			if (!enhancedRequest) throw redirect(303, `/odonto/pacientes/${params.id}`);
+			if (!enhancedRequest) throw redirect(303, patientDetailUrl(params.id, 'historial'));
 			return { savedEntry };
 		}
 
@@ -646,10 +649,10 @@ export const actions: Actions = {
 		const savedEntry = normalizeSavedClinicalEntry(savedEntryRaw);
 		if (!savedEntry) {
 			console.error('La entrada se guardó sin una respuesta clínica utilizable');
-			throw redirect(303, `/odonto/pacientes/${params.id}`);
+			throw redirect(303, patientDetailUrl(params.id, 'historial'));
 		}
 
-		if (!enhancedRequest) throw redirect(303, `/odonto/pacientes/${params.id}`);
+		if (!enhancedRequest) throw redirect(303, patientDetailUrl(params.id, 'historial'));
 		return { savedEntry };
 	},
 	update_entry: async ({ request, params, locals, fetch, cookies }) => {
@@ -722,7 +725,7 @@ export const actions: Actions = {
 				return fail(404, { message: 'Entrada no encontrada' });
 			}
 
-			throw redirect(303, `/odonto/pacientes/${params.id}`);
+			throw redirect(303, patientDetailUrl(params.id, 'historial'));
 		}
 
 		const session = await resolveBusinessActionContext({ locals, fetch, cookies });
@@ -759,7 +762,7 @@ export const actions: Actions = {
 			return fail(mapped.status, { message: mapped.message });
 		}
 
-		throw redirect(303, `/odonto/pacientes/${params.id}`);
+		throw redirect(303, patientDetailUrl(params.id, 'historial'));
 	},
 	update_patient: async ({ request, params, locals, fetch, cookies }) => {
 		if (!locals.auth) throw redirect(303, '/login');
@@ -841,7 +844,7 @@ export const actions: Actions = {
 				return fail(404, { message: 'Paciente no encontrado' });
 			}
 
-			throw redirect(303, `/odonto/pacientes/${params.id}`);
+			throw redirect(303, patientDetailUrl(params.id, 'datos'));
 		}
 
 		const session = await resolveBusinessActionContext({ locals, fetch, cookies });
@@ -993,7 +996,7 @@ export const actions: Actions = {
 			}
 		}
 
-		throw redirect(303, `/odonto/pacientes/${params.id}`);
+		throw redirect(303, patientDetailUrl(params.id, 'datos'));
 	},
 	archive_patient: async ({ params, locals, fetch, cookies }) => {
 		if (!locals.auth) throw redirect(303, '/login');

@@ -189,3 +189,20 @@ describe('último paso después de crear un turno desde Agenda', () => {
 		expect(screen.queryByRole('link', { name: 'Enviar enlace de activación' })).not.toBeInTheDocument();
 	});
 });
+
+describe('turno cancelado', () => {
+	it('no vuelve a ofrecer la cancelación desde el detalle interno', () => {
+		render(Page, {
+			data: {
+				...data,
+				appointment: {
+					...appointment,
+					status: 'cancelled'
+				}
+			}
+		});
+
+		expect(screen.getByText('Cancelado')).toBeInTheDocument();
+		expect(screen.queryByText('Cancelar turno')).not.toBeInTheDocument();
+	});
+});

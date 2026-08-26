@@ -889,3 +889,30 @@ describe('calendario en iPhone', () => {
 		expect(fetch).not.toHaveBeenCalled();
 	});
 });
+
+describe('turno cancelado', () => {
+	afterEach(() => {
+		cleanup();
+		vi.unstubAllGlobals();
+	});
+
+	it('informa la cancelación sin volver a ofrecer acciones', () => {
+		render(Page, {
+			data: {
+				...pageData,
+				appointment: {
+					...appointment,
+					status: 'cancelled',
+					public_status_label: 'Cancelado',
+					can_confirm: false,
+					can_cancel: false,
+					can_request_reschedule: false
+				}
+			}
+		});
+
+		expect(screen.getByRole('heading', { name: 'Turno cancelado' })).toBeInTheDocument();
+		expect(screen.queryByRole('heading', { name: 'Acciones' })).not.toBeInTheDocument();
+		expect(screen.queryByText('Cancelar turno')).not.toBeInTheDocument();
+	});
+});
