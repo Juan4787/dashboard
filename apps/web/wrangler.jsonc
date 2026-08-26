@@ -8,5 +8,8 @@
 	},
 	"compatibility_date": "2026-05-03",
 	"compatibility_flags": ["nodejs_compat"],
+	"placement": {
+		"region": "aws:sa-east-1"
+	},
 	"keep_vars": true
 }

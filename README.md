@@ -94,6 +94,11 @@ webhooks de Mercado Pago que estén habilitados.
 borre los bindings cargados desde el panel. No lo elimines mientras las variables
 y los secretos de producción se administren fuera del repositorio.
 
+El Worker fija su ejecución dinámica cerca de `aws:sa-east-1` (São Paulo), donde
+reside Supabase. Cloudflare sigue entregando los assets estáticos desde el borde
+más cercano a cada persona; la ubicación dirigida reduce los viajes de las rutas
+server-side a la base de datos.
+
 Las variables y los secretos pertenecen al Worker, no al repositorio. Cambiar
 `name` en `wrangler.jsonc` apunta a otro Worker y **no** copia su configuración.
 Después de cualquier cambio de nombre, cargá y verificá como mínimo
