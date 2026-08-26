@@ -418,7 +418,9 @@ export const verifyStoredClinicalImage = async ({
 	try {
 		response = await globalThis.fetch(signedUrl, {
 			headers: { Range: 'bytes=0-31' },
-			redirect: 'error',
+			// Workers only supports "follow" and "manual". Manual preserves the
+			// no-redirect boundary because every 3xx response fails the ok check below.
+			redirect: 'manual',
 			signal: AbortSignal.timeout(10_000)
 		});
 	} catch {
@@ -475,7 +477,8 @@ export const verifyStoredClinicalThumbnail = async ({
 		const signedUrl = await createSignedClinicalFileUrl({ admin, bucket, path, expiresIn: 30 });
 		const response = await globalThis.fetch(signedUrl, {
 			headers: { Range: 'bytes=0-31' },
-			redirect: 'error',
+			// Do not follow a signed-storage redirect; see the original-image check.
+			redirect: 'manual',
 			signal: AbortSignal.timeout(10_000)
 		});
 		if (!response.ok) return false;

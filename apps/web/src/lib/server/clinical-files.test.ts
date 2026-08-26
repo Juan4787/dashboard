@@ -245,7 +245,7 @@ describe('clinical files server boundary', () => {
 		).resolves.toEqual({ bytes: 6, mimeType: 'image/jpeg' });
 		expect(fetchMock).toHaveBeenCalledWith(
 			'https://storage.example.test/signed-original',
-			expect.objectContaining({ headers: { Range: 'bytes=0-31' }, redirect: 'error' })
+			expect.objectContaining({ headers: { Range: 'bytes=0-31' }, redirect: 'manual' })
 		);
 
 		info.mockResolvedValueOnce({ data: { size: 7, contentType: 'image/jpeg' }, error: null });
@@ -269,6 +269,22 @@ describe('clinical files server boundary', () => {
 				expectedMime: 'image/jpeg'
 			})
 		).rejects.toMatchObject({ status: 400 });
+
+		fetchMock.mockResolvedValueOnce(
+			new Response(null, {
+				status: 302,
+				headers: { location: 'https://unexpected.example.test/image' }
+			})
+		);
+		await expect(
+			verifyStoredClinicalImage({
+				admin,
+				bucket: CLINICAL_FILES_BUCKET,
+				path: 'business/patient/file/original.jpg',
+				expectedBytes: 6,
+				expectedMime: 'image/jpeg'
+			})
+		).rejects.toMatchObject({ status: 409, code: 'UPLOAD_CONFLICT' });
 
 		fetchMock.mockRejectedValueOnce(
 			new TypeError('GET https://storage.example.test/signed-original?token=secret failed')
@@ -298,7 +314,8 @@ describe('clinical files server boundary', () => {
 			error: null
 		}));
 		const admin = { storage: { from: vi.fn(() => ({ info, createSignedUrl })) } } as never;
-		vi.stubGlobal('fetch', vi.fn(async () => new Response(webp, { status: 206 })));
+		const fetchMock = vi.fn(async () => new Response(webp, { status: 206 }));
+		vi.stubGlobal('fetch', fetchMock);
 
 		await expect(
 			verifyStoredClinicalThumbnail({
@@ -307,6 +324,10 @@ describe('clinical files server boundary', () => {
 				path: 'business/patient/file/thumbnail.webp'
 			})
 		).resolves.toBe(true);
+		expect(fetchMock).toHaveBeenCalledWith(
+			'https://storage.example.test/signed-thumb',
+			expect.objectContaining({ headers: { Range: 'bytes=0-31' }, redirect: 'manual' })
+		);
 
 		info.mockResolvedValueOnce({
 			data: { size: 12, contentType: 'image/png' },
