@@ -28,7 +28,7 @@ describe('agenda search performance contracts', () => {
 		);
 
 		expect(agenda).toContain("fetch('/odonto/agenda/buscar/precarga'");
-		expect(agenda).toContain('filterAgendaAppointmentSnapshot(');
+		expect(agenda).toContain('filterAgendaAppointmentsByQuery(');
 		expect(agenda).toContain("if (to?.url.pathname === '/odonto/agenda')");
 		expect(agenda).toContain('void loadLiveSnapshot();');
 		expect(agenda).toContain('onpointerenter={() => void loadLiveSnapshot()}');
@@ -43,5 +43,9 @@ describe('agenda search performance contracts', () => {
 
 		expect(agenda).not.toContain('Buscando…');
 		expect(agenda).not.toContain('{#if liveActive && liveLoading}');
+		expect(agenda).toContain('filterAgendaAppointmentsByQuery(');
+		expect(agenda).toContain('return liveKnownGroups ?? { upcoming: [], past: [] }');
+		expect(agenda).not.toContain("liveController = null;\n\t\tliveResults = null;\n\t\tliveResolvedQuery = '';");
+		expect(agenda.match(/clearLiveSearch\(\);/g)).toHaveLength(2);
 	});
 });

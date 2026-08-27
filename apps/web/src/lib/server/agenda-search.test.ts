@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	filterAgendaAppointmentSnapshot,
+	filterAgendaAppointmentsByQuery,
 	normalizeSearchText,
 	patientMatchesAgendaQuery
 } from './agenda-search';
@@ -108,5 +109,35 @@ describe('filterAgendaAppointmentSnapshot', () => {
 		expect(filterAgendaAppointmentSnapshot(appointments, 'ju', 1, now).map(({ id }) => id)).toEqual([
 			'matching-future'
 		]);
+	});
+});
+
+describe('filterAgendaAppointmentsByQuery', () => {
+	const appointments = [
+		{
+			id: 'expired-fernando',
+			starts_at: '2026-08-25T17:30:00.000Z',
+			status: 'reserved',
+			patients: { full_name: 'Fernando Lopez', phone_e164: '+5493425048209' }
+		},
+		{
+			id: 'upcoming-juan',
+			starts_at: '2026-08-29T08:15:00.000Z',
+			status: 'reserved',
+			patients: { full_name: 'Juan Carlos Ramirez', phone_e164: '+5493425000000' }
+		}
+	];
+
+	it('refilters known rows immediately while the authoritative request is pending', () => {
+		expect(filterAgendaAppointmentsByQuery(appointments, 'fer').map(({ id }) => id)).toEqual([
+			'expired-fernando'
+		]);
+		expect(filterAgendaAppointmentsByQuery(appointments, 'juan car').map(({ id }) => id)).toEqual([
+			'upcoming-juan'
+		]);
+	});
+
+	it('does not keep stale rows from a previous unrelated query', () => {
+		expect(filterAgendaAppointmentsByQuery(appointments, 'ermene')).toEqual([]);
 	});
 });

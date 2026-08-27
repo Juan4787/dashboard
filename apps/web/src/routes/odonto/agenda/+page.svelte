@@ -7,12 +7,14 @@
 		snapshotContainsRange,
 		type AvailabilitySnapshot
 	} from '$lib/availability/snapshot';
-	import { filterAgendaAppointmentSnapshot } from '$lib/utils/agenda-search';
+	import { filterAgendaAppointmentsByQuery } from '$lib/utils/agenda-search';
 	import { onDestroy, tick } from 'svelte';
 	import { slide } from 'svelte/transition';
 	import {
 		ACTIVE_APPOINTMENT_STATUSES,
-		isUpcomingActiveAppointment
+		isExpiredActiveAppointment,
+		isUpcomingActiveAppointment,
+		splitActiveAppointmentGroups
 	} from '$lib/utils/appointment-visibility';
 
 	type Appointment = {
@@ -182,15 +184,14 @@
 		return d.getFullYear() === today.getFullYear() ? label : `${label} ${d.getFullYear()}`;
 	};
 
-	// Buscador en vivo: independiente de los filtros, busca próximos turnos
-	// activos por nombre o teléfono a medida que se escribe. Al entrar en Agenda
+	// Buscador en vivo: independiente de los filtros, busca turnos activos
+	// por nombre o teléfono a medida que se escribe. Al entrar en Agenda
 	// se carga en segundo plano una instantánea compacta que no se muestra hasta
 	// que haya una consulta; la respuesta remota sigue siendo la fuente definitiva.
 	const MAX_VISIBLE_LIVE_RESULTS = 60;
 	let searchInput = $state('');
 	let liveResults = $state<AppointmentGroups | null>(null);
 	let liveResolvedQuery = $state('');
-	let liveLoading = $state(false);
 	let liveError = $state('');
 	let liveRequest = 0;
 	let liveController: AbortController | null = null;
@@ -202,17 +203,37 @@
 
 	const liveQuery = $derived(searchInput.trim());
 	const liveActive = $derived(liveQuery.length > 0);
-	const liveSnapshotGroups = $derived.by((): AppointmentGroups | null => {
-		if (!liveActive || liveSnapshot === null) return null;
-		return {
-			upcoming: filterAgendaAppointmentSnapshot(
-				liveSnapshot,
+	const splitLiveAppointmentGroups = (appointments: readonly Appointment[]): AppointmentGroups =>
+		splitActiveAppointmentGroups(appointments);
+	const liveKnownGroups = $derived.by((): AppointmentGroups | null => {
+		if (!liveActive) return null;
+		const knownAppointments = new Map<string, Appointment>();
+		for (const appointment of liveSnapshot ?? []) {
+			knownAppointments.set(appointment.id, appointment);
+		}
+		for (const appointment of [
+			...(liveResults?.upcoming ?? []),
+			...(liveResults?.past ?? [])
+		]) {
+			knownAppointments.set(appointment.id, appointment);
+		}
+		return splitLiveAppointmentGroups(
+			filterAgendaAppointmentsByQuery(
+				[...knownAppointments.values()],
 				liveQuery,
 				MAX_VISIBLE_LIVE_RESULTS
-			),
-			past: []
-		};
+			)
+		);
 	});
+	const clearLiveSearch = () => {
+		liveRequest += 1;
+		liveController?.abort();
+		liveController = null;
+		searchInput = '';
+		liveResults = null;
+		liveResolvedQuery = '';
+		liveError = '';
+	};
 
 	const clearLiveSnapshot = () => {
 		liveSnapshotRequest += 1;
@@ -271,7 +292,6 @@
 	const loadLiveResults = async (query: string, request: number) => {
 		const controller = new AbortController();
 		liveController = controller;
-		liveLoading = true;
 		liveError = '';
 		try {
 			const response = await fetch(`/odonto/agenda/buscar?q=${encodeURIComponent(query)}`, {
@@ -285,14 +305,11 @@
 				liveError = payload?.message ?? 'No se pudo buscar. Probá de nuevo.';
 				return;
 			}
-			liveResults = {
-				upcoming: Array.isArray(payload?.upcoming)
-					? payload.upcoming.filter((appointment: Appointment) =>
-							isUpcomingActiveAppointment(appointment)
-						)
-					: [],
-				past: []
-			};
+			const serverAppointments = [
+				...(Array.isArray(payload?.upcoming) ? payload.upcoming : []),
+				...(Array.isArray(payload?.past) ? payload.past : [])
+			] as Appointment[];
+			liveResults = splitLiveAppointmentGroups(serverAppointments);
 			liveResolvedQuery = query;
 		} catch (error) {
 			if ((error as Error)?.name === 'AbortError') return;
@@ -302,7 +319,6 @@
 			liveError = 'No se pudo buscar. Probá de nuevo.';
 		} finally {
 			if (request === liveRequest) {
-				liveLoading = false;
 				if (liveController === controller) liveController = null;
 			}
 		}
@@ -313,11 +329,10 @@
 		const request = ++liveRequest;
 		liveController?.abort();
 		liveController = null;
-		liveResults = null;
-		liveResolvedQuery = '';
-		liveLoading = false;
 		liveError = '';
 		if (!query) {
+			liveResults = null;
+			liveResolvedQuery = '';
 			return;
 		}
 		const timeout = window.setTimeout(() => void loadLiveResults(query, request), 120);
@@ -327,17 +342,19 @@
 		};
 	});
 
+	const appointmentStatusLabel = (appointment: Pick<Appointment, 'starts_at' | 'status'>) =>
+		isExpiredActiveAppointment(appointment)
+			? 'Expirado'
+			: (statusLabels[appointment.status] ?? appointment.status);
+	const appointmentStatusTone = (appointment: Pick<Appointment, 'starts_at' | 'status'>) =>
+		isExpiredActiveAppointment(appointment)
+			? 'ux-badge ux-badge-warning'
+			: (statusTone[appointment.status] ?? 'ux-badge');
+
 	// Al navegar (botón "Buscar", flechas de día, "Hoy") mandan los filtros:
 	// se limpia el buscador y la lista vuelve a los resultados del servidor.
 	afterNavigate(({ to }) => {
-		liveRequest += 1;
-		liveController?.abort();
-		liveController = null;
-		searchInput = '';
-		liveResults = null;
-		liveResolvedQuery = '';
-		liveLoading = false;
-		liveError = '';
+		clearLiveSearch();
 		clearLiveSnapshot();
 		if (to?.url.pathname === '/odonto/agenda') void loadLiveSnapshot();
 	});
@@ -350,7 +367,7 @@
 	const displayGroups = $derived.by((): AppointmentGroups | null => {
 		if (liveActive) {
 			if (liveResolvedQuery === liveQuery && liveResults) return liveResults;
-			return liveSnapshotGroups ?? { upcoming: [], past: [] };
+			return liveKnownGroups ?? { upcoming: [], past: [] };
 		}
 		if (data.anyDay) return upcomingOnly(data.appointments);
 		return null;
@@ -458,6 +475,7 @@
 	$effect(() => {
 		const businessId = String(data.context.business?.id ?? '');
 		if (businessId && referencesBusinessId && businessId !== referencesBusinessId) {
+			clearLiveSearch();
 			clearLiveSnapshot();
 			professionals = [];
 			services = [];
@@ -518,7 +536,7 @@
 				{appointment.service_name_snapshot} · {appointment.professional_name_snapshot}
 			</p>
 			<div class="mt-2 flex flex-wrap gap-2">
-				<span class={statusTone[appointment.status] ?? 'ux-badge'}>{statusLabels[appointment.status] ?? appointment.status}</span>
+				<span class={appointmentStatusTone(appointment)}>{appointmentStatusLabel(appointment)}</span>
 				{#if appointment.source === 'public_booking'}<span class="ux-badge">Online</span>{/if}
 			</div>
 		</div>
@@ -629,12 +647,8 @@
 					onfocus={() => void loadLiveSnapshot()}
 				/>
 			</label>
-			<p class="mt-2 text-xs font-semibold text-white/40">Busca próximos turnos mientras escribís.</p>
-			{#if referencesLoading}
-				<p class="mt-3 text-sm font-semibold text-[#c4b5fd]" aria-live="polite">
-					Cargando profesionales y servicios…
-				</p>
-			{:else if referencesError}
+			<p class="mt-2 text-xs font-semibold text-white/40">Busca turnos activos mientras escribís.</p>
+			{#if referencesError}
 				<div class="ux-alert mt-3">
 					{referencesError}
 					<button type="button" class="ml-2 font-bold underline" onclick={loadReferences}>Reintentar</button>
@@ -748,6 +762,16 @@
 							<p class="text-xs font-bold uppercase tracking-wide text-white/40">Próximos</p>
 							<div class="mt-2 grid gap-3">
 								{#each displayGroups.upcoming as appointment (appointment.id)}
+									{@render appointmentRow(appointment, true)}
+								{/each}
+							</div>
+						</div>
+					{/if}
+					{#if displayGroups.past.length > 0}
+						<div>
+							<p class="text-xs font-bold uppercase tracking-wide text-white/40">Expirados</p>
+							<div class="mt-2 grid gap-3">
+								{#each displayGroups.past as appointment (appointment.id)}
 									{@render appointmentRow(appointment, true)}
 								{/each}
 							</div>

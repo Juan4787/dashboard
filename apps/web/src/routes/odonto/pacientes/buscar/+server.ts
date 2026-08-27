@@ -1,9 +1,12 @@
 import { env } from '$env/dynamic/private';
 import { getOdontoContext } from '$lib/server/odonto-context';
+import { normalizeSearchText } from '$lib/utils/agenda-search';
 import { json, redirect } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 
 const cleanQuery = (value: string) => value.trim().replace(/\s+/g, ' ');
+const escapeIlikePattern = (value: string) =>
+	value.replace(/\\/g, '\\\\').replace(/[%_]/g, '\\$&');
 
 export const GET: RequestHandler = async ({ url, locals, fetch, cookies }) => {
 	if (!locals.auth) throw redirect(303, '/login');
@@ -18,14 +21,23 @@ export const GET: RequestHandler = async ({ url, locals, fetch, cookies }) => {
 		cookies,
 		membershipCache: 'short'
 	});
-	const safeQuery = query.replace(/[%_]/g, '\\$&');
+	const safeQuery = escapeIlikePattern(query);
+	const normalizedQuery = normalizeSearchText(query);
 	const digits = query.replace(/\D/g, '');
 	const filters = [
 		`full_name.ilike.%${safeQuery}%`,
 		`phone_e164.ilike.%${safeQuery}%`,
 		`dni.ilike.%${safeQuery}%`
 	];
-	if (digits.length >= 3) filters.push(`phone_e164.ilike.%${digits}%`);
+	if (normalizedQuery) {
+		filters.push(`search_name_normalized.ilike.%${escapeIlikePattern(normalizedQuery)}%`);
+	}
+	if (digits.length >= 2) {
+		filters.push(
+			`search_phone_digits.ilike.%${digits}%`,
+			`search_dni_digits.ilike.%${digits}%`
+		);
+	}
 
 	const { data, error } = await supabase
 		.from('patients')

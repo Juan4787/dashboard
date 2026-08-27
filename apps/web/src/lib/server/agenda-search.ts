@@ -3,6 +3,7 @@
 // precarga en memoria.
 export {
 	filterAgendaAppointmentSnapshot,
+	filterAgendaAppointmentsByQuery,
 	normalizeSearchText,
 	patientMatchesAgendaQuery,
 	type AgendaSearchAppointment,

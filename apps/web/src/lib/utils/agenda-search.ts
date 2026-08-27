@@ -41,6 +41,23 @@ export const patientMatchesAgendaQuery = (patient: AgendaSearchPatient, rawQuery
 	return false;
 };
 
+export const filterAgendaAppointmentsByQuery = <T extends AgendaSearchAppointment>(
+	appointments: readonly T[],
+	rawQuery: string,
+	limit = 60
+) => {
+	if (!normalizeSearchText(rawQuery) || limit <= 0) return [];
+	const matches: T[] = [];
+	for (const appointment of appointments) {
+		if (!appointment.patients || !patientMatchesAgendaQuery(appointment.patients, rawQuery)) {
+			continue;
+		}
+		matches.push(appointment);
+		if (matches.length >= limit) break;
+	}
+	return matches;
+};
+
 export const filterAgendaAppointmentSnapshot = <T extends AgendaSearchAppointment>(
 	appointments: readonly T[],
 	rawQuery: string,

@@ -8,6 +8,20 @@ const migration = readFileSync(
 	),
 	'utf8'
 );
+const historyMigration = readFileSync(
+	new URL(
+		'../../../../../../../supabase/migrations/20260827170000_agenda_search_active_history.sql',
+		import.meta.url
+	),
+	'utf8'
+);
+const expiredWindowMigration = readFileSync(
+	new URL(
+		'../../../../../../../supabase/migrations/20260827173000_agenda_search_expired_window.sql',
+		import.meta.url
+	),
+	'utf8'
+);
 
 describe('fast agenda search migration contract', () => {
 	it('runs the active appointment lookup as one bounded and indexed database operation', () => {
@@ -33,5 +47,24 @@ describe('fast agenda search migration contract', () => {
 		expect(migration).toContain(
 			'grant execute on function public.search_upcoming_active_appointments(uuid, text, integer)'
 		);
+	});
+
+	it('keeps active past appointments searchable and orders future results first', () => {
+		expect(historyMigration).toContain('create or replace function public.search_upcoming_active_appointments(');
+		expect(historyMigration).toContain("appointment.status in ('reserved', 'confirmed', 'reschedule_requested')");
+		expect(historyMigration).toContain('v_now timestamptz := statement_timestamp()');
+		expect(historyMigration).toContain('(appointment.starts_at < v_now) asc');
+		expect(historyMigration).not.toContain('and appointment.starts_at >= statement_timestamp()');
+	});
+
+	it('limits expired results to the last six calendar months without changing status', () => {
+		expect(expiredWindowMigration).toContain(
+			"appointment.starts_at >= v_now - interval '6 months'"
+		);
+		expect(expiredWindowMigration).toContain(
+			"appointment.status in ('reserved', 'confirmed', 'reschedule_requested')"
+		);
+		expect(expiredWindowMigration).toContain('starts_at');
+		expect(expiredWindowMigration).toContain('El estado persistido no se modifica');
 	});
 });

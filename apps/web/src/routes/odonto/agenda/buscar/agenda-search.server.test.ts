@@ -53,7 +53,7 @@ describe('agenda active appointment search endpoint', () => {
 	it('uses one authorized RPC instead of scanning patients and then appointments', async () => {
 		const appointment = {
 			id: 'appointment-1',
-			starts_at: '2026-08-24T12:00:00.000Z',
+			starts_at: '2099-08-24T12:00:00.000Z',
 			status: 'reserved',
 			patients: { full_name: 'Juan Pérez', phone_e164: '+5491112345678' }
 		};
@@ -71,6 +71,36 @@ describe('agenda active appointment search endpoint', () => {
 		});
 		expect(mocks.from).not.toHaveBeenCalled();
 		expect(mocks.getOdontoContext).not.toHaveBeenCalled();
+	});
+
+	it('keeps a recent active appointment in the expired group', async () => {
+		const appointment = {
+			id: 'appointment-past',
+			starts_at: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+			status: 'reserved',
+			patients: { full_name: 'Ermenegildo', phone_e164: '+5493428963125' }
+		};
+		mocks.rpc.mockResolvedValue({ data: [appointment], error: null });
+
+		const response = await GET(makeEvent('Ermenegildo'));
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({ upcoming: [], past: [appointment] });
+	});
+
+	it('does not return active appointments older than six months', async () => {
+		const appointment = {
+			id: 'appointment-too-old',
+			starts_at: '2020-08-24T12:00:00.000Z',
+			status: 'reserved',
+			patients: { full_name: 'Ermenegildo', phone_e164: '+5493428963125' }
+		};
+		mocks.rpc.mockResolvedValue({ data: [appointment], error: null });
+
+		const response = await GET(makeEvent('Ermenegildo'));
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({ upcoming: [], past: [] });
 	});
 
 	it('falls back to the regular business resolver when the active cookie is unavailable', async () => {
