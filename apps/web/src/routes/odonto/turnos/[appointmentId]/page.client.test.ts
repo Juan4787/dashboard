@@ -2,7 +2,7 @@
 
 import { cleanup, render, screen, waitFor } from '@testing-library/svelte';
 import '@testing-library/jest-dom/vitest';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Page from './+page.svelte';
 
 const appointment = {
@@ -204,5 +204,48 @@ describe('turno cancelado', () => {
 
 		expect(screen.getByText('Cancelado')).toBeInTheDocument();
 		expect(screen.queryByText('Cancelar turno')).not.toBeInTheDocument();
+	});
+});
+
+describe('visibilidad de cancelación por estado y fecha', () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date('2026-08-22T15:00:00.000Z'));
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	const renderAppointment = (overrides: Record<string, unknown> = {}) =>
+		render(Page, {
+			data: {
+				...data,
+				justCreated: false,
+				appointment: {
+					...appointment,
+					starts_at: '2026-08-22T16:00:00.000Z',
+					ends_at: '2026-08-22T16:30:00.000Z',
+					...overrides
+				}
+			}
+		});
+
+	it.each(['reserved', 'confirmed', 'reschedule_requested'] as const)(
+		'muestra cancelar para un turno %s activo y futuro',
+		(status) => {
+			renderAppointment({ status });
+
+			expect(screen.getByText('Cancelar turno', { selector: 'summary' })).toBeInTheDocument();
+		}
+	);
+
+	it('oculta cancelar cuando el turno ya comenzó, aunque siga reservado', () => {
+		renderAppointment({
+			starts_at: '2026-08-22T14:59:59.999Z',
+			ends_at: '2026-08-22T15:30:00.000Z'
+		});
+
+		expect(screen.queryByText('Cancelar turno', { selector: 'summary' })).not.toBeInTheDocument();
 	});
 });

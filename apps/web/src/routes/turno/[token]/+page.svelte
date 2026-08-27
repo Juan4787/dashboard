@@ -935,6 +935,9 @@
 		Boolean(appointment) && !appointment.is_past && isActiveAppointmentStatus(appointment.status)
 	);
 	const isCancelled = $derived(appointment?.status === 'cancelled');
+	const canShowCancelAction = $derived(
+		isActive && appointment?.can_cancel === true
+	);
 	const hasCalendarAction = $derived(
 		Boolean(appointment) &&
 			['clicked_google', 'clicked_ics', 'downloaded_ics', 'clicked_outlook', 'clicked_phone_calendar', 'synced_google'].includes(
@@ -1590,20 +1593,22 @@
 								</button>
 							</form>
 						</details>
-						<details class="rounded-2xl border border-red-400/20 bg-red-500/10">
-							<summary class="cursor-pointer list-none px-5 py-4 text-base font-bold text-red-100">Cancelar turno</summary>
-							<form method="POST" action="?/cancel" class="border-t border-red-400/20 p-5">
-								<label>
-									<span class="ux-label">Motivo (opcional)</span>
-									<textarea name="note" rows="2" disabled={!appointment.can_cancel} class="ux-textarea"></textarea>
-								</label>
-								<label class="mt-4 flex items-start gap-3 text-sm font-bold text-red-100">
-									<input type="checkbox" name="confirm_cancel" value="true" required disabled={!appointment.can_cancel} class="mt-1 h-4 w-4 accent-red-600 disabled:opacity-60" />
-									<span>Confirmo que quiero cancelar este turno.</span>
-								</label>
-								<button disabled={!appointment.can_cancel} class="ux-btn-danger mt-4 w-full">Cancelar turno</button>
-							</form>
-						</details>
+						{#if canShowCancelAction}
+							<details class="rounded-2xl border border-red-400/20 bg-red-500/10">
+								<summary class="cursor-pointer list-none px-5 py-4 text-base font-bold text-red-100">Cancelar turno</summary>
+								<form method="POST" action="?/cancel" class="border-t border-red-400/20 p-5">
+									<label>
+										<span class="ux-label">Motivo (opcional)</span>
+										<textarea name="note" rows="2" disabled={!appointment.can_cancel} class="ux-textarea"></textarea>
+									</label>
+									<label class="mt-4 flex items-start gap-3 text-sm font-bold text-red-100">
+										<input type="checkbox" name="confirm_cancel" value="true" required disabled={!appointment.can_cancel} class="mt-1 h-4 w-4 accent-red-600 disabled:opacity-60" />
+										<span>Confirmo que quiero cancelar este turno.</span>
+									</label>
+									<button disabled={!appointment.can_cancel} class="ux-btn-danger mt-4 w-full">Cancelar turno</button>
+								</form>
+							</details>
+						{/if}
 					</div>
 					{#if !appointment.can_confirm && !appointment.can_cancel && !appointment.can_request_reschedule}
 						<p class="ux-empty mt-5">Este enlace ya no admite acciones online.</p>

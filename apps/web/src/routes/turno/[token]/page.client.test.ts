@@ -916,3 +916,44 @@ describe('turno cancelado', () => {
 		expect(screen.queryByText('Cancelar turno')).not.toBeInTheDocument();
 	});
 });
+
+describe('visibilidad de cancelación por estado y fecha', () => {
+	afterEach(() => {
+		cleanup();
+		vi.unstubAllGlobals();
+	});
+
+	it.each(['reserved', 'confirmed', 'reschedule_requested'] as const)(
+		'muestra cancelar para un turno %s activo y futuro',
+		(status) => {
+			render(Page, {
+				data: {
+					...pageData,
+					appointment: {
+						...appointment,
+						status,
+						is_past: false,
+						can_cancel: true
+					}
+				}
+			});
+
+			expect(screen.getByText('Cancelar turno', { selector: 'summary' })).toBeInTheDocument();
+		}
+	);
+
+	it('oculta cancelar cuando el turno ya expiró aunque el estado recibido sea activo', () => {
+		render(Page, {
+			data: {
+				...pageData,
+				appointment: {
+					...appointment,
+					is_past: true,
+					can_cancel: true
+				}
+			}
+		});
+
+		expect(screen.queryByText('Cancelar turno', { selector: 'summary' })).not.toBeInTheDocument();
+	});
+});

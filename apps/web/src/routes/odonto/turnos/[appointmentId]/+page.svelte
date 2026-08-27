@@ -5,6 +5,7 @@
 	import { enhance } from '$app/forms';
 	import { onMount } from 'svelte';
 	import type { SubmitFunction } from '@sveltejs/kit';
+	import { isUpcomingActiveAppointment } from '$lib/utils/appointment-visibility';
 
 	type Slot = { date: string; time: string; starts_at: string; professional_name: string };
 	type AuditLog = {
@@ -59,6 +60,9 @@
 
 	const canOperate = $derived(data.context.canOperate && !data.demo);
 	const isClosed = $derived(data.appointment?.status === 'cancelled');
+	const canShowCancelAction = $derived(
+		!isClosed && isUpcomingActiveAppointment(data.appointment)
+	);
 	const appointmentProfessionals = $derived(data.appointment?.professionals ?? []);
 	const isJoint = $derived(appointmentProfessionals.length > 1);
 
@@ -489,7 +493,7 @@
 				{/if}
 			</div>
 
-			{#if !isClosed}
+			{#if canShowCancelAction}
 				<div class="mt-7 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
 					<details class="rounded-2xl border border-red-400/20 bg-red-500/10 md:col-span-2 xl:col-span-3">
 						<summary class="cursor-pointer list-none px-5 py-5 text-lg font-bold text-red-100">Cancelar turno</summary>
