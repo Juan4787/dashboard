@@ -88,7 +88,7 @@ describe('agenda active appointment search endpoint', () => {
 		expect(await response.json()).toEqual({ upcoming: [], past: [appointment] });
 	});
 
-	it('does not return active appointments older than six months', async () => {
+	it('does not return active appointments older than three months', async () => {
 		const appointment = {
 			id: 'appointment-too-old',
 			starts_at: '2020-08-24T12:00:00.000Z',

@@ -48,20 +48,20 @@ describe('upcoming active appointments', () => {
 });
 
 describe('expired active appointments', () => {
-	it('uses a six-calendar-month window and includes the exact cutoff', () => {
-		const endOfAugust = new Date('2026-08-31T15:00:00.000Z');
+	it('uses a three-calendar-month window and includes the exact cutoff', () => {
+		const endOfMay = new Date('2026-05-31T15:00:00.000Z');
 
-		expect(getAgendaExpiredCutoff(endOfAugust).toISOString()).toBe('2026-02-28T15:00:00.000Z');
+		expect(getAgendaExpiredCutoff(endOfMay).toISOString()).toBe('2026-02-28T15:00:00.000Z');
 		expect(
 			isExpiredActiveAppointment(
 				{ starts_at: '2026-02-28T15:00:00.000Z', status: 'reserved' },
-				endOfAugust
+				endOfMay
 			)
 		).toBe(true);
 		expect(
 			isExpiredActiveAppointment(
 				{ starts_at: '2026-02-28T14:59:59.999Z', status: 'reserved' },
-				endOfAugust
+				endOfMay
 			)
 		).toBe(false);
 	});

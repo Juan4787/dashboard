@@ -4,7 +4,7 @@ export const ACTIVE_APPOINTMENT_STATUSES = [
 	'reschedule_requested'
 ] as const;
 
-export const AGENDA_EXPIRED_MONTHS = 6;
+export const AGENDA_EXPIRED_MONTHS = 3;
 
 export type ActiveAppointmentStatus = (typeof ACTIVE_APPOINTMENT_STATUSES)[number];
 
@@ -20,9 +20,9 @@ export const isUpcomingActiveAppointment = (
 	return Number.isFinite(startsAt) && startsAt >= now.getTime();
 };
 
-// PostgreSQL usa meses calendario para `interval '6 months'`. Reproducimos
+// PostgreSQL usa meses calendario para `interval '3 months'`. Reproducimos
 // esa regla en el navegador y fijamos el día al último válido del mes destino
-// para que, por ejemplo, el 31 de agosto reste seis meses hasta el 28 de febrero.
+// para que, por ejemplo, el 31 de mayo reste tres meses hasta el 28 de febrero.
 export const getAgendaExpiredCutoff = (now: Date = new Date()) => {
 	const cutoff = new Date(now.getTime());
 	const originalDay = cutoff.getUTCDate();
