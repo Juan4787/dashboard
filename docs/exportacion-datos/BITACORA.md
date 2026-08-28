@@ -672,3 +672,21 @@ solo corresponde aplicar/verificar Supabase, stagear rutas exactas, publicar
 
 Punto exacto de reanudacion: aplicar la migracion de exportacion en Supabase de
 produccion y verificar tabla, RPC, ACL y cron antes del commit.
+
+## 2026-08-28 - Fase 6 completada
+
+- Supabase produccion: migracion `20260827220000` aplicada y registrada. Se
+  verificaron RLS, ausencia de permisos para `anon/authenticated`, ejecucion de
+  los cuatro RPC solo por `service_role`, acciones de rate limit y cron activo
+  cada 15 minutos.
+- GitHub `main`: feature publicada en `76577088c13f568d9d824c1643ae95839cd44340`;
+  `HEAD`, `origin/main` y el SHA remoto coincidieron con divergencia `0 0`.
+- Cloudflare Workers: despliegue directo exitoso en
+  `https://app.cita-suite.workers.dev`, version
+  `953263dd-20e3-46cd-9c64-aa4a241f522a`, startup 43 ms.
+- Smoke de produccion: `/login` respondio 200, la pantalla protegida redirigio
+  al ingreso y el endpoint sin sesion respondio 401.
+- `tailwind.config.js`, `Auditoria final pre lanzamiento.md` y
+  `apps/web/output/playwright/**` quedaron fuera del commit.
+
+La implementacion y todas sus fases quedan cerradas.
