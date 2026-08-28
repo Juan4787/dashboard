@@ -34,7 +34,7 @@ cumplirse tambien sus verificaciones.
 - Fase 4 - Interfaz y acceso restringido: completada.
 - Fase 5 - Auditoria, regresion y rendimiento: completada.
 - Fase 6 - Supabase, main y verificacion de publicacion: completada.
-- Fase 7 - Correccion de legibilidad y autonomia del Excel: en curso.
+- Fase 7 - Correccion del contenido visible del Excel: completada.
 
 ## Decisiones no negociables
 

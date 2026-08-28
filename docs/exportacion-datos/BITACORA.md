@@ -753,3 +753,19 @@ Evidencia:
 
 Punto exacto de reanudacion: publicar las rutas exactas en `main`, desplegar
 Cloudflare y registrar SHA y version final.
+
+## 2026-08-28 - Fase 7 publicada
+
+- GitHub `main`: correccion publicada en
+  `e3cd0f76da700e067d0ac3c457fd98cb9884e821`.
+- Cloudflare Workers: version
+  `2101ebcf-bda0-4517-b0fd-f927ee386763` desplegada en
+  `https://app.cita-suite.workers.dev`; startup 37 ms.
+- Smoke de produccion: `/login` respondio 200, la ruta de exportacion sin
+  sesion redirigio al ingreso y el nuevo Worker XLSX respondio 200.
+- Supabase conserva la migracion ya aplicada. Esta correccion no modifica el
+  contrato privado de datos y no necesita SQL adicional.
+- `tailwind.config.js`, `Auditoria final pre lanzamiento.md` y
+  `apps/web/output/playwright/**` permanecieron fuera de los commits.
+
+La Fase 7 queda cerrada.
