@@ -2,8 +2,8 @@
 
 ## 1. Objetivo de producto
 
-Permitir que el dueño o un administrador directo de un consultorio se lleve en
-un archivo Excel legible y verificable la informacion tabular de sus pacientes.
+Permitir que el dueño o un administrador directo de un consultorio se lleve la
+informacion tabular de sus pacientes en un archivo Excel verificable.
 La funcion responde a la objecion comercial de perder acceso a los datos al
 dejar de usar Cita Suite.
 
@@ -13,7 +13,7 @@ Texto de alcance propuesto:
 > seguimientos. No incluye radiografias ni archivos adjuntos.
 
 No se presenta como backup completo ni como mecanismo de restauracion dentro de
-Cita Suite. El formato versionado debe, sin embargo, permitir lectura humana e
+Cita Suite. El formato versionado debe, sin embargo, permitir consulta directa e
 importacion por otro sistema.
 
 ## 2. Alcance funcional
@@ -366,6 +366,13 @@ Cancelar o expirar no consume un nuevo inicio.
 No se consulta la carga actual de la pagina de paciente: esta pagina limita
 historial y turnos y excluye archivados.
 
+Los identificadores enumerados en esta seccion pertenecen exclusivamente al
+protocolo privado entre servidor y generador. Se usan para relacionar filas en
+memoria y comprobar integridad; el contrato visible vigente
+`CONTRATO-XLSX-V2.md` prohibe escribirlos en el Excel. Toda relacion visible se
+resuelve a nombre de paciente, DNI, nombre profesional, fecha y contexto del
+registro.
+
 ### 6.1 Pacientes
 
 Fuente: `patients` y perfil canonico `patient_clinical_profiles`.
@@ -405,8 +412,9 @@ Una fila por clave superior de `custom_fields`:
 - `value_text`: representacion humana para escalares
 - `value_json`: serializacion canonica solo para objetos/listas
 
-El identificador y el tipo permiten distinguir valores que visualmente se
-parecen. Objetos/listas se deben poder reconstruir sin perdida semantica.
+El identificador y el tipo permiten validar el transporte privado. En el Excel,
+solo se muestran nombre, DNI, etiqueta y un valor en castellano. Objetos y
+listas se convierten a lineas con etiquetas y valores, sin JSON visible.
 
 ### 6.3 Historial clinico
 

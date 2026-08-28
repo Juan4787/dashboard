@@ -1,5 +1,10 @@
 export const PATIENT_EXPORT_SCHEMA_VERSION = 'cita-suite-patient-export/v1' as const;
 
+// El protocolo servidor sigue en v1 porque los datasets no cambian. El formato
+// visible del Excel tiene su propia version: v2 elimina identificadores internos
+// y resuelve las relaciones a nombres y datos reconocibles por el consultorio.
+export const PATIENT_EXPORT_WORKBOOK_VERSION = 'cita-suite-patient-export/v2' as const;
+
 export const PATIENT_EXPORT_DATASETS = [
 	'patients',
 	'custom_fields',

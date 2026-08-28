@@ -92,7 +92,7 @@ describe('patient export HTTP orchestrator', () => {
 					blob: new Blob(['xlsx'], {
 						type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 					}),
-					filename: 'cita-suite-pacientes-20260828-1435.xlsx',
+					filename: 'datos-pacientes-20260828-1435.xlsx',
 					byteLength: 4
 				};
 			}

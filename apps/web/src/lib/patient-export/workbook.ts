@@ -1,6 +1,7 @@
 import {
 	PATIENT_EXPORT_DATASETS,
 	PATIENT_EXPORT_SCHEMA_VERSION,
+	PATIENT_EXPORT_WORKBOOK_VERSION,
 	type PatientExportAppointmentSource,
 	type PatientExportDatasetRows,
 	type PatientExportSession
@@ -16,12 +17,12 @@ export const PATIENT_EXPORT_TEXT_CHUNK_CODE_UNITS = 30_000;
 export const PATIENT_EXPORT_TEXT_CHUNK_LINE_FEEDS = 250;
 
 export const PATIENT_EXPORT_SHEET_NAMES = [
-	'Informacion',
+	'Resumen',
 	'Pacientes',
-	'Campos personalizados',
-	'Historial clinico',
+	'Datos adicionales',
+	'Historia clínica',
 	'Turnos',
-	'Profesionales por turno',
+	'Profesionales de turnos',
 	'Seguimientos',
 	'Textos extensos'
 ] as const;
@@ -36,64 +37,62 @@ type SheetDefinition = {
 
 export const PATIENT_EXPORT_SHEET_DEFINITIONS = [
 	{
-		name: 'Informacion',
-		headers: ['Clave', 'Valor'],
+		name: 'Resumen',
+		headers: ['Dato', 'Detalle'],
 		widths: [34, 64]
 	},
 	{
 		name: 'Pacientes',
 		headers: [
-			'ID paciente',
 			'Nombre completo',
 			'DNI',
-			'Telefono',
-			'Email',
+			'Teléfono',
+			'Correo electrónico',
 			'Fecha de nacimiento',
-			'Direccion',
+			'Dirección',
 			'Obra social',
 			'Plan',
 			'Alergias',
-			'Medicacion',
+			'Medicación',
 			'Antecedentes',
-			'Alerta clinica',
-			'Notas clinicas',
+			'Alerta clínica',
+			'Notas clínicas',
 			'Estado',
-			'Archivado en',
-			'Creado en',
-			'Actualizado en'
+			'Fecha de archivo',
+			'Fecha de alta',
+			'Última actualización'
 		],
-		widths: [38, 32, 18, 22, 30, 20, 34, 24, 20, 36, 36, 40, 36, 44, 16, 25, 25, 25]
+		widths: [32, 18, 22, 30, 20, 34, 24, 20, 36, 36, 40, 36, 44, 16, 25, 25, 25]
 	},
 	{
-		name: 'Campos personalizados',
-		headers: ['ID paciente', 'Clave', 'Etiqueta', 'Tipo', 'Valor', 'Valor JSON'],
-		widths: [38, 30, 30, 14, 38, 56]
+		name: 'Datos adicionales',
+		headers: ['Paciente', 'DNI', 'Campo', 'Valor'],
+		widths: [32, 18, 30, 64]
 	},
 	{
-		name: 'Historial clinico',
+		name: 'Historia clínica',
 		headers: [
-			'ID entrada clinica',
-			'ID paciente',
+			'Paciente',
+			'DNI',
 			'Fecha y hora',
 			'Tipo',
-			'Descripcion',
+			'Descripción',
 			'Piezas',
 			'Nota interna',
 			'Importe',
-			'ID profesional',
 			'Profesional',
 			'Estado',
-			'Archivado en',
-			'Creado en',
-			'Actualizado en'
+			'Fecha de archivo',
+			'Fecha de carga',
+			'Última actualización'
 		],
-		widths: [38, 38, 25, 22, 52, 18, 42, 18, 38, 30, 16, 25, 25, 25]
+		widths: [32, 18, 25, 22, 52, 18, 42, 18, 30, 16, 25, 25, 25]
 	},
 	{
 		name: 'Turnos',
 		headers: [
-			'ID turno',
-			'ID paciente',
+			'Paciente',
+			'DNI',
 			'Inicio',
 			'Fin',
 			'Estado',
@@ -101,55 +100,55 @@ export const PATIENT_EXPORT_SHEET_DEFINITIONS = [
 			'Servicio',
 			'Nota interna',
 			'Profesional principal',
-			'Confirmado en',
-			'Cancelado en',
-			'Reprogramacion solicitada en',
-			'Motivo de cancelacion',
-			'Creado en',
-			'Actualizado en'
+			'Fecha de confirmación',
+			'Fecha de cancelación',
+			'Pedido de reprogramación',
+			'Motivo de cancelación',
+			'Fecha de creación',
+			'Última actualización'
 		],
-		widths: [38, 38, 25, 25, 28, 24, 32, 42, 32, 25, 25, 30, 40, 25, 25]
+		widths: [32, 18, 25, 25, 28, 24, 32, 42, 32, 25, 25, 30, 40, 25, 25]
 	},
 	{
-		name: 'Profesionales por turno',
+		name: 'Profesionales de turnos',
 		headers: [
-			'ID turno',
-			'ID paciente',
-			'ID profesional',
+			'Paciente',
+			'DNI',
+			'Inicio del turno',
+			'Servicio',
 			'Profesional',
-			'Es principal',
-			'Orden'
+			'Responsable principal'
 		],
-		widths: [38, 38, 38, 32, 16, 12]
+		widths: [32, 18, 25, 32, 32, 22]
 	},
 	{
 		name: 'Seguimientos',
 		headers: [
-			'ID seguimiento',
-			'ID paciente',
-			'Recordar el',
+			'Paciente',
+			'DNI',
+			'Fecha de recordatorio',
 			'Mensaje',
 			'Estado',
-			'ID profesional asignado',
 			'Profesional asignado',
-			'Completado en',
-			'Creado en',
-			'Actualizado en'
+			'Fecha de finalización',
+			'Fecha de creación',
+			'Última actualización'
 		],
-		widths: [38, 38, 18, 52, 18, 38, 32, 25, 25, 25]
+		widths: [32, 18, 22, 52, 18, 32, 25, 25, 25]
 	},
 	{
 		name: 'Textos extensos',
 		headers: [
-			'Referencia texto',
-			'Entidad',
-			'ID entidad',
+			'Referencia',
+			'Paciente',
+			'DNI',
+			'Sección',
+			'Registro',
 			'Campo',
 			'Parte',
-			'Total de partes',
 			'Texto'
 		],
-		widths: [20, 28, 38, 28, 12, 16, 70]
+		widths: [22, 32, 18, 28, 36, 28, 16, 70]
 	}
 ] as const satisfies readonly SheetDefinition[];
 
@@ -168,6 +167,7 @@ export type PatientExportWorkbookSheet = {
 };
 
 export type PatientExportWorkbook = {
+	version: typeof PATIENT_EXPORT_WORKBOOK_VERSION;
 	filename: string;
 	mimeType: typeof PATIENT_EXPORT_XLSX_MIME;
 	sheets: PatientExportWorkbookSheet[];
@@ -237,8 +237,10 @@ export const splitPatientExportText = (value: string): string[] => {
 };
 
 type LongTextContext = {
-	entity: string;
-	entityId: string;
+	patientName: string | null;
+	patientDni: string | null;
+	section: string;
+	record: string;
 	field: string;
 };
 
@@ -263,6 +265,180 @@ const APPOINTMENT_SOURCE: Record<PatientExportAppointmentSource, string> = {
 	admin: 'Administración'
 };
 const FOLLOW_UP_STATUS = { pending: 'Pendiente', done: 'Completado' } as const;
+
+type PatientIdentity = {
+	fullName: string;
+	dni: string | null;
+};
+
+const formatCalendarDate = (value: string | null): string | null => {
+	if (value === null) return null;
+	const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+	if (!match) throw new PatientExportWorkbookError();
+	return `${match[3]}/${match[2]}/${match[1]}`;
+};
+
+const timestampFormatter = (timeZone: string) => {
+	let formatter: Intl.DateTimeFormat;
+	try {
+		formatter = new Intl.DateTimeFormat('es-AR', {
+			timeZone,
+			year: 'numeric',
+			month: '2-digit',
+			day: '2-digit',
+			hour: '2-digit',
+			minute: '2-digit',
+			second: '2-digit',
+			hourCycle: 'h23'
+		});
+	} catch (error) {
+		throw new PatientExportWorkbookError(undefined, { cause: error });
+	}
+
+	return (value: string | null): string | null => {
+		if (value === null) return null;
+		const date = new Date(value);
+		if (!Number.isFinite(date.getTime())) throw new PatientExportWorkbookError();
+		const parts = new Map<string, string>(
+			formatter
+				.formatToParts(date)
+				.filter((part) => part.type !== 'literal')
+				.map((part) => [part.type, part.value])
+		);
+		const required = (part: string) => {
+			const result = parts.get(part);
+			if (!result) throw new PatientExportWorkbookError();
+			return result;
+		};
+		const milliseconds = date.getUTCMilliseconds();
+		return `${required('day')}/${required('month')}/${required('year')} ${required('hour')}:${required('minute')}:${required('second')}${milliseconds ? `.${String(milliseconds).padStart(3, '0')}` : ''}`;
+	};
+};
+
+type LosslessJsonValue =
+	| { kind: 'null' }
+	| { kind: 'boolean'; value: boolean }
+	| { kind: 'number'; value: string }
+	| { kind: 'string'; value: string }
+	| { kind: 'array'; value: LosslessJsonValue[] }
+	| { kind: 'object'; value: [string, LosslessJsonValue][] };
+
+const parseLosslessJson = (source: string): LosslessJsonValue => {
+	let index = 0;
+	const skipWhitespace = () => {
+		while (/\s/.test(source[index] ?? '')) index += 1;
+	};
+	const parseString = (): string => {
+		if (source[index] !== '"') throw new Error('JSON_STRING_EXPECTED');
+		const start = index;
+		index += 1;
+		while (index < source.length) {
+			if (source[index] === '\\') {
+				index += 2;
+				continue;
+			}
+			if (source[index] === '"') {
+				index += 1;
+				return JSON.parse(source.slice(start, index)) as string;
+			}
+			index += 1;
+		}
+		throw new Error('JSON_STRING_UNTERMINATED');
+	};
+	const parseValue = (depth = 0): LosslessJsonValue => {
+		if (depth > 50) throw new Error('JSON_TOO_DEEP');
+		skipWhitespace();
+		const current = source[index];
+		if (current === '"') return { kind: 'string', value: parseString() };
+		if (current === '[') {
+			index += 1;
+			const value: LosslessJsonValue[] = [];
+			skipWhitespace();
+			if (source[index] === ']') {
+				index += 1;
+				return { kind: 'array', value };
+			}
+			while (true) {
+				value.push(parseValue(depth + 1));
+				skipWhitespace();
+				if (source[index] === ']') {
+					index += 1;
+					return { kind: 'array', value };
+				}
+				if (source[index] !== ',') throw new Error('JSON_ARRAY_SEPARATOR_EXPECTED');
+				index += 1;
+			}
+		}
+		if (current === '{') {
+			index += 1;
+			const value: [string, LosslessJsonValue][] = [];
+			skipWhitespace();
+			if (source[index] === '}') {
+				index += 1;
+				return { kind: 'object', value };
+			}
+			while (true) {
+				skipWhitespace();
+				const key = parseString();
+				skipWhitespace();
+				if (source[index] !== ':') throw new Error('JSON_OBJECT_COLON_EXPECTED');
+				index += 1;
+				value.push([key, parseValue(depth + 1)]);
+				skipWhitespace();
+				if (source[index] === '}') {
+					index += 1;
+					return { kind: 'object', value };
+				}
+				if (source[index] !== ',') throw new Error('JSON_OBJECT_SEPARATOR_EXPECTED');
+				index += 1;
+			}
+		}
+		for (const [literal, value] of [
+			['true', { kind: 'boolean', value: true }],
+			['false', { kind: 'boolean', value: false }],
+			['null', { kind: 'null' }]
+		] as const) {
+			if (source.startsWith(literal, index)) {
+				index += literal.length;
+				return value;
+			}
+		}
+		const numberMatch = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/.exec(
+			source.slice(index)
+		);
+		if (!numberMatch) throw new Error('JSON_VALUE_EXPECTED');
+		index += numberMatch[0].length;
+		return { kind: 'number', value: numberMatch[0] };
+	};
+
+	const result = parseValue();
+	skipWhitespace();
+	if (index !== source.length) throw new Error('JSON_TRAILING_CONTENT');
+	return result;
+};
+
+const renderStructuredValue = (value: LosslessJsonValue, depth = 0): string => {
+	if (depth > 50) throw new PatientExportWorkbookError();
+	if (value.kind === 'null') return 'Sin dato';
+	if (value.kind === 'string' || value.kind === 'number') return value.value;
+	if (value.kind === 'boolean') return value.value ? 'Sí' : 'No';
+	if (value.kind === 'array') {
+		if (value.value.length === 0) return 'Sin elementos';
+		return value.value
+			.map((item, index) => {
+				const rendered = renderStructuredValue(item, depth + 1);
+				return `${index + 1}. ${rendered.replaceAll('\n', '\n   ')}`;
+			})
+			.join('\n');
+	}
+	if (value.value.length === 0) return 'Sin contenido';
+	return value.value
+		.map(([key, item]) => {
+			const rendered = renderStructuredValue(item, depth + 1);
+			return `${key}: ${rendered.replaceAll('\n', '\n  ')}`;
+		})
+		.join('\n');
+};
 
 const canonicalDecimal = (value: string): string => {
 	const negative = value.startsWith('-');
@@ -296,12 +472,12 @@ export const exactExcelAmount = (value: number | string | null): number | string
 
 const customFieldValue = (
 	row: PatientExportDatasetRows['custom_fields'][number]
-): { value: string | null; json: string | null } => {
+): string | null => {
 	switch (row.value_type) {
 		case 'string':
 		case 'number':
 			if (row.value_text === null || row.value_json !== null) throw new PatientExportWorkbookError();
-			return { value: row.value_text, json: null };
+			return row.value_text;
 		case 'boolean':
 			if (
 				(row.value_text !== 'true' && row.value_text !== 'false') ||
@@ -309,24 +485,25 @@ const customFieldValue = (
 			) {
 				throw new PatientExportWorkbookError();
 			}
-			return { value: row.value_text === 'true' ? 'Verdadero' : 'Falso', json: null };
+			return row.value_text === 'true' ? 'Sí' : 'No';
 		case 'null':
 			if (row.value_text !== null || row.value_json !== null) throw new PatientExportWorkbookError();
-			return { value: null, json: null };
+			return null;
 		case 'object':
 		case 'array': {
 			if (row.value_text !== null || row.value_json === null) throw new PatientExportWorkbookError();
 			try {
-				const parsed = JSON.parse(row.value_json) as unknown;
+				const parsed = parseLosslessJson(row.value_json);
 				const matches =
 					row.value_type === 'array'
-						? Array.isArray(parsed)
-						: typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed);
+						? parsed.kind === 'array'
+						: parsed.kind === 'object';
 				if (!matches) throw new Error('CUSTOM_FIELD_TYPE_MISMATCH');
+				return renderStructuredValue(parsed);
 			} catch (error) {
+				if (error instanceof PatientExportWorkbookError) throw error;
 				throw new PatientExportWorkbookError(undefined, { cause: error });
 			}
-			return { value: null, json: row.value_json };
 		}
 	}
 };
@@ -364,7 +541,7 @@ export const patientExportFilename = (
 	if (!Number.isFinite(generatedAt.getTime())) throw new PatientExportWorkbookError();
 	const iso = generatedAt.toISOString();
 	const stamp = `${iso.slice(0, 10).replaceAll('-', '')}-${iso.slice(11, 16).replace(':', '')}`;
-	return `cita-suite-${scope === 'patient' ? 'paciente' : 'pacientes'}-${stamp}.xlsx`;
+	return `datos-${scope === 'patient' ? 'paciente' : 'pacientes'}-${stamp}.xlsx`;
 };
 
 const sheetDefinition = (name: PatientExportSheetName): SheetDefinition => {
@@ -388,6 +565,49 @@ export const buildPatientExportWorkbook = (
 	input: PatientExportWorkbookInput
 ): PatientExportWorkbook => {
 	const generatedAt = assertWorkbookInput(input);
+	const formatTimestamp = timestampFormatter(input.session.business.timezone);
+	const requiredTimestamp = (value: string): string => {
+		const formatted = formatTimestamp(value);
+		if (formatted === null) throw new PatientExportWorkbookError();
+		return formatted;
+	};
+	const requiredCalendarDate = (value: string): string => {
+		const formatted = formatCalendarDate(value);
+		if (formatted === null) throw new PatientExportWorkbookError();
+		return formatted;
+	};
+	const compactContext = (value: string | null): string | null => {
+		if (value === null) return null;
+		const characters = Array.from(value);
+		return characters.length <= 200 ? value : `${characters.slice(0, 197).join('')}...`;
+	};
+
+	const patientsById = new Map<string, PatientIdentity>();
+	for (const patient of input.datasets.patients) {
+		if (patientsById.has(patient.patient_id)) throw new PatientExportWorkbookError();
+		patientsById.set(patient.patient_id, {
+			fullName: patient.full_name,
+			dni: patient.dni
+		});
+	}
+	const patientIdentity = (patientId: string): PatientIdentity => {
+		const identity = patientsById.get(patientId);
+		if (!identity) {
+			throw new PatientExportWorkbookError(
+				'No pudimos relacionar todos los datos con sus pacientes. Volvé a preparar el archivo.',
+				{ code: 'WORKBOOK_INCOMPLETE' }
+			);
+		}
+		return identity;
+	};
+
+	const appointmentsById = new Map(
+		input.datasets.appointments.map((appointment) => [appointment.appointment_id, appointment])
+	);
+	if (appointmentsById.size !== input.datasets.appointments.length) {
+		throw new PatientExportWorkbookError();
+	}
+
 	const longTexts: LongTextRow[] = [];
 	let nextTextReference = 1;
 
@@ -399,7 +619,7 @@ export const buildPatientExportWorkbook = (
 		const chunks = splitPatientExportText(value);
 		if (chunks.length === 1) return text(value);
 
-		const reference = `texto-${String(nextTextReference).padStart(6, '0')}`;
+		const reference = `Texto extenso ${nextTextReference}`;
 		nextTextReference += 1;
 		for (let index = 0; index < chunks.length; index += 1) {
 			longTexts.push({
@@ -414,86 +634,94 @@ export const buildPatientExportWorkbook = (
 	};
 
 	const informationRows: PatientExportWorkbookCell[][] = [
-		['version_formato', PATIENT_EXPORT_SCHEMA_VERSION],
-		['generado_en_utc', generatedAt.toISOString()],
-		['timezone_consultorio', input.session.business.timezone],
+		['Consultorio', input.session.business.name],
+		['Fecha de exportación', requiredTimestamp(generatedAt.toISOString())],
 		[
-			'alcance',
-			input.session.scope === 'patient' ? 'Paciente individual' : 'Todos los pacientes'
+			'Contenido',
+			input.session.scope === 'patient'
+				? 'Ficha completa del paciente seleccionado'
+				: 'Fichas completas de todos los pacientes'
 		],
-		['consultorio', input.session.business.name],
-		['cantidad_pacientes', input.datasets.patients.length],
-		['cantidad_campos_personalizados', input.datasets.custom_fields.length],
-		['cantidad_entradas_clinicas', input.datasets.clinical_entries.length],
-		['cantidad_turnos', input.datasets.appointments.length],
-		['cantidad_relaciones_profesionales', input.datasets.appointment_professionals.length],
-		['cantidad_seguimientos', input.datasets.follow_ups.length],
-		['incluye_radiografias', 'No'],
-		['incluye_adjuntos', 'No'],
+		['Pacientes', input.datasets.patients.length],
+		['Datos adicionales', input.datasets.custom_fields.length],
+		['Registros de historia clínica', input.datasets.clinical_entries.length],
+		['Turnos', input.datasets.appointments.length],
+		['Profesionales asignados a turnos', input.datasets.appointment_professionals.length],
+		['Seguimientos', input.datasets.follow_ups.length],
+		['Fechas y horas', 'Expresadas en la hora local del consultorio.'],
 		[
-			'aclaracion',
-			'Incluye datos tabulares. No incluye radiografias, imagenes, PDF ni archivos adjuntos.'
+			'Textos muy largos',
+			'Cuando una celda indique “Texto extenso 1”, el contenido completo está en la hoja Textos extensos.'
 		]
-	].map(([key, value]) => [
-		text(String(key)),
+	].map(([label, value]) => [
+		text(String(label)),
 		typeof value === 'number'
 			? number(value)
 			: exportText(String(value), {
-					entity: 'Informacion',
-					entityId: 'workbook',
-					field: String(key)
+					patientName: null,
+					patientDni: null,
+					section: 'Resumen',
+					record: 'Datos de la exportación',
+					field: String(label)
 				})
 	]);
 
 	const patientRows = input.datasets.patients.map((row) => {
+		const identity = patientIdentity(row.patient_id);
 		const context = (field: string): LongTextContext => ({
-			entity: 'Paciente',
-			entityId: row.patient_id,
+			patientName: compactContext(identity.fullName),
+			patientDni: compactContext(identity.dni),
+			section: 'Pacientes',
+			record: 'Ficha del paciente',
 			field
 		});
 		return [
-			exportText(row.patient_id, context('ID paciente')),
 			exportText(row.full_name, context('Nombre completo')),
 			exportText(row.dni, context('DNI')),
-			exportText(row.phone, context('Telefono')),
-			exportText(row.email, context('Email')),
-			exportText(row.birth_date, context('Fecha de nacimiento')),
-			exportText(row.address, context('Direccion')),
+			exportText(row.phone, context('Teléfono')),
+			exportText(row.email, context('Correo electrónico')),
+			exportText(formatCalendarDate(row.birth_date), context('Fecha de nacimiento')),
+			exportText(row.address, context('Dirección')),
 			exportText(row.insurance, context('Obra social')),
 			exportText(row.insurance_plan, context('Plan')),
 			exportText(row.allergies, context('Alergias')),
-			exportText(row.medication, context('Medicacion')),
+			exportText(row.medication, context('Medicación')),
 			exportText(row.background, context('Antecedentes')),
-			exportText(row.clinical_alert_note, context('Alerta clinica')),
-			exportText(row.clinical_notes, context('Notas clinicas')),
+			exportText(row.clinical_alert_note, context('Alerta clínica')),
+			exportText(row.clinical_notes, context('Notas clínicas')),
 			text(PATIENT_STATUS[row.status]),
-			nullableText(row.archived_at),
-			text(row.created_at),
-			text(row.updated_at)
+			nullableText(formatTimestamp(row.archived_at)),
+			text(requiredTimestamp(row.created_at)),
+			text(requiredTimestamp(row.updated_at))
 		];
 	});
 
 	const customFieldRows = input.datasets.custom_fields.map((row) => {
-		const values = customFieldValue(row);
+		const identity = patientIdentity(row.patient_id);
+		const value = customFieldValue(row);
 		const context = (field: string): LongTextContext => ({
-			entity: 'Campo personalizado',
-			entityId: row.patient_id,
+			patientName: compactContext(identity.fullName),
+			patientDni: compactContext(identity.dni),
+			section: 'Datos adicionales',
+			record: 'Ficha del paciente',
 			field
 		});
 		return [
-			text(row.patient_id),
-			exportText(row.field_key, context('Clave')),
-			exportText(row.field_label, context('Etiqueta')),
-			text(row.value_type),
-			exportText(values.value, context('Valor')),
-			exportText(values.json, context('Valor JSON'))
+			exportText(identity.fullName, context('Paciente')),
+			exportText(identity.dni, context('DNI')),
+			exportText(row.field_label, context('Campo')),
+			exportText(value, context('Valor'))
 		];
 	});
 
 	const clinicalEntryRows = input.datasets.clinical_entries.map((row) => {
+		const identity = patientIdentity(row.patient_id);
+		const occurredAt = requiredTimestamp(row.occurred_at);
 		const context = (field: string): LongTextContext => ({
-			entity: 'Entrada clinica',
-			entityId: row.clinical_entry_id,
+			patientName: compactContext(identity.fullName),
+			patientDni: compactContext(identity.dni),
+			section: 'Historia clínica',
+			record: `Atención del ${occurredAt}`,
 			field
 		});
 		const amount = exactExcelAmount(row.amount);
@@ -504,101 +732,123 @@ export const buildPatientExportWorkbook = (
 					? number(amount)
 					: exportText(amount, context('Importe'));
 		return [
-			text(row.clinical_entry_id),
-			text(row.patient_id),
-			text(row.occurred_at),
+			exportText(identity.fullName, context('Paciente')),
+			exportText(identity.dni, context('DNI')),
+			text(occurredAt),
 			exportText(row.entry_type, context('Tipo')),
-			exportText(row.description, context('Descripcion')),
+			exportText(row.description, context('Descripción')),
 			exportText(row.teeth, context('Piezas')),
 			exportText(row.internal_note, context('Nota interna')),
 			amountCell,
-			nullableText(row.professional_id),
 			exportText(row.professional_name, context('Profesional')),
 			text(PATIENT_STATUS[row.status]),
-			nullableText(row.archived_at),
-			text(row.created_at),
-			text(row.updated_at)
+			nullableText(formatTimestamp(row.archived_at)),
+			text(requiredTimestamp(row.created_at)),
+			text(requiredTimestamp(row.updated_at))
 		];
 	});
 
 	const appointmentRows = input.datasets.appointments.map((row) => {
+		const identity = patientIdentity(row.patient_id);
+		const startsAt = requiredTimestamp(row.starts_at);
 		const context = (field: string): LongTextContext => ({
-			entity: 'Turno',
-			entityId: row.appointment_id,
+			patientName: compactContext(identity.fullName),
+			patientDni: compactContext(identity.dni),
+			section: 'Turnos',
+			record: `Turno del ${startsAt}`,
 			field
 		});
 		return [
-			text(row.appointment_id),
-			text(row.patient_id),
-			text(row.starts_at),
-			text(row.ends_at),
+			exportText(identity.fullName, context('Paciente')),
+			exportText(identity.dni, context('DNI')),
+			text(startsAt),
+			text(requiredTimestamp(row.ends_at)),
 			text(APPOINTMENT_STATUS[row.status]),
 			text(APPOINTMENT_SOURCE[row.source]),
 			exportText(row.service_name_snapshot, context('Servicio')),
 			exportText(row.internal_note, context('Nota interna')),
 			exportText(row.professional_name_snapshot, context('Profesional principal')),
-			nullableText(row.confirmed_at),
-			nullableText(row.cancelled_at),
-			nullableText(row.reschedule_requested_at),
-			exportText(row.cancelled_reason, context('Motivo de cancelacion')),
-			text(row.created_at),
-			text(row.updated_at)
+			nullableText(formatTimestamp(row.confirmed_at)),
+			nullableText(formatTimestamp(row.cancelled_at)),
+			nullableText(formatTimestamp(row.reschedule_requested_at)),
+			exportText(row.cancelled_reason, context('Motivo de cancelación')),
+			text(requiredTimestamp(row.created_at)),
+			text(requiredTimestamp(row.updated_at))
 		];
 	});
 
-	const appointmentProfessionalRows = input.datasets.appointment_professionals.map((row) => [
-		text(row.appointment_id),
-		text(row.patient_id),
-		text(row.professional_id),
-		exportText(row.professional_name, {
-			entity: 'Profesional por turno',
-			entityId: row.appointment_id,
-			field: 'Profesional'
-		}),
-		text(row.is_primary ? 'Sí' : 'No'),
-		number(row.position)
-	]);
-
-	const followUpRows = input.datasets.follow_ups.map((row) => {
+	const appointmentProfessionalRows = input.datasets.appointment_professionals.map((row) => {
+		const identity = patientIdentity(row.patient_id);
+		const appointment = appointmentsById.get(row.appointment_id);
+		if (!appointment || appointment.patient_id !== row.patient_id) {
+			throw new PatientExportWorkbookError(
+				'No pudimos relacionar todos los profesionales con sus turnos. Volvé a preparar el archivo.',
+				{ code: 'WORKBOOK_INCOMPLETE' }
+			);
+		}
+		const startsAt = requiredTimestamp(appointment.starts_at);
 		const context = (field: string): LongTextContext => ({
-			entity: 'Seguimiento',
-			entityId: row.follow_up_id,
+			patientName: compactContext(identity.fullName),
+			patientDni: compactContext(identity.dni),
+			section: 'Profesionales de turnos',
+			record: `Turno del ${startsAt}`,
 			field
 		});
 		return [
-			text(row.follow_up_id),
-			text(row.patient_id),
-			text(row.remind_on),
+			exportText(identity.fullName, context('Paciente')),
+			exportText(identity.dni, context('DNI')),
+			text(startsAt),
+			exportText(appointment.service_name_snapshot, context('Servicio')),
+			exportText(row.professional_name, context('Profesional')),
+			text(row.is_primary ? 'Sí' : 'No')
+		];
+	});
+
+	const followUpRows = input.datasets.follow_ups.map((row) => {
+		const identity = patientIdentity(row.patient_id);
+		const remindOn = requiredCalendarDate(row.remind_on);
+		const context = (field: string): LongTextContext => ({
+			patientName: compactContext(identity.fullName),
+			patientDni: compactContext(identity.dni),
+			section: 'Seguimientos',
+			record: `Seguimiento del ${remindOn}`,
+			field
+		});
+		return [
+			exportText(identity.fullName, context('Paciente')),
+			exportText(identity.dni, context('DNI')),
+			text(remindOn),
 			exportText(row.message, context('Mensaje')),
 			text(FOLLOW_UP_STATUS[row.status]),
-			nullableText(row.assigned_professional_id),
 			exportText(row.assigned_professional_name, context('Profesional asignado')),
-			nullableText(row.done_at),
-			text(row.created_at),
-			text(row.updated_at)
+			nullableText(formatTimestamp(row.done_at)),
+			text(requiredTimestamp(row.created_at)),
+			text(requiredTimestamp(row.updated_at))
 		];
 	});
 
 	const longTextRows = longTexts.map((row) => [
 		text(row.reference),
-		text(row.entity),
-		text(row.entityId),
+		nullableText(row.patientName),
+		nullableText(row.patientDni),
+		text(row.section),
+		text(row.record),
 		text(row.field),
-		number(row.part),
-		number(row.totalParts),
+		text(`${row.part} de ${row.totalParts}`),
 		text(row.value)
 	]);
 
 	return {
+		version: PATIENT_EXPORT_WORKBOOK_VERSION,
 		filename: patientExportFilename(input.session.scope, generatedAt),
 		mimeType: PATIENT_EXPORT_XLSX_MIME,
 		sheets: [
-			makeSheet('Informacion', informationRows),
+			makeSheet('Resumen', informationRows),
 			makeSheet('Pacientes', patientRows),
-			makeSheet('Campos personalizados', customFieldRows),
-			makeSheet('Historial clinico', clinicalEntryRows),
+			makeSheet('Datos adicionales', customFieldRows),
+			makeSheet('Historia clínica', clinicalEntryRows),
 			makeSheet('Turnos', appointmentRows),
-			makeSheet('Profesionales por turno', appointmentProfessionalRows),
+			makeSheet('Profesionales de turnos', appointmentProfessionalRows),
 			makeSheet('Seguimientos', followUpRows),
 			makeSheet('Textos extensos', longTextRows)
 		]

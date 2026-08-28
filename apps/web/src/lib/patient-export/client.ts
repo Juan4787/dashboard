@@ -116,7 +116,7 @@ export const buildPatientExportXlsx = (
 			if (
 				message.type === 'success' &&
 				typeof message.filename === 'string' &&
-				/^cita-suite-paciente(?:s)?-\d{8}-\d{4}\.xlsx$/.test(message.filename) &&
+				/^datos-paciente(?:s)?-\d{8}-\d{4}\.xlsx$/.test(message.filename) &&
 				message.mimeType === PATIENT_EXPORT_XLSX_MIME &&
 				message.buffer instanceof ArrayBuffer &&
 				Number.isSafeInteger(message.byteLength) &&

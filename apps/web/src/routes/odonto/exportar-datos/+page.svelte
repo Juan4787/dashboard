@@ -22,8 +22,8 @@
 		<h1 class="ux-title">Exportar datos</h1>
 		<p class="ux-subtitle">
 			{isPatientExport
-				? 'Prepará un Excel con la información tabular de este paciente.'
-				: 'Llevate la información tabular de tus pacientes en un archivo Excel.'}
+				? 'Prepará un Excel con la ficha completa de este paciente.'
+				: 'Descargá un Excel con la información completa de tus pacientes.'}
 		</p>
 	</div>
 
@@ -39,14 +39,14 @@
 					<div class="min-w-0">
 						<h2 id="included-data-title" class="text-xl font-black text-neutral-950 dark:text-white">Qué incluye</h2>
 						<p class="mt-1 text-sm leading-6 text-neutral-600 dark:text-neutral-300">
-							El archivo tiene ocho hojas ordenadas y listas para consultar.
+							El archivo contiene ocho hojas.
 						</p>
 					</div>
 				</div>
 				<ul class="mt-5 grid gap-3 text-sm leading-6 text-neutral-700 dark:text-neutral-200 sm:grid-cols-2">
 					<li class="rounded-2xl bg-neutral-50 px-4 py-3 dark:bg-[#13243d]">Datos de pacientes y ficha clínica</li>
-					<li class="rounded-2xl bg-neutral-50 px-4 py-3 dark:bg-[#13243d]">Campos personalizados</li>
-					<li class="rounded-2xl bg-neutral-50 px-4 py-3 dark:bg-[#13243d]">Historial clínico e importes</li>
+					<li class="rounded-2xl bg-neutral-50 px-4 py-3 dark:bg-[#13243d]">Datos adicionales de cada paciente</li>
+					<li class="rounded-2xl bg-neutral-50 px-4 py-3 dark:bg-[#13243d]">Historia clínica e importes</li>
 					<li class="rounded-2xl bg-neutral-50 px-4 py-3 dark:bg-[#13243d]">Turnos y profesionales asignados</li>
 					<li class="rounded-2xl bg-neutral-50 px-4 py-3 dark:bg-[#13243d] sm:col-span-2">Seguimientos, incluidos los registros archivados que correspondan</li>
 				</ul>

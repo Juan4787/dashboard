@@ -60,7 +60,7 @@ describe('patient export worker client', () => {
 		worker.emitMessage({
 			type: 'success',
 			requestId,
-			filename: 'cita-suite-pacientes-20260828-1435.xlsx',
+			filename: 'datos-pacientes-20260828-1435.xlsx',
 			mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 			buffer,
 			byteLength: 3
@@ -68,7 +68,7 @@ describe('patient export worker client', () => {
 
 		const result = await resultPromise;
 		expect(onProgress.mock.calls.map(([phase]) => phase)).toEqual(['transforming', 'writing']);
-		expect(result.filename).toBe('cita-suite-pacientes-20260828-1435.xlsx');
+		expect(result.filename).toBe('datos-pacientes-20260828-1435.xlsx');
 		expect(result.blob.type).toBe(
 			'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 		);

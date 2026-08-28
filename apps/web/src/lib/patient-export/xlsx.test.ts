@@ -10,7 +10,15 @@ import writeXlsxFile from 'write-excel-file/node';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { decodePatientExportOoxmlText } from './ooxml';
 import { buildPatientExportWorkbook } from './workbook';
-import { makePatientExportWorkbookInput } from './test-fixtures';
+import {
+	ALLOCATION_ID,
+	APPOINTMENT_ID,
+	ENTRY_ID,
+	FOLLOW_UP_ID,
+	PATIENT_ID,
+	PROFESSIONAL_ID,
+	makePatientExportWorkbookInput
+} from './test-fixtures';
 import { toPatientExportWritableSheets } from './xlsx-adapter';
 
 const { JSDOM } = createRequire(import.meta.url)('jsdom') as {
@@ -50,12 +58,12 @@ describe('generated patient export XLSX', () => {
 				sheet.getAttribute('name')
 			)
 		).toEqual([
-			'Informacion',
+			'Resumen',
 			'Pacientes',
-			'Campos personalizados',
-			'Historial clinico',
+			'Datos adicionales',
+			'Historia clínica',
 			'Turnos',
-			'Profesionales por turno',
+			'Profesionales de turnos',
 			'Seguimientos',
 			'Textos extensos'
 		]);
@@ -79,12 +87,12 @@ describe('generated patient export XLSX', () => {
 		expect(worksheets.every(([, bytes]) => !/<f(?:\s|>)/i.test(decode(bytes)))).toBe(true);
 
 		const patients = parseXml(decode(archive['xl/worksheets/sheet2.xml']!));
-		for (const reference of ['A2', 'B2', 'C2', 'D2', 'F2']) {
+		for (const reference of ['A2', 'B2', 'C2', 'D2', 'E2']) {
 			expect(cellAt(patients, reference)?.getAttribute('t')).toBe('s');
 		}
 
 		const customFields = parseXml(decode(archive['xl/worksheets/sheet3.xml']!));
-		expect(cellAt(customFields, 'E2')?.getAttribute('t')).toBe('s');
+		expect(cellAt(customFields, 'D2')?.getAttribute('t')).toBe('s');
 
 		const clinical = parseXml(decode(archive['xl/worksheets/sheet4.xml']!));
 		expect(cellAt(clinical, 'E2')?.getAttribute('t')).toBe('s');
@@ -106,6 +114,19 @@ describe('generated patient export XLSX', () => {
 		expect(decodedStrings).toContain('literal _x000D_ y control \u0001');
 		expect(encodedStrings.some((value) => value.includes('_x005F_x000D_'))).toBe(true);
 		expect(encodedStrings.some((value) => value.includes('_x0001_'))).toBe(true);
+		for (const internalId of [
+			PATIENT_ID,
+			ENTRY_ID,
+			APPOINTMENT_ID,
+			PROFESSIONAL_ID,
+			ALLOCATION_ID,
+			FOLLOW_UP_ID
+		]) {
+			expect(decodedStrings.some((value) => value.includes(internalId))).toBe(false);
+		}
+		expect(decodedStrings.some((value) => /\bID (?:paciente|turno|profesional)\b/i.test(value))).toBe(
+			false
+		);
 	});
 
 	it('keeps the third-party browser runtime import isolated to the lazy worker', async () => {

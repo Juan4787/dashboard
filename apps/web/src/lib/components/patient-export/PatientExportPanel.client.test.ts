@@ -22,7 +22,7 @@ const counts = {
 
 const result = () => ({
 	blob: new Blob(['xlsx']),
-	filename: 'cita-suite-pacientes-20260828-1435.xlsx',
+	filename: 'datos-pacientes-20260828-1435.xlsx',
 	byteLength: 4,
 	counts,
 	scope: 'all_patients' as const
@@ -108,7 +108,7 @@ describe('panel de exportación de pacientes', () => {
 		render(PatientExportPanel, { scope: 'all_patients' });
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Preparar archivo Excel' }));
-		expect(await screen.findByText('Historial clínico: 12 de 30 registros.')).toBeInTheDocument();
+		expect(await screen.findByText('Historia clínica: 12 de 30 registros.')).toBeInTheDocument();
 		await fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
 
 		const summary = await screen.findByText('Exportación cancelada');

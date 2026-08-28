@@ -10,7 +10,8 @@ Antes de comenzar cada fase se debe:
 
 1. Leer este archivo completo.
 2. Leer `IMPLEMENTACION.md` completo.
-3. Leer `CONTRATO-XLSX-V1.md` completo.
+3. Leer `CONTRATO-XLSX-V2.md` completo. `CONTRATO-XLSX-V1.md` queda solo como
+   registro histórico del formato descartado.
 4. Leer la ultima entrada de `BITACORA.md` y confirmar el siguiente paso.
 5. Registrar en `BITACORA.md` que los documentos fueron consultados.
 
@@ -33,6 +34,7 @@ cumplirse tambien sus verificaciones.
 - Fase 4 - Interfaz y acceso restringido: completada.
 - Fase 5 - Auditoria, regresion y rendimiento: completada.
 - Fase 6 - Supabase, main y verificacion de publicacion: completada.
+- Fase 7 - Correccion de legibilidad y autonomia del Excel: en curso.
 
 ## Decisiones no negociables
 
@@ -54,6 +56,8 @@ cumplirse tambien sus verificaciones.
 - El XLSX no contiene formulas. Los datos controlados por usuarios se escriben
   como texto y se conservan sin cambios.
 - No se trunca contenido silenciosamente.
+- Todas las relaciones del Excel se muestran con nombres y DNI, nunca con UUID,
+  hashes, JSON o claves internas.
 - Los errores visibles son humanos y accionables; nunca muestran SQL,
   PostgREST, UUID internos, codigos HTTP ni detalles de infraestructura.
 - La libreria XLSX se carga de forma diferida y solo al iniciar una exportacion.
@@ -78,9 +82,11 @@ La funcionalidad se considera terminada solamente cuando:
 - Owner y admin directo pueden exportar; profesional, asistencia temporal,
   usuario revocado y otro consultorio no pueden hacerlo.
 - El resultado global e individual comparte exactamente el mismo esquema.
-- Los conteos y los identificadores del workbook coinciden con la fuente.
+- Los conteos coinciden con la fuente y cada relacion se resuelve al nombre y
+  DNI correctos antes de construir el workbook.
 - El archivo reabierto contiene cero formulas y conserva texto, Unicode,
-  identificadores, fechas, valores personalizados y textos extensos.
+  fechas, valores personalizados y textos extensos sin mostrar identificadores
+  internos.
 - Los cambios concurrentes se detectan y nunca generan un archivo mezclado.
 - Una sesion abandonada vence y libera el bloqueo global.
 - Una recarga, cierre o navegacion durante una exportacion inicia la cancelacion

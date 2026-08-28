@@ -1,5 +1,9 @@
 # Contrato XLSX `cita-suite-patient-export/v1`
 
+> Contrato histórico sustituido por `CONTRATO-XLSX-V2.md`. No debe usarse para
+> nuevas exportaciones porque exponía identificadores internos en lugar de
+> resolver las relaciones a nombres y DNI.
+
 Este archivo fija el formato externo. Cambiar nombres, orden, significado o
 tipos incompatibles requiere una nueva version del contrato.
 

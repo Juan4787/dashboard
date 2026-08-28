@@ -21,10 +21,10 @@
 
 	const datasetLabels: Record<PatientExportDataset, string> = {
 		patients: 'Pacientes',
-		custom_fields: 'Campos personalizados',
-		clinical_entries: 'Historial clínico',
+		custom_fields: 'Datos adicionales',
+		clinical_entries: 'Historia clínica',
 		appointments: 'Turnos',
-		appointment_professionals: 'Profesionales por turno',
+		appointment_professionals: 'Profesionales de turnos',
 		follow_ups: 'Seguimientos'
 	};
 	const datasets: PatientExportDataset[] = [

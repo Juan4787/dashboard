@@ -75,7 +75,7 @@ export const makePatientExportDatasets = (): PatientExportDatasetRows => ({
 			field_label: 'Objeto',
 			value_type: 'object',
 			value_text: null,
-			value_json: '{"a":1,"b":"001"}'
+			value_json: '{"a":9007199254740993,"b":"001"}'
 		},
 		{
 			patient_id: PATIENT_ID,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { PatientExportDatasetRows } from './contract';
+import { PATIENT_EXPORT_WORKBOOK_VERSION, type PatientExportDatasetRows } from './contract';
 import { PatientExportTextError } from './ooxml';
 import {
 	PATIENT_EXPORT_SHEET_DEFINITIONS,
@@ -14,6 +14,12 @@ import {
 	type PatientExportWorkbookCell
 } from './workbook';
 import {
+	ALLOCATION_ID,
+	APPOINTMENT_ID,
+	ENTRY_ID,
+	FOLLOW_UP_ID,
+	PATIENT_ID,
+	PROFESSIONAL_ID,
 	makePatientExportWorkbookInput,
 	sessionForDatasets
 } from './test-fixtures';
@@ -29,8 +35,8 @@ const emptyDatasets = (): PatientExportDatasetRows => ({
 	follow_ups: []
 });
 
-describe('patient export workbook v1', () => {
-	it('keeps the exact eight-sheet contract and headers, including empty sheets', () => {
+describe('patient export workbook v2', () => {
+	it('keeps the exact human-readable eight-sheet contract, including empty sheets', () => {
 		const datasets = emptyDatasets();
 		const workbook = buildPatientExportWorkbook({
 			session: sessionForDatasets(datasets),
@@ -39,87 +45,124 @@ describe('patient export workbook v1', () => {
 		});
 
 		expect(workbook.sheets.map((sheet) => sheet.name)).toEqual([
-			'Informacion',
+			'Resumen',
 			'Pacientes',
-			'Campos personalizados',
-			'Historial clinico',
+			'Datos adicionales',
+			'Historia clínica',
 			'Turnos',
-			'Profesionales por turno',
+			'Profesionales de turnos',
 			'Seguimientos',
 			'Textos extensos'
 		]);
+		expect(workbook.version).toBe(PATIENT_EXPORT_WORKBOOK_VERSION);
 		expect(PATIENT_EXPORT_SHEET_NAMES).toHaveLength(8);
 		expect(PATIENT_EXPORT_SHEET_DEFINITIONS.map(({ headers }) => headers)).toEqual([
-			['Clave', 'Valor'],
+			['Dato', 'Detalle'],
 			[
-				'ID paciente', 'Nombre completo', 'DNI', 'Telefono', 'Email',
-				'Fecha de nacimiento', 'Direccion', 'Obra social', 'Plan', 'Alergias',
-				'Medicacion', 'Antecedentes', 'Alerta clinica', 'Notas clinicas', 'Estado',
-				'Archivado en', 'Creado en', 'Actualizado en'
+				'Nombre completo', 'DNI', 'Teléfono', 'Correo electrónico', 'Fecha de nacimiento',
+				'Dirección', 'Obra social', 'Plan', 'Alergias', 'Medicación', 'Antecedentes',
+				'Alerta clínica', 'Notas clínicas', 'Estado', 'Fecha de archivo', 'Fecha de alta',
+				'Última actualización'
 			],
-			['ID paciente', 'Clave', 'Etiqueta', 'Tipo', 'Valor', 'Valor JSON'],
+			['Paciente', 'DNI', 'Campo', 'Valor'],
 			[
-				'ID entrada clinica', 'ID paciente', 'Fecha y hora', 'Tipo', 'Descripcion',
-				'Piezas', 'Nota interna', 'Importe', 'ID profesional', 'Profesional', 'Estado',
-				'Archivado en', 'Creado en', 'Actualizado en'
+				'Paciente', 'DNI', 'Fecha y hora', 'Tipo', 'Descripción', 'Piezas', 'Nota interna',
+				'Importe', 'Profesional', 'Estado', 'Fecha de archivo', 'Fecha de carga',
+				'Última actualización'
 			],
 			[
-				'ID turno', 'ID paciente', 'Inicio', 'Fin', 'Estado', 'Origen', 'Servicio',
-				'Nota interna', 'Profesional principal', 'Confirmado en', 'Cancelado en',
-				'Reprogramacion solicitada en', 'Motivo de cancelacion', 'Creado en', 'Actualizado en'
+				'Paciente', 'DNI', 'Inicio', 'Fin', 'Estado', 'Origen', 'Servicio', 'Nota interna',
+				'Profesional principal', 'Fecha de confirmación', 'Fecha de cancelación',
+				'Pedido de reprogramación', 'Motivo de cancelación', 'Fecha de creación',
+				'Última actualización'
 			],
-			['ID turno', 'ID paciente', 'ID profesional', 'Profesional', 'Es principal', 'Orden'],
 			[
-				'ID seguimiento', 'ID paciente', 'Recordar el', 'Mensaje', 'Estado',
-				'ID profesional asignado', 'Profesional asignado', 'Completado en',
-				'Creado en', 'Actualizado en'
+				'Paciente', 'DNI', 'Inicio del turno', 'Servicio', 'Profesional',
+				'Responsable principal'
 			],
-			['Referencia texto', 'Entidad', 'ID entidad', 'Campo', 'Parte', 'Total de partes', 'Texto']
+			[
+				'Paciente', 'DNI', 'Fecha de recordatorio', 'Mensaje', 'Estado',
+				'Profesional asignado', 'Fecha de finalización', 'Fecha de creación',
+				'Última actualización'
+			],
+			[
+				'Referencia', 'Paciente', 'DNI', 'Sección', 'Registro', 'Campo', 'Parte', 'Texto'
+			]
 		]);
 		expect(workbook.sheets.slice(1).every((sheet) => sheet.rows.length === 0)).toBe(true);
-		expect(workbook.filename).toBe('cita-suite-pacientes-20260828-1435.xlsx');
+		expect(workbook.filename).toBe('datos-pacientes-20260828-1435.xlsx');
 		expect(workbook.mimeType).toBe(PATIENT_EXPORT_XLSX_MIME);
 	});
 
-	it('maps states and origins to human text while preserving IDs and scalar types', () => {
+	it('replaces every internal relationship with patient and professional names', () => {
 		const workbook = buildPatientExportWorkbook(makePatientExportWorkbookInput());
 		const byName = new Map(workbook.sheets.map((sheet) => [sheet.name, sheet]));
 		const patient = byName.get('Pacientes')?.rows[0];
-		const clinical = byName.get('Historial clinico')?.rows[0];
+		const clinical = byName.get('Historia clínica')?.rows[0];
 		const appointment = byName.get('Turnos')?.rows[0];
-		const professional = byName.get('Profesionales por turno')?.rows[0];
+		const professional = byName.get('Profesionales de turnos')?.rows[0];
 		const followUp = byName.get('Seguimientos')?.rows[0];
 
-		expect(patient?.map(valueOf).slice(0, 6)).toEqual([
-			'11111111-1111-4111-8111-111111111111',
+		expect(patient?.map(valueOf).slice(0, 5)).toEqual([
 			'Zoë Núñez 😀',
 			'00123456',
 			'+54 11 4000-0000',
 			'zoe@example.test',
-			'1990-01-02'
+			'02/01/1990'
 		]);
-		expect(valueOf(patient?.[14] ?? null)).toBe('Activo');
+		expect(valueOf(patient?.[13] ?? null)).toBe('Activo');
+		expect(clinical?.map(valueOf).slice(0, 4)).toEqual([
+			'Zoë Núñez 😀',
+			'00123456',
+			'27/08/2026 17:15:00',
+			'Consulta'
+		]);
 		expect(valueOf(clinical?.[7] ?? null)).toBe(12345.67);
 		expect(clinical?.[7]?.kind).toBe('number');
-		expect(valueOf(clinical?.[10] ?? null)).toBe('Archivado');
+		expect(valueOf(clinical?.[9] ?? null)).toBe('Archivado');
 		expect(valueOf(appointment?.[4] ?? null)).toBe('Reprogramación solicitada');
 		expect(valueOf(appointment?.[5] ?? null)).toBe('Reserva en línea');
-		expect(valueOf(professional?.[4] ?? null)).toBe('Sí');
-		expect(valueOf(professional?.[5] ?? null)).toBe(0);
+		expect(professional?.map(valueOf).slice(0, 5)).toEqual([
+			'Zoë Núñez 😀',
+			'00123456',
+			'29/08/2026 09:00:00',
+			'Consulta inicial',
+			'Dra. Álvarez'
+		]);
+		expect(valueOf(professional?.[5] ?? null)).toBe('Sí');
 		expect(valueOf(followUp?.[4] ?? null)).toBe('Completado');
+
+		const visibleValues = workbook.sheets.flatMap((sheet) => [
+			...sheet.headers,
+			...sheet.rows.flatMap((row) => row.map(valueOf))
+		]);
+		const visibleText = visibleValues.filter((value): value is string => typeof value === 'string');
+		for (const internalId of [
+			PATIENT_ID,
+			ENTRY_ID,
+			APPOINTMENT_ID,
+			PROFESSIONAL_ID,
+			ALLOCATION_ID,
+			FOLLOW_UP_ID
+		]) {
+			expect(visibleText.some((value) => value.includes(internalId))).toBe(false);
+		}
+		expect(visibleText.some((value) => /cita-suite-patient-export|valor json|id paciente/i.test(value))).toBe(
+			false
+		);
 	});
 
-	it('keeps every custom-field root type reconstructible', () => {
+	it('renders every custom-field type as a single human-readable value', () => {
 		const customRows = buildPatientExportWorkbook(makePatientExportWorkbookInput()).sheets.find(
-			(sheet) => sheet.name === 'Campos personalizados'
+			(sheet) => sheet.name === 'Datos adicionales'
 		)?.rows;
-		expect(customRows?.map((row) => row.map(valueOf).slice(3))).toEqual([
-			['string', '=1+1', null],
-			['number', '9007199254740993', null],
-			['boolean', 'Verdadero', null],
-			['null', null, null],
-			['object', null, '{"a":1,"b":"001"}'],
-			['array', null, '[1,"001",false]']
+		expect(customRows?.map((row) => row.map(valueOf))).toEqual([
+			['Zoë Núñez 😀', '00123456', 'Texto', '=1+1'],
+			['Zoë Núñez 😀', '00123456', 'Número', '9007199254740993'],
+			['Zoë Núñez 😀', '00123456', 'Booleano', 'Sí'],
+			['Zoë Núñez 😀', '00123456', 'Nulo', null],
+			['Zoë Núñez 😀', '00123456', 'Objeto', 'a: 9007199254740993\nb: 001'],
+			['Zoë Núñez 😀', '00123456', 'Lista', '1. 1\n2. 001\n3. No']
 		]);
 	});
 
@@ -129,16 +172,15 @@ describe('patient export workbook v1', () => {
 		input.datasets.clinical_entries[0]!.description = original;
 
 		const workbook = buildPatientExportWorkbook(input);
-		const clinicalRow = workbook.sheets.find((sheet) => sheet.name === 'Historial clinico')!
+		const clinicalRow = workbook.sheets.find((sheet) => sheet.name === 'Historia clínica')!
 			.rows[0]!;
 		const reference = valueOf(clinicalRow[4] ?? null);
 		const parts = workbook.sheets
 			.find((sheet) => sheet.name === 'Textos extensos')!
-			.rows.filter((row) => valueOf(row[0] ?? null) === reference)
-			.sort((left, right) => Number(valueOf(left[4] ?? null)) - Number(valueOf(right[4] ?? null)));
-		const chunks = parts.map((row) => String(valueOf(row[6] ?? null)));
+			.rows.filter((row) => valueOf(row[0] ?? null) === reference);
+		const chunks = parts.map((row) => String(valueOf(row[7] ?? null)));
 
-		expect(reference).toBe('texto-000001');
+		expect(reference).toBe('Texto extenso 1');
 		expect(chunks.join('')).toBe(original);
 		expect(chunks.every((chunk) => chunk.length <= PATIENT_EXPORT_TEXT_CHUNK_CODE_UNITS)).toBe(true);
 		expect(
@@ -147,7 +189,11 @@ describe('patient export workbook v1', () => {
 			)
 		).toBe(true);
 		expect(chunks.some((chunk) => chunk.startsWith('😀'))).toBe(true);
-		expect(parts.every((row) => valueOf(row[5] ?? null) === parts.length)).toBe(true);
+		expect(parts.every((row) => valueOf(row[1] ?? null) === 'Zoë Núñez 😀')).toBe(true);
+		expect(parts.every((row) => valueOf(row[2] ?? null) === '00123456')).toBe(true);
+		expect(parts.map((row) => valueOf(row[6] ?? null))).toEqual(
+			parts.map((_, index) => `${index + 1} de ${parts.length}`)
+		);
 	});
 
 	it('uses numbers only when decimal text round-trips safely', () => {
@@ -173,6 +219,22 @@ describe('patient export workbook v1', () => {
 		const malformedUnicode = makePatientExportWorkbookInput();
 		malformedUnicode.datasets.patients[0]!.full_name = '\ud800';
 		expect(() => buildPatientExportWorkbook(malformedUnicode)).toThrow(PatientExportTextError);
+	});
+
+	it('fails closed instead of showing an orphan internal identifier', () => {
+		const missingPatient = makePatientExportWorkbookInput();
+		missingPatient.datasets.patients = [];
+		missingPatient.session.expected_counts.patients = 0;
+		expect(() => buildPatientExportWorkbook(missingPatient)).toThrow(
+			expect.objectContaining({ code: 'WORKBOOK_INCOMPLETE' })
+		);
+
+		const missingAppointment = makePatientExportWorkbookInput();
+		missingAppointment.datasets.appointments = [];
+		missingAppointment.session.expected_counts.appointments = 0;
+		expect(() => buildPatientExportWorkbook(missingAppointment)).toThrow(
+			expect.objectContaining({ code: 'WORKBOOK_INCOMPLETE' })
+		);
 	});
 
 	it('splits solely on line-feed limits when character length is small', () => {

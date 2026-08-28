@@ -690,3 +690,66 @@ produccion y verificar tabla, RPC, ACL y cron antes del commit.
   `apps/web/output/playwright/**` quedaron fuera del commit.
 
 La implementacion y todas sus fases quedan cerradas.
+
+## 2026-08-28 - Fase 7 abierta: el Excel debe sobrevivir a la aplicacion
+
+Consulta obligatoria realizada antes de corregir:
+
+- `README.md`, `IMPLEMENTACION.md`, el contrato v1 y la ultima entrada de esta
+  bitacora fueron leidos.
+- La objecion se reprodujo directamente en `workbook.ts` y en su prueba: el
+  contrato anterior exigia conservar UUID de pacientes, historias, turnos y
+  profesionales en las celdas visibles.
+
+Causa raiz:
+
+- Se confundio portabilidad tecnica con utilidad para la persona. Los UUID
+  ayudaban a reconstruir relaciones para un importador programado, pero hacian
+  que las relaciones no pudieran identificarse por nombre y DNI fuera de Cita
+  Suite.
+- La hoja de resumen tambien exponia claves de protocolo y los datos
+  adicionales mostraban tipos y JSON.
+
+Criterio corregido y siguiente paso:
+
+1. conservar identificadores solo durante la union interna de datos;
+2. resolver cada fila a nombre de paciente, DNI, profesional, fecha y servicio;
+3. fallar si una relacion no se puede resolver, sin usar el UUID como salida;
+4. publicar el contrato humano v2 y agregar pruebas que busquen todos los UUID
+   de las fixtures dentro del XLSX real;
+5. reabrir el archivo con LibreOffice, ejecutar chequeos y volver a desplegar.
+
+Punto exacto de reanudacion: completar pruebas y auditoria del generador v2;
+despues actualizar esta entrada antes de publicar.
+
+## 2026-08-28 - Fase 7 implementada y auditada
+
+Cambios comprobados:
+
+- Las ocho hojas ya no escriben UUID de paciente, entrada clinica, turno,
+  profesional, asignacion ni seguimiento.
+- `Historia clínica`, `Turnos`, `Datos adicionales`, `Profesionales de turnos`,
+  `Seguimientos` y `Textos extensos` resuelven el paciente a nombre y DNI.
+- Los campos compuestos se muestran como etiquetas y valores. El analizador
+  conserva numeros mayores al limite seguro de JavaScript sin cambiar digitos.
+- Las fechas se muestran en formato argentino usando la hora del consultorio.
+- Si falta el paciente o turno necesario para resolver una relacion, la
+  construccion se detiene; nunca reemplaza el nombre por un identificador.
+- El nombre del archivo paso a `datos-paciente...xlsx` o
+  `datos-pacientes...xlsx`.
+
+Evidencia:
+
+- Suite completa servidor/XLSX: 105 archivos y 810 pruebas aprobadas.
+- Suite completa cliente: 7 archivos y 71 pruebas aprobadas.
+- `pnpm check`: 0 errores y 0 advertencias.
+- El XLSX real contiene ocho hojas, cero formulas, ninguno de los UUID de las
+  fixtures y se reabre correctamente con LibreOffice.
+- Build Cloudflare aprobado. El mayor chunk compartido sigue en 204,41 kB,
+  igual al baseline. El codigo adicional queda dentro del Worker XLSX, que solo
+  se carga al iniciar una exportacion.
+- No hay cambios de tablas, RPC ni politicas; Supabase no requiere una nueva
+  migracion para esta correccion.
+
+Punto exacto de reanudacion: publicar las rutas exactas en `main`, desplegar
+Cloudflare y registrar SHA y version final.
