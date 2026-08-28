@@ -66,7 +66,7 @@
 		{
 			label: 'Configuración',
 			href: '/odonto/configuracion',
-			activePrefixes: ['/odonto/configuracion', '/odonto/profesionales']
+			activePrefixes: ['/odonto/configuracion', '/odonto/profesionales', '/odonto/exportar-datos']
 		}
 	];
 
@@ -92,6 +92,7 @@
 		{ label: 'Suscripción', href: '/odonto/configuracion/suscripcion' },
 		{ label: 'Link de reserva', href: '/odonto/configuracion/comunicacion' },
 		{ label: 'Reseña de Google', href: '/odonto/configuracion/resena-google' },
+		{ label: 'Exportar datos', href: '/odonto/exportar-datos' },
 		{ label: 'Ayuda', href: '/odonto/configuracion/ayuda' }
 	];
 
@@ -145,10 +146,12 @@
 		}
 		return 'Podemos ayudarte a cargar profesionales, servicios y horarios iniciales durante una hora.';
 	});
+	const canExportPatientDataNow = $derived(Boolean(data?.canExportPatientData));
 	const configNav = $derived.by(() =>
 		baseConfigNav.filter((item) => {
 			if (data?.isMaster && item.href === '/odonto/configuracion/ayuda') return false;
 			if (isAssistingAccount && item.href === '/odonto/configuracion/suscripcion') return false;
+			if (item.href === '/odonto/exportar-datos' && !canExportPatientDataNow) return false;
 			return true;
 		})
 	);
@@ -240,9 +243,13 @@
 		if (isMasterPage) return [];
 		if (!activeBusiness || accountPendingManualSetup) return [];
 		if (commercialAccessRestricted) {
-			return restrictedClinicalReadAvailable
-				? dailyNav.filter((item) => item.label === 'Pacientes')
-				: [];
+			if (!restrictedClinicalReadAvailable) return [];
+			return [
+				...dailyNav.filter((item) => item.label === 'Pacientes'),
+				...(canExportPatientDataNow
+					? [{ label: 'Exportar datos', href: '/odonto/exportar-datos' }]
+					: [])
+			];
 		}
 		if (activeBusiness?.role === 'professional') {
 			return professionalNav;
@@ -456,6 +463,7 @@
 		}
 		if (path.startsWith('/odonto/agenda')) return 'Agenda';
 		if (path.startsWith('/odonto/pacientes')) return 'Pacientes';
+		if (path.startsWith('/odonto/exportar-datos')) return 'Exportar datos';
 		if (path.startsWith('/odonto/configuracion/usuarios')) return 'Equipo';
 		if (path.startsWith('/odonto/configuracion/ayuda')) return 'Ayuda';
 		if (path.startsWith('/odonto/profesionales')) return 'Equipo';
@@ -479,6 +487,7 @@
 		if (path.startsWith('/odonto/turnos/')) return '/odonto/agenda';
 		if (path.startsWith('/odonto/agenda/semana')) return '/odonto/agenda';
 		if (path.startsWith('/odonto/pacientes/')) return '/odonto/pacientes';
+		if (path.startsWith('/odonto/exportar-datos')) return '/odonto/pacientes';
 		if (path.startsWith('/odonto/seguimientos/importantes')) return '/odonto/seguimientos';
 		if (path.startsWith('/odonto/profesionales/')) return '/odonto/configuracion/usuarios';
 		if (path.startsWith('/odonto/configuracion/usuarios')) return '/odonto/agenda';
@@ -503,6 +512,7 @@
 		if (routeId === '/odonto/profesionales') return 'professionals';
 		if (routeId === '/odonto/pacientes/[id]') return 'patientDetail';
 		if (routeId === '/odonto/configuracion') return 'config';
+		if (routeId === '/odonto/exportar-datos') return 'config';
 		if (routeId === '/odonto/maestro') return 'master';
 		if (routeId === '/odonto/pacientes') return 'patients';
 		if (path.startsWith('/odonto/agenda/semana')) return 'agendaWeek';
@@ -518,6 +528,7 @@
 		if (path.startsWith('/odonto/profesionales')) return 'professionals';
 		if (path.startsWith('/odonto/pacientes/')) return 'patientDetail';
 		if (path.startsWith('/odonto/configuracion')) return 'config';
+		if (path.startsWith('/odonto/exportar-datos')) return 'config';
 		if (path.startsWith('/odonto/maestro')) return 'master';
 		return 'patients';
 	};
@@ -1095,6 +1106,20 @@
 						Tu agenda, pacientes y configuración siguen guardados. Activá tu suscripción para volver a usar Cita Suite.
 					{/if}
 				</p>
+				{#if canExportPatientDataNow}
+					<div class="mx-auto mt-6 max-w-lg rounded-2xl border border-teal-300/45 bg-teal-50/80 p-4 text-left dark:border-teal-300/25 dark:bg-teal-400/10">
+						<p class="text-sm font-bold text-teal-950 dark:text-teal-100">Tus datos siguen disponibles</p>
+						<p class="mt-1 text-sm font-medium text-teal-900/80 dark:text-teal-50/75">
+							Podés llevarte pacientes, historial clínico, turnos y seguimientos en un archivo Excel.
+						</p>
+						<a
+							href="/odonto/exportar-datos"
+							class="mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-teal-700 px-4 py-2.5 text-center text-sm font-bold text-white shadow-sm transition hover:bg-teal-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600 sm:w-auto"
+						>
+							Exportar mis datos en Excel
+						</a>
+					</div>
+				{/if}
 				{#if canSelfServiceActivation}
 					<div class="mx-auto mt-6 max-w-sm rounded-2xl border border-amber-300/30 bg-white/70 p-4 text-left shadow-sm dark:bg-[#13243d]/70">
 						<p class="text-sm font-black text-amber-950 dark:text-amber-100">Cita Suite</p>

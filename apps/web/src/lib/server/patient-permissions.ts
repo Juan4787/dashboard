@@ -1,4 +1,8 @@
 import type { BusinessContext } from './business';
+import { canExportPatientDataFromContext } from '$lib/utils/patient-export-permissions';
+
+export const canExportPatientData = (context: BusinessContext) =>
+	canExportPatientDataFromContext(context);
 
 export const resolvePatientPermissions = (context: BusinessContext) => {
 	const role = context.role;
@@ -36,6 +40,7 @@ export const resolvePatientPermissions = (context: BusinessContext) => {
 		canViewRadiographTrash:
 			isOwnerOrAdmin && capabilities.canViewExistingClinicalNotes && context.access.canEnterApp,
 		canTrashRadiographs:
-			isOwnerOrAdmin && capabilities.canManagePatientFiles && context.access.canUseBusiness
+			isOwnerOrAdmin && capabilities.canManagePatientFiles && context.access.canUseBusiness,
+		canExportPatientData: canExportPatientData(context)
 	};
 };

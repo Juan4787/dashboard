@@ -130,7 +130,7 @@ El acceso se decide según los roles y vínculos vigentes dentro de la Plataform
 Los originales se entregan mediante enlaces temporales y específicos luego de verificar el permiso del usuario. El Cliente debe administrar correctamente usuarios, roles, vínculos profesionales y dispositivos de acceso.
 El Cliente es responsable por la licitud, pertinencia, exactitud y contenido de las imágenes que carga; por contar con la base legal o autorización necesaria; y por determinar sus obligaciones profesionales de conservación, copia, entrega, integridad y documentación.
 Enviar una imagen a la papelera es una supresión lógica: deja de mostrarse en la ficha activa, pero no borra físicamente el objeto. El dueño o un administrador pueden restaurarla. La versión actual no permite vaciar la papelera ni eliminar definitivamente imágenes clínicas desde la Plataforma.
-La versión actual tampoco incluye un servicio de backup externo dedicado, recuperación individual desde backup ni exportación masiva de archivos. Supabase Storage constituye la copia física operativa de estas imágenes. En consecuencia, el Prestador no garantiza recuperación frente a pérdida o corrupción física completa de dicha infraestructura, y el Cliente debe evaluar respaldos adicionales si su actividad o normativa los exige.
+La versión actual tampoco incluye un servicio de backup externo dedicado, recuperación individual desde backup ni exportación de radiografías, imágenes o adjuntos. La exportación Excel descripta en la sección 23 comprende únicamente datos tabulares. Supabase Storage constituye la copia física operativa de las imágenes. En consecuencia, el Prestador no garantiza recuperación frente a pérdida o corrupción física completa de dicha infraestructura, y el Cliente debe evaluar respaldos adicionales si su actividad o normativa los exige.
 
 15. Subprestadores e infraestructura
 El Cliente autoriza al Prestador a utilizar subprestadores necesarios o convenientes para prestar la Plataforma, incluyendo proveedores de infraestructura, hosting, base de datos, autenticación, despliegue, monitoreo, seguridad, correo, almacenamiento, soporte, pagos, analítica técnica o servicios relacionados.
@@ -195,20 +195,22 @@ La suscripción habilita el acceso durante el período pagado o concedido por el
 Vencida la suscripción, la cuenta podrá continuar operativa durante un período de gracia de hasta cuarenta y ocho (48) horas. Durante ese período, el Prestador podrá informar el estado vencido y requerir regularización.
 Transcurrido el período de gracia sin regularización, el Prestador podrá aplicar modo restringido.
 En modo restringido, el Prestador podrá permitir acceso limitado a ciertos datos existentes, tales como pacientes, notas, tratamientos, costos u otra información que determine técnicamente disponible, pero podrá bloquear funciones operativas, incluyendo creación, edición, reprogramación, reserva pública, carga de nuevos datos, configuración, modificación de agenda, servicios, profesionales, disponibilidad u otras funciones.
-El Cliente acepta que el modo restringido no garantiza disponibilidad completa de la agenda, todos los módulos, todas las vistas, todas las funciones, ni exportaciones automáticas. Su alcance dependerá de la disponibilidad técnica, estado de cuenta, permisos, seguridad y decisión del Prestador.
+El Cliente acepta que el modo restringido no garantiza disponibilidad completa de la agenda, todos los módulos, todas las vistas ni todas las funciones. Mientras la cuenta permanezca habilitada para ingresar, el titular o un administrador con membresía directa podrán acceder a la exportación Excel de datos tabulares descripta en la sección 23. Una cuenta archivada o pausada manualmente no conserva ese acceso.
 Pasados treinta (30) días desde el inicio del modo restringido sin regularización, el Prestador podrá archivar la cuenta. Una cuenta archivada no garantiza acceso operativo al panel.
 La reactivación podrá estar sujeta a pago, disponibilidad técnica, conservación existente, verificación de titularidad, ausencia de riesgo, compatibilidad técnica y decisión del Prestador.
 La falta de pago no implica eliminación automática inmediata de datos. La eliminación, conservación, bloqueo, anonimización, exportación o archivo se regirá por estos Términos y la normativa aplicable.
 
 23. Exportación de datos
-La versión actual no incluye una herramienta de exportación masiva o descarga integral de datos e imágenes, ni garantiza una exportación automática o en un formato determinado.
-El Cliente podrá formular una solicitud por los canales de soporte. Cualquier asistencia excepcional quedará sujeta a verificación de identidad y permisos, disponibilidad técnica, seguridad, proporcionalidad y normativa aplicable, sin que ello implique que exista una función contratada de exportación.
-La futura habilitación de exportaciones requerirá condiciones técnicas y de seguridad específicas y será informada expresamente.
+La versión actual permite que el titular o un administrador con membresía directa y vigente prepare, desde la Plataforma, un archivo Excel (.xlsx) de un paciente o del conjunto de pacientes del consultorio activo. Una asistencia temporal del Prestador, un profesional y los demás roles no están autorizados a utilizar esta función.
+El Excel incluye datos tabulares de pacientes y su ficha clínica, campos personalizados, historial clínico e importes, turnos, profesionales asignados a turnos y seguimientos. Puede incluir registros activos, archivados, pasados, futuros o cancelados cuando correspondan al alcance solicitado.
+La exportación no incluye radiografías, imágenes, PDF, adjuntos, credenciales, tokens, datos internos de autenticación, registros técnicos reservados ni una copia integral de la infraestructura. El archivo no es un backup restaurable de la Plataforma y no reemplaza los respaldos, formalidades ni medios de conservación que correspondan a la actividad del Cliente.
+La función está sujeta a autenticación, rol, estado de cuenta, pertenencia al consultorio, límites razonables de uso, controles de integridad, disponibilidad técnica y medidas de seguridad. Si los datos cambian durante la preparación, la Plataforma podrá reiniciar o detener el proceso para evitar entregar un archivo internamente inconsistente.
+La creación del archivo es una operación de lectura y no modifica los registros del Cliente. Una vez descargado, el Cliente es responsable de custodiarlo, limitar su acceso, almacenarlo y transferirlo de forma segura, dado que puede contener datos personales y sensibles.
 
 24. Baja del servicio
 El Cliente podrá solicitar la baja del servicio mediante los canales habilitados.
 La baja suspende o finaliza el uso operativo de la Plataforma, pero no implica eliminación automática, inmediata o total de la información.
-Antes de solicitar la baja, el Cliente debe conservar por sus propios medios la información que su actividad requiera, teniendo presente que la versión actual no incluye una exportación masiva garantizada.
+Antes de solicitar la baja, el Cliente debe utilizar la exportación disponible y conservar por sus propios medios la información y los archivos que su actividad requiera. El Excel tabular no incluye radiografías ni adjuntos y no constituye un backup restaurable de la Plataforma.
 La baja podrá derivar en restricción, archivo, conservación temporal, bloqueo, anonimización o eliminación según corresponda.
 El Prestador podrá conservar información mínima necesaria para seguridad, auditoría, facturación, prevención de abuso, defensa legal, cumplimiento normativo, soporte, trazabilidad, obligaciones contractuales o recuperación posterior.
 
@@ -338,7 +340,7 @@ ANEXO II — POLÍTICA DE BAJA, CONSERVACIÓN Y SUPRESIÓN LÓGICA
 1. Principio general
 La falta de pago, suspensión, baja o archivo de cuenta no implica eliminación inmediata de datos.
 2. Exportación
-La versión actual no incluye una exportación masiva garantizada. Las consultas excepcionales se rigen por la sección 23.
+El titular o un administrador directo pueden exportar los datos tabulares descriptos en la sección 23 mientras el estado y los permisos de la cuenta lo permitan. La exportación no incluye imágenes ni adjuntos y no constituye un backup restaurable.
 3. Gracia y modo restringido
 La cuenta podrá tener hasta 48 horas de gracia tras el vencimiento. Luego podrá pasar a modo restringido por hasta 30 días, con funciones limitadas.
 4. Cuenta archivada
@@ -363,7 +365,7 @@ f. que asume responsabilidad por informar, obtener autorizaciones y responder a 
 g. que acepta el uso de subprestadores e infraestructura tecnológica;
 h. que acepta que puede existir acceso técnico-administrativo excepcional limitado a finalidades legítimas;
 i. que entiende que el Prestador no accede ordinariamente ni usa los datos para fines propios;
-j. que acepta la política de pagos, vencimiento, restricción y archivo, y entiende que no existe una exportación masiva garantizada en la versión actual;
+j. que acepta la política de pagos, vencimiento, restricción y archivo, y conoce el alcance y las exclusiones de la exportación Excel prevista en la sección 23;
 k. que entiende que la recuperación de cuenta no está garantizada si pierde email, contraseña, factores, usuarios administradores o prueba de titularidad;
 l. que comprende que las imágenes clínicas se alojan en infraestructura privada de la Plataforma, se comparten según permisos del paciente y no cuentan actualmente con backup externo dedicado ni purga física;
 m. que acepta que la baja no implica eliminación inmediata de datos;
@@ -385,7 +387,7 @@ n. que acepta que la eliminación estará sujeta a verificación, disponibilidad
 			<BackLink href="/login" label="Volver al ingreso" />
 			<h1 class="mt-3 text-2xl font-semibold">Términos y condiciones</h1>
 			<p class="mt-1 text-xs text-neutral-500 dark:text-neutral-300">
-				Última actualización: 2026-08-20
+				Última actualización: 2026-08-28
 			</p>
 
 			<div class="mt-6 space-y-3 text-sm leading-relaxed text-neutral-700 dark:text-neutral-200">

@@ -22,6 +22,7 @@ export function allowsRestrictedClinicalRead(
 	if (!context.commercialAccessEnabled || !context.canEnterApp) return false;
 
 	return (
+		pathname === '/odonto/exportar-datos' ||
 		pathname === '/odonto/pacientes' ||
 		pathname === '/odonto/pacientes/papelera' ||
 		PATIENT_DETAIL_PATH.test(pathname)

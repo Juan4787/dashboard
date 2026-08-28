@@ -370,7 +370,8 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, dep
 				canViewRadiographs: true,
 				canUploadRadiographs: true,
 				canViewRadiographTrash: true,
-				canTrashRadiographs: true
+				canTrashRadiographs: true,
+				canExportPatientData: false
 			},
 			followUpParticipates: false,
 			followUpCanAssign: false,

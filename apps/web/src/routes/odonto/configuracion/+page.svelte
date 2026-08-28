@@ -2,7 +2,9 @@
 	import { page } from '$app/stores';
 	import BackLink from '$lib/components/BackLink.svelte';
 
-	let { data } = $props<{ data: { demo: boolean; isMaster?: boolean } }>();
+	let { data } = $props<{
+		data: { demo: boolean; isMaster?: boolean; canExportPatientData?: boolean };
+	}>();
 
 	const returnTarget = $derived.by(() => {
 		const raw = $page.url.searchParams.get('return') ?? '';
@@ -49,6 +51,13 @@
 			<h2 class="mt-4 text-2xl font-bold text-white">Reseña de Google</h2>
 			<p class="mt-2 text-sm text-white/55">Configurá el enlace y el mensaje automático.</p>
 		</a>
+		{#if data.canExportPatientData}
+			<a href="/odonto/exportar-datos" class="ux-choice p-6">
+				<span class="ux-badge">Excel</span>
+				<h2 class="mt-4 text-2xl font-bold text-white">Exportar datos</h2>
+				<p class="mt-2 text-sm text-white/55">Prepará un Excel con pacientes, historial, turnos y seguimientos.</p>
+			</a>
+		{/if}
 		{#if !data.isMaster}
 			<a href="/odonto/configuracion/ayuda" class="ux-choice p-6">
 				<span class="ux-badge">Ayuda</span>

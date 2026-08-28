@@ -29,6 +29,7 @@ import { getSubscriptionAmountArs } from '$lib/server/mercadopago';
 import { redirect } from '@sveltejs/kit';
 import type { LayoutServerLoad } from './$types';
 import { env } from '$env/dynamic/private';
+import { canExportPatientData } from '$lib/server/patient-permissions';
 
 export const load: LayoutServerLoad = async ({
 	locals,
@@ -187,6 +188,11 @@ export const load: LayoutServerLoad = async ({
 		isMaster,
 		email,
 		activeBusiness,
+		canExportPatientData: Boolean(
+			activeBusiness &&
+				activeBusiness.business.id !== 'demo-business' &&
+				canExportPatientData(activeBusiness)
+		),
 		businessError,
 		pendingManualSetup,
 		accountAssistance,

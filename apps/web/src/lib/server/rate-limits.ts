@@ -15,7 +15,9 @@ export const RATE_LIMIT_ACTIONS = [
 	'radiograph_upload_by_user',
 	'radiograph_original_access_by_user',
 	'radiograph_trash_by_user',
-	'radiograph_restore_by_user'
+	'radiograph_restore_by_user',
+	'patient_export_individual_by_user',
+	'patient_export_global_by_business'
 ] as const;
 
 export type RateLimitAction = (typeof RATE_LIMIT_ACTIONS)[number];
@@ -158,6 +160,7 @@ export const enforceRateLimitsFailOpen = async (
 };
 
 const FIFTEEN_MINUTES = 15 * 60;
+const TEN_MINUTES = 10 * 60;
 const ONE_HOUR = 60 * 60;
 const ONE_DAY = 24 * ONE_HOUR;
 
@@ -311,6 +314,26 @@ export const radiographRestoreRateLimitRules = (userId: string): RateLimitRule[]
 		limit: 30,
 		windowSeconds: 60,
 		message: 'Restauraste varias imágenes en poco tiempo.'
+	}
+];
+
+export const patientExportIndividualRateLimitRules = (userId: string): RateLimitRule[] => [
+	{
+		action: 'patient_export_individual_by_user',
+		subject: userId,
+		limit: 10,
+		windowSeconds: TEN_MINUTES,
+		message: 'Preparaste varias exportaciones individuales en poco tiempo.'
+	}
+];
+
+export const patientExportGlobalRateLimitRules = (businessId: string): RateLimitRule[] => [
+	{
+		action: 'patient_export_global_by_business',
+		subject: businessId,
+		limit: 2,
+		windowSeconds: ONE_HOUR,
+		message: 'Ya se prepararon varias exportaciones completas durante esta hora.'
 	}
 ];
 

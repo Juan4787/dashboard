@@ -10,6 +10,7 @@ const restrictedOwner = {
 
 describe('restricted clinical read routes', () => {
 	it.each([
+		'/odonto/exportar-datos',
 		'/odonto/pacientes',
 		'/odonto/pacientes/papelera',
 		'/odonto/pacientes/8b900b87-bcda-49b6-ad1a-6ff4e80b86dc',

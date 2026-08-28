@@ -12,7 +12,7 @@
 			<BackLink href="/login" label="Volver al ingreso" />
 			<h1 class="mt-2 text-2xl font-semibold">Política de privacidad</h1>
 			<p class="mt-1 text-xs text-neutral-500 dark:text-neutral-300">
-				Última actualización: 2026-08-20
+				Última actualización: 2026-08-28
 			</p>
 
 			<section class="mt-6 space-y-3 text-sm leading-relaxed text-neutral-700 dark:text-neutral-200">
@@ -39,6 +39,7 @@
 					<li>Proveer el servicio de gestión de pacientes y consultas.</li>
 					<li>Guardar imágenes clínicas, asociarlas a pacientes y mostrarlas únicamente a usuarios autorizados.</li>
 					<li>Registrar acciones relevantes, como cargas, accesos a originales, envíos a la papelera y restauraciones.</li>
+					<li>Preparar exportaciones Excel solicitadas por el dueño o un administrador autorizado.</li>
 					<li>Mejorar estabilidad y soporte técnico.</li>
 				</ul>
 			</section>
@@ -81,11 +82,26 @@
 			</section>
 
 			<section class="mt-6 space-y-3">
+				<h2 class="text-lg font-semibold">Exportaciones solicitadas</h2>
+				<p class="text-sm text-neutral-700 dark:text-neutral-200">
+					El dueño o un administrador con membresía directa pueden solicitar un Excel con datos tabulares de
+					pacientes, ficha clínica, campos personalizados, historial, turnos y seguimientos. Cita Suite verifica
+					los permisos y la pertenencia al consultorio antes de entregar los datos; el archivo se construye en
+					el navegador del usuario y la operación puede quedar registrada con datos técnicos de auditoría.
+				</p>
+				<p class="text-sm text-neutral-700 dark:text-neutral-200">
+					La exportación no incluye radiografías, imágenes, PDF ni adjuntos, y no es una copia de seguridad
+					restaurable. Una vez descargado el archivo, quien lo solicitó es responsable de protegerlo porque
+					puede contener datos personales y sensibles.
+				</p>
+			</section>
+
+			<section class="mt-6 space-y-3">
 				<h2 class="text-lg font-semibold">Retención, papelera y recuperación</h2>
 				<p class="text-sm text-neutral-700 dark:text-neutral-200">
 					Las imágenes enviadas a la papelera dejan de mostrarse en la ficha, pero el archivo y sus metadatos se
 					conservan para que el dueño o un administrador puedan restaurarlos. La versión actual no ofrece borrado
-					físico de imágenes clínicas desde Cita Suite, vaciado de papelera, exportación masiva ni una copia de
+					físico de imágenes clínicas desde Cita Suite, vaciado de papelera, exportación de esos archivos ni una copia de
 					respaldo externa dedicada. Por ese motivo no se garantiza la recuperación frente a una pérdida física o
 					corrupción completa de la infraestructura de almacenamiento.
 				</p>
