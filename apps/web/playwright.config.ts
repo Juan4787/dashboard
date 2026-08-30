@@ -2,6 +2,12 @@ import { defineConfig } from '@playwright/test';
 
 const baseURL = process.env.E2E_BASE_URL ?? 'http://127.0.0.1:5173';
 const shouldStartServer = !process.env.E2E_BASE_URL;
+const cloudflareVersion = process.env.E2E_CLOUDFLARE_VERSION?.trim();
+const extraHTTPHeaders = cloudflareVersion
+	? {
+			'Cloudflare-Workers-Version-Overrides': `app="${cloudflareVersion}"`
+		}
+	: undefined;
 
 export default defineConfig({
 	testDir: 'e2e',
@@ -14,6 +20,7 @@ export default defineConfig({
 	retries: process.env.CI ? 1 : 0,
 	use: {
 		baseURL,
+		extraHTTPHeaders,
 		trace: 'on-first-retry',
 		screenshot: 'only-on-failure',
 		video: 'retain-on-failure'
