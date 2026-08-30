@@ -430,18 +430,17 @@ const uniqueSlots = (slots: AvailabilitySlot[]) => {
 //
 // El flujo de reserva navega 4-5 veces la misma URL (servicio → profesional →
 // día → horario) y cada navegación recomputaba TODOS los escaneos (varios
-// round-trips a Supabase). El caché por instancia con TTL corto convierte esos
-// pasos en una sola computación.
+// round-trips a Supabase). `cachedScan` conserva la deduplicación de requests
+// simultáneos, pero no persiste resultados de disponibilidad entre requests:
+// un reload puede caer en otro isolate de Cloudflare y nunca debe volver a
+// mostrar un horario que acaba de ocuparse.
 //
-// La disponibilidad puede tolerar una ventana corta porque la creación de la
-// reserva SIEMPRE revalida el slot contra disponibilidad viva
-// (PUBLIC_SLOT_UNAVAILABLE si otro lo tomó). El catálogo y el estado comercial,
-// en cambio, no se cachean entre requests: un cambio de servicio, profesional
-// o suscripción debe ser visible inmediatamente en un entorno con varias
-// instancias de Cloudflare Workers.
+// El catálogo y el estado comercial tampoco se cachean: un cambio de servicio,
+// profesional o suscripción debe ser visible inmediatamente en un entorno con
+// varias instancias de Cloudflare Workers.
 // ---------------------------------------------------------------------------
 
-const SLOT_SCAN_CACHE_TTL_MS = 25_000;
+const SLOT_SCAN_CACHE_TTL_MS = 0;
 const STRUCTURE_SCAN_CACHE_TTL_MS = 0;
 const SCAN_CACHE_MAX_ENTRIES = 500;
 
