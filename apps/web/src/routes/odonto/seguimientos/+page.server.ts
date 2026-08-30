@@ -27,7 +27,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, depends }) 
 		locals,
 		fetch,
 		cookies,
-		membershipCache: 'short'
+		membershipCache: 'fresh'
 	});
 	// Lectura no participa de Seguimientos.
 	if (!roleParticipatesInFollowUps(business.role)) throw redirect(303, '/odonto/agenda');

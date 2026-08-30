@@ -14,7 +14,7 @@ export const GET: RequestHandler = async ({ url, locals, fetch, cookies }) => {
 		locals,
 		fetch,
 		cookies,
-		membershipCache: 'short'
+		membershipCache: 'fresh'
 	});
 	if (!roleSeesAllFollowUps(business.role)) return json({ professionals: [] });
 

@@ -1,11 +1,14 @@
 import { test, expect } from '@playwright/test';
 import { loginWithSharedSession } from './helpers/shared-auth';
 
-const email = process.env.E2E_EMAIL;
-const password = process.env.E2E_PASSWORD;
+const email = process.env.E2E_EMAIL ?? process.env.CITA_SUITE_TEST_EMAIL;
+const password = process.env.E2E_PASSWORD ?? process.env.CITA_SUITE_TEST_PASSWORD;
 
 test.describe('Odontologia - flujo base', () => {
-	test.skip(!email || !password, 'Definí E2E_EMAIL y E2E_PASSWORD para correr el test.');
+	test.skip(
+		!email || !password,
+		'Definí E2E_EMAIL/E2E_PASSWORD o CITA_SUITE_TEST_EMAIL/CITA_SUITE_TEST_PASSWORD para correr el test.'
+	);
 
 	test('login y navegación principal', async ({ page }) => {
 		await loginWithSharedSession(page, {

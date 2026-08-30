@@ -13,7 +13,7 @@ export const GET: RequestHandler = async ({ params, locals, fetch, cookies, setH
 		locals,
 		fetch,
 		cookies,
-		membershipCache: 'short'
+		membershipCache: 'fresh'
 	});
 	// El cliente de usuario conserva RLS como primera barrera antes de usar el
 	// cliente administrativo para leer el registro de auditoría.

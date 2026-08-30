@@ -85,8 +85,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 	const { supabase, business } = await getOdontoContext({
 		locals,
 		fetch,
-		cookies,
-		membershipCache: 'short'
+		cookies
 	});
 	if (business.role === 'professional') throw redirect(303, '/odonto/mis-turnos');
 	const dateParam = String(url.searchParams.get('date') ?? '').trim();

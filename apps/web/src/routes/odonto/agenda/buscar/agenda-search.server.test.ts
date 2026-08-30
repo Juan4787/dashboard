@@ -110,7 +110,7 @@ describe('agenda active appointment search endpoint', () => {
 
 		expect(response.status).toBe(200);
 		expect(mocks.getOdontoContext).toHaveBeenCalledWith(
-			expect.objectContaining({ membershipCache: 'short' })
+			expect.objectContaining({ membershipCache: 'fresh' })
 		);
 		expect(mocks.rpc).toHaveBeenCalledWith(
 			'search_upcoming_active_appointments',

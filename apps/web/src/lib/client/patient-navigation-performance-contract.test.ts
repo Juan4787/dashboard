@@ -18,14 +18,14 @@ describe('patient navigation performance contracts', () => {
 		expect(patientListSource).not.toContain('schedulePatientWarmup');
 	});
 
-	it('reuses membership only for the patient read and the database-guarded clinical insert', () => {
+	it('keeps patient reads and clinical writes on a fresh commercial membership state', () => {
 		const patientDetailSource = readSource('../../routes/odonto/pacientes/[id]/+page.server.ts');
 		const shortReads = patientDetailSource.match(/membershipCache: 'short'/g) ?? [];
 		const addEntryAction = patientDetailSource.split('add_entry: async')[1]?.split('update_entry: async')[0] ?? '';
 		const laterActions = patientDetailSource.split('update_entry: async')[1] ?? '';
 
-		expect(shortReads).toHaveLength(2);
-		expect(addEntryAction).toContain("membershipCache: 'short'");
+		expect(shortReads).toHaveLength(0);
+		expect(addEntryAction).toContain("membershipCache: 'fresh'");
 		expect(laterActions).not.toContain("membershipCache: 'short'");
 	});
 

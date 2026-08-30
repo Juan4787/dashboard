@@ -1,10 +1,11 @@
 import { expect, test } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { loginWithSharedSession } from './helpers/shared-auth';
 
-const email = process.env.E2E_EMAIL;
-const password = process.env.E2E_PASSWORD;
+const email = process.env.E2E_EMAIL ?? process.env.CITA_SUITE_TEST_EMAIL;
+const password = process.env.E2E_PASSWORD ?? process.env.CITA_SUITE_TEST_PASSWORD;
 
 const uniqueSuffix = () => `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 const publicPatientMarker = (value: string) =>
@@ -268,7 +269,10 @@ const openDayAppointmentsPanel = async (page: import('@playwright/test').Page) =
 test.describe.configure({ mode: 'serial' });
 
 test.describe('Dental Suite - flujo operativo completo', () => {
-	test.skip(!email || !password, 'Definí E2E_EMAIL y E2E_PASSWORD para correr el flujo completo.');
+	test.skip(
+		!email || !password,
+		'Definí E2E_EMAIL/E2E_PASSWORD o CITA_SUITE_TEST_EMAIL/CITA_SUITE_TEST_PASSWORD para correr el flujo completo.'
+	);
 
 	// Limpia las fixtures "E2E " antes y después: deja el negocio real sin basura de prueba.
 	test.beforeAll(cleanupE2EFixtures);
@@ -312,6 +316,7 @@ test.describe('Dental Suite - flujo operativo completo', () => {
 		await cleanupRecentHeadlessBookingAttempts();
 
 		await page.goto(bookingUrl.pathname);
+		const runtimeOrigin = new URL(page.url()).origin;
 		await expect(page.getByRole('heading', { name: '¿Qué necesitás?' })).toBeVisible();
 		await expect(page.getByText('recibir mensajes relacionados')).toHaveCount(0);
 		await expect(page.getByRole('link', { name: new RegExp(serviceName) })).toBeVisible();
@@ -346,17 +351,21 @@ test.describe('Dental Suite - flujo operativo completo', () => {
 		await expect(bookingSummary.getByText(serviceName)).toBeVisible();
 		await expect(bookingSummary.getByText(professionalName)).toBeVisible();
 		const publicTokenUrl = page.url();
+		expect(new URL(publicTokenUrl).origin).toBe(runtimeOrigin);
 
 		await page.goto(selectedBookingUrl.toString());
 		await expect(section(page, 'Elegí un horario').getByRole('link', { name: '09:00' })).toHaveCount(0);
 
+		const overlapIdempotencyKey = randomUUID();
 		const overlapResult = await page.evaluate(
-			async ({ serviceId, professionalId, selectedDate, overlapPatient, overlapPhone }) => {
+			async ({ serviceId, professionalId, selectedDate, overlapPatient, overlapPhone, idempotencyKey }) => {
 				const form = new FormData();
 				form.set('service_id', serviceId);
 				form.set('professional_id', professionalId);
 				form.set('date', selectedDate);
 				form.set('time', '09:00');
+				form.set('patient_mode', 'new');
+				form.set('idempotency_key', idempotencyKey);
 				form.set('patient_name', overlapPatient);
 				form.set('patient_phone', overlapPhone);
 				const response = await fetch('/odonto/agenda?/create_appointment', {
@@ -366,7 +375,7 @@ test.describe('Dental Suite - flujo operativo completo', () => {
 				});
 				return { status: response.status, text: await response.text() };
 			},
-			{ serviceId, professionalId, selectedDate, overlapPatient, overlapPhone }
+			{ serviceId, professionalId, selectedDate, overlapPatient, overlapPhone, idempotencyKey: overlapIdempotencyKey }
 		);
 		expect(overlapResult.text).toContain(
 			'Ese horario ya no está libre para el profesional seleccionado.'

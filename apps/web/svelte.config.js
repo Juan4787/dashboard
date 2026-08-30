@@ -1,15 +1,10 @@
 import cloudflareAdapter from '@sveltejs/adapter-cloudflare';
-import vercelAdapter from '@sveltejs/adapter-vercel';
 import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 
 /** @type {import('@sveltejs/kit').Config} */
 const isProd = process.env.NODE_ENV === 'production';
-// Vercel declara su entorno durante el build. En los demás builds usamos Workers,
-// que es la plataforma comercial y el comportamiento esperado por Workers Builds.
-const adapter =
-	process.env.VERCEL === '1'
-		? vercelAdapter()
-		: cloudflareAdapter();
+// Cloudflare Workers es el único destino de publicación del candidato comercial.
+const adapter = cloudflareAdapter();
 
 const config = {
 	// Consult https://svelte.dev/docs/kit/integrations

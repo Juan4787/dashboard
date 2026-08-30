@@ -127,6 +127,25 @@ export const getPublicSiteUrl = () => {
 	const publicSiteUrl = (publicEnv as Record<string, string | undefined>).PUBLIC_SITE_URL;
 	const privateSiteUrl = (env as Record<string, string | undefined>).PUBLIC_SITE_URL;
 	const raw = publicSiteUrl?.trim() || privateSiteUrl?.trim() || PUBLIC_SITE_URL_FALLBACK;
+	try {
+		const parsed = new URL(raw);
+		const hostname = parsed.hostname.toLowerCase();
+		const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1';
+		if (parsed.protocol !== 'https:' && !isLocalHost) return PUBLIC_SITE_URL_FALLBACK;
+		// Un despliegue Cloudflare no debe seguir generando enlaces hacia los
+		// hosts históricos: además de confundir al profesional, esos enlaces
+		// pueden abrir el turno en otro origen y bloquear sus formularios POST.
+		if (
+			hostname === 'netlify.app' ||
+			hostname.endsWith('.netlify.app') ||
+			hostname === 'vercel.app' ||
+			hostname.endsWith('.vercel.app')
+		) {
+			return PUBLIC_SITE_URL_FALLBACK;
+		}
+	} catch {
+		return PUBLIC_SITE_URL_FALLBACK;
+	}
 	return raw.replace(/\/$/, '');
 };
 

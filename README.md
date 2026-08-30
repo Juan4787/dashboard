@@ -35,34 +35,10 @@ Las variables de entorno viven en la raíz. `apps/web/vite.config.ts` usa `envDi
 
 ## Despliegues
 
-El repositorio admite Cloudflare Workers y Vercel. Workers usa
-`apps/web/wrangler.jsonc`; Vercel usa `vercel.json`. El adaptador se selecciona
-durante el build según la plataforma, sin compartir artefactos entre proveedores.
-
-Para crear el proyecto en Vercel, configurá `apps/web` como **Root Directory**
-y mantené habilitada la opción para incluir archivos fuera de esa raíz. Así
-Vercel encuentra su `vercel.json`, y sus comandos vuelven a la raíz del
-monorepo para resolver `packages/shared`. Usá Node 20 o superior. Cargá las
-mismas variables privadas de producción que usaba Netlify, pero definí
-`PUBLIC_SITE_URL` con el dominio de Vercel antes de promoverlo a producción.
-Después agregá ese dominio a:
-
-- las Redirect URLs de Supabase (login, recuperación y reservas);
-- los redirect URIs de Google Calendar, si está habilitado;
-- la URL del webhook y los retornos de Mercado Pago, si esas integraciones se
-  usan en producción.
-
-El build equivalente que puede verificarse localmente es:
-
-```sh
-node scripts/vercel-build.mjs
-```
-
-### Cloudflare Workers (producción comercial)
-
-Workers es la plataforma prevista para la producción comercial. El Worker se
+Cloudflare Workers es el único destino de publicación del candidato comercial.
+El Worker se
 llama `app` y usa el artefacto de SvelteKit generado exclusivamente por
-el adaptador de Cloudflare. Vercel mantiene su adaptador y configuración.
+el adaptador de Cloudflare.
 
 Antes del primer despliegue, configurá el proyecto de Workers con **Root
 Directory** en `apps/web` y Node 20.3 o superior. En **Settings → Builds** usá
@@ -87,8 +63,8 @@ producción que necesita el servidor (incluidas las claves de Supabase,
 integraciones de calendario, mensajería y VAPID). `DEMO_MODE` debe permanecer
 sin definir o con valor distinto de `true` en producción. Definí también
 `PUBLIC_SITE_URL` con el dominio final de Cloudflare y agregalo a las Redirect
-URLs de Supabase, a los redirect URIs de Google Calendar y a los retornos y
-webhooks de Mercado Pago que estén habilitados.
+URLs de Supabase y a los redirect URIs de las integraciones externas que estén
+habilitadas.
 
 `keep_vars: true` en `apps/web/wrangler.jsonc` evita que un despliegue automático
 borre los bindings cargados desde el panel. No lo elimines mientras las variables

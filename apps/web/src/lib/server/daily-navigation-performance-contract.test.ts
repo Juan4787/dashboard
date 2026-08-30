@@ -5,16 +5,14 @@ const readSource = (relativePath: string) =>
 	readFileSync(new URL(relativePath, import.meta.url), 'utf8');
 
 describe('daily navigation performance contracts', () => {
-	it('keeps the daily shell across routine URLs while preserving the master boundary', () => {
+	it('revalidates the daily shell on route changes while preserving the master boundary', () => {
 		const layout = readSource('../../routes/odonto/+layout.server.ts');
 		const pathnameReads = layout.match(/url\.pathname/g) ?? [];
 
 		expect(layout).toContain("depends('app:odonto-shell')");
 		expect(layout).toContain("depends('app:follow-ups')");
-		expect(layout).toContain(
-			'const pathname = isMaster ? url.pathname : untrack(() => url.pathname)'
-		);
-		expect(pathnameReads).toHaveLength(2);
+		expect(layout).toContain('const pathname = url.pathname');
+		expect(pathnameReads).toHaveLength(1);
 	});
 
 	it('reuses a recently verified membership for high-frequency read routes', () => {
@@ -28,7 +26,7 @@ describe('daily navigation performance contracts', () => {
 		];
 
 		for (const route of readRoutes) {
-			expect(readSource(route)).toContain("membershipCache: 'short'");
+			expect(readSource(route)).not.toContain("membershipCache: 'short'");
 		}
 	});
 

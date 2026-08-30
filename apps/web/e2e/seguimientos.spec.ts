@@ -10,8 +10,8 @@ import { loginWithSharedSession } from './helpers/shared-auth';
 // - Adaptativo: si la cuenta no tiene pacientes / profesionales asignables, igual
 //   valida los caminos visibles (vacío, validación) y SALTA la creación, sin dejar basura.
 
-const email = process.env.E2E_EMAIL;
-const password = process.env.E2E_PASSWORD;
+const email = process.env.E2E_EMAIL ?? process.env.CITA_SUITE_TEST_EMAIL;
+const password = process.env.E2E_PASSWORD ?? process.env.CITA_SUITE_TEST_PASSWORD;
 const businessId = process.env.CITA_SUITE_TEST_BUSINESS_ID;
 
 const E2E_TAG = 'E2E-SEG';
@@ -106,7 +106,7 @@ test.describe.configure({ mode: 'serial' });
 test.describe('Seguimientos — cobertura E2E', () => {
 	test.skip(
 		!email || !password || !businessId,
-		'Definí E2E_EMAIL, E2E_PASSWORD y CITA_SUITE_TEST_BUSINESS_ID para correr estos tests.'
+		'Definí E2E_EMAIL/E2E_PASSWORD o CITA_SUITE_TEST_EMAIL/CITA_SUITE_TEST_PASSWORD, junto con CITA_SUITE_TEST_BUSINESS_ID, para correr estos tests.'
 	);
 	test.skip(process.env.DEMO_MODE === 'true', 'Seguimientos no aplica en modo demo.');
 

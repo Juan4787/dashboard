@@ -22,13 +22,7 @@ export const actions: Actions = {
 		}
 
 		const supabase = await createSupabaseServerClient('odonto', null, fetch);
-		const rawSiteUrl =
-			env.PUBLIC_SITE_URL ??
-			env.SITE_URL ??
-			env.URL ??
-			env.DEPLOY_PRIME_URL ??
-			env.DEPLOY_URL ??
-			(env.VERCEL_URL ? `https://${env.VERCEL_URL}` : '');
+		const rawSiteUrl = (env as Record<string, string | undefined>).PUBLIC_SITE_URL ?? '';
 		const baseUrl = rawSiteUrl ? rawSiteUrl.replace(/\/+$/, '') : '';
 		const redirectTo = `${baseUrl || PUBLIC_SITE_URL_FALLBACK}/reset/callback`;
 

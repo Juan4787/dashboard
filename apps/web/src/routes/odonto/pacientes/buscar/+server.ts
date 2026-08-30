@@ -19,7 +19,7 @@ export const GET: RequestHandler = async ({ url, locals, fetch, cookies }) => {
 		locals,
 		fetch,
 		cookies,
-		membershipCache: 'short'
+		membershipCache: 'fresh'
 	});
 	const safeQuery = escapeIlikePattern(query);
 	const normalizedQuery = normalizeSearchText(query);

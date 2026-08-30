@@ -433,13 +433,16 @@ const uniqueSlots = (slots: AvailabilitySlot[]) => {
 // round-trips a Supabase). El caché por instancia con TTL corto convierte esos
 // pasos en una sola computación.
 //
-// Staleness acotada y tolerada por diseño: la creación de la reserva SIEMPRE
-// revalida el slot contra disponibilidad viva (PUBLIC_SLOT_UNAVAILABLE si otro
-// lo tomó), igual que ya pasa entre que el paciente ve el horario y confirma.
+// La disponibilidad puede tolerar una ventana corta porque la creación de la
+// reserva SIEMPRE revalida el slot contra disponibilidad viva
+// (PUBLIC_SLOT_UNAVAILABLE si otro lo tomó). El catálogo y el estado comercial,
+// en cambio, no se cachean entre requests: un cambio de servicio, profesional
+// o suscripción debe ser visible inmediatamente en un entorno con varias
+// instancias de Cloudflare Workers.
 // ---------------------------------------------------------------------------
 
 const SLOT_SCAN_CACHE_TTL_MS = 25_000;
-const STRUCTURE_SCAN_CACHE_TTL_MS = 60_000;
+const STRUCTURE_SCAN_CACHE_TTL_MS = 0;
 const SCAN_CACHE_MAX_ENTRIES = 500;
 
 type ScanCacheEntry = {
@@ -680,20 +683,6 @@ const slotsFromPublicSnapshot = (
 		maxSlots: input.maxSlots,
 		maxSlotsPerDate: input.maxSlotsPerDate
 	});
-};
-
-export const getPublicBookingCdnCacheControl = (input: {
-	serviceId?: string | null;
-	professionalId?: string | null;
-	professionalIds?: string[] | null;
-	date?: string | null;
-}) => {
-	if (input.date) return 'public, durable, s-maxage=5, stale-while-revalidate=10';
-	if (input.professionalId || (input.professionalIds?.length ?? 0) >= 2) {
-		return 'public, durable, s-maxage=10, stale-while-revalidate=30';
-	}
-	if (input.serviceId) return 'public, durable, s-maxage=10, stale-while-revalidate=30';
-	return 'public, durable, s-maxage=60, stale-while-revalidate=300';
 };
 
 export const loadPublicBookingState = async (

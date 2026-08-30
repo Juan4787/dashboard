@@ -44,7 +44,7 @@ export const GET: RequestHandler = async ({ params, url, locals, fetch, cookies 
 		supabase,
 		accessToken: locals.auth.access_token,
 		cookies,
-		membershipCache: 'short'
+		membershipCache: 'fresh'
 	});
 	if (!context) {
 		return json({ message: 'No se pudo resolver el negocio activo.' }, { status: 500 });

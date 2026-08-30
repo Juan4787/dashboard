@@ -34,7 +34,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 		locals,
 		fetch,
 		cookies,
-		membershipCache: 'short'
+		membershipCache: 'fresh'
 	});
 	const { data: links } = await supabase
 		.from('professional_users')

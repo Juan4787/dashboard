@@ -10,7 +10,6 @@ import {
 } from '$lib/utils/patient-name';
 import {
 	createPublicBooking,
-	getPublicBookingCdnCacheControl,
 	getPublicBookingErrorMessage,
 	loadPublicBookingState,
 	publicHash,
@@ -47,13 +46,9 @@ export const load: PageServerLoad = async ({ params, fetch, url, setHeaders }) =
 		professionalIds: bookingMode === 'joint' ? requestedProfessionalIds : [],
 		date: url.searchParams.get('date') ?? ''
 	};
-	// El navegador no conserva datos; Netlify sí puede servirlos desde su caché
-	// durable. Los pasos con horarios usan TTL muy corto y la creación del turno
-	// siempre revalida la disponibilidad viva antes de guardar.
-	setHeaders({
-		'cache-control': 'no-store',
-		'netlify-cdn-cache-control': getPublicBookingCdnCacheControl(selected)
-	});
+	// Las reservas no pueden servirse desde cachés compartidas: el catálogo y,
+	// especialmente, los horarios deben reflejar disponibilidad viva.
+	setHeaders({ 'cache-control': 'no-store' });
 
 	if (env.DEMO_MODE === 'true') {
 		return {

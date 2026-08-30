@@ -37,8 +37,7 @@ export const load: LayoutServerLoad = async ({
 	cookies,
 	getClientAddress,
 	url,
-	depends,
-	untrack
+	depends
 }) => {
 	depends('app:odonto-shell');
 	depends('app:follow-ups');
@@ -52,10 +51,10 @@ export const load: LayoutServerLoad = async ({
 	}
 	const email = getEmailFromAccessToken(auth.access_token);
 	const isMaster = isMasterEmail(email);
-	// El shell cotidiano tiene invalidaciones propias para negocio y seguimientos.
-	// Las cuentas maestras sí rastrean la ruta porque al entrar/salir de su panel
-	// cambia si corresponde resolver un consultorio activo.
-	const pathname = isMaster ? url.pathname : untrack(() => url.pathname);
+	// El estado comercial es sensible: debe revalidarse tanto al recargar como al
+	// navegar entre rutas. Evitar el seguimiento de la ruta dejaría el shell con
+	// un acceso revocado hasta una recarga manual.
+	const pathname = url.pathname;
 	let activeBusiness = null;
 	let businessError: string | null = null;
 	let pendingManualSetup = false;
@@ -78,22 +77,15 @@ export const load: LayoutServerLoad = async ({
 			// El panel maestro no consume un consultorio activo. Evitar resolverlo acá
 			// elimina trabajo duplicado antes de cargar su propia vista global.
 			if (!isMasterDashboard) {
-				const useShortMembershipCache = [
-					'/odonto/agenda',
-					'/odonto/mis-turnos',
-					'/odonto/pacientes',
-					'/odonto/recordatorios',
-					'/odonto/seguimientos',
-					'/odonto/mensajes',
-					'/odonto/turnos'
-				].some((prefix) => pathname.startsWith(prefix));
 				activeBusiness = await resolveActiveBusiness({
 					supabase,
 					accessToken: auth.access_token,
 					cookies,
 					defaultBusinessCreationIp: getClientAddress(),
 					fetch,
-					membershipCache: useShortMembershipCache ? 'short' : 'fresh'
+					// Nunca reutilizar entre requests un estado comercial que puede haber
+					// sido revocado desde otra sesión o por soporte.
+					membershipCache: 'fresh'
 				});
 			}
 

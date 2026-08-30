@@ -6,7 +6,6 @@ import {
 	createPublicBooking,
 	getPublicBookingErrorCode,
 	getPublicBookingErrorMessage,
-	getPublicBookingCdnCacheControl,
 	loadPublicBookingState,
 	PUBLIC_BOOKING_ERROR_MESSAGES,
 	summarizeSlotsByDate,
@@ -37,27 +36,6 @@ vi.mock('./appointments', () => ({
 }));
 
 describe('public booking UX helpers', () => {
-	it('mantiene la caché del catálogo larga y la de horarios deliberadamente corta', () => {
-		expect(getPublicBookingCdnCacheControl({})).toBe(
-			'public, durable, s-maxage=60, stale-while-revalidate=300'
-		);
-		expect(getPublicBookingCdnCacheControl({ serviceId: 'svc-1' })).toBe(
-			'public, durable, s-maxage=10, stale-while-revalidate=30'
-		);
-		expect(getPublicBookingCdnCacheControl({ professionalId: 'pro-1' })).toBe(
-			'public, durable, s-maxage=10, stale-while-revalidate=30'
-		);
-		expect(getPublicBookingCdnCacheControl({ professionalIds: ['pro-1', 'pro-2'] })).toBe(
-			'public, durable, s-maxage=10, stale-while-revalidate=30'
-		);
-		expect(
-			getPublicBookingCdnCacheControl({
-				professionalId: 'pro-1',
-				date: '2026-07-21'
-			})
-		).toBe('public, durable, s-maxage=5, stale-while-revalidate=10');
-	});
-
 	it('usa un mensaje claro cuando el horario público ya no está disponible', () => {
 		expect(getPublicBookingErrorMessage(new Error('PUBLIC_SLOT_UNAVAILABLE'))).toBe(
 			'Ese horario acaba de ser ocupado. Elegí otro de los horarios disponibles.'

@@ -26,7 +26,7 @@ export const GET: RequestHandler = async ({ locals, fetch, cookies, setHeaders }
 			locals,
 			fetch,
 			cookies,
-			membershipCache: 'short'
+			membershipCache: 'fresh'
 		});
 		businessId = context.business.business.id;
 		supabase = context.supabase;

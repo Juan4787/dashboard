@@ -74,7 +74,7 @@ describe('agenda active appointment preload endpoint', () => {
 		await GET(event);
 
 		expect(mocks.getOdontoContext).toHaveBeenCalledWith(
-			expect.objectContaining({ membershipCache: 'short' })
+			expect.objectContaining({ membershipCache: 'fresh' })
 		);
 		expect(mocks.rpc).toHaveBeenCalledWith(
 			'list_upcoming_active_appointments_snapshot',

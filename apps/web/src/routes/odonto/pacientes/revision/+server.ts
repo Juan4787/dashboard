@@ -88,7 +88,7 @@ export const GET: RequestHandler = async ({ locals, fetch, cookies, setHeaders, 
 				locals,
 				fetch,
 				cookies,
-				membershipCache: 'short'
+				membershipCache: 'fresh'
 			});
 			if (business.business.id !== requestedBusinessId) {
 				return json({ message: 'No tenés acceso a ese consultorio.' }, { status: 403 });

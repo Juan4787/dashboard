@@ -1,4 +1,4 @@
-// Sin timeZone, Intl usa la zona del runtime: en SSR (Netlify) eso es UTC y difiere
+// Sin timeZone, Intl usa la zona del runtime: en SSR eso puede ser UTC y diferir
 // del navegador del paciente. Toda superficie pública debe pasar la timezone del negocio.
 const dateFormatters = new Map<string, Intl.DateTimeFormat>();
 const dateTimeFormatters = new Map<string, Intl.DateTimeFormat>();
@@ -60,7 +60,7 @@ export const formatInTimeZone = (value: string | Date, timeZone: string): ZonedD
 	const timeLabel = formatterFor(
 		timeFormatters,
 		// h23 representa medianoche como 00:00. `hour12: false` elige h24 en
-		// es-AR dentro de Node/Netlify y producía el ambiguo “24:00”.
+		// es-AR dentro de Node y producía el ambiguo “24:00”.
 		{ hour: '2-digit', minute: '2-digit', hourCycle: 'h23' },
 		timeZone
 	).format(date);

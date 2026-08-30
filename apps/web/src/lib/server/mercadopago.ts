@@ -103,7 +103,7 @@ const mpGet = async <T>(path: string, fetchFn: FetchLike): Promise<MpApiResult<T
 	}
 	const response = await fetchFn(`${MP_API_BASE}${path}`, {
 		headers: { Authorization: `Bearer ${token}` },
-		// Presupuesto acotado: la función serverless (10 s en Netlify) puede
+		// Presupuesto acotado: la función serverless puede
 		// necesitar hasta dos llamadas a MP más las queries a Supabase.
 		signal: AbortSignal.timeout(5000)
 	});
@@ -791,7 +791,7 @@ export type MpReturnSummary = {
 	accessBlocked: boolean;
 };
 
-// La función serverless de Netlify corta a los ~10 s: la confirmación deja de
+// La función serverless tiene un presupuesto acotado: la confirmación deja de
 // iterar antes de agotar ese presupuesto y devuelve lo confirmado hasta ahí
 // (webhook + conciliación completan lo que falte).
 const CONFIRM_BUDGET_MS = 6500;

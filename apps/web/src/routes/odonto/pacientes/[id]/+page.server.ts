@@ -387,7 +387,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, dep
 		supabase,
 		accessToken: locals.auth.access_token,
 		cookies,
-		membershipCache: 'short'
+		membershipCache: 'fresh'
 	});
 	if (!context) throw kitError(500, 'No se pudo resolver el negocio activo');
 	const permissions = resolvePatientPermissions(context);
@@ -604,12 +604,13 @@ export const actions: Actions = {
 		}
 
 		// La RPC vuelve a validar rol, acceso comercial y vínculo con el paciente en
-		// PostgreSQL. Sólo esta escritura crítica puede reutilizar la lectura breve.
+		// PostgreSQL. La sesión también resuelve el estado comercial fresco para que
+		// una revocación no quede oculta por una lectura compartida anterior.
 		const session = await resolveBusinessActionContext({
 			locals,
 			fetch,
 			cookies,
-			membershipCache: 'short'
+			membershipCache: 'fresh'
 		});
 		if (!session) {
 			return fail(401, { message: 'Sesión inválida. Volvé a iniciar sesión.' });

@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import WebSocket from 'ws';
 
@@ -501,6 +502,8 @@ test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 			professional_id: fixture.otherProfessionalId,
 			date: fixture.date,
 			time: '10:30',
+			patient_mode: 'existing',
+			idempotency_key: randomUUID(),
 			patient_id: fixture.secondPatientId
 		});
 		expectAppointmentCreated(createOtherProfessionalAppointment);
@@ -510,6 +513,8 @@ test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 			professional_id: fixture.professionalId,
 			date: fixture.date,
 			time: '09:00',
+			patient_mode: 'existing',
+			idempotency_key: randomUUID(),
 			patient_id: fixture.patientId
 		});
 		expectAppointmentCreated(createAppointment);
@@ -578,6 +583,8 @@ test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 			professional_id: fixture.professionalId,
 			date: fixture.date,
 			time: '10:30',
+			patient_mode: 'new',
+			idempotency_key: randomUUID(),
 			patient_name: `E2E Bloqueo ${fixture.suffix}`,
 			patient_phone: `+54911${Math.floor(10000000 + Math.random() * 90000000)}`
 		});
@@ -696,6 +703,8 @@ test.describe('roles, profesionales y agenda - regresiones críticas', () => {
 			professional_id: fixture.otherProfessionalId,
 			date: fixture.date,
 			time: '09:45',
+			patient_mode: 'existing',
+			idempotency_key: randomUUID(),
 			patient_id: fixture.secondPatientId
 		});
 		expect(overlapAttempt.text).toContain(

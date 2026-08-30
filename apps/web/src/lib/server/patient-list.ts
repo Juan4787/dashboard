@@ -190,7 +190,7 @@ export const loadPatientList = async ({
 			supabase,
 			accessToken: locals.auth.access_token,
 			cookies,
-			membershipCache: 'short'
+			membershipCache: 'fresh'
 		})
 	]);
 	if (!userId) throw redirect(303, '/login');

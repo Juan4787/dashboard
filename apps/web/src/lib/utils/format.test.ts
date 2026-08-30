@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { formatAccessRemaining, formatDate, formatDateTime, formatInTimeZone } from './format';
 
 // Caso que rompía sin timezone: 21:30 ART = 00:30 UTC del día SIGUIENTE.
-// En SSR (Netlify corre en UTC) la fecha aparecía corrida un día.
+// En SSR, cuando el runtime usa UTC, la fecha aparecía corrida un día.
 const lateEvening = '2026-06-16T00:30:00.000Z';
 
 describe('formatDateTime con timezone', () => {

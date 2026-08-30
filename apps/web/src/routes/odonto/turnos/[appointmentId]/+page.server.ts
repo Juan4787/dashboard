@@ -80,7 +80,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, url
 		locals,
 		fetch,
 		cookies,
-		membershipCache: 'short'
+		membershipCache: 'fresh'
 	});
 	const { data, error } = await supabase
 		.from('appointments')

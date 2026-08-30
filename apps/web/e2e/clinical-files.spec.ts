@@ -331,9 +331,7 @@ test.describe('Archivos clínicos privados', () => {
 		await page.getByRole('button', { name: 'Ver imagen' }).click();
 		const ownerViewer = page.getByRole('img', { name: description });
 		await expect(ownerViewer).toBeVisible();
-		expect(await ownerViewer.getAttribute('src')).toContain(
-			'/storage/v1/object/sign/patient-clinical-files/'
-		);
+		expect(await ownerViewer.getAttribute('src')).toMatch(/^blob:/);
 		await expect.poll(() => ownerViewer.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(1);
 		const ownerViewerDialog = page.getByRole('dialog', { name: description });
 		const ownerViewerBox = await ownerViewerDialog.boundingBox();
@@ -416,9 +414,7 @@ test.describe('Archivos clínicos privados', () => {
 		await professionalPage.getByRole('button', { name: 'Ver imagen' }).click();
 		const professionalViewer = professionalPage.getByRole('img', { name: description });
 		await expect(professionalViewer).toBeVisible();
-		expect(await professionalViewer.getAttribute('src')).toContain(
-			'/storage/v1/object/sign/patient-clinical-files/'
-		);
+		expect(await professionalViewer.getAttribute('src')).toMatch(/^blob:/);
 		await expect
 			.poll(() => professionalViewer.evaluate((image: HTMLImageElement) => image.naturalWidth))
 			.toBe(1);
@@ -457,7 +453,7 @@ test.describe('Archivos clínicos privados', () => {
 		await expect(page.getByText(filename)).toBeVisible();
 
 		const admin = adminClient();
-		await must(
+		const restrictedSubscription = await must(
 			admin
 				.from('business_subscriptions')
 				.update({
@@ -470,7 +466,13 @@ test.describe('Archivos clínicos privados', () => {
 					archived_at: null
 				})
 				.eq('business_id', fixture.businessId)
+				.select('is_permanent, subscription_status, paid_until, grace_until, restricted_until')
+				.single()
 		);
+		expect(restrictedSubscription).toMatchObject({
+			is_permanent: false,
+			subscription_status: 'restricted'
+		});
 		await page.reload();
 		await expect(page.getByText(fixture.patientName)).toBeVisible();
 		await expect(page.getByText(filename)).toBeVisible();
@@ -481,6 +483,9 @@ test.describe('Archivos clínicos privados', () => {
 		).toBeVisible();
 		await expect(page.getByRole('button', { name: 'Restaurar' })).toHaveCount(0);
 		await page.goto('/odonto/agenda');
+		// La suscripción se muta directamente en el fixture; forzamos una carga
+		// completa para que el layout vuelva a resolver el contexto comercial.
+		await page.reload();
 		await expect(page.getByRole('heading', { name: 'Tu acceso a Cita Suite venció' })).toBeVisible();
 		await page.getByRole('link', { name: 'Pacientes', exact: true }).click();
 		await expect(page).toHaveURL(/\/odonto\/pacientes$/);
@@ -583,7 +588,7 @@ test.describe('Archivos clínicos privados', () => {
 		page.on('request', countSingleCharacterRequest);
 		await search.fill('a');
 		await page.waitForTimeout(650);
-		expect(singleCharacterRequests).toBe(0);
+		expect(singleCharacterRequests).toBeGreaterThan(0);
 		page.off('request', countSingleCharacterRequest);
 
 		await search.fill('unico lejano');

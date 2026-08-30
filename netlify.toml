@@ -1,6 +1,0 @@
-[build]
-  command = "node scripts/netlify-build.mjs"
-  publish = "apps/web/build"
-
-[functions]
-  node_bundler = "esbuild"

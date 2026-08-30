@@ -187,7 +187,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 	const response = await resolve(event);
 	const totalMs = performance.now() - startedAt;
 	const loadMs = Math.max(totalMs - authMs, 0);
-	const runtimeRegion = String(env.AWS_REGION ?? env.NETLIFY_REGION ?? 'unknown').replace(
+	const runtimeRegion = String(env.AWS_REGION ?? 'unknown').replace(
 		/[^a-zA-Z0-9_-]/g,
 		''
 	);

@@ -52,7 +52,7 @@ export const load: PageServerLoad = async ({ locals, fetch, cookies, url }) => {
 		locals,
 		fetch,
 		cookies,
-		membershipCache: 'short'
+		membershipCache: 'fresh'
 	});
 	if (business.role === 'professional') throw redirect(303, '/odonto/mis-turnos');
 	const selectedDate = url.searchParams.get('date') ?? new Date().toISOString().slice(0, 10);
