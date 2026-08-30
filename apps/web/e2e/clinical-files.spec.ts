@@ -357,6 +357,12 @@ test.describe('Archivos clínicos privados', () => {
 			await mobilePage.getByRole('button', { name: 'Ver imagen' }).click();
 			const mobileViewerDialog = mobilePage.getByRole('dialog', { name: description });
 			await expect(mobileViewerDialog).toBeVisible();
+			const mobileViewer = mobileViewerDialog.getByRole('img', { name: description });
+			await expect(mobileViewer).toBeVisible();
+			expect(await mobileViewer.getAttribute('src')).toMatch(/^blob:/);
+			await expect
+				.poll(() => mobileViewer.evaluate((image: HTMLImageElement) => image.naturalWidth))
+				.toBe(1);
 			const mobileViewerBox = await mobileViewerDialog.boundingBox();
 			expect(mobileViewerBox?.width ?? 0).toBeGreaterThanOrEqual(390);
 			expect(mobileViewerBox?.width ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(391);
