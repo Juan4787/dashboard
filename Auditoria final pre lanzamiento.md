@@ -38,7 +38,7 @@ Al elaborar el contenido original de este plan no se modificó código ni se eje
 
 - [x] Recontar y registrar los archivos de entrada de rutas y endpoints. Hay 171 archivos bajo `apps/web/src/routes` al 2026-08-30; el texto histórico de 127 se conserva.
 
-- [x] Recontar y registrar la suite E2E. Hay 13 specs y 27 pruebas; se observaron 20 lugares con skip condicional. La ejecución Cloudflare resultó 19 passed, 2 failed y 6 skipped; la local 18 passed, 4 failed y 5 skipped.
+- [x] Recontar y registrar la suite E2E. Hay 13 specs y 27 pruebas; se observaron 20 lugares con skip condicional. La corrida inicial quedó 19 passed, 2 failed y 6 skipped; la candidata final, tras corregir causas y respetar el rate limit, quedó 14 passed y 13 skips explícitos sin fallos (más 12/12 destructivos y 2/2 clínicos remotos). La corrida local histórica quedó 18 passed, 4 failed y 5 skipped.
 
 - [x] Mantener Playwright limitado a un worker y sin paralelismo en [playwright.config.ts](</home/usuario/CascadeProjects/Base de Datos Sabrina/apps/web/playwright.config.ts:3>), apropiado para esta PC. Se ejecutó con `workers=1`; la corrida certificadora Cloudflare fijó además `retries=0`.
 
@@ -52,7 +52,7 @@ Al elaborar el contenido original de este plan no se modificó código ni se eje
 
 - [ ] Declarar y verificar observabilidad y scheduling explícitos. `wrangler.jsonc` y la versión activa no declaran `observability` ni `triggers.crons`; quedan sin demostrar Workers Logs/scheduler y el riesgo bloquea GO.
 
-- [ ] Eliminar el riesgo de URLs del hosting anterior. Sigue existiendo un fallback a Netlify en [constants.ts](</home/usuario/CascadeProjects/Base de Datos Sabrina/apps/web/src/lib/constants.ts:30>) y también en .env.example. Aunque producción tenga un binding PUBLIC_SITE_URL, comprobar que absolutamente todos los enlaces reales usan el dominio Cloudflare.
+- [x] Eliminar el riesgo de URLs del hosting anterior. El candidato sólo conserva el fallback `https://app.cita-suite.workers.dev`, rechaza explícitamente hosts Netlify/Vercel en `getPublicSiteUrl()` y los smokes/crawl del Worker activo no encontraron referencias a `netlify.app`, Vercel ni localhost. El hallazgo histórico de la configuración anterior se conserva en el registro de remediación.
 
 - [x] Inventariar los nombres de secretos/bindings efectivos. `wrangler versions view` registró 28 bindings/nombres de secreto sin imprimir valores; faltan bindings opcionales de Turnstile y credenciales completas de WhatsApp.
 
@@ -66,7 +66,7 @@ Al elaborar el contenido original de este plan no se modificó código ni se eje
 
 Ningún resultado aislado equivale a “producto validado”. La aprobación requiere que pasen todos estos gates. Si falla uno, es NO-GO.
 
-- [ ] **G0 — Trazabilidad:** commit, migraciones, artefacto y versión Cloudflare identificados inequívocamente. **Bloqueado:** la versión activa `97f5d35f-c20e-4d4e-9ee9-ffa122f2e553` no tiene tag/mensaje ni correlación demostrada con `e3887e4`; además sus assets no coinciden con el build local candidato.
+- [ ] **G0 — Trazabilidad:** commit, migraciones, artefacto y versión Cloudflare identificados inequívocamente. **Parcial/bloqueado:** la candidata activa `9ed2e958-697c-46b6-90ea-5b3bd01c9adf` identifica en tag/mensaje el commit local `7c25b12` y el Worker SHA, pero el branch no fue publicado en GitHub ni existe checkout remoto limpio que cierre la correlación.
 
 - [ ] **G1 — Recuperación:** backup restaurado realmente en un entorno aislado. **Bloqueado:** no se ejecutó backup/restore aislado.
 
@@ -74,15 +74,15 @@ Ningún resultado aislado equivale a “producto validado”. La aprobación req
 
 - [ ] **G3 — Datos:** RPC, RLS, roles, concurrencia e invariantes verdes. **Parcial:** pgTAP y concurrencia pasaron; no se completó la matriz E2E de todos los roles/tenants ni el backup restaurado.
 
-- [ ] **G4 — Funcional:** todos los recorridos E2E completos, sin skips inesperados. **Bloqueado:** Cloudflare 19/2/6 y local 18/4/5 (passed/failed/skipped); hay dos fallos reproducibles del arnés `patient_mode`.
+- [ ] **G4 — Funcional:** todos los recorridos E2E completos, sin skips inesperados. **Parcial:** la candidata final no tuvo fallos (suite general 14/27 con 13 skips explícitos; destructivos 12/12; clínicos remotos 2/2), pero Google real, ayuda maestra y escenarios demo no pudieron ejecutarse en este entorno.
 
 - [ ] **G5 — UX:** tareas reales completadas correctamente por usuarios representativos. **Bloqueado:** sólo automatización; faltan participantes, accesibilidad formal, dispositivos y métricas SEQ/SUS.
 
-- [ ] **G6 — Cloudflare:** runtime, caché, placement, límites, logs, jobs y rollback verificados. **Bloqueado:** no hay observabilidad/cron declarados, límites p99 ni rollback real; además hay header de caché residual Netlify.
+- [ ] **G6 — Cloudflare:** runtime, caché, placement, límites, logs, jobs y rollback verificados. **Bloqueado:** runtime/headers/placement y promoción controlada pasaron, pero no hay observabilidad/cron declarados, límites p99 ni rollback real demostrado.
 
 - [ ] **G7 — Proveedores:** Supabase, Google, Meta, push y Mercado Pago verificados. **Bloqueado:** revisión oficial Mercado Pago no disponible, Google real/WhatsApp/Turnstile/VAPID administrado sin credenciales completas y sin callbacks reales.
 
-- [ ] **G8 — Producción:** suite segura ejecutada contra el dominio real y la versión exacta. **Bloqueado:** dominio real probado, pero no versión exacta correlacionada; E2E tiene fallos/skips.
+- [ ] **G8 — Producción:** suite segura ejecutada contra el dominio real y la versión exacta. **Parcial/bloqueado:** dominio y versión `9ed2e958-…` al 100 % fueron probados sin fallos y con dos pasadas consecutivas, pero persisten skips de cobertura y la correlación Git remota pendiente.
 
 - [ ] **G9 — Operación:** alertas, soporte, rollback, auditoría e incidentes listos. **Bloqueado:** no se demostraron logs/alertas/scheduler/rollback ni runbook operativo completo.
 
@@ -234,9 +234,9 @@ Crear fixtures determinísticos y versionados:
 
 - [x] Construir una sola vez el artefacto candidato. `pnpm build:cloudflare` terminó correctamente; SHA del Worker local construido `cf4056f946ba2822fb93035da445ea2b74c918e9bbbb7d646dffcc8db657d484`.
 
-- [ ] Subirlo como versión Cloudflare con tag o mensaje que contenga el SHA.
+- [x] Subirlo como versión Cloudflare con tag o mensaje que contenga el SHA. Versión `9ed2e958-697c-46b6-90ea-5b3bd01c9adf`, tag `prelaunch-7c25b12`, mensaje con `source commit 7c25b12` y Worker SHA `cf4056f946ba2822fb93035da445ea2b74c918e9bbbb7d646dffcc8db657d484`.
 
-- [ ] Mantenerlo inicialmente en 0% de tráfico.
+- [x] Mantenerlo inicialmente en 0% de tráfico. La candidata se probó al 0% contra la versión anterior al 100% antes de la promoción controlada.
 
 - [x] Registrar un manifiesto de nombres esperados de bindings y funciones habilitadas. Se comparó con la vista de versión Cloudflare; sólo se registraron nombres, nunca valores.
 
@@ -1402,13 +1402,13 @@ Para cada tipo anterior:
 
 - [ ] Logout revoca blob URLs y aborta requests.
 
-- [ ] Zoom.
+- [x] Zoom. El visor privado se probó en desktop con controles y en 390 px con pellizco; el zoom móvil se ejecutó después de esperar el original `blob:` cargado.
 
 - [ ] Pan.
 
 - [ ] Orientación.
 
-- [ ] Pantalla pequeña.
+- [x] Pantalla pequeña. Visor y ficha probados a 390 × 844 sin overflow horizontal.
 
 - [ ] Memoria después de abrir muchas imágenes.
 
@@ -1558,11 +1558,11 @@ Recordatorios de turnos:
 
 - [ ] Token de turno pasado.
 
-- [x] Header `no-store`. PDF, ICS y reserva pública sintéticos respondieron con `cache-control: no-store`; el header residual `netlify-cdn-cache-control` observado en HTML queda como riesgo de limpieza de hosting anterior.
+- [x] Header `no-store`. PDF, ICS y reserva pública sintéticos respondieron con `cache-control: no-store`; el Worker activo candidato tampoco envía `netlify-cdn-cache-control`.
 
 - [ ] Header Referrer-Policy.
 
-- [ ] Confirmar.
+- [x] Confirmar. El paciente confirmó desde el portal y la Agenda mostró el estado `Confirmado` en el Worker activo.
 
 - [ ] Cancelar.
 
@@ -2146,9 +2146,9 @@ Revisar en desktop y móvil:
 
 El candidato debe desplegarse con:
 
-- [ ] SHA Git como tag o mensaje.
+- [x] SHA Git como tag o mensaje. El mensaje/tag de la versión candidata identifica `source commit 7c25b12` (`prelaunch-7c25b12`); el commit es local y todavía no está publicado en GitHub.
 
-- [x] Version ID registrado. `97f5d35f-c20e-4d4e-9ee9-ffa122f2e553`, número 28, 100 %.
+- [x] Version ID registrado. Candidata `9ed2e958-697c-46b6-90ea-5b3bd01c9adf`, número 32, 100 %; rollback `97f5d35f-c20e-4d4e-9ee9-ffa122f2e553`, número 28, 0 %. Deployment `d9bc2787-544b-4863-8472-5276da97fe9b`.
 
 - [x] Checksums del artefacto. Se registraron SHA-256 del artefacto Worker local, lockfile, configuración Wrangler y manifiesto de migraciones.
 
@@ -2156,7 +2156,7 @@ El candidato debe desplegarse con:
 
 - [ ] Binding opcional de metadata de versión o header de diagnóstico no sensible.
 
-- [ ] Usar una versión al 0% y el header oficial Cloudflare-Workers-Version-Overrides para dirigir Playwright al candidato sin exponer usuarios. Cloudflare permite probar así una versión con 0% de tráfico. Referencia: [Version overrides](https://developers.cloudflare.com/workers/versions-and-deployments/version-overrides/).
+- [x] Usar una versión al 0% y el header oficial Cloudflare-Workers-Version-Overrides para dirigir Playwright al candidato sin exponer usuarios. Se dirigió Playwright a `9ed2e958-697c-46b6-90ea-5b3bd01c9adf` con `app="..."` mientras estaba al 0 %, antes de promoverlo. Referencia: [Version overrides](https://developers.cloudflare.com/workers/versions-and-deployments/version-overrides/).
 
 - [ ] Probar mezcla de versiones. Cloudflare advierte que requests consecutivos pueden llegar a versiones diferentes durante despliegues graduales. Referencia: [Gradual deployments](https://developers.cloudflare.com/workers/versions-and-deployments/gradual-deployments/).
 
@@ -2192,15 +2192,15 @@ Comprobar mediante comportamiento, sin imprimir valores:
 
 - [ ] Reseñas contienen el dominio Cloudflare.
 
-- [ ] Ningún link nuevo contiene netlify.app.
+- [x] Ningún link nuevo contiene netlify.app. Crawl autenticado y smokes de reserva/login activos no encontraron el host histórico.
 
-- [ ] Ningún link nuevo contiene Vercel.
+- [x] Ningún link nuevo contiene Vercel. Crawl autenticado y smokes de reserva/login activos no encontraron el host histórico.
 
-- [ ] Ningún link nuevo contiene localhost.
+- [x] Ningún link nuevo contiene localhost. Crawl autenticado de diez rutas válidas no encontró `localhost` ni `127.0.0.1`.
 
 - [x] Ningún link nuevo contiene `workers.dev` si no es el dominio público elegido. El dominio elegido y probado es `app.cita-suite.workers.dev`.
 
-- [ ] Un deploy posterior mantiene todos los bindings por keep_vars.
+- [x] Un deploy posterior mantiene todos los bindings por keep_vars. La publicación de la candidata conservó los 28 bindings esperados y `PUBLIC_SITE_URL` quedó explícito en la vista de versión.
 
 - [ ] Cada función opcional aparece habilitada o explícitamente deshabilitada.
 
@@ -2370,15 +2370,15 @@ Criterios:
 
 - [ ] 500 humana.
 
-- [ ] URL con slash final.
+- [x] URL con slash final. Smoke HTTP controlado contra Cloudflare sin caída del Worker.
 
-- [ ] URL con mayúsculas.
+- [x] URL con mayúsculas. Smoke HTTP controlado contra Cloudflare sin caída del Worker.
 
-- [ ] URL con encoding inválido.
+- [x] URL con encoding inválido. Smoke HTTP controlado contra Cloudflare sin caída del Worker.
 
-- [ ] URL con query enorme.
+- [x] URL con query enorme. Query de 9 KB respondió sin caída del Worker.
 
-- [ ] WAF o bot protection no bloquea OAuth.
+- [x] WAF o bot protection no bloquea OAuth. El inicio de OAuth llegó a `accounts.google.com` desde Cloudflare.
 
 - [ ] WAF o bot protection no bloquea webhooks.
 
@@ -2404,7 +2404,7 @@ Criterios:
 
 ### 9. Promoción y rollback
 
-- [ ] Candidato al 0% y versión anterior al 100%.
+- [x] Candidato al 0% y versión anterior al 100%. Deployment controlado previo: `9ed2e958-…` al 0 % y `97f5d35f-…` al 100 %; luego se promovió con rollback al 0 %.
 
 - [ ] Primera pasada completa @prod-safe mediante override.
 
@@ -2418,7 +2418,7 @@ Criterios:
 
 - [ ] Promover durante horario de baja actividad.
 
-- [ ] Ejecutar smoke crítico sin override en los primeros cinco minutos.
+- [x] Ejecutar smoke crítico sin override en los primeros cinco minutos. Tras la promoción, login/navegación/configuración pasaron en 5,1 s.
 
 - [ ] Observar durante 30 minutos antes de cerrar la ventana.
 
@@ -2652,7 +2652,7 @@ La ejecución certificadora debe tener:
 
 - [x] `retries=0`. La corrida certificadora Cloudflare se ejecutó con `--workers=1 --retries=0`; la corrida local wrapper conservó un retry de CI y por eso no se considera certificadora.
 
-- [ ] Cero skips inesperados.
+- [x] Cero skips inesperados. Las 13 omisiones de la suite general fueron explícitas y trazables: 1 ayuda maestra sin `E2E_MASTER_PASSWORD`, 2 clinical-files locales, 1 Google real sin credenciales, 2 demo con `DEMO_MODE=false`, 5 pacientes UX destructivos y 2 roles destructivos; esos flujos se ejecutaron aparte cuando era seguro.
 
 - [ ] Cero tests flaky.
 
@@ -2662,9 +2662,9 @@ La ejecución certificadora debe tener:
 
 - [ ] Tercera pasada consecutiva de los casos críticos en staging.
 
-- [ ] Primera pasada consecutiva @prod-safe sobre Cloudflare.
+- [x] Primera pasada consecutiva @prod-safe sobre Cloudflare. Suite general sin override: 14/27 pasaron y 13 skips explícitos, sin fallos.
 
-- [ ] Segunda pasada consecutiva @prod-safe sobre Cloudflare.
+- [x] Segunda pasada consecutiva @prod-safe sobre Cloudflare. Segunda suite general sin override: 14/27 pasaron y 13 skips explícitos, sin fallos.
 
 - [x] Una pasada en Chromium. Suite E2E y pruebas independientes de reserva/radiografías se ejecutaron en Chromium.
 
@@ -2676,7 +2676,7 @@ La ejecución certificadora debe tener:
 
 - [ ] Soak de staging de 24 horas.
 
-- [ ] Smoke de producción inmediato.
+- [x] Smoke de producción inmediato. Ejecutado sin override después de la promoción; 1/1 pasó y las rutas HTTP críticas devolvieron los estados esperados.
 
 - [ ] Monitor sintético horario durante las primeras 24 horas.
 
@@ -2888,3 +2888,54 @@ la decisión NO-GO ni convierte el candidato local en la versión de producción
 - PENDIENTE — Siguen sin evidencia staging idéntico, backup/restore, observabilidad y scheduler, rollback, límites p95/p99, Firefox/WebKit/dispositivos físicos, accesibilidad formal, UX moderada con profesionales, proveedores reales y la checklist oficial de Mercado Pago (fuera del alcance técnico de esta remediación). La auditoría completa de dependencias sí quedó limpia en el candidato local.
 
 La decisión operativa continúa siendo **NO-GO** hasta cerrar esos puntos y repetir la certificación contra la versión exacta publicada.
+
+## Registro de ejecución continuada — 2026-08-30 — Cloudflare candidato y tráfico real
+
+Esta sección agrega la evidencia obtenida después del registro anterior. No reemplaza
+ningún hallazgo histórico ni convierte los gates incompletos en aprobados.
+
+### Identidad del candidato y publicación controlada
+
+- Branch local de trabajo: `prelaunch/cloudflare-20260830`.
+- Código de Worker publicado: commit `7c25b12` (`fix: enhance public appointment actions`), Worker SHA `cf4056f946ba2822fb93035da445ea2b74c918e9bbbb7d646dffcc8db657d484`.
+- Commit posterior sólo de arnés E2E: `730b9ef` (`test: wait for clinical original before mobile pinch`); no cambia el Worker publicado.
+- Versión Cloudflare: `9ed2e958-697c-46b6-90ea-5b3bd01c9adf`, número 32, tag `prelaunch-7c25b12`, mensaje con el commit y el SHA del Worker.
+- Deployment final: `d9bc2787-544b-4863-8472-5276da97fe9b`, candidata al 100 % y rollback `97f5d35f-c20e-4d4e-9ee9-ffa122f2e553` al 0 %. `wrangler versions view` confirmó handler `fetch`, `nodejs_compat`, `ASSETS`, `keep_vars`, 28 nombres de bindings, `PUBLIC_SITE_URL=https://app.cita-suite.workers.dev`, placement targeted `aws:sa-east-1` y assets servidos directamente.
+- Antes de promover, se mantuvo la candidata al 0 % y la anterior al 100 %, y Playwright recibió el header oficial `Cloudflare-Workers-Version-Overrides` dirigido a la versión 32. La promoción posterior dejó una orden de rollback explícita, pero no se ejecutó un rollback real.
+- No se hizo `git push`, no se modificó `main`/`origin/main` y se conservaron todos los artefactos y archivos ajenos del worktree sin stagear.
+
+### E2E completo y limitador real de login
+
+- Primera corrida completa con el candidato al 0 %: el limitador real de Supabase informó `Hay demasiados intentos de ingreso para este correo` y dejó 5 casos sin sesión; no se vació la tabla ni se forzó bypass. Tras esperar la ventana indicada, un login aislado pasó en 5,8 s.
+- Corrida general sobre la candidata al 0 % con `CI=1`, `--workers=1`, `--retries=0`: **14/27 pasaron, 13 skips explícitos, 0 fallos**.
+- Corrida general inmediatamente posterior a la promoción, sin override: **14/27 pasaron, 13 skips explícitos, 0 fallos**.
+- Segunda corrida general consecutiva sin override: **14/27 pasaron, 13 skips explícitos, 0 fallos**.
+- Los 13 skips fueron trazables y no silenciosos: 1 ayuda maestra sin `E2E_MASTER_PASSWORD`, 2 clinical-files que por diseño exigen Supabase local, 1 Google real sin credenciales autorizadas, 2 escenarios `DEMO_MODE=true`, 5 pacientes UX destructivos y 2 roles destructivos. Los 5+2 destructivos se ejecutaron aparte con fixtures reales sintéticos.
+- Suite destructiva `patients-appointments-ux.spec.ts`, `roles-agenda-regression.spec.ts` y `seguimientos.spec.ts` contra la candidata al 0 %: **12/12 pasaron**.
+- La misma suite destructiva sin override, con la candidata al 100 %: **12/12 pasaron**.
+- `odonto.smoke.spec.ts` sin override después de promover: **1/1 pasó en 5,1 s**; los dos casos demo quedaron correctamente omitidos por `DEMO_MODE=false`.
+
+### Clínica, latencia y corrección del arnés
+
+- Para validar el Worker exacto se habilitó temporalmente el fixture remoto del spec clínico, sin rebajar permisos de producción. El primer intento mostró una carrera reproducible: en 390 px el original todavía estaba en estado de carga cuando el test envió el pellizco; los eventos Pointer sí llegaron, pero el componente los descarta correctamente mientras `busy=true`.
+- El arnés quedó corregido para esperar imagen visible, `src` `blob:` y `naturalWidth=1` antes del gesto. El cambio quedó en `730b9ef`; la habilitación remota temporal y la instrumentación fueron revertidas.
+- Repetición clínica contra la candidata: **2/2 pasaron**. Se comprobaron carga y `/complete`, visor privado desktop/móvil, zoom por controles y pellizco, permisos de profesional y recepción, papelera, suscripción restringida y restauración con auditoría.
+- Las corridas clínicas generaron más de un `beforeAll` y dejaron fixtures parciales por el fallo de latencia: en conjunto se identificaron y limpiaron por IDs exactos 6 negocios sintéticos, 17 usuarios y 7 radiografías (incluido un residuo previo descubierto al iniciar esta continuación). La relectura posterior no encontró residuos.
+- El cleanup remoto no pudo borrar `patient_radiographs` mediante `service_role` porque la migración revoca ese permiso. Se usó una transacción administrativa exacta sobre los `business_id` identificados, se eliminaron primero los objetos de Storage y luego los usuarios sintéticos; nunca se alteró la protección permanente del rol.
+
+### Smoke HTTP y versión atendiendo tráfico
+
+- Sin override, `/` respondió 302 a `/login`; `/login`, `/terminos`, `/privacidad` y `/reservar/8b900b87-bcda-49b6-ad1a-6ff4e80b86dc` respondieron 200.
+- La reserva pública activa envió `cache-control: no-store`, no envió `netlify-cdn-cache-control`, y todas las respuestas incluyeron `server: cloudflare` y `cf-ray`. Las rutas dinámicas críticas mostraron `cf-placement: remote-GRU`; las informativas devolvieron `remote-` sin región.
+- El HTML sin override sirvió los assets de la candidata (`entry/app.DywMcSLn.js`, `entry/start.C3zEUM2s.js`); el override deliberado a la versión anterior sirvió hashes distintos (`app.DamWbg43.js`, `start.CSiV65tF.js`). Esto demuestra que el tráfico real quedó en la versión candidata y que el rollback es identificable.
+- Los smokes de slash final, mayúsculas, encoding inválido y query de 9 KB no derribaron el Worker. No se ejecutaron pruebas agresivas DAST ni cargas destructivas.
+
+### Relectura de datos y estado final
+
+- Después de todas las corridas se consultaron nuevamente Supabase por patrones exactos: negocios `e2e-*` 0, `allowed_emails` E2E 0, invitaciones E2E 0, seguimientos `E2E-SEG` 0, pacientes E2E 0, turnos con snapshot E2E 0, negocios clínicos E2E 0 y usuarios Auth `e2e-*` 0.
+- La cuenta de prueba quedó sin intentos adicionales forzados; el bloqueo temporal observado se conserva como evidencia del límite humano y no como error de aplicación.
+- `pnpm check` posterior al arnés: 0 errores y 0 warnings. Supabase local no estaba levantado al intentar una comprobación final (`supabase_db_turnos-saas` no existía); no se presentó esa ejecución como pasada local.
+
+### Decisión después de la promoción
+
+El comportamiento funcional y de UX automatizado de la candidata publicada quedó sin fallos en las rutas ejecutables y el tráfico 100 % activo fue comprobado dos veces. La decisión de lanzamiento comercial permanece **NO-GO** porque siguen sin demostrarse G0 (GitHub/checkout remoto correlacionado), G1 (backup restaurado), G3 completo multi-tenant, G5 (UX humana y accesibilidad formal), G6/G9 (observabilidad, scheduler, límites p99 y rollback real), G7 (proveedores reales) y los casos explícitamente omitidos de Google real, ayuda maestra y demo. Mercado Pago continúa fuera del alcance solicitado y no fue certificado.
