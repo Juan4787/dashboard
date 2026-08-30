@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { enhance } from '$app/forms';
 	import { onMount } from 'svelte';
 	import { formatDateTime, formatInTimeZone } from '$lib/utils/format';
 	import { isActiveAppointmentStatus } from '$lib/utils/appointment-visibility';
@@ -1578,12 +1579,12 @@
 				<section class="ux-card">
 					<h2 class="ux-section-title">Acciones</h2>
 					<div class="mt-5 grid gap-3">
-						<form method="POST" action="?/confirm">
+						<form method="POST" action="?/confirm" use:enhance>
 							<button disabled={!appointment.can_confirm} class="ux-btn-primary w-full">Confirmo que voy</button>
 						</form>
 						<details class="rounded-2xl border border-white/10 bg-white/[0.035]">
 							<summary class="cursor-pointer list-none px-5 py-4 text-base font-bold text-white">Necesito reprogramar</summary>
-							<form method="POST" action="?/request_reschedule" class="border-t border-white/10 p-5">
+							<form method="POST" action="?/request_reschedule" class="border-t border-white/10 p-5" use:enhance>
 								<label>
 									<span class="ux-label">Comentario (opcional)</span>
 									<textarea name="note" rows="2" disabled={!appointment.can_request_reschedule} class="ux-textarea"></textarea>
@@ -1596,7 +1597,7 @@
 						{#if canShowCancelAction}
 							<details class="rounded-2xl border border-red-400/20 bg-red-500/10">
 								<summary class="cursor-pointer list-none px-5 py-4 text-base font-bold text-red-100">Cancelar turno</summary>
-								<form method="POST" action="?/cancel" class="border-t border-red-400/20 p-5">
+								<form method="POST" action="?/cancel" class="border-t border-red-400/20 p-5" use:enhance>
 									<label>
 										<span class="ux-label">Motivo (opcional)</span>
 										<textarea name="note" rows="2" disabled={!appointment.can_cancel} class="ux-textarea"></textarea>
