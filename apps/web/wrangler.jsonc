@@ -11,5 +11,8 @@
 	"placement": {
 		"region": "aws:sa-east-1"
 	},
+	"vars": {
+		"PUBLIC_SITE_URL": "https://app.cita-suite.workers.dev"
+	},
 	"keep_vars": true
 }
