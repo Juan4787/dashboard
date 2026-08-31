@@ -75,6 +75,38 @@ describe('hooks auth validation', () => {
 		expect(event.cookies.delete).toHaveBeenCalledWith('active-business-id', { path: '/' });
 	});
 
+	it('conserva la sesión y devuelve 503 cuando Auth está temporalmente caído', async () => {
+		const event = makeEvent();
+		const resolve = vi.fn(async () => new Response('ok'));
+		const outage = Object.assign(new Error('fetch failed'), { name: 'AuthRetryableFetchError' });
+		mocks.createSupabaseServerClient.mockResolvedValue({
+			auth: { getUser: vi.fn(async () => ({ data: { user: null }, error: outage })) }
+		});
+
+		const response = await handle({ event, resolve } as never);
+
+		expect(response).toBeInstanceOf(Response);
+		expect((response as Response).status).toBe(503);
+		expect((response as Response).headers.get('cache-control')).toBe('no-store');
+		expect(await (response as Response).text()).toContain('Tus datos no se modificaron');
+		expect(resolve).not.toHaveBeenCalled();
+		expect(event.cookies.delete).not.toHaveBeenCalled();
+	});
+
+	it('trata un 429 de Auth como transitorio y no borra cookies', async () => {
+		const event = makeEvent();
+		const resolve = vi.fn(async () => new Response('ok'));
+		const rateLimit = Object.assign(new Error('too many requests'), { status: 429 });
+		mocks.createSupabaseServerClient.mockResolvedValue({
+			auth: { getUser: vi.fn(async () => ({ data: { user: null }, error: rateLimit })) }
+		});
+
+		const response = await handle({ event, resolve } as never);
+
+		expect((response as Response).status).toBe(503);
+		expect(event.cookies.delete).not.toHaveBeenCalled();
+	});
+
 	it('vuelve a validar Auth en cada request para respetar la revocación inmediata', async () => {
 		const firstEvent = makeEvent();
 		const secondEvent = makeEvent();

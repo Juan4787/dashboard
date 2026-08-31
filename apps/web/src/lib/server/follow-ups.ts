@@ -59,6 +59,8 @@ export const getFollowUpErrorMessage = (code: string): string => {
 			return 'No se encontró el seguimiento.';
 		case 'FOLLOWUP_FORBIDDEN':
 			return 'No tenés permiso para esta acción.';
+		case 'FOLLOWUP_STATUS_CONFLICT':
+			return 'El seguimiento cambió mientras lo estabas actualizando y no sobrescribimos ese cambio. Recargá la lista para ver el estado actual.';
 		default:
 			return 'No se pudo completar la acción.';
 	}
@@ -67,6 +69,7 @@ export const getFollowUpErrorMessage = (code: string): string => {
 export const getFollowUpErrorStatus = (code: string): number => {
 	if (code === 'FOLLOWUP_FORBIDDEN') return 403;
 	if (code === 'FOLLOWUP_NOT_FOUND') return 404;
+	if (code === 'FOLLOWUP_STATUS_CONFLICT') return 409;
 	return 400;
 };
 
@@ -545,9 +548,10 @@ export const createFollowUp = async (
 const loadScopedPendingFollowUp = async (admin: SupabaseClient, scope: RoleScope, id: string) => {
 	const { data, error } = await admin
 		.from('follow_ups')
-		.select('id, patient_id, assigned_professional_id, status')
+		.select('id, patient_id, assigned_professional_id, status, updated_at')
 		.eq('business_id', scope.businessId)
 		.eq('id', id)
+		.eq('status', 'pending')
 		.maybeSingle();
 	if (error) throw error;
 	if (!data) throw new FollowUpError('FOLLOWUP_NOT_FOUND');
@@ -562,14 +566,18 @@ export const markFollowUpDone = async (
 	admin: SupabaseClient,
 	args: RoleScope & { id: string }
 ): Promise<void> => {
-	await loadScopedPendingFollowUp(admin, args, args.id);
-	const { error } = await admin
+	const existing = await loadScopedPendingFollowUp(admin, args, args.id);
+	const { data: changed, error } = await admin
 		.from('follow_ups')
 		.update({ status: 'done', done_at: new Date().toISOString() })
 		.eq('business_id', args.businessId)
 		.eq('id', args.id)
-		.eq('status', 'pending');
+		.eq('status', 'pending')
+		.eq('updated_at', String(existing.updated_at))
+		.select('id')
+		.maybeSingle();
 	if (error) throw error;
+	if (!changed) throw new FollowUpError('FOLLOWUP_STATUS_CONFLICT');
 };
 
 export const snoozeFollowUp = async (
@@ -580,14 +588,18 @@ export const snoozeFollowUp = async (
 	const remindOn = (args.newRemindOn ?? '').trim();
 	// Snooze siempre a FUTURO (sale de "ejecutándose").
 	if (!isValidISODate(remindOn) || remindOn <= today) throw new FollowUpError('FOLLOWUP_INVALID_DATE');
-	await loadScopedPendingFollowUp(admin, args, args.id);
-	const { error } = await admin
+	const existing = await loadScopedPendingFollowUp(admin, args, args.id);
+	const { data: changed, error } = await admin
 		.from('follow_ups')
 		.update({ remind_on: remindOn })
 		.eq('business_id', args.businessId)
 		.eq('id', args.id)
-		.eq('status', 'pending');
+		.eq('status', 'pending')
+		.eq('updated_at', String(existing.updated_at))
+		.select('id')
+		.maybeSingle();
 	if (error) throw error;
+	if (!changed) throw new FollowUpError('FOLLOWUP_STATUS_CONFLICT');
 };
 
 /** Editar un seguimiento pendiente: fecha, mensaje y (si corresponde) asignación. El paciente no cambia. */
@@ -622,7 +634,7 @@ export const updateFollowUp = async (
 		assignedProfessionalId = assignTo;
 	}
 
-	const { error } = await admin
+	const { data: changed, error } = await admin
 		.from('follow_ups')
 		.update({
 			remind_on: remindOn,
@@ -631,8 +643,12 @@ export const updateFollowUp = async (
 		})
 		.eq('business_id', args.businessId)
 		.eq('id', args.id)
-		.eq('status', 'pending');
+		.eq('status', 'pending')
+		.eq('updated_at', String(existing.updated_at))
+		.select('id')
+		.maybeSingle();
 	if (error) throw error;
+	if (!changed) throw new FollowUpError('FOLLOWUP_STATUS_CONFLICT');
 };
 
 /** ¿El profesional tiene seguimientos asociados (cualquier estado)? Para el guard de borrado. */

@@ -27,6 +27,38 @@ const supabaseHosts = new Set(
 	)
 );
 
+// Una caída o rate-limit de Auth no invalida una sesión. Borrar cookies ante un
+// fallo transitorio expulsa a profesionales legítimos y, peor aún, los lleva a
+// creer que perdieron su trabajo. Sólo los errores explícitamente transitorios
+// conservan las credenciales y devuelven 503; un error de autenticidad ambiguo
+// sigue cerrándose de forma segura.
+const isTransientAuthError = (error: unknown): boolean => {
+	const candidate = error as { status?: number; statusCode?: number; name?: string; message?: string };
+	const status = Number(candidate?.status ?? candidate?.statusCode ?? 0);
+	if (status === 408 || status === 429 || status >= 500) return true;
+	const descriptor = `${candidate?.name ?? ''} ${candidate?.message ?? ''}`.toLowerCase();
+	return /retryable|fetch failed|network|timed? ?out|econn|enotfound|socket|temporar/.test(descriptor);
+};
+
+const authUnavailableResponse = () =>
+	new Response(
+		'No pudimos validar tu sesión porque el servicio de acceso está momentáneamente no disponible. Tus datos no se modificaron. Esperá unos segundos y volvé a intentar.',
+		{
+			status: 503,
+			headers: {
+				'content-type': 'text/plain; charset=utf-8',
+				'cache-control': 'no-store',
+				'retry-after': '10',
+				'strict-transport-security': 'max-age=31536000',
+				'content-security-policy': "default-src 'none'; frame-ancestors 'none'",
+				'x-content-type-options': 'nosniff',
+				'x-frame-options': 'DENY',
+				'referrer-policy': 'no-referrer',
+				'permissions-policy': 'camera=(), microphone=(), geolocation=()'
+			}
+		}
+	);
+
 export const handle: Handle = async ({ event, resolve }) => {
 	const startedAt = performance.now();
 	let authMs = 0;
@@ -123,6 +155,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 				}
 			}
 		} catch (err) {
+			if (isTransientAuthError(err)) return authUnavailableResponse();
 			clearAuthCookies();
 			throw redirect(303, '/login');
 		}

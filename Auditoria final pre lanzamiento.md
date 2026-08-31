@@ -5126,6 +5126,121 @@ mutación inválida fue rechazada por la restricción y no modificó datos.
   Esto impide sobrescribir una transición o resucitar una cancelación.
 - [x] Se agregaron tests unitarios de conflicto, auditoría posterior al commit y
   reprogramación concurrente; el archivo de appointments quedó en **19/19 PASS**.
-- [ ] La repetición contra el Worker de la versión `9605d56…` queda pendiente de su
-  build y despliegue reproducible; hasta observarla en Cloudflare este hallazgo no
-  se considera cerrado ni se cambia el estado global NO-GO.
+- [x] La repetición post-deploy contra `https://app.cita-suite.workers.dev` con el
+  candidato `fd4d18c1fd5e4a555a20671ada420078f832b0a2` produjo, en ocho cancelaciones
+  simultáneas, **1 éxito, 7 conflictos, 1 auditoría y cero HTTP 5xx**. La carrera
+  mixta de cuatro cancelaciones y cuatro reprogramaciones produjo una sola transición
+  ganadora; el estado final y su única auditoría coincidieron, sin resucitar el turno.
+- [x] El candidato fue construido dos veces con 105 archivos y hash ordenado
+  `83d71bfd28b8428d8522acc87ad0a8174690c71b70e82b8e591efcb42428df1b`; Wrangler leyó
+  112 assets (3947.37 KiB, 807.22 KiB gzip). Se publicó con tag
+  `fd4d18c-clean-83d71bfd`, mensaje `prelaunch serialize authenticated appointment
+  transitions fd4d18c` y versión Cloudflare
+  `165fbf68-6f59-4d9c-b05a-d48aa9cd233e` al 100 %. `/_app/version.json` devuelve el
+  SHA completo esperado.
+- [x] El arnés corrigió su propio cleanup y verificó que no quedaran negocios ni
+  usuarios sintéticos. El hallazgo de carrera queda cerrado en código, base y Worker;
+  G3 sigue parcial por los restantes frentes independientes y la decisión global
+  continúa **NO-GO**.
+
+## Actualización posterior — política RLS de `allowed_emails` — 2026-08-31
+
+### Antecedente reproducido
+
+- [x] La revisión completa de `pg_policies` encontró que la política heredada
+  `allowed_emails_master_read` tenía `USING (true)` para `authenticated`. La
+  función pública `is_email_enabled(text)` ya estaba cerrada por la migración
+  anterior, pero esa política dejaba leer directamente la lista interna de
+  correos a cualquier usuario autenticado.
+- [x] La cuenta de prueba autenticada obtuvo HTTP `200` y una fila al consultar
+  `allowed_emails?select=id&limit=1`; no se imprimieron correos ni identificadores.
+  Esto es un hallazgo de privacidad real, independiente del endpoint anónimo ya
+  cerrado, y queda conservado como antecedente.
+
+### Corrección y estado actual
+
+- [x] Se creó `20260831060000_restrict_allowed_emails_policy.sql`, que elimina
+  únicamente la política global heredada. No borra la función, datos, tabla,
+  Storage, secretos ni políticas explícitas del maestro.
+- [x] La aplicación remota se ejecutó en una única transacción con
+  `ON_ERROR_STOP=1`: antes había 1 política con ese nombre y después 0; la fila
+  `20260831060000:restrict_allowed_emails_policy` quedó registrada en el historial.
+- [x] El usuario autenticado de prueba ahora recibe HTTP `200` con cero filas;
+  el maestro autenticado sigue recibiendo HTTP `200` con filas (sin exponer sus
+  valores en el registro). La consulta anónima continúa sin acceso.
+- [x] El contrato de migración quedó cubierto por Vitest; la comprobación remota
+  no encontró políticas públicas con `USING (true)` o `WITH CHECK (true)`.
+- [ ] Falta publicar esta corrección en el Worker y repetir el smoke autenticado
+  en Cloudflare con el candidato exacto. Hasta esa publicación, la base está
+  corregida pero el gate de promoción permanece **NO-GO**.
+
+## Actualización posterior — falsos cierres de sesión durante caída de Auth — 2026-08-31
+
+### Antecedente de código
+
+- [x] `hooks.server.ts` trataba cualquier error de `getUser()` o `refreshSession()`
+  como sesión inválida, borraba las tres cookies y redirigía a login. Un error
+  transitorio de red, timeout, 429 o 5xx de Supabase Auth podía expulsar a un
+  profesional legítimo aunque su token siguiera siendo válido.
+
+### Corrección y estado actual de código
+
+- [x] Se agregó clasificación explícita de errores transitorios (429, 5xx,
+  timeout/red/retryable) que conserva las cookies y devuelve HTTP 503 sin ejecutar
+  rutas protegidas. La respuesta no revela códigos internos, indica que los datos
+  no se modificaron y contiene `no-store`/`Retry-After`.
+- [x] Los errores de autenticidad no transitorios siguen invalidando la sesión y
+  limpiando cookies; se preserva el cierre seguro ante tokens inválidos o revocados.
+- [x] Tests de hooks: **6/6 PASS**, incluidos fetch fallido `AuthRetryableFetchError`,
+  429 y token inválido. `svelte-check`: 0 errores, 0 warnings.
+- [ ] Falta demostrar la caída real de Auth desde una ventana controlada de
+  staging/Cloudflare; no se debe provocar una indisponibilidad en el proyecto
+  productivo. El gate de resiliencia y la decisión global siguen **NO-GO**.
+
+## Actualización posterior — carreras de Seguimientos — 2026-08-31
+
+### Antecedente detectado por inspección
+
+- [x] `markFollowUpDone`, `snoozeFollowUp` y `updateFollowUp` leían una fila y
+  luego hacían `UPDATE ... WHERE status = 'pending'` sin comprobar la fila
+  devuelta. Supabase no considera error un `UPDATE` que afecta cero filas: una
+  segunda pestaña podía mostrar éxito aunque la primera hubiese cambiado o
+  completado el seguimiento; en edición, dos formularios podían pisarse.
+
+### Corrección y estado actual de código
+
+- [x] Las mutaciones ahora cargan sólo seguimientos pendientes, condicionan por
+  `status` y `updated_at` observado, piden `select('id').maybeSingle()` y fallan
+  con `FOLLOWUP_STATUS_CONFLICT` (HTTP 409) sin falso éxito. El mensaje visible
+  pide recargar la lista y no expone códigos técnicos.
+- [x] Tests aislados de seguimientos: **11/11 PASS**; la suite completa posterior
+  al cambio de código queda pendiente de repetir tras la publicación.
+- [ ] Falta repetir la carrera concurrente contra el Worker publicado y verificar
+  que no se duplique ninguna auditoría. Hasta esa evidencia, G3/G4 permanecen
+  parciales y la decisión global es **NO-GO**.
+
+## Actualización posterior — RPC legado de expiración global — 2026-08-31
+
+### Antecedente reproducido
+
+- [x] La inspección del catálogo remoto encontró `public.expire_public_booking_holds()`
+  fuera de las migraciones actuales. Era `SECURITY DEFINER`, recorría turnos con
+  `pending_confirmation` y archivaba pacientes de todos los consultorios, pero
+  conservaba `EXECUTE` para `authenticated`. Un usuario de prueba pudo invocarlo
+  por PostgREST (HTTP 200, sin imprimir datos); no se creó ni modificó ningún
+  fixture porque el estado actual no contiene ese status.
+- [x] La función es un residuo del flujo histórico de retenciones y no aparece en
+  el código actual ni en el scheduler operativo. Su existencia ejecutable era, por
+  sí misma, una capacidad de mutación transversal no autorizada.
+
+### Corrección y estado actual
+
+- [x] `20260831061000_revoke_legacy_hold_expirer.sql` revoca todo `EXECUTE` de
+  `public`, `anon` y `authenticated`, sin eliminar la función ni tocar tablas,
+  datos, Storage o triggers. La aplicación remota se hizo en una transacción
+  `ON_ERROR_STOP=1`; el historial registra la migración.
+- [x] Las sondas posteriores reciben HTTP `403` con sesión autenticada y HTTP
+  `401` sin sesión. El RPC ya no puede ser llamado por clientes públicos.
+- [ ] Falta incluir la migración en un build/deploy del Worker y repetir el smoke
+  de superficie desde Cloudflare. El cierre de base es válido, pero la promoción
+  sigue **NO-GO** hasta verificar la versión publicada.
