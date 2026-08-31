@@ -37,7 +37,7 @@
 
 - [x] **Antecedente inmediato del candidato final antes del ensayo de rollback:** commit `fba21de079706f9674a85303a3ec68b589b90f70`, versión Cloudflare `9f8be05a-b003-42a8-bc00-18e87eff0c54` al 100 %, deployment `9c33abf2-6c5c-4b5a-9ca5-12be37cdcefe`; tag `fba21de079706f9674a85303a3ec68b589b90f70-clean-2324f2`, manifiesto completo `2324f2e253b33f44eedbec04708a2aaf5d7c775e448bf5ce422cfafdac5f371b` y smoke de producción documentados al final de este archivo. Se conserva como corte anterior.
 
-- [x] **Estado actual del candidato final (última relectura):** commit de runtime `fba21de079706f9674a85303a3ec68b589b90f70`, versión Cloudflare `9f8be05a-b003-42a8-bc00-18e87eff0c54` al 100 %, deployment posterior al ensayo de rollback `d49c0e7b-7520-4fb4-9e03-1d6b277ff055`; tag `fba21de079706f9674a85303a3ec68b589b90f70-clean-2324f2`, manifiesto completo `2324f2e253b33f44eedbec04708a2aaf5d7c775e448bf5ce422cfafdac5f371b` y smoke posterior documentados al final de este archivo. El `HEAD` documental puede ser posterior, pero no altera este runtime.
+- [x] **Estado actual del candidato final (última relectura):** commit de runtime `fba21de079706f9674a85303a3ec68b589b90f70`, versión Cloudflare `9f8be05a-b003-42a8-bc00-18e87eff0c54` al 100 %, deployment posterior al ensayo dinámico de rollback `9c794bbb-1902-431a-beb2-b9e266c6047e`; tag `fba21de079706f9674a85303a3ec68b589b90f70-clean-2324f2`, manifiesto completo `2324f2e253b33f44eedbec04708a2aaf5d7c775e448bf5ce422cfafdac5f371b` y smoke posterior documentados al final de este archivo. El `HEAD` documental puede ser posterior, pero no altera este runtime.
 
 - [x] **Commit posterior de documentación (no desplegado):** `035f3d823580a48aa8a49dd494672ddb718c34a2` sólo agrega esta relectura y el manifiesto archivado; no modifica `apps/web` ni el artefacto que atiende Cloudflare. Por eso la versión productiva continúa correlacionada deliberadamente con el commit de runtime `fba21de…`, mientras `HEAD`/`origin/prelaunch/cloudflare-20260830` ahora apuntan a este commit documental.
 
@@ -4712,3 +4712,28 @@ desde el candidato `fba21de` actualmente certificado y su restauración inmediat
 - [x] El spec actualizado se ejecutó nuevamente contra la versión Cloudflare actual con
   un worker y sin reintentos: **1/1 pasó en 33,5 s**. La modificación es sólo de
   robustez del test; no modifica la aplicación ni el deployment fba21de.
+
+## Relectura de rollback con HTML dinámico no cacheable — 2026-08-31 — ESTADO ACTUAL
+
+Esta medición posterior corrige una limitación metodológica de la primera sonda: el archivo
+de versión estático podía aparecer como `HIT`. Se conserva aquella medición como
+antecedente y aquí se valida el cambio de tráfico con `/login`, cuyo HTML declara
+`private, no-store`.
+
+- [x] Se volvió a promover temporalmente al 100 % la versión anterior
+  `10f572e4-cef3-400a-be76-32405bd6333f` en el deployment
+  `cada1b8f-e4da-44c4-9baf-b52b9d0cf815`. No se modificaron código, secretos,
+  bindings ni datos.
+- [x] Sondas secuenciales con `Cache-Control: no-cache`, `Pragma: no-cache`,
+  `cache: no-store` y query único observaron `/login` HTTP 200 con
+  `cache-control: private, no-store` y el hash HTML anterior
+  `app.CDBtQGV7.js` en **1.011 ms**, sin `cf-cache-status`. Esto prueba el cambio
+  del documento servido, no una lectura de un objeto estático compartido.
+- [x] Se restauró inmediatamente `fba21de` al 100 % en el deployment
+  `9c794bbb-1902-431a-beb2-b9e266c6047e`; la sonda dinámica volvió a observar
+  `app.DcejDFCW.js` HTTP 200, `private, no-store`, sin `cf-cache-status`, en
+  **860 ms**.
+- [x] El estado final quedó en una sola versión `9f8be05a-b003-42a8-bc00-18e87eff0c54`
+  al 100 %. Este ensayo dinámico confirma el RTO de borde del artefacto bajo una
+  hipótesis de caché más estricta; el runbook humano, las alertas y el rollback de
+  datos siguen pendientes.
