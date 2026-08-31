@@ -37,6 +37,8 @@
 
 - [x] **Estado actual del candidato final (última relectura):** commit `fba21de079706f9674a85303a3ec68b589b90f70`, versión Cloudflare `9f8be05a-b003-42a8-bc00-18e87eff0c54` al 100 %, deployment `9c33abf2-6c5c-4b5a-9ca5-12be37cdcefe`; tag `fba21de079706f9674a85303a3ec68b589b90f70-clean-2324f2`, manifiesto completo `2324f2e253b33f44eedbec04708a2aaf5d7c775e448bf5ce422cfafdac5f371b` y smoke de producción documentados al final de este archivo. Este es el único candidato que gobierna la decisión vigente.
 
+- [x] **Commit posterior de documentación (no desplegado):** `035f3d823580a48aa8a49dd494672ddb718c34a2` sólo agrega esta relectura y el manifiesto archivado; no modifica `apps/web` ni el artefacto que atiende Cloudflare. Por eso la versión productiva continúa correlacionada deliberadamente con el commit de runtime `fba21de…`, mientras `HEAD`/`origin/prelaunch/cloudflare-20260830` ahora apuntan a este commit documental.
+
 - [x] Enlace al informe y artefactos: este archivo; resultados Playwright en [apps/web/test-results](</home/usuario/CascadeProjects/Base de Datos Sabrina/apps/web/test-results) y [apps/web/output/playwright](</home/usuario/CascadeProjects/Base de Datos Sabrina/apps/web/output/playwright). Los artefactos contienen capturas/traces de fallos y no se consideran evidencia de aprobación.
 
 ## Alcance y principio de aceptación
@@ -4400,10 +4402,14 @@ aprobaciones implícitas de los demás gates. La versión vigente del código es
 
 ### Candidato, checkout y reproducibilidad del artefacto que consume Cloudflare
 
-- [x] El checkout aislado de certificación `/tmp/cita-suite-audit-edf9a9f` quedó sin
-  cambios y su `HEAD` fue `fba21de079706f9674a85303a3ec68b589b90f70`. El checkout
-  principal y `origin/prelaunch/cloudflare-20260830` devolvieron el mismo SHA. La
-  comprobación `git ls-remote` también devolvió ese SHA; no se imprimieron secretos.
+- [x] En el momento de construir y publicar el runtime, el checkout aislado de
+  certificación `/tmp/cita-suite-audit-edf9a9f` quedó sin cambios y su `HEAD` fue
+  `fba21de079706f9674a85303a3ec68b589b90f70`; el checkout principal y
+  `origin/prelaunch/cloudflare-20260830` devolvieron ese mismo SHA y la comprobación
+  `git ls-remote` coincidió. Después se hizo el commit documental
+  `035f3d823580a48aa8a49dd494672ddb718c34a2`, que no toca el runtime ni se desplegó;
+  por eso el deployment sigue correlacionado con `fba21de…` y ambos estados quedan
+  explícitos, sin presentar una paridad falsa entre documentación y bundle.
 - [x] Se ejecutaron dos builds independientes desde un `.svelte-kit` completamente
   retirado entre corridas, con `NODE_ENV=production`,
   `CLOUDFLARE_WORKERS=1`, `CITA_BUILD_VERSION=fba21de…`,
