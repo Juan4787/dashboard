@@ -3067,7 +3067,7 @@ Esta entrada conserva cada resultado obtenido durante la continuación de la aud
 - [ ] Permanecen pendientes las variantes de push no ejecutadas en esta corrida (Samsung Internet, Firefox Android, Chrome/Edge desktop, permisos rechazado/bloqueado/recuperado, dos dispositivos, renovación de claves, respuestas 410/429/5xx, concurrencia, service worker viejo y clicks con página cerrada/abierta/múltiple).
 - [ ] El job externo no tiene alertas `onFailure`; debe configurarse o aceptarse explícitamente el riesgo antes del lanzamiento.
 
-## Registro de ejecución continuada — 2026-08-30 — cuenta profesional y BrowserStack iPhone
+## Registro de ejecución continuada — 2026-08-30 — cuenta profesional y BrowserStack iPhone — ANTECEDENTE de `fba21de`
 
 ### Comprobación proactiva de servicios por profesional
 
@@ -3154,7 +3154,7 @@ Se repitieron cancelar y pedir reprogramación con dos turnos sintéticos en el 
 - [x] No hubo errores de consola ni `pageerror`. Una cancelación de navegación SvelteKit (`ERR_ABORTED` en `__data.json`) ocurrió después de la respuesta exitosa y no alteró el resultado.
 - [x] La limpieza exacta eliminó los dos turnos y el paciente sintético; la relectura devolvió `0` pacientes con el marcador de esta corrida.
 
-## Registro de ejecución continuada — 2026-08-30 — smoke HTTP público final del Worker vigente
+## Registro de ejecución continuada — 2026-08-30 — smoke HTTP público final del Worker vigente en ese corte — ANTECEDENTE de `fba21de`
 
 - [x] Un token público sintético válido respondió `200` desde Cloudflare con `cache-control: no-store`, `referrer-policy: no-referrer`, CSP explícita, `server: cloudflare` y `cf-ray`.
 - [x] Los alias `/confirmar/<token>`, `/cancelar/<token>` y `/reprogramar/<token>` respondieron `303` y redirigieron al mismo `/turno/<token>` con `accion=confirmar`, `accion=cancelar` y `accion=reprogramar`, respectivamente.
@@ -3176,7 +3176,7 @@ Se repitieron cancelar y pedir reprogramación con dos turnos sintéticos en el 
 - [x] Los tres profesionales residuales iniciales fueron eliminados por sus IDs exactos, luego de verificar cero dependencias; la relectura confirmó `remaining=0`. No se ejecutó ninguna purga por prefijo amplio.
 - [x] El script de limpieza en modo dry-run (`node apps/web/scripts/cleanup-e2e-fixtures.mjs`) volvió a consultar los filtros corregidos y mostró `profesionales: 0`, `servicios: 0`, `pacientes: 0`; no borró nada en esta comprobación.
 
-## Registro de ejecución continuada — 2026-08-30 — batería completa vigente sin override
+## Registro de ejecución continuada — 2026-08-30 — batería completa vigente en ese corte sin override — ANTECEDENTE de `fba21de`
 
 - [x] Se ejecutó la suite completa de `apps/web/e2e` contra `https://app.cita-suite.workers.dev`, sin `Cloudflare-Workers-Version-Overrides`, con `CI=1`, `E2E_ALLOW_DESTRUCTIVE=true`, `--workers=1` y `--retries=0`.
 - [x] Resultado: **22 passed, 5 skipped, 0 failed**, en 5,9 minutos. El código de salida fue `0`.
@@ -3220,7 +3220,7 @@ Este índice existe para que ninguna hora de pruebas quede separada de su regist
 - [x] Ampliación de navegadores: intento inicial de Firefox por binario incorrecto, instalación del binario fijado, corrida completa final 22/27 con cinco skips explícitos, corrección del arnés responsive, repeticiones Firefox/Chromium 2/2, sondas de validación y bloqueo WebKit por dependencias del host — registrado en `Firefox, WebKit y cierre de la matriz de navegadores`.
 - [x] Resultado de la revisión de registro: todas las ejecuciones listadas arriba tienen resultado explícito; las casillas que siguen sin marcar representan cobertura no ejecutada, evidencia no suficiente o un gate que deliberadamente no se puede cerrar todavía. La decisión global continúa **NO-GO**.
 
-## Registro de ejecución continuada — 2026-08-31 — Firefox, WebKit y cierre de la matriz de navegadores
+## Registro de ejecución continuada — 2026-08-31 — Firefox, WebKit y cierre de la matriz de navegadores — ANTECEDENTE de `fba21de`
 
 Esta sección deja asentado el intento de ampliar la verificación al motor Firefox y al
 motor WebKit. Los resultados de infraestructura, las limitaciones del arnés y las
@@ -4130,7 +4130,7 @@ de alertas y no se eliminan porque explican el fallo de coordinación observado.
   relectura de trazabilidad posterior; hasta entonces esta casilla no se usa para aprobar
   el artefacto en producción.
 
-## Relectura actual posterior al fix de Web Push y smoke HTTP — 2026-08-31
+## Relectura del corte `4f4b28f` posterior al fix de Web Push y smoke HTTP — 2026-08-31 — ANTECEDENTE de `fba21de`
 
 Esta sección tiene precedencia sobre los estados actuales anteriores. No reescribe ni
 borra sus antecedentes: el cambio de código, el nuevo build y el nuevo deployment
@@ -4220,7 +4220,7 @@ certificando ahora.
   el nuevo Worker esté sano. La decisión global permanece **NO-GO** hasta resolverlo o
   aprobar explícitamente una política de orígenes y privacidad con una nueva medición.
 
-## Relectura actual — cierre del hallazgo de logo/CSP — 2026-08-31
+## Relectura del corte `1d5fa13` — cierre del hallazgo de logo/CSP — 2026-08-31 — ANTECEDENTE de `fba21de`
 
 Esta sección supersede únicamente el hallazgo de logo/CSP de la sección anterior. El
 hallazgo original y su reproducción permanecen intactos como antecedente; no se
@@ -4288,7 +4288,7 @@ reinterpreta como si nunca hubiera existido.
   de base que apareció transitoriamente en una lista de procesos, ya registrada en la
   actualización de backup. No se imprime ni se reutiliza aquí.
 
-## Matriz anónima completa de endpoints y métodos — 2026-08-31 — estado actual
+## Matriz anónima completa de endpoints y métodos — 2026-08-31 — ANTECEDENTE del candidato `fba21de`
 
 - [x] Se derivaron **51 rutas** reales de todos los `+server.ts`, sustituyendo cada
   parámetro dinámico por un valor inválido controlado. Las solicitudes fueron
@@ -4316,7 +4316,7 @@ reinterpreta como si nunca hubiera existido.
   las mutaciones clínicas positivas ya registradas; esas requieren IDs válidos y siguen
   gobernadas por G3.
 
-## Relectura actual — atributos de sesión, logout remoto y tokens inválidos — 2026-08-31
+## Relectura del corte `1d5fa13` — atributos de sesión, logout remoto y tokens inválidos — 2026-08-31 — ANTECEDENTE de `fba21de`
 
 Esta sección agrega evidencia de autenticación obtenida después de las matrices anónimas.
 Los resultados de login, cookies y logout que figuran en bloques anteriores siguen siendo
@@ -4366,7 +4366,7 @@ autenticación permanece **BLOQUEADO/NO-GO** hasta corregir y repetir este caso,
 probar refresh real vencido/reutilizado y fault-injection de Auth. El `HTTP 429` es
 evidencia del rate limiter activo, no un falso éxito ni un fallo de aplicación.
 
-## Hallazgo crítico — logout sólo local y riesgo de prefetch — 2026-08-31 — estado actual
+## Hallazgo crítico — logout sólo local y riesgo de prefetch — 2026-08-31 — ANTECEDENTE supersedido por `fba21de`
 
 Esta sección registra la reproducción y la remediación posterior sin borrar la evidencia
 del fallo. El resultado de producción que sigue corresponde al Worker `1d5fa13…` **antes**
