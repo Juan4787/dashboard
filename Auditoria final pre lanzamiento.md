@@ -41,8 +41,8 @@
 
 - [x] **Aclaración editorial posterior (no desplegada):** `16b71f9` sólo corrige la
   descripción de la relación entre el commit documental y el runtime; tampoco modifica
-  `apps/web` ni la versión Cloudflare. Es el `HEAD` documental actual y no sustituye al
-  candidato de runtime `fba21de…`.
+  `apps/web` ni la versión Cloudflare. La cadena documental posterior conserva el
+  `HEAD` remoto actual sin sustituir al candidato de runtime `fba21de…`.
 
 - [x] Enlace al informe y artefactos: este archivo; resultados Playwright en [apps/web/test-results](</home/usuario/CascadeProjects/Base de Datos Sabrina/apps/web/test-results) y [apps/web/output/playwright](</home/usuario/CascadeProjects/Base de Datos Sabrina/apps/web/output/playwright). Los artefactos contienen capturas/traces de fallos y no se consideran evidencia de aprobación.
 
