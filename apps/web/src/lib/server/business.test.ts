@@ -203,7 +203,7 @@ describe('resolveActiveBusiness', () => {
 			limit: vi.fn(() => inviteQuery),
 			maybeSingle: vi.fn(async () => ({ data: { id: 'invite-1' }, error: null }))
 		};
-		supabaseMocks.createSupabaseAdminClient.mockResolvedValue({ from: vi.fn(() => inviteQuery) } as any);
+		supabaseMocks.createSupabaseAdminClient.mockResolvedValue({ from: vi.fn(() => inviteQuery) } as never);
 		const userId = 'user-invited';
 		const email = 'invited@example.com';
 		let contextReads = 0;
