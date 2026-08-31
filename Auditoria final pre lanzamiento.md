@@ -4,21 +4,38 @@
 >
 > Regla de uso: marcar una casilla únicamente cuando exista evidencia verificable y enlazada. Si una casilla no aplica, registrar por qué, quién lo aprobó y qué riesgo residual queda; no eliminarla ni omitirla.
 
+## Convención obligatoria: antecedentes frente a estado actual
+
+- Los bloques fechados como **antecedente**, **snapshot histórico** o **estado encontrado al elaborar el plan** conservan lo que era cierto en ese corte. No se borran ni se reescriben para aparentar que siempre estuvo resuelto.
+- El estado que gobierna la decisión de lanzamiento es la última sección fechada que diga explícitamente **estado actual**, junto con sus relecturas posteriores. Si una línea antigua contradice una relectura actual, la antigua se interpreta sólo como historial.
+- Cada cambio de código, secreto, migración, configuración, deployment o fixture puede invalidar evidencia anterior. En ese caso se agrega una nueva medición y se deja la anterior marcada como antecedente.
+- La decisión vigente al cierre de este registro sigue siendo **NO-GO** hasta que todos los gates críticos tengan evidencia suficiente; ningún `[x]` histórico se cuenta automáticamente para el candidato final.
+
 ## Control de ejecución
 
 - [x] Fecha de inicio: 2026-08-30 (America/Argentina/Buenos_Aires).
 
 - [x] Responsable: Codex, ejecución automatizada y revisión de evidencia; quedan pendientes las pruebas que requieren personas, dispositivos o proveedores no configurados.
 
-- [x] SHA candidato: `e3887e414a88933355a57442082bef14deb89e5c` (`HEAD` y `origin/main`).
+- [x] **Snapshot histórico del plan (2026-08-30):** SHA candidato `e3887e414a88933355a57442082bef14deb89e5c` (`HEAD` y `origin/main`). La relectura actual del candidato final está registrada más abajo.
 
-- [x] Versión Cloudflare: `97f5d35f-c20e-4d4e-9ee9-ffa122f2e553`, número 28, 100 %, creada 2026-08-28T15:43:42.950Z; sin tag ni mensaje.
+- [x] **Snapshot histórico del plan:** versión Cloudflare `97f5d35f-c20e-4d4e-9ee9-ffa122f2e553`, número 28, 100 %, creada 2026-08-28T15:43:42.950Z; sin tag ni mensaje. La versión actual etiquetada está registrada en la relectura de G0.
 
 - [x] Dominio de producción: `https://app.cita-suite.workers.dev` (dominio workers.dev elegido; el flujo público de prueba también conserva el dominio histórico de Netlify como fixture externo y no se tomó como producción).
 
 - [x] Proyecto Supabase: `yjzferwuzbtgpmdnzlcb` (URL remota verificada sin exponer claves).
 
-- [x] Resultado final: **NO-GO**. La corrida inicial encontró fallos E2E reproducibles del arnés y 15 vulnerabilidades de auditoría completa (estas últimas quedaron corregidas en el candidato remediado); persisten falta de correlación Git↔deployment, ausencia de observabilidad/scheduler demostrados, y recuperación/UX humana/proveedores aún no certificados.
+- [x] **Resultado histórico del plan:** **NO-GO**. La corrida inicial encontró fallos E2E reproducibles del arnés y 15 vulnerabilidades de auditoría completa (estas últimas quedaron corregidas en el candidato remediado); los pendientes que se revaluaron después se conservan aquí como antecedentes.
+
+- [x] **Antecedente inmediato del candidato final:** commit `034ecbdd0548e1fe45806adcb0efc4747fa4ebf6`, versión Cloudflare `3ed7a7a7-3cfb-4444-9516-5b92fbd334e7` al 100 %, deployment `e9426b31-a7e4-41d6-bc4d-ba842f80a773`; se conserva como evidencia del corte anterior y queda supersedido por la relectura posterior del fix Web Push.
+
+- [x] **Antecedente inmediato del candidato final:** commit `4f4b28f5d6918f37d4de592b3fdfccc009b0f93b`, versión Cloudflare `f713a7d7-afc1-4132-8982-fc2e31a0de66` al 100 %, deployment `2026-08-31T10:01:38.025Z`; su manifiesto, smoke y fix de Web Push se conservan como corte anterior.
+
+- [x] **Antecedente inmediato del candidato final:** commit `1d5fa13eb35b6fda3c6c947110e8f1e97b49fa02`, versión Cloudflare `9c48ac8f-4804-44b0-9d56-abbd6c492b59` al 100 %, deployment `abf97a4a-c326-4c84-a062-449d7a4d3c57`; tag `1d5fa13eb35b6fda3c6c947110e8f1e97b49fa02-manifest-dd962a9c`, manifiesto combinado byte a byte y smoke están documentados en la relectura posterior del final. Queda supersedido por el candidato actual de abajo.
+
+- [x] **Antecedente inmediato del candidato final:** commit `35349a5c702109bcc527a06133d905aee9accf62`, versión Cloudflare `10f572e4-cef3-400a-be76-32405bd6333f` al 100 %, deployment `6701db36-57ec-472b-b9ce-2c681a33bf02`; tag `35349a5c702109bcc527a06133d905aee9accf62-clean-d22ebfd`, manifiesto completo y smoke de producción documentados al final de este archivo. Se conserva como evidencia del corte anterior y queda supersedido por el candidato `fba21de` de abajo.
+
+- [x] **Estado actual del candidato final (última relectura):** commit `fba21de079706f9674a85303a3ec68b589b90f70`, versión Cloudflare `9f8be05a-b003-42a8-bc00-18e87eff0c54` al 100 %, deployment `9c33abf2-6c5c-4b5a-9ca5-12be37cdcefe`; tag `fba21de079706f9674a85303a3ec68b589b90f70-clean-2324f2`, manifiesto completo `2324f2e253b33f44eedbec04708a2aaf5d7c775e448bf5ce422cfafdac5f371b` y smoke de producción documentados al final de este archivo. Este es el único candidato que gobierna la decisión vigente.
 
 - [x] Enlace al informe y artefactos: este archivo; resultados Playwright en [apps/web/test-results](</home/usuario/CascadeProjects/Base de Datos Sabrina/apps/web/test-results) y [apps/web/output/playwright](</home/usuario/CascadeProjects/Base de Datos Sabrina/apps/web/output/playwright). Los artefactos contienen capturas/traces de fallos y no se consideran evidencia de aprobación.
 
@@ -2939,3 +2956,1656 @@ ningún hallazgo histórico ni convierte los gates incompletos en aprobados.
 ### Decisión después de la promoción
 
 El comportamiento funcional y de UX automatizado de la candidata publicada quedó sin fallos en las rutas ejecutables y el tráfico 100 % activo fue comprobado dos veces. La decisión de lanzamiento comercial permanece **NO-GO** porque siguen sin demostrarse G0 (GitHub/checkout remoto correlacionado), G1 (backup restaurado), G3 completo multi-tenant, G5 (UX humana y accesibilidad formal), G6/G9 (observabilidad, scheduler, límites p99 y rollback real), G7 (proveedores reales) y los casos explícitamente omitidos de Google real, ayuda maestra y demo. Mercado Pago continúa fuera del alcance solicitado y no fue certificado.
+
+## Registro de ejecución continuada — 2026-08-30 — ayuda maestra
+
+Esta entrada actualiza únicamente la evidencia de la prueba que antes había quedado omitida por falta de la variable esperada. No elimina el registro histórico del skip ni convierte los demás gates incompletos en aprobados.
+
+- [x] `MASTER_EMAIL` presente en el entorno de ejecución, sin imprimir su valor.
+- [x] `E2E_MASTER_PASSWORD` presente en el entorno de ejecución, sin imprimir su valor. La suite usa exactamente este nombre; la comprobación anterior había quedado desactualizada.
+- [x] `CI=1 E2E_BASE_URL=https://app.cita-suite.workers.dev pnpm --filter web exec playwright test e2e/account-assistance.spec.ts --workers=1 --retries=0`: **1/1 passed (15,7 s)** contra el Worker de Cloudflare.
+- [x] No se expusieron credenciales, cookies, tokens ni valores de variables durante la comprobación.
+- [ ] El gate G4 sigue incompleto: esta prueba cerró sólo la omisión de ayuda maestra; permanecen otros casos explícitamente omitidos y la matriz funcional total todavía no está certificada.
+
+## Registro de ejecución continuada — 2026-08-30 — exportación productiva y preparación de Agenda
+
+Esta entrada conserva cada resultado obtenido durante la continuación de la auditoría. No reemplaza los registros históricos ni transforma un resultado parcial en un cierre de gate.
+
+### Exportación individual en el Worker Cloudflare
+
+- [x] Se inició sesión con la cuenta de prueba sin imprimir credenciales, cookies ni tokens.
+- [x] Se abrió un paciente existente desde `/odonto/pacientes`, se verificó el enlace `Abrir exportación` y se llegó a `/odonto/exportar-datos?patient_id=...` en el Worker real.
+- [x] La preparación respondió `201` en `/api/odonto/exportaciones`, `200` para las seis hojas (`patients`, `custom_fields`, `clinical_entries`, `appointments`, `appointment_professionals`, `follow_ups`) y `200` en `validaciones`.
+- [x] La interfaz mostró `Archivo listo`, el botón `Descargar otra vez` y los conteos `Pacientes 1`, `Datos adicionales 0`, `Historia clínica 0`, `Turnos 1`, `Profesionales de turnos 1`, `Seguimientos 0`.
+- [x] Se recibió la descarga automática real `datos-paciente-20260831-0112.xlsx` de 10,6 KB; el ZIP XLSX contiene `xl/workbook.xml`, ocho archivos de hoja y ocho etiquetas de hoja.
+- [x] Se inspeccionó el XML visible del XLSX: no contiene UUID internos.
+- [x] No hubo errores de consola ni solicitudes fallidas en esta corrida.
+
+### Exportación completa en el Worker Cloudflare
+
+- [x] La primera repetición del alcance completo devolvió `429` con el mensaje humano de límite de uso. El estado de base confirmó cero sesiones activas y exactamente dos eventos `patient_export_global_by_business` de intentos previos sobre este consultorio de prueba.
+- [x] Se eliminaron exclusivamente esos dos eventos de rate-limit del `business_id` de prueba mediante una transacción administrativa exacta; la relectura devolvió `0`. No se tocaron eventos de otros negocios.
+- [x] Un intento posterior no llegó a la exportación porque la interfaz de login activó el límite temporal del correo después de las repetidas comprobaciones; no se forzó bypass ni se vació ninguna tabla.
+- [x] Se obtuvo una sesión Supabase válida con las mismas credenciales (sin saltar autenticación) y se repitió el flujo directamente autenticado en el Worker.
+- [x] La preparación completa respondió `201`, seis hojas `200` y validación `200`; mostró `Archivo listo` y descarga automática `datos-pacientes-20260831-0120.xlsx` de 13,9 KB.
+- [x] Conteos visibles y recibidos: `Pacientes 19`, `Datos adicionales 0`, `Historia clínica 5`, `Turnos 22`, `Profesionales de turnos 22`, `Seguimientos 0`.
+- [x] El XLSX completo contiene `xl/workbook.xml`, ocho archivos de hoja y ocho etiquetas de hoja; el XML visible no contiene UUID internos.
+- [x] No hubo errores de consola. Dos `ERR_ABORTED` observados en solicitudes de hojas (`patients` y `clinical_entries`) coincidieron con respuestas `200` y la orquestación terminó correctamente; se registran como abortos de transporte/navegación no bloqueantes, no como fallos silenciosos.
+
+### Residuo sintético descubierto y cleanup
+
+- [x] La exportación individual reveló un paciente sintético antiguo (`Paciente Browserstack onmiovum`) que no figuraba en la limpieza resumida anterior.
+- [x] La inspección exacta encontró un paciente, un turno reservado, cero radiografías, cero seguimientos, cero entradas clínicas y cero perfil clínico asociados.
+- [x] Se eliminaron por IDs exactos el turno y el paciente; la transacción confirmó `patient=0`, `appointment=0`, `radiographs=0`. Los registros de auditoría de esas pruebas no se borraron, para preservar la trazabilidad inmutable.
+
+### Agenda — primera lectura real y corrección del método de espera
+
+- [x] La primera sonda de Agenda tuvo aserciones negativas por seleccionar el primer encabezado (el aviso de ayuda de configuración, no el `h1`) y por leer la página antes de esperar la hidratación; no fue un error de aplicación. Se repitió con `h1` explícito y `networkidle`.
+- [x] La repetición verificó `h1` de día, enlaces `Día anterior`/`Día siguiente`, botón `Buscar`, panel de búsqueda, calendario accesible, selección `Cualquier día`, referencias (2 profesionales y 7 servicios más `Todos`), búsqueda sin resultados, vista semanal con siete días y navegación semanal.
+- [x] En móvil de 390 px, día y semana quedaron con `scrollWidth=clientWidth=bodyWidth=390`, sin overflow horizontal y sin errores de consola ni solicitudes fallidas.
+- [x] Filtros de Agenda enviados por formulario: profesional, servicio, estado y fecha llegaron a una URL reproducible; la respuesta directa del Worker fue `200` en 3,859 s y conservó los filtros. Los estados ofrecidos para `Cualquier día` fueron exactamente `Todos`, `Reservado`, `Confirmado` y `Reprogramar`; `Cancelado` quedó excluido.
+- [x] Búsqueda con fixture sintético futuro en el consultorio real: el nombre produjo un resultado próximo y el sufijo telefónico produjo el mismo resultado; la diferencia inicial de mayúsculas en el encabezado (`PRÓXIMOS` frente a una aserción `Próximos`) fue un error de aserción, no de la aplicación. Se verificó también la lista por día explícito, `Cualquier día`, búsqueda sin resultados y vista semanal de siete días.
+- [x] Agenda móvil a 390 px: día y semana mantuvieron `scrollWidth=clientWidth=bodyWidth=390`, sin overflow horizontal, errores de consola ni solicitudes fallidas. El fixture futuro se eliminó por ID y la relectura devolvió cero pacientes y cero turnos sintéticos.
+- [x] La búsqueda local mostró el resultado inmediatamente y la respuesta asíncrona no dejó carreras ni resultados viejos en la corrida funcional. La primera lectura negativa se debió a hidratar antes de tiempo y a seleccionar el `h2` de ayuda en lugar del `h1`; se repitió con espera de `networkidle` y selectores semánticos.
+
+### Samsung físico — prueba de push y recordatorio de dos horas en producción
+
+- [x] Precondición confirmada: ADB inalámbrico conectado a `192.168.100.30:33279`, dispositivo físico `SM_A715F`, Chrome 151, CDP disponible por `127.0.0.1:9222`; el teléfono estaba desbloqueado para la corrida definitiva.
+- [x] Se creó un único paciente y turno sintéticos en `Consultorio Ramirez`, a 95 minutos del instante de prueba, con servicio y profesional reales del consultorio. El turno se usó sólo durante esta corrida y se limpió por IDs exactos.
+- [x] La lectura HTTP directa del enlace público del turno respondió `200` desde Cloudflare, con `server: cloudflare` y `cf-ray`; el HTML contenía los datos del turno.
+- [x] El enlace abierto en Chrome físico mostró `h1=Tu turno`, permiso de notificaciones `granted` y un service worker registrado. Como el permiso ya estaba concedido, la interfaz sincronizó automáticamente la suscripción y no mostró el botón inicial; la prueba quedó en la pregunta de recepción, que es el estado correcto para un dispositivo ya autorizado.
+- [x] La notificación de prueba fue visible en la bandeja real de Android con título `Notificaciones activadas` y cuerpo neutral `Esta es una prueba de Consultorio Ramirez.`. La respuesta POST de la ruta push fue `200`; el proveedor push respondió `201`; la fila de entrega quedó `accepted`, `received` y `displayed`, sin fallo ni endpoint muerto.
+- [x] Se pulsó `Sí, la recibí` en el portal físico. La UI mostró `Recordatorio activado` y la fila de entrega quedó confirmada por el usuario. No hubo errores de consola ni solicitudes fallidas en la corrida.
+- [x] Se consultó la configuración real de cron-job.org (job `7795525`): habilitado, método POST, URL del Worker Cloudflare, cada 10 minutos en UTC (`00,10,20,30,40,50`), timeout de 30 s. El historial REST devolvió 50 ejecuciones; las últimas cinco fueron `status=1`, `OK`, HTTP `200`, con duraciones entre 3,517 y 3,980 ms.
+- [x] Se invocó una vez el endpoint configurado usando el secreto vigente almacenado en la configuración del job, sin imprimirlo. La respuesta fue HTTP `200`: `push.configured=true`, `claimed=1`, `sent=1`, `failed=0`, `deadEndpoints=0`; reseñas y calendario no reclamaron filas. Esto demuestra el disparo real, la autenticación, el claim y el envío, no sólo la existencia del endpoint.
+- [x] El recordatorio de dos horas apareció en la bandeja real del Samsung; la fila de suscripción quedó con `push_2h_sent_at` y `failed_count=0`, y la entrega push quedó aceptada por el proveedor (`201`) sin fallo ni endpoint muerto.
+- [ ] Observabilidad pendiente: dentro de los 12 s de la comprobación, la entrega de dos horas todavía no había escrito `received_at`/`displayed_at`, aunque Android ya mostraba el aviso y el proveedor lo había aceptado. Debe repetirse con una ventana de observación mayor o con trazas del service worker antes de declarar cerrada la telemetría del recordatorio.
+- [x] Se probaron también las defensas del job: POST sin secreto `401`, POST con secreto incorrecto `401` y GET con secreto correcto `405` (`GET method not allowed`).
+- [ ] Hallazgo de operación: cron-job.org tiene `onFailure=false`; sólo está activa la alerta de deshabilitación. La cadencia y las ejecuciones son correctas, pero no hay alerta automática ante un fallo individual del job.
+- [x] Limpieza: paciente, turno y dispositivo creado exclusivamente para esta corrida fueron eliminados; la relectura confirmó `patient=0` y `appointment=0`, y el dispositivo quedó eliminado al no conservar suscripciones. Los registros de auditoría no se borraron.
+
+### Incidencias de método registradas, sin convertirlas en bugs
+
+- [x] El primer arnés intentó buscar un botón de activación que no debía existir porque el permiso ya estaba concedido y la sincronización automática ya había llegado a `test_question`; se corrigió el método observando el estado real.
+- [x] Una sonda intermedia del enlace físico terminó en `ERR_CONNECTION_CLOSED`; la misma URL, una lectura HTTP directa y una navegación posterior con reintento respondieron correctamente desde Cloudflare. Se conserva como evento transitorio de red/edge, no como fallo funcional confirmado.
+
+### Verificación local posterior a la corrida
+
+- [x] `pnpm check`: `svelte-check found 0 errors and 0 warnings`.
+- [x] Suite Vitest completa, secuencial (`--maxWorkers=1`): 106 archivos, 813 tests, todos pasaron.
+- [x] Suite focalizada de push, service worker, recordatorios, Agenda, reserva pública y exportación: 10 archivos, 150 tests, todos pasaron.
+- [x] Relectura de residuos sintéticos en Supabase: pacientes, turnos, negocios, allowlist y seguimientos con patrones de auditoría devolvieron `0`.
+
+### Estado de los gates tras esta continuación
+
+- [x] Scheduler externo de `send-push-reminders` demostrado con configuración, cadencia, historial y una ejecución real con envío a un dispositivo físico.
+- [x] Chrome en Samsung físico y recordatorio de dos horas demostrados en el Worker Cloudflare activo.
+- [ ] Sigue sin estar demostrada la telemetría `received/displayed` del recordatorio de dos horas después de una ventana de observación ampliada.
+- [ ] Permanecen pendientes las variantes de push no ejecutadas en esta corrida (Samsung Internet, Firefox Android, Chrome/Edge desktop, permisos rechazado/bloqueado/recuperado, dos dispositivos, renovación de claves, respuestas 410/429/5xx, concurrencia, service worker viejo y clicks con página cerrada/abierta/múltiple).
+- [ ] El job externo no tiene alertas `onFailure`; debe configurarse o aceptarse explícitamente el riesgo antes del lanzamiento.
+
+## Registro de ejecución continuada — 2026-08-30 — cuenta profesional y BrowserStack iPhone
+
+### Comprobación proactiva de servicios por profesional
+
+- [x] Se inició sesión en el Worker Cloudflare con la cuenta de prueba y se abrió la sección real de profesionales. La URL `/odonto/profesionales` redirige a `/odonto/configuracion/usuarios` por diseño; los enlaces de `Ver profesional` llevaron a los dos profesionales existentes.
+- [x] Profesional `Juan Ramirez` (`cuentaprueba3@gmail.com`) comprobado con los siete servicios activos y públicos: `Blanqueo` (30 min), `Consulta` (30 min, desactivado por defecto), `Extraccion dental` (45 min, $60.000), `Limpieza dental` (30 min, $35.000), `Ortodoncia` (60 min, $2.250.000), `Otro servicio` (30 min, desactivado por defecto) y `Tratamiento` (30 min).
+- [x] Profesional `Jorge Martinez` (`jorgemartinez@gmail.com`) comprobado con la misma asignación de siete servicios. La consulta directa de Supabase confirmó dos profesionales activos/públicos, siete servicios activos/públicos y 14 filas de `professional_services` (siete por profesional); no hay un profesional del consultorio sin servicios.
+- [x] La disponibilidad también fue revalidada: Jorge tiene reglas de lunes a viernes de 09:00 a 17:00 y domingo de 09:00 a 13:00; Juan tiene reglas todos los días de 00:00 a 23:59. No hubo errores de consola durante la comprobación.
+- [x] El primer resultado que parecía indicar un profesional sin servicios era una selección incorrecta del filtro `Un profesional` en el arnés, no un estado de datos ni una falla de la cuenta.
+
+### iPhone real en BrowserStack + Playwright contra Cloudflare
+
+- [x] Se abrió una sesión real de iPhone 15 Pro Max con iOS 17 mediante BrowserStack/Playwright, sin imprimir usuario, access key, cookies ni tokens. El plan respondió correctamente y no dejó sesiones colgadas.
+- [x] La página pública del consultorio respondió `200`, mostró el título `Reservar turno · Consultorio Ramirez`, los pasos de reserva y los siete servicios. La sesión inicial no tuvo fallos de red.
+- [x] Se recorrió la reserva completa seleccionando un servicio, un profesional real (no el filtro `Un profesional`), día, horario, nombre alfabético válido, teléfono y correo. El POST de confirmación respondió `200` y el portal mostró `Tu turno quedó reservado` con el resumen y sus acciones.
+- [x] Se comprobó la persistencia después de recargar: la ruta real evaluada en el contexto del navegador fue `/turno/<token>?creado=1`, el portal siguió visible, el formulario no reapareció y no hubo errores de consola ni solicitudes fallidas en la corrida válida.
+- [x] Se eliminaron por IDs exactos los pacientes y turnos sintéticos creados en las corridas de iPhone; la relectura posterior confirmó cero restos conocidos.
+- [ ] Hallazgo de compatibilidad: una sesión iOS registró el mensaje CSP `Refused to apply a stylesheet because its hash, its nonce, or 'unsafe-inline' does not appear in style-src`. No impidió el flujo ni generó solicitudes fallidas, pero debe revisarse el origen de ese estilo inline antes de cerrar el gate CSP/iOS.
+- [x] La discrepancia ocasional entre `page.url()` del adaptador BrowserStack y la URL observada con `location.href` se aisló al adaptador de la sesión; el navegador y la pantalla sí estaban en el portal correcto tras la navegación.
+
+### Actualización de alcance
+
+- [x] La cuenta real, el Samsung físico y el iPhone BrowserStack fueron comprobados después de las corridas históricas; los resultados de esta sección superseden únicamente la afirmación histórica de “dispositivo no probado”.
+- [ ] Esto no cierra por sí solo la accesibilidad WCAG, los cinco usuarios representativos por rol, Safari físico, permisos push iOS ni las pruebas de interrupción/offline, que siguen requiriendo sus recorridos específicos.
+
+## Registro de ejecución continuada — 2026-08-30 — cambio de versión Cloudflare detectado durante la auditoría (antecedente)
+
+Esta sección conserva la evidencia de la versión `37ed...` que estuvo al 100 % durante ese
+corte. El candidato final `3ed7...` y su deployment posterior tienen precedencia en las
+relecturas fechadas más abajo.
+
+- [x] La relectura de `wrangler deployments list` detectó un deployment posterior al candidato documentado: deployment `4665f...`, versión `37ed...`, al 100 %, creado el 30 de agosto a las 22:56 UTC, con mensaje `Updated secret INTERNAL_JOB_SECRET`.
+- [x] `wrangler versions view` confirmó que la versión nueva mantiene `fetch`, `nodejs_compat`, `ASSETS` y `PUBLIC_SITE_URL=https://app.cita-suite.workers.dev`. El HTML público actual sigue sirviendo los assets de la candidata (`app.DywMcSLn.js` y `start.C3zEUM2s.js`) y ya no sirve los hashes antiguos.
+- [x] La prueba definitiva de Samsung, el cron real y los smokes HTTP posteriores se ejecutaron después de ese deployment y por lo tanto cubren el artefacto que hoy atiende tráfico, incluido el secreto operativo vigente.
+- [ ] Trazabilidad pendiente: la versión `37ed...` no tiene tag ni mensaje con commit/SHA del Worker; que sus assets coincidan con la candidata demuestra sólo la parte estática observada, no una identidad criptográfica completa del bundle server-side. Debe etiquetarse o correlacionarse antes de declarar cerrado G0.
+- [ ] Deriva de configuración detectada y registrada sin exponer secretos: el `INTERNAL_JOB_SECRET` local y el secreto configurado en cron-job.org están presentes pero no coinciden. El endpoint productivo funciona con el secreto del job (POST real `200`), pero cualquier operador que invoque el job desde el `.env` local recibirá `401` hasta alinear el procedimiento o documentar formalmente la separación.
+- [x] El deployment posterior no se trató como una regresión silenciosa: se repitieron smoke HTTP, activación push física, envío de 2 horas y defensas `401/405` contra la versión realmente activa.
+- [x] Contra la versión `37ed...` actualmente al 100 % se repitió `odonto.full.spec.ts` con un worker y sin override: **1/1 pasó en 46,7 s**. Incluyó login, configuración, catálogo, exclusión de profesional/servicio sin disponibilidad, reserva pública, portal, confirmación, Agenda y rechazo de solapamiento.
+- [x] Contra esa misma versión vigente se repitieron secuencialmente las suites destructivas: `roles-agenda-regression.spec.ts` **2/2**, `patients-appointments-ux.spec.ts` **5/5** y `seguimientos.spec.ts` **5/5**, sin fallos y con un solo worker.
+- [x] `odonto.smoke.spec.ts` contra la versión vigente: **1/1 pasó**; los dos escenarios de demo quedaron omitidos de forma explícita porque `DEMO_MODE=false`, no por un fallo oculto.
+- [x] `account-assistance.spec.ts` contra la versión vigente: **1/1 pasó en 36,7 s** con la contraseña maestra del entorno, sin imprimir credenciales.
+- [x] `commercial-lock.spec.ts`, `mobile-navigation-ux.spec.ts` y `login-register-ux.spec.ts` contra la versión vigente: **2/2**, **1/1** y **1/1** pasaron respectivamente, en ejecución secuencial.
+- [x] Relectura posterior de ese E2E en el negocio real: pacientes `E2E*`/`Pruebaautomatizada*`, servicios `E2E*`, profesionales `E2E*` y turnos con snapshots E2E devolvieron `0`.
+- [x] Crawl autenticado actual de diez rutas críticas: Agenda, Pacientes, Seguimientos, Recordatorios, Usuarios, Comunicación, Negocio, Reseña de Google y Papelera respondieron `200`; la ruta deliberadamente inexistente `/odonto/configuracion/equipo` respondió `404` como corresponde. No hubo errores JavaScript en las rutas válidas.
+- [x] Los cuatro `ERR_ABORTED` observados en el crawl fueron cancelaciones de requests de datos durante navegación (`/odonto/agenda/referencias`, precarga de Agenda, revisión de Pacientes y lista de Papelera); coincidieron con navegación terminada y no se trataron como 5xx ni como errores funcionales.
+- [x] Relectura amplia posterior a todas las suites actuales: negocios `e2e-*`, `allowed_emails` E2E, invitaciones E2E, negocios clínicos E2E y pacientes del fixture físico devolvieron `0`; no quedó un fixture de esta continuación sin limpiar.
+
+## Registro de ejecución continuada — 2026-08-30 — exportación repetida contra la versión activa en ese corte (antecedente)
+
+Esta entrada se agrega porque la versión que quedó al 100 % en Cloudflare cambió durante la auditoría. La exportación que figuraba antes en el documento no se toma como evidencia suficiente de esa versión nueva; se repitieron ambos alcances directamente contra `https://app.cita-suite.workers.dev` y se conservaron los resultados.
+
+### Exportación individual
+
+- [x] Se obtuvo una sesión Supabase válida con la cuenta de prueba y se inyectaron únicamente las cookies de sesión esperadas por el Worker; no se imprimieron tokens, cookies ni credenciales.
+- [x] `/odonto/exportar-datos?patient_id=...` abrió el paciente real del consultorio de prueba y la interfaz mostró el estado inicial correcto.
+- [x] La preparación devolvió `201`; las seis hojas (`patients`, `custom_fields`, `clinical_entries`, `appointments`, `appointment_professionals`, `follow_ups`) y `validaciones` devolvieron `200`.
+- [x] La interfaz llegó a `Archivo listo` con conteos `Pacientes 1`, `Datos adicionales 0`, `Historia clínica 0`, `Turnos 1`, `Profesionales de turnos 1`, `Seguimientos 0`; no quedó ninguna sesión `active` antes ni después.
+- [x] Se recibió la descarga `datos-paciente-20260831-0225.xlsx` de 10.901 bytes. El ZIP XLSX incluyó `xl/workbook.xml` y ocho hojas; la inspección del contenido comprimido no encontró UUID internos.
+- [x] No hubo errores de consola. Una solicitud de `clinical_entries` quedó como `ERR_ABORTED` en el navegador después de responder `200` y la orquestación terminó con archivo válido; se conserva como cancelación de transporte observada, no como fallo silencioso.
+
+### Exportación completa
+
+- [x] `/odonto/exportar-datos` se abrió con la misma sesión y sin modificar datos del consultorio.
+- [x] La preparación devolvió `201`; las seis hojas y `validaciones` devolvieron `200`.
+- [x] La interfaz llegó a `Archivo listo` con `Pacientes 18`, `Datos adicionales 0`, `Historia clínica 5`, `Turnos 21`, `Profesionales de turnos 21`, `Seguimientos 0`; las sesiones activas fueron `0` antes y después.
+- [x] Se recibió `datos-pacientes-20260831-0226.xlsx` de 14.020 bytes. El ZIP XLSX incluyó `xl/workbook.xml` y ocho hojas; la inspección del contenido comprimido no encontró UUID internos.
+- [x] No hubo errores de consola. Cuatro solicitudes (`patients`, `appointments`, `appointment_professionals`, `follow_ups`) quedaron como `ERR_ABORTED` después de responder `200`, mientras la orquestación terminó correctamente; se documentan para observabilidad del transporte y no se clasifican como error funcional.
+
+### Registro y límites
+
+- [x] La prueba cubre la versión que atiende tráfico actualmente (`37ed...` / deployment `4665f...`) y cierra la omisión de exportación de esa versión.
+- [x] Se verificó que no quedaran sesiones de exportación activas y no se borraron registros de auditoría.
+- [ ] La observación de `ERR_ABORTED` de hojas sigue siendo un residuo de red/navegación a vigilar en métricas; los códigos HTTP `200`, la validación y el archivo final demuestran que no interrumpió ninguna de las dos exportaciones.
+
+## Registro de ejecución continuada — 2026-08-30 — acciones públicas contra la versión activa en ese corte (antecedente)
+
+Se repitieron cancelar y pedir reprogramación con dos turnos sintéticos en el consultorio real, creados con fechas futuras y eliminados por sus IDs al finalizar. La prueba se ejecutó sin sesión interna para representar al paciente que recibe el enlace.
+
+- [x] El pedido público de reprogramación respondió `200` y mostró `Pedido de reprogramación recibido.`.
+- [x] La relectura del turno confirmó `status=reschedule_requested` y `reschedule_requested_at` no nulo; el registro de auditoría `appointment.public_reschedule_requested` quedó presente.
+- [x] Tras recargar, el portal mostró `Quiere reprogramar`; una sonda adicional de la misma versión no encontró el botón `Enviar pedido` para volver a solicitarla. La sección/estado que pueda permanecer durante la hidratación no expone una acción efectiva.
+- [x] La cancelación pública respondió `200` y mostró `Turno cancelado.`.
+- [x] La relectura confirmó `status=cancelled`, `cancelled_at` no nulo y conservó el motivo enviado; el registro `appointment.public_cancelled` quedó presente.
+- [x] Tras recargar un turno cancelado, no aparecieron las acciones `Cancelar turno` ni `Necesito reprogramar`; el portal mostró el estado cancelado.
+- [x] No hubo errores de consola ni `pageerror`. Una cancelación de navegación SvelteKit (`ERR_ABORTED` en `__data.json`) ocurrió después de la respuesta exitosa y no alteró el resultado.
+- [x] La limpieza exacta eliminó los dos turnos y el paciente sintético; la relectura devolvió `0` pacientes con el marcador de esta corrida.
+
+## Registro de ejecución continuada — 2026-08-30 — smoke HTTP público final del Worker vigente
+
+- [x] Un token público sintético válido respondió `200` desde Cloudflare con `cache-control: no-store`, `referrer-policy: no-referrer`, CSP explícita, `server: cloudflare` y `cf-ray`.
+- [x] Los alias `/confirmar/<token>`, `/cancelar/<token>` y `/reprogramar/<token>` respondieron `303` y redirigieron al mismo `/turno/<token>` con `accion=confirmar`, `accion=cancelar` y `accion=reprogramar`, respectivamente.
+- [x] El calendario ICS respondió `200`, `text/calendar; charset=utf-8; method=PUBLISH`, `inline`, `no-store`, 1.083 bytes y contenido `BEGIN:VCALENDAR`.
+- [x] El comprobante PDF respondió `200`, `application/pdf`, `attachment`, `no-store`, 1.537 bytes y firma `%PDF` válida.
+- [x] Un token UUID inexistente respondió una página humana `200` con el estado de enlace no disponible, sin mostrar resumen ni datos del consultorio; también quedó `no-store`.
+- [x] La petición HTTP sin TLS respondió `302` hacia `https://app.cita-suite.workers.dev/login`; no se aceptó contenido operativo por HTTP.
+- [x] La ruta protegida deliberadamente inexistente, sin autenticación, respondió `303` a `/login`; su respuesta autenticada `404` ya está registrada en el crawl vigente, por lo que no se confundió el control de acceso con la inexistencia de la ruta.
+- [x] El fixture de token, paciente y turno se eliminó por ID al finalizar; no se conservaron URLs públicas ni datos de prueba en el registro.
+
+## Hallazgo corregido durante la verificación — cleanup del arnés E2E
+
+- [x] La relectura después de la batería completa encontró tres profesionales sintéticos recientes (`E2E Profesional …`, `E2E Sin horarios …` y `E2E No ofrece …`) en el consultorio de prueba, IDs `2d7815f9-9d3b-4f77-b514-ae179cc05279`, `4e385760-bc5f-4920-9ada-e4b8d68aef24` y `c83c9380-2c03-4c75-98e4-19cd5562d7d0`. No tenían filas en `professional_services`, `availability_rules` ni `appointments`; eran residuos del arnés, no datos clínicos ni un fallo del producto.
+- [x] Se comprobó la causa: los filtros REST del cleanup usaban `like.E2E*`. En PostgREST, ese `*` se estaba tratando como texto literal y la consulta devolvía cero aunque los nombres existieran.
+- [x] Se corrigieron, mediante cambios mínimos y sólo en los helpers de prueba, los filtros a `ilike.E2E%25`/`ilike.%25HeadlessChrome%25` en `odonto.full.spec.ts`, `cleanup-e2e-fixtures.mjs` y `seguimientos.spec.ts`.
+- [x] `pnpm check` posterior a la corrección terminó con 0 errores y 0 warnings.
+- [x] Se repitió `odonto.full.spec.ts` contra el Worker vigente, `--workers=1 --retries=0`: **1/1 pasó en 43,2 s**.
+- [x] La relectura posterior a esa repetición confirmó `0` profesionales E2E, `0` servicios E2E, `0` pacientes sintéticos, `0` negocios E2E y `0` sesiones de exportación activas. La corrección evita repetir el residuo en futuras corridas.
+- [x] Los tres profesionales residuales iniciales fueron eliminados por sus IDs exactos, luego de verificar cero dependencias; la relectura confirmó `remaining=0`. No se ejecutó ninguna purga por prefijo amplio.
+- [x] El script de limpieza en modo dry-run (`node apps/web/scripts/cleanup-e2e-fixtures.mjs`) volvió a consultar los filtros corregidos y mostró `profesionales: 0`, `servicios: 0`, `pacientes: 0`; no borró nada en esta comprobación.
+
+## Registro de ejecución continuada — 2026-08-30 — batería completa vigente sin override
+
+- [x] Se ejecutó la suite completa de `apps/web/e2e` contra `https://app.cita-suite.workers.dev`, sin `Cloudflare-Workers-Version-Overrides`, con `CI=1`, `E2E_ALLOW_DESTRUCTIVE=true`, `--workers=1` y `--retries=0`.
+- [x] Resultado: **22 passed, 5 skipped, 0 failed**, en 5,9 minutos. El código de salida fue `0`.
+- [x] La corrida incluyó los casos destructivos permitidos con fixtures sintéticos, además de los casos seguros y la auditoría UX de pacientes; no se abrió una segunda corrida ni se reinterpretó un retry como aprobación.
+- [x] Los cinco skips fueron explícitos y trazables: tres pruebas de archivos clínicos que exigen Supabase local y dos casos que exigen `E2E_GOOGLE_REAL`/credenciales Google reales. No hubo skips silenciosos ni fallos en los 22 casos ejecutados.
+- [x] Se volvió a observar `real_patient_search_local_render_ms=28`; la advertencia `NO_COLOR` no afectó el resultado.
+- [x] El proceso se ejecutó de forma secuencial y terminó normalmente; los artefactos/fixtures y su relectura quedan cubiertos por las secciones de cleanup y residuos de esta auditoría.
+
+## Relectura de deployment y residuos — 2026-08-30 (antecedente de la rotación posterior)
+
+- [x] `wrangler deployments list --name app --json` volvió a mostrar el deployment `4665f770-ed11-4911-99ab-ad79de9c9eff` con la versión `37ed62d5-b4c5-4138-8518-209f874b4962` al `100 %`; no se detectó un cambio de tráfico mientras se ejecutaban las últimas pruebas.
+- [x] La batería posterior, la exportación, las acciones públicas y el smoke HTTP se ejecutaron contra ese mismo dominio y sin override de versión.
+- [x] La limpieza dry-run y la consulta directa posterior devolvieron cero profesionales/servicios/pacientes E2E, cero negocios con slug E2E y cero sesiones de exportación activas; los únicos registros conservados son auditorías de prueba y artefactos de evidencia.
+- [x] `git diff --check` volvió a terminar sin errores después de incorporar todo este registro.
+
+## Observabilidad Cloudflare — prueba de tail en tiempo real (antecedente de la versión 37ed...)
+
+- [x] Se abrió una sesión real `wrangler tail app --format json --status ok --sampling-rate 0.99` y, durante esa ventana, se solicitó `/login` del dominio público.
+- [x] Se recibió un evento de invocación parseable del Worker: `outcome=ok`, `response.status=200`, `scriptName=app`, versión `37ed62d5-b4c5-4138-8518-209f874b4962`, `cpuTime=6 ms`, `wallTime=19 ms`, `truncated=false`, cero excepciones y cero logs de error. El ingress observado fue `ORD`/Estados Unidos; no se lo generaliza a todos los PoP.
+- [x] Esto demuestra que `wrangler tail` puede observar en vivo la versión que atiende tráfico y que la respuesta controlada no produjo una excepción Worker.
+- [ ] El gate de observabilidad no queda totalmente cerrado: `wrangler.jsonc` aún no declara `observability`, no se configuró sampling 100 % persistente durante una ventana completa y no existe un dashboard/alerta de 5xx, CPU, memoria y p99 documentado. El evento aislado es evidencia parcial, no una certificación operativa global.
+
+## Índice de trazabilidad — ejecuciones realizadas y dónde quedó cada evidencia
+
+Este índice existe para que ninguna hora de pruebas quede separada de su registro. Cada fila apunta a la sección narrativa correspondiente de este mismo archivo; los skips, errores de método, abortos esperados, rate limits y gates pendientes se conservaron como estado, no se ocultaron.
+
+- [x] Preparación y congelamiento: versiones de Node/pnpm/Supabase CLI/Wrangler/Playwright, SHA de código, lockfile, migraciones, build Cloudflare, dry-run de assets, `pnpm check`, auditoría de dependencias y `git diff --check` — registrados en `Control de ejecución`, `1. Congelar el candidato` y `2. Validación local secuencial`.
+- [x] Base de datos: reset local, pgTAP, scripts de concurrencia (asociación, identidad, cupo público, límite clínico, exportación/lock y resolución pública) — registrados en `3. Base de datos y recuperación` y `Registro de ejecución — 2026-08-30`.
+- [x] E2E local: `clinical-files.spec.ts`, `roles-agenda-regression.spec.ts` y `odonto.full.spec.ts`, todos en un worker, con cleanup exacto — registrados en `Verificación secuencial posterior`.
+- [x] Cloudflare candidato al 0 % y luego promovido: corridas generales, destructivas, clínicas remotas, smoke, rate limit, version override y relectura de residuos — registrados en `Cloudflare candidato y tráfico real`.
+- [x] Cloudflare versión vigente al 100 % (`37ed...`/`4665f...`): `odonto.full.spec.ts` 1/1, roles 2/2, pacientes/turnos 5/5, seguimientos 5/5, smoke 1/1, ayuda maestra 1/1, bloqueo comercial 2/2, navegación móvil 1/1, login/registro 1/1 y crawl autenticado — registrados en `cambio de versión Cloudflare detectado durante la auditoría`.
+- [x] Exportación individual y completa contra la versión vigente: respuestas 201/200, validaciones, descarga XLSX, hojas, conteos, ausencia de UUID, sesiones activas en cero y abortos de transporte posteriores a 200 — registrados en `exportación repetida contra la versión actualmente activa`.
+- [x] Agenda vigente: vistas día/semana, navegación, búsqueda, referencias, filtros, query params, resultados por nombre/teléfono, estados, móvil 390 px, relectura y cleanup — registrados en `exportación productiva y preparación de Agenda`.
+- [x] Cuenta real de profesionales: los dos profesionales de la cuenta, los siete servicios públicos y 14 asignaciones, disponibilidad y causa del falso hallazgo del arnés — registrados en `cuenta profesional y BrowserStack iPhone`.
+- [x] BrowserStack: iPhone 15 Pro Max/iOS 17 con Playwright, reserva pública completa, recarga del portal, red, consola y cleanup; el mensaje CSP iOS quedó como residuo abierto — registrado en `cuenta profesional y BrowserStack iPhone`.
+- [x] Samsung físico: ADB inalámbrico, Chrome 151, enlace público, permiso y service worker, receipt de prueba, notificación real, recordatorio de dos horas, confirmación humana, base de datos, cleanup y defensas 401/405 — registrado en `Samsung físico — prueba de push y recordatorio de dos horas en producción`.
+- [x] Scheduler externo: configuración de cron-job.org, cadencia de diez minutos, 50 ejecuciones históricas, cinco últimas exitosas, invocación real autenticada y resultado `claimed/sent/failed/deadEndpoints` — registrado en la misma sección de Samsung; la alerta `onFailure=false` permanece pendiente.
+- [x] Acciones públicas: pedido de reprogramación y cancelación en portal sin sesión interna, HTTP 200, mensajes, estados persistidos, timestamps, motivos, auditoría, desaparición de acciones terminales y cleanup — registrado en `acciones públicas contra la versión actualmente activa`.
+- [x] Relecturas y residuos: filtros exactos de pacientes, turnos, negocios, allowlist, invitaciones, seguimientos, negocios clínicos, usuarios Auth, sesiones de exportación y marcadores de esta continuación — registrados en cada sección de cleanup y en `Verificación local posterior a la corrida`.
+- [x] Seguridad de registro: no se imprimieron credenciales, cookies, tokens, claves ni URLs firmadas; los registros conservan sólo valores sanitizados — indicado en cada sección y en `Evidencia y reporte`.
+- [x] Ampliación de navegadores: intento inicial de Firefox por binario incorrecto, instalación del binario fijado, corrida completa final 22/27 con cinco skips explícitos, corrección del arnés responsive, repeticiones Firefox/Chromium 2/2, sondas de validación y bloqueo WebKit por dependencias del host — registrado en `Firefox, WebKit y cierre de la matriz de navegadores`.
+- [x] Resultado de la revisión de registro: todas las ejecuciones listadas arriba tienen resultado explícito; las casillas que siguen sin marcar representan cobertura no ejecutada, evidencia no suficiente o un gate que deliberadamente no se puede cerrar todavía. La decisión global continúa **NO-GO**.
+
+## Registro de ejecución continuada — 2026-08-31 — Firefox, WebKit y cierre de la matriz de navegadores
+
+Esta sección deja asentado el intento de ampliar la verificación al motor Firefox y al
+motor WebKit. Los resultados de infraestructura, las limitaciones del arnés y las
+repeticiones posteriores quedan separados de los resultados de la aplicación para no
+convertir una prueba no ejecutada en una aprobación.
+
+**Nota de precedencia:** el bloque inicial `Control de ejecución` y las secciones
+históricas conservan deliberadamente el snapshot que existía cuando se creó el plan.
+Para la decisión actual deben leerse en conjunto las continuaciones fechadas más abajo,
+que registran el deployment vigente `37ed...`/`4665f...` y todas las repeticiones
+posteriores; no se borró ni se reescribió ningún dato histórico.
+
+### Firefox en Chromium Playwright
+
+- [x] Se intentó inicialmente la suite completa de Firefox con un worker. El proceso no llegó a abrir el navegador porque Playwright 1.60 buscaba `firefox-1522` y sólo estaba instalado `firefox-1538`; las 14 salidas fueron fallos de lanzamiento de infraestructura y no se contaron como fallos del producto.
+- [x] Se instaló el binario exacto requerido por la versión fijada de Playwright (`firefox v1522`, Firefox 150.0.2) sin modificar el código de producción.
+- [x] La suite completa posterior se ejecutó con `--browser=firefox --workers=1 --retries=0` contra `https://app.cita-suite.workers.dev`: **19 pasaron, 5 se omitieron explícitamente y 3 quedaron registrados como fallos de ejecución**.
+- [x] Dos de esos tres fallos fueron `browser.newContext: options.isMobile is not supported in Firefox` en `mobile-navigation-ux.spec.ts` y `patients-real-ux-audit.spec.ts`; se clasificaron como incompatibilidad declarativa del arnés, no como error funcional de la aplicación.
+- [x] El tercer fallo de la corrida completa fue `odonto.full.spec.ts`, que agotó el tiempo esperando el portal mientras seguía en el formulario de reserva. Se conservó la traza y la captura; no se lo cerró como aprobado por el mero hecho de ser aislado.
+- [x] Se repitió `odonto.full.spec.ts` aislado en Firefox, un worker y sin reintentos: **1/1 pasó en 44,7 s**, con creación de reserva, portal y verificaciones posteriores.
+- [x] Se ejecutó una sonda Firefox independiente con nombre inválido que fue rechazada por la validación de nombre (`checkValidity=false`, sin POST); se verificó que el rechazo es intencional y que el formulario muestra el mensaje humano correspondiente.
+- [x] Se ejecutaron dos sondas Firefox independientes con nombres alfabéticos válidos, incluido el formato largo usado por el arnés: ambas llegaron al portal, recibieron POST `200` y no produjeron errores de consola ni `pageerror`; los fixtures se eliminaron por ID y se releyeron como inexistentes.
+- [x] Se corrigió únicamente el arnés para que las pruebas responsive no dependan de `isMobile`: se conserva viewport táctil de `390×844`, se omite la opción no soportada por Firefox y se mantiene la cobertura de layout. No se cambió código de la aplicación ni el Worker publicado.
+- [x] Después de esa corrección, `mobile-navigation-ux.spec.ts` y `patients-real-ux-audit.spec.ts` se repitieron en Firefox, secuencialmente: **2/2 pasaron**; la búsqueda local informó `real_patient_search_local_render_ms=71` y no quedaron fixtures sintéticos.
+- [x] Las mismas dos pruebas se repitieron en Chromium después del ajuste del arnés: **2/2 pasaron** en 22,0 s; la búsqueda local informó `real_patient_search_local_render_ms=40`.
+- [x] Se repitió la suite completa de Firefox después de corregir el arnés: `--browser=firefox --workers=1 --retries=0`, 27 casos, **22 pasaron, 5 skips explícitos y 0 fallos**, en 6,1 minutos. Los cinco skips siguen siendo los tres casos de archivos clínicos que exigen Supabase local y los dos de Google real que exigen credenciales autorizadas.
+- [ ] La corrida completa de 27 casos no queda marcada como totalmente limpia: conserva el registro del fallo transitorio/no reproducible de `odonto.full` y los cinco skips explícitos (tres archivos clínicos que exigen Supabase local y dos Google real que exigen credenciales autorizadas). La repetición aislada y las pruebas específicas posteriores reducen el riesgo, pero no sustituyen una nueva corrida total si se exige cero fallos históricos en el mismo artefacto del arnés.
+
+### WebKit local
+
+- [x] Se instaló el binario WebKit fijado por Playwright para intentar la cobertura del motor Safari local.
+- [x] La ejecución de `odonto.full.spec.ts` en WebKit no llegó a iniciar el navegador: el host carece de `libgstreamer-plugins-bad1.0-0`, `libavif16` y `libwoff1`.
+- [x] `playwright install-deps webkit` fue intentado; el instalador se detuvo porque requiere `sudo` interactivo y no se proporcionó contraseña desde el entorno de pruebas. No se alteró el sistema operativo ni se simuló una aprobación.
+- [ ] WebKit local queda **no ejecutado por bloqueo de infraestructura**, no aprobado ni fallido funcionalmente. La cobertura real de iPhone en BrowserStack ya está registrada por separado, pero no reemplaza la ejecución del motor WebKit local si el gate exige ambos.
+
+### Estado de esta ampliación
+
+- [x] Todos los intentos, fallos de lanzamiento, skips, cambios mínimos del arnés, repeticiones, tiempos y limpiezas de Firefox/WebKit quedan registrados en este archivo.
+- [x] La modificación del arnés volvió a pasar `pnpm check`: `svelte-check found 0 errors and 0 warnings`; no cambia el artefacto Cloudflare actualmente publicado (`37ed...`). Las pruebas continuaron ejecutándose con un solo worker por la restricción de memoria del equipo.
+- [x] El dry-run posterior a la suite completa de Firefox volvió a leer la base por filtros acotados: `profesionales: 0`, `servicios: 0`, `pacientes: 0`; no fue necesario borrar ningún residuo.
+- [x] Como cierre del cambio del arnés, se repitió la suite completa de Chromium contra la misma versión Cloudflare al 100 %: `--browser=chromium --workers=1 --retries=0`, 27 casos, **22 pasaron, 5 skips explícitos y 0 fallos**, en 5,8 minutos; `real_patient_search_local_render_ms=22`.
+- [x] El dry-run posterior a esa corrida Chromium volvió a mostrar `profesionales: 0`, `servicios: 0`, `pacientes: 0`; no quedó ningún fixture conocido.
+- [x] La relectura de Cloudflare posterior (`wrangler deployments list --name app --json`, ordenada por fecha) confirmó que sigue al 100 % el deployment `4665f770-ed11-4911-99ab-ad79de9c9eff` con la versión `37ed62d5-b4c5-4138-8518-209f874b4962`; no hubo cambio de tráfico durante esta ampliación.
+- [x] `pnpm audit --audit-level=high` volvió a terminar con `No known vulnerabilities found`.
+- [ ] La matriz de navegadores no puede declararse cerrada mientras WebKit local siga bloqueado y la corrida total de Firefox conserve el fallo histórico no reproducible; el estado global de lanzamiento continúa **NO-GO**.
+
+## Registro de autorización e instrucciones del usuario — 2026-08-31
+
+Esta sección fija el alcance operativo vigente para las siguientes corridas. No cambia
+ningún resultado anterior ni convierte una prueba pendiente en aprobada.
+
+### REGLA CENTRAL (texto literal)
+
+> Pacientes, turnos, profesionales, consultorios, emails y archivos actuales son descartables.
+>
+> 1. Puedo crearlos, alterarlos, archivarlos o eliminarlos libremente durante las pruebas.
+> 2. Lo protegido es el código, las migraciones, funciones, triggers, RLS, grants, constraints, Storage, secretos, configuración de Cloudflare y capacidad futura de operar correctamente con pacientes reales.
+> 3. No ejecutaré DDL destructivo directamente sobre producción para “probar qué pasa”; eso se prueba en una base aislada construida desde migraciones.
+
+### Flexibilización autorizada el 2026-08-31
+
+El usuario aclara que la protección anterior no impide cambios operativos seguros: quedan
+autorizados los pushes a GitHub, los deploys de Cloudflare y las migraciones a Supabase
+cuando exista evidencia de alta seguridad. Cada uno exige antes un filtro explícito:
+checkout/commit y diff revisados, secretos fuera del artefacto, `pnpm check`, tests
+secuenciales aplicables, build reproducible y hash, destino identificado, compatibilidad
+con el rollback y verificación posterior del artefacto/estado remoto. No se hará ninguna
+promoción por comodidad ni se confundirá una autorización general con evidencia de que el
+cambio sea seguro.
+
+### Criterio adicional de reproducibilidad — precisión del usuario
+
+“Byte a byte” significa comparar literalmente el output que consume Cloudflare, no sólo
+observar el mismo comportamiento. Para cada build candidato se deben conservar los hashes
+de todos los archivos de `.svelte-kit/cloudflare` (o del bundle final que Wrangler sube),
+comparar sus valores sin que el nombre temporal del directorio contamine el resultado,
+revisar `version.json`, manifiestos, IDs, timestamps y metadata no determinista, y registrar
+el commit/hash exacto. Un E2E verde o dos respuestas equivalentes no sustituyen esta
+comparación binaria.
+
+### Autorización y criterios obligatorios
+
+- [x] El usuario autoriza ejecutar la cobertura pendiente con todos los accesos disponibles, respetando sin excepciones la REGLA CENTRAL.
+- [x] Se pueden crear, alterar, archivar y eliminar libremente los datos de prueba actuales, con manifiesto y relectura para conservar trazabilidad.
+- [x] Código, migraciones, funciones, triggers, RLS, grants, constraints, Storage, secretos, Cloudflare y capacidad futura quedan fuera de cualquier purga o DDL destructivo directo.
+- [x] Cuando una prueba directa esté bloqueada, se debe buscar una equivalencia técnica razonable (base aislada, versión no promovida, simulación controlada, contenedor, BrowserStack, dispositivo físico u otro runner), dejando claro qué propiedad demuestra y cuál no.
+- [x] No se deben repetir pruebas ya demostradas salvo que haya cambiado código, configuración, versión, navegador, dispositivo, datos o hipótesis; las nuevas corridas deben buscar bordes distintos.
+- [x] La auditoría debe cubrir código y comportamiento: los tests no sustituyen la revisión estática y la revisión estática no sustituye las pruebas operativas.
+- [x] Deben registrarse todos los comandos, versiones, entradas, salidas, tiempos, errores, skips, fallos de método, hipótesis, correcciones, reintentos, fixtures, IDs de cleanup, relecturas, artefactos y riesgos residuales.
+- [x] No se debe interrumpir una batería por comodidad; el proceso debe continuar secuencialmente mientras sea razonable y seguro para el código/configuración protegidos.
+- [x] La aceptación se juzga por seguridad clínica, privacidad, integridad futura y experiencia diaria del profesional, no sólo por código HTTP o tests verdes.
+
+### Cobertura solicitada después de retirar lo ya demostrado
+
+La siguiente matriz es el alcance explícito que el usuario pidió ejecutar con permiso
+absoluto. Cada línea conserva el objetivo; el estado se marcará sólo cuando exista
+evidencia verificable.
+
+#### Trazabilidad exacta y rollback real — crítico
+
+- [ ] Congelar un checkout limpio y un commit único.
+- [ ] Construir y calcular hashes reproducibles.
+- [ ] Publicar una versión Cloudflare etiquetada con commit y hash.
+- [ ] Confirmar que esa versión atiende el 100 %.
+- [ ] Probar mezcla de versiones durante despliegue gradual.
+- [ ] Ejecutar un rollback real y medir cuánto tarda la recuperación.
+
+#### Backup y restauración completa — crítico
+
+- [ ] Respaldar esquema, datos, Auth, metadata y Storage.
+- [ ] Restaurar todo en un Supabase aislado, nunca sobre producción.
+- [ ] Comparar conteos, relaciones y checksums.
+- [ ] Abrir en la aplicación restaurada pacientes, historias, turnos y radiografías.
+- [ ] Probar un backup incompleto o corrupto.
+- [ ] Medir RPO y RTO reales.
+
+#### Aislamiento entre consultorios y permisos — crítico
+
+- [ ] Crear consultorios A y B con datos deliberadamente parecidos.
+- [ ] Probar owner, admin, recepción, profesional vinculado, profesional no vinculado, readonly y maestro.
+- [ ] Atacar cada ruta por interfaz, URL directa, HTTP y RPC.
+- [ ] Intercambiar IDs, cookies, cursores y parámetros entre consultorios.
+- [ ] Revocar membresías y asistencia durante una sesión activa.
+- [ ] Confirmar que jamás se filtran datos clínicos, costos, imágenes o pacientes laterales.
+
+#### Concurrencia e integridad clínica — crítico
+
+- [ ] Dos altas iniciales simultáneas del mismo consultorio.
+- [ ] Dos pestañas creando o editando el mismo paciente.
+- [ ] Doble clic y respuesta perdida después del commit.
+- [ ] Cincuenta reservas concurrentes sobre el mismo horario.
+- [ ] Crear, cancelar y reprogramar simultáneamente.
+- [ ] Guardar historia mientras otro usuario archiva o modifica el paciente.
+- [ ] Eliminar registros entre carga y mutación.
+- [ ] Confirmar idempotencia, ausencia de falsos éxitos y cero duplicados.
+
+#### Autenticación, recuperación y sesiones — crítico
+
+- [ ] Login inválido, vacío, con espacios, mayúsculas y usuario inexistente.
+- [ ] Registro duplicado, contraseña débil y doble envío.
+- [ ] Recuperación por correo válida, vencida y reutilizada.
+- [ ] Sesión vencida durante cada mutación clínica.
+- [ ] Refresh de token, varias pestañas, logout remoto y revocación inmediata.
+- [ ] Cookies Secure, HttpOnly, SameSite, dominio, path y expiración.
+- [ ] Verificar que prefetch, crawlers o navegación externa no disparen logout.
+- [ ] Probar caída del rate limiter y de Supabase Auth sin mostrar falsos bloqueos.
+
+#### Seguridad ofensiva controlada — crítico
+
+- [ ] RLS e IDOR sobre todos los IDs y RPC.
+- [ ] CSRF en POST y GET con efectos.
+- [ ] XSS almacenado y reflejado en nombres, notas, historia, servicios y URLs.
+- [ ] Inyección SQL/PostgREST mediante filtros y cursores.
+- [ ] SSRF en logos, mapas, reseñas, Storage y redirects.
+- [ ] Path traversal, MIME falso y archivos polyglot.
+- [ ] Fuerza bruta, enumeración y bypass de rate limit.
+- [ ] Fuga de tokens, URLs firmadas, cookies o PII en logs, analytics, historial y referrer.
+- [ ] Secret scanning, SBOM y DAST seguro sobre staging.
+
+#### UX clínica y accesibilidad — crítico
+
+- [ ] Recorrer todas las tareas diarias de cada rol.
+- [ ] Confirmar persistentemente paciente, fecha, hora, profesional, consultorio y estado.
+- [ ] Probar loading, vacío, error, timeout, offline y permisos insuficientes.
+- [ ] Verificar que los formularios conserven lo escrito después de un error.
+- [ ] Foco, teclado, modales, Escape, restauración de foco y navegación sólo con teclado.
+- [ ] Zoom al 200 %, texto grande y anchos 320/360/375/390/412 px.
+- [ ] Back, forward, refresh, bloqueo del teléfono, cambio de pestaña y conexión intermitente.
+- [ ] TalkBack en Samsung y auditoría automatizada WCAG.
+- [ ] Registrar por separado las métricas SEQ/SUS y errores humanos que requieren profesionales participantes.
+
+#### Cloudflare profundo y privacidad de caché — alto
+
+- [ ] Confirmar que HTML y JSON autenticados nunca producen caché compartida.
+- [ ] Probar contaminación de caché entre usuarios y consultorios.
+- [ ] Validar tokens públicos, URLs firmadas, ICS y PDF.
+- [ ] Probar chunks antiguos después de deploy y actualización del service worker.
+- [ ] Revisar TLS, IPv4/IPv6, HSTS, CSP, MIME sniffing y framing.
+- [ ] Verificar 404 y 500 humanas.
+- [ ] Probar WAF, parámetros largos, Unicode y métodos HTTP inesperados.
+- [ ] Investigar y cerrar la advertencia CSP observada en iPhone.
+
+#### Fallos controlados y recuperación — alto
+
+- [ ] Simular Supabase DB, Auth y Storage caídos.
+- [ ] Timeouts, 401, 404, 429 y 5xx.
+- [ ] Offline, paquetes perdidos, reconexión y latencia alta.
+- [ ] Clock skew, zona horaria incorrecta y límites de medianoche.
+- [ ] Cuota agotada, job detenido y backlog.
+- [ ] Confirmar mensajes humanos y ausencia de éxito falso o pérdida de trabajo.
+
+#### Capacidad y rendimiento — alto
+
+- [ ] Poblar el volumen objetivo completo.
+- [ ] Ejecutar pico realista y tres veces el pico.
+- [ ] Búsquedas, Agenda e historias simultáneas.
+- [ ] Uploads concurrentes.
+- [ ] Jobs ejecutándose mientras profesionales usan la aplicación.
+- [ ] Medir TTFB, navegación, mutaciones y búsquedas en p50/p95/p99.
+- [ ] Medir CPU, memoria, conexiones y subrequests del Worker.
+- [ ] Ejecutar la carga desde runner externo y staging, no desde esta PC limitada.
+
+#### Pacientes, historia y archivos en casos límite — alto
+
+- [ ] Acentos, apóstrofes, emoji, Unicode, espacios duplicados y n frente a ñ.
+- [ ] Identidades con nombres, teléfonos y DNI repetidos dentro y entre consultorios.
+- [ ] Pacientes sin teléfono, bloqueados y archivados.
+- [ ] Historias largas, paginadas y concurrentes.
+- [ ] JPG/PNG, archivo corrupto, cero bytes, MIME falso, polyglot, 25 MiB y 25 MiB + 1 byte.
+- [ ] Papelera, restauración, permisos y expiración de URLs firmadas.
+
+#### Push, service worker y cron avanzado — alto
+
+- [ ] Habilitar alertas de fallo en cron-job.org y probarlas con un job controlado.
+- [ ] Dos invocaciones simultáneas y reintentos idempotentes.
+- [ ] Límites exactos de la ventana de dos horas.
+- [ ] Turnos cancelados, reprogramados o modificados después de generar el recordatorio.
+- [ ] Endpoints muertos y respuestas 410, 429 y 5xx.
+- [ ] Permiso rechazado, bloqueado y recuperado.
+- [ ] Dos dispositivos para el mismo paciente.
+- [ ] Samsung Internet, Firefox Android y navegadores desktop.
+- [ ] Service worker viejo, actualización y clicks con la aplicación cerrada.
+- [ ] Esperar y demostrar accepted, received y displayed.
+
+#### Google — alto si forma parte del lanzamiento
+
+- [ ] Login y registro reales.
+- [ ] PKCE, state, callback sin código, vencido o manipulado.
+- [ ] Cancelación del usuario y prevención de open redirects.
+- [ ] Google Calendar: conexión, desconexión, token vencido, revocación, reintentos e idempotencia.
+- [ ] Reseñas: configuración, enlaces y redirecciones.
+- [ ] Confirmar operatividad de la cuenta Google y su posible 2FA.
+
+#### Dispositivos y redes restantes — medio/alto
+
+- [ ] Más versiones de Safari/iOS en BrowserStack.
+- [ ] Flujos internos completos, no solamente reserva pública.
+- [ ] Android Chrome, Samsung Internet y Firefox.
+- [ ] Orientación, teclado abierto, bloqueo, background y retorno.
+- [ ] 4G degradado, red móvil, pérdida de paquetes y regiones distintas.
+
+#### Observabilidad, alertas y soak — obligatorio antes del GO
+
+- [ ] Activar logs persistentes durante la certificación.
+- [ ] Dashboard de 5xx, CPU, memoria, latencia y jobs.
+- [ ] Correlacionar versión, cf-ray, request y resultado.
+- [ ] Probar que cada alerta llegue a una persona.
+- [ ] Synthetic checks durante 6 horas.
+- [ ] Soak de staging durante 24 horas.
+- [ ] Ensayo del runbook de incidente y rollback.
+
+### Regla de registro durante la ejecución
+
+- [x] Esta autorización no permite ocultar fallos, convertir skips en verdes ni borrar evidencia.
+- [x] Cada bloque se actualizará con evidencia concreta y se mantendrá la decisión global NO-GO hasta que los gates críticos estén demostrados.
+- [x] Los datos sintéticos pueden eliminarse; los cambios en código, esquema, funciones, permisos, secretos o configuración requieren revisión explícita y verificación posterior.
+
+## Registro de ejecución continuada — 2026-08-31 — estado actual separado de antecedentes
+
+Esta sección es la referencia de estado actual de la auditoría. Los bloques anteriores
+siguen siendo antecedentes históricos y no se borran ni se reescriben, aunque mencionen
+otra versión, otro resultado o un gate que en ese momento estaba bloqueado. Cuando una
+prueba se repitió después de cambiar código, configuración, secreto o artefacto, el
+resultado de abajo supersede sólo esa afirmación operativa para la decisión vigente.
+
+### Hallazgo crítico descubierto en la prueba pública y corrección
+
+- [x] **Antecedente conservado:** antes de la corrección, una prueba HTTP real contra el
+  Worker ejecutó confirmar, cancelar y pedir reprogramación simultáneamente sobre el
+  mismo turno sintético. Las tres respuestas informaron éxito; la relectura terminó con
+  `status=cancelled` pero con `confirmed_at`, `cancelled_at` y
+  `reschedule_requested_at` no nulos. Los tres intentos quedaron marcados como exitosos,
+  aunque sólo la última escritura sobrevivió. Esto era un bug real de integridad y no un
+  problema del arnés.
+- [x] La causa quedó aislada en `apps/web/src/lib/server/public-appointments.ts`:
+  cada request leía el mismo estado y el `UPDATE` sólo filtraba por `id` y
+  `business_id`, por lo que una respuesta sin filas observadas no se distinguía de un
+  cambio aplicado.
+- [x] La corrección exige que el `UPDATE` coincida también con el `status` leído,
+  solicita `select('id').maybeSingle()` y convierte cero filas en
+  `PUBLIC_TOKEN_ACTION_CONFLICT`. La capa de acción traduce ese conflicto a un mensaje
+  para la persona: `Este turno cambió mientras lo actualizábamos. Volvé a abrir el
+  enlace y revisá su estado.`. No se modificaron DDL, RLS, grants, Storage ni secretos
+  como parte de este arreglo.
+- [x] Se añadió la expectativa unitaria del mensaje de conflicto en
+  `public-appointments.test.ts`.
+- [x] `pnpm --filter web check`: 0 errores y 0 warnings.
+- [x] Vitest focalizado: 1 archivo, 5/5 tests.
+- [x] Vitest completo secuencial (`pnpm test -- --maxWorkers=1`): 106 archivos,
+  815/815 tests, 22,35 s.
+- [x] La corrección quedó en el commit único
+  `034ecbdd0548e1fe45806adcb0efc4747fa4ebf6`, mensaje
+  `security: serialize public appointment actions`, y se subió a
+  `prelaunch/cloudflare-20260830` junto con el tag
+  `prelaunch-cloudflare-034ecbd`.
+- [x] El checkout de producción usado para compilar se creó separado del worktree
+  sucio de pruebas: `/tmp/cita-suite-audit-034ecbd`, `HEAD` exactamente igual al
+  commit. La rama remota y el commit local coincidieron; el tag anotado apunta al mismo
+  SHA mediante `^{}`.
+
+### Reproducibilidad binaria del artefacto que consume Cloudflare
+
+- [x] En el checkout limpio se ejecutaron dos builds Cloudflare con
+  `NODE_ENV=production`, `CITA_BUILD_VERSION` y `GIT_COMMIT_SHA` iguales al commit,
+  `SOURCE_DATE_EPOCH=0` y un solo proceso de build. Cada salida tuvo 105 archivos.
+- [x] La comparación de manifiestos `path + sha256` de las dos carpetas
+  `.svelte-kit/cloudflare` fue **IDENTICAL**: ambos manifiestos tienen SHA
+  `9af9b539488eb0651cafe1ded98adbd821c76076fd59118bfe3e72a9d88140d3`.
+- [x] `_worker.js` coincidió byte a byte en ambos builds con SHA
+  `cf4056f946ba2822fb93035da445ea2b74c918e9bbbb7d646dffcc8db657d484`.
+- [x] `/_app/version.json` coincidió con SHA
+  `4e0abf919afd1588d6a05f2e0f18d8e7487f7765ca9f4c088a275cd3004f7b40` y contenido
+  `{"version":"034ecbdd0548e1fe45806adcb0efc4747fa4ebf6"}`. No se observaron
+  timestamps, IDs de build ni metadata variable dentro de ese output.
+- [x] Un primer `wrangler versions upload` ejecutado desde la raíz del monorepo fue
+  rechazado con `Missing entry-point to Worker script or to assets directory`; no
+  publicó nada. Se conservó como error de procedimiento. La carga repetida desde
+  `apps/web`, donde reside `wrangler.jsonc`, fue la única considerada válida.
+- [x] La carga válida creó la versión `f26efcfc-0391-49c9-9fa5-48ba2ffab01e`, creada
+  `2026-08-31T07:22:45.105956Z`, tag completo
+  `034ecbdd0548e1fe45806adcb0efc4747fa4ebf6` y mensaje
+  `prelaunch audit 034ecbdd0548e1fe45806adcb0efc4747fa4ebf6`.
+- [x] La URL de preview de esa versión sirvió `version.json` exacto, `/login` con
+  `private, no-store`, `/reservar/<business-id>` con `no-store` y headers HSTS,
+  `nosniff`, `DENY`, `strict-origin-when-cross-origin` y Permissions Policy. El
+  `Content-Security-Policy` incluyó nonce dinámico y los orígenes explícitos esperados.
+
+### Mezcla, promoción, rollback y correlación actuales de Cloudflare
+
+- [x] La mezcla gradual `87d94b10-f1bd-4d22-8f7d-67f9c05bffcf` dejó
+  `f26efcfc…` al 1 % y `93988102…` (b1 ya certificado) al 99 %. El muestreo único y
+  secuencial de 200 `version.json` recibió 4 respuestas del SHA nuevo, 196 del SHA
+  anterior, 0 desconocidas y 0 errores.
+- [x] La promoción `75046ed0-dbab-4236-8dce-4ca10d686e69` dejó `f26efcfc…` al 100 %;
+  20/20 lecturas posteriores devolvieron el SHA nuevo.
+- [x] Se ejecutó rollback real a b1 en `c7f6c381-1d68-45e8-abad-393b032a820a` y
+  restauración del candidato en `b3473377-69d9-4c81-8949-626b367bc2b7`. El control
+  plane informó 0,67 s y 0,81 s respectivamente; el primer `version.json` observado
+  coincidió tras 31,027 s y 30,792 s con el sondeo conservador usado. Esos tiempos
+  incluyen propagación/sondeo de borde y se reportan como RTO observado, no como una
+  latencia aislada del API.
+- [x] Durante la rotación de secreto, `wrangler secret put` generó versiones automáticas
+  sin tag (`1450ef32…`, `46f85941…`, `dd50d81f…`). Cloudflare rechazó reutilizar el
+  artefacto antiguo con el código 10220 (`A secret has changed since this version was
+  active`). No se ocultó ni se tomó una versión automática sin verificar.
+- [x] Tras ese rechazo se cargó un artefacto nuevo desde el mismo output reproducible:
+  versión `3ed7a7a7-3cfb-4444-9516-5b92fbd334e7`, tag
+  `034ecbdd0548e1fe45806adcb0efc4747fa4ebf6-secret-rotated`, mensaje
+  `prelaunch racefix 034ecbdd0548e1fe45806adcb0efc4747fa4ebf6 post-secret-rotation`.
+  El deployment actual es `890a9863-f69c-407f-9091-4bf7e0cbb0be`, 100 %.
+- [x] `wrangler versions view` de la versión final confirmó el mismo tag/mensaje, sólo
+  handler `fetch`, placement targeted `aws:sa-east-1`, compatibilidad `nodejs_compat` y
+  las bindings esperadas; no es una versión automática sin etiqueta.
+- [x] El manifiesto completo `path + sha256` del output que consumió esta carga quedó
+  archivado en `audit-evidence/cloudflare/034ecbdd-manifest.txt`, fuera de `/tmp`.
+  Su SHA es `9af9b539488eb0651cafe1ded98adbd821c76076fd59118bfe3e72a9d88140d3`, y
+  coincide con los dos builds independientes; `_worker.js` y `version.json` conservan
+  respectivamente `cf4056f9…d484` y `4e0abf9f…7b40`. El upload final reutilizó exactamente
+  ese output, por lo que la comparación no se limita a que la aplicación “se comporte igual”.
+- [x] El estado actual de `version.json` continúa mostrando exactamente el commit
+  `034ecbdd…`; el deployment actual no es una versión sin tag.
+- [x] Smoke posterior a la rotación contra `https://app.cita-suite.workers.dev`: `/_app/version.json`
+  devolvió el commit exacto; `/login` respondió 200 con `private, no-store`; la reserva pública
+  respondió 200 con `no-store`; ambos incluyeron HSTS, CSP con nonce, `nosniff`, `DENY`,
+  referrer policy y Permissions Policy. Una ruta inexistente devolvió 404 con la página humana
+  de “no encontrada”, sin error crudo.
+- [x] Se abrió `wrangler tail app --format=json --sampling-rate=0.99` con TTY y se
+  solicitó `/login` durante la ventana. Llegó un evento parseable con
+  `scriptVersion.id=f26efcfc…`, `outcome=ok`, HTTP 200, `truncated=false`, sin
+  excepciones, `cpuTime=2` y `wallTime=7` (valores de la invocación observada). El
+  segundo recurso estático no produjo un evento adicional por caché. Una ejecución
+  no interactiva anterior terminó sin eventos y se conserva como limitación del
+  método, no como evidencia negativa.
+- [x] Se repitió el tail después de la rotación definitiva: una petición real a `/login`
+  correlacionó `scriptVersion.id=3ed7a7a7…`, `outcome=ok`, HTTP 200, `truncated=false`,
+  sin excepciones ni logs de aplicación. El tail usado es efímero: no reemplaza logs
+  persistentes ni un dashboard de auditoría.
+- [x] Sonda HTTP ofensiva segura contra el deployment final: token público inválido en GET
+  devolvió página humana 200/no-store; POST cross-origin a una acción pública fue rechazado
+  con 403 sin CORS; GET de la acción no ejecutó mutación; job interno sin header y GET fueron
+  405; header interno incorrecto fue 401 JSON; query de 9 KB y ruta Unicode no derribaron el
+  Worker (200/no-store o página no disponible); PUT inesperado fue 405. No se enviaron secretos
+  ni se alteraron datos. `TRACE` fue omitido por el cliente Fetch, que lo rechaza antes de
+  emitir la petición; no se contó como prueba del servidor.
+- [x] Sonda REST/RPC anónima contra el Supabase productivo, usando `anon` sin sesión, sobre
+  19 tablas clínicas/tenencia y dos funciones (`list_user_business_contexts` y
+  `user_has_business_access`) con el ID del consultorio de prueba: las tablas públicas
+  devolvieron arrays vacíos, las tablas sensibles y RPC protegidas respondieron 401, y no hubo
+  filas laterales ni datos clínicos. La lectura usó `limit=1` y no escribió nada; no reemplaza
+  la matriz autenticada de cada rol ni un pentest independiente.
+- [x] Filtros PostgREST adversariales secuenciales: comilla/OR y orden con intento de
+  inyección fueron bloqueados con 403 por la capa perimetral; un cursor malformado devolvió
+  400 y Unicode válido devolvió array vacío 200. No hubo ejecución de DDL, filas clínicas ni
+  mensajes internos expuestos.
+- [x] Secret scan reproducible sobre los 545 archivos versionados: no aparecieron claves
+  privadas, tokens de proveedor ni credenciales en código de producción. Los únicos patrones
+  de JWT/secret detectados están en 13 archivos de tests con valores ficticios; `.env` quedó
+  fuera del índice y nunca se imprimió. No se contó este grep como reemplazo de un scanner
+  dedicado ni de un SBOM formal.
+- [x] Inventario de dependencias de producción con `pnpm list --prod --depth Infinity`:
+  439 aristas y 134 paquetes únicos; la lista normalizada `paquete@versión` produjo SHA-256
+  `b13f00d2718274750d2d21d9b9e7c605cfab4b7dfea24763e654374994f13567`. `pnpm audit` no
+  reportó vulnerabilidades conocidas de producción. Este hash es trazabilidad del inventario,
+  no una certificación SBOM firmada.
+
+### Incidente de secreto y estado posterior
+
+- [x] Una inspección inicial de la respuesta completa de la API de cron-job.org imprimió
+  accidentalmente un header secreto en la salida de diagnóstico. El valor no aparece en
+  este archivo ni se volverá a mostrar. Se trató como exposición y no como un dato
+  descartable.
+- [x] La primera tentativa de rotación actualizó el secreto del Worker, pero el deploy
+  del artefacto histórico fue rechazado por el código 10220; el script restauró el
+  secreto anterior y el header del job, sin dejar el endpoint sin respuesta.
+- [x] La rotación definitiva generó un secreto nuevo en memoria, cargó un artefacto
+  nuevo y actualizó `PATCH /jobs/7795525` sin imprimir el valor. El endpoint respondió
+  `200`, `ok=true`, `push.configured=true`, `claimed=0`, `sent=0`, `failed=0` y
+  `deadEndpoints=0` con el secreto nuevo; respondió `401` con el anterior.
+- [x] El job quedó habilitado, POST, URL exacta del Worker, timeout 30 s, zona UTC,
+  minutos `[0,10,20,30,40,50]`, sin expiración, y header presente. Se conserva la
+  configuración `onFailure=false`/`onDisable=true` como riesgo operativo pendiente en
+  ese corte histórico; el PATCH posterior quedó documentado al final.
+- [ ] El `.env` local conserva el secreto anterior porque es un archivo de credenciales
+  no versionado y no se debe reescribir exponiendo el nuevo valor en un patch. Por eso
+  las invocaciones manuales locales al job deben usar el procedimiento seguro de
+  producción; el Worker y cron sí quedaron coordinados y el secreto anterior ya no
+  autentica.
+- [x] Después de la rotación la API de historial respondió 200 con 50 elementos. El registro
+  inmediatamente posterior a la actualización fue `status=4`, HTTP 401, duración 1.036 ms
+  (`date=1788162628`); se conserva como fallo real de coordinación observado, no se maquilla
+  como éxito. Las ejecuciones anteriores continuaban siendo `status=1`/HTTP 200.
+- [x] Se observó una ejecución periódica posterior al PATCH con el header nuevo:
+  historial HTTP 200, `status=1`, HTTP 200, duración 1.406 ms, `date=1788163830`
+  (08:10:30 UTC). Otra ejecución inmediatamente anterior también fue `status=1`/HTTP 200
+  (`date=1788163261`). Esto demuestra que el fallo 401 aislado de la transición no persiste
+  en la cadencia normal; el probe manual con el secreto nuevo fue 200 y con el anterior 401.
+- [x] **Antecedente congelado:** la política de notificación estaba en
+  `onFailure=false`/`onDisable=true` en el momento del `401` de transición; por eso esa
+  ejecución no generó alerta. La política vigente y la prueba de entrega pendiente están en
+  la actualización posterior.
+
+### Concurrencia pública en el Worker real después de la corrección
+
+- [x] Preparación: se crearon consultorios, suscripciones, profesionales, servicios,
+  asignaciones, pacientes Auth sintéticos y turnos `reserved` exclusivamente para estas
+  rondas. Cada fixture fue identificado por UUID y se eliminó por filtros exactos; no se
+  reutilizó un paciente real.
+- [x] Dos errores de preparación quedaron registrados: primero se intentó insertar una
+  suscripción que el trigger ya había creado (HTTP 409 por clave única); después se
+  intentaron pacientes sin `owner_id` y la base respondió NOT NULL. Se corrigió el arnés
+  usando la suscripción del trigger y un usuario Auth sintético. No son bugs de usuario.
+- [x] Tres rondas contra `f26efcfc…` al 100 % usaron permutaciones de
+  confirmar/cancelar/reprogramar. En cada ronda hubo exactamente un `200` con mensaje de
+  éxito, dos respuestas de conflicto `400` con mensaje humano, una sola transición de
+  estado, un único registro de auditoría ganador y exactamente un turno.
+- [x] Ronda final contra el artefacto activo tras la corrección: confirmar 400/conflicto,
+  cancelar 200/éxito, reprogramar 400/conflicto; estado final `cancelled`, sólo
+  `cancelled_at` presente, una auditoría `appointment.public_cancelled` y tres intentos
+  (`token_confirm=false/PUBLIC_TOKEN_ACTION_CONFLICT`,
+  `token_reschedule=false/PUBLIC_TOKEN_ACTION_CONFLICT`,
+  `token_cancel=true`). La misma prueba contra el artefacto actual se repitió después
+  de rotar el secreto: confirmar y reprogramar fueron conflictos, cancelar fue el único
+  éxito; el estado final y los timestamps fueron coherentes.
+- [x] En todos los casos la cuenta de turnos quedó en 1 y la limpieza devolvió
+  `business=0`, `patient=0`, `appointment=0` y usuario Auth sintético eliminado. El
+  intento directo de borrar `audit_logs` devolvió error porque el log es append-only;
+  la eliminación exacta del negocio hizo la cascada permitida y dejó cero residuo. El
+  error de cleanup no se ocultó ni se usó para borrar por prefijo amplio.
+- [x] Una variante del arnés sin header `Accept` recibió HTML 200 para los conflictos,
+  pero el cuerpo mantuvo el mensaje de conflicto y nunca el mensaje de éxito. Con los
+  headers de formulario del navegador (`Accept: text/html`) los conflictos fueron 400.
+  Esto documenta la diferencia de negociación HTTP; la decisión de éxito se verificó
+  por estado persistido, mensaje y auditoría, no sólo por código HTTP.
+
+### Drift observado en la auditoría de intentos públicos
+
+- [x] El `public_booking_attempts` remoto tiene columnas adicionales
+  `appointment_id`, `idempotency_key`, `email_hash`, `device_hash`,
+  `identity_bundle_hash`, `risk_score` y `risk_flags` que no existen en el SQL de
+  migraciones versionado, en `packages/shared/src/database.types.ts` ni en el stack local
+  recién reseteado. La historia `supabase_migrations.schema_migrations` no muestra una
+  migración correspondiente.
+- [x] Las filas nuevas dejan `appointment_id=NULL` y guardan el ID dentro de
+  `metadata.appointment_id`; el evento no desaparece, pero la columna relacional no se
+  utiliza. Esto es drift de esquema/configuración y no se corrige improvisando DDL sobre
+  producción. Requiere reconciliar la migración fuente, tipos y uso de la columna antes
+  del GO si se pretende consultar ese campo directamente.
+- [ ] Mientras no se reconcilie ese drift, los informes de intentos deben consultar
+  `metadata.appointment_id` y no asumir que `appointment_id` está poblado.
+
+### E2E dirigido posterior al cambio
+
+- [x] Una primera invocación directa de Playwright quedó omitida porque el proceso no
+  recibió las credenciales del `.env`; se conserva como skip de arnés, no como verde.
+- [x] Con un lanzador que lee `.env` sin imprimir valores y pasa las variables sólo al
+  proceso hijo, `odonto.full.spec.ts` contra `https://app.cita-suite.workers.dev` y el
+  consultorio de prueba pasó **1/1 Chromium en 37,1 s** y **1/1 Firefox en 1,2 min**,
+  siempre con un worker y sin reintentos.
+- [x] Repetición de la suite Playwright completa contra el deployment final, con un worker,
+  `CI=1` y `--retries=0`: **22/27 pasaron, 5 skips explícitos, 0 fallos, 5,1 min**. Los
+  skips corresponden a escenarios que el propio arnés exige ejecutar contra Supabase local,
+  demo o proveedores externos no autorizados; no se contaron como verdes.
+- [x] Suite de componentes/clientes posterior al commit: `test:client`, 7 archivos,
+  **71/71 tests** pasaron secuencialmente en 13,90 s.
+- [x] Matriz adicional de roles contra Cloudflare: se creó un consultorio sintético con
+  owner, admin, recepción, profesional vinculado y solo lectura. Los cinco iniciaron sesión
+  uno por uno; owner/admin conservaron Equipo, recepción/solo lectura fueron llevados a Agenda
+  y profesional a Mis turnos, sin acceso lateral a Equipo. Todas las rutas esperadas coincidieron
+  y la limpieza por UUID dejó cero negocios, profesionales y correos de la matriz.
+- [x] Replay idempotente de acción pública en el deployment final: se creó un turno sintético,
+  la primera confirmación se hizo por UI y un segundo POST de confirmación devolvió 200 con el
+  mismo mensaje seguro. La relectura mostró exactamente un turno `confirmed`, sólo
+  `confirmed_at`, cero `cancelled_at`/`reschedule_requested_at` y un único audit log para ese
+  appointment. Cleanup posterior por paciente devolvió cero residuos.
+- [x] Una primera relectura de cleanup desde `apps/web` falló sólo porque el arnés buscó `.env`
+  en el directorio equivocado; se repitió apuntando al archivo raíz y confirmó cero residuos.
+- [x] La relectura posterior de marcadores devolvió cero negocios, profesionales,
+  servicios, pacientes y turnos E2E conocidos. Los intentos públicos de prueba se
+  conservan como auditoría operativa; no son pacientes ni turnos activos.
+- [x] La primera sonda auxiliar de cleanup consultó por error el nombre inexistente
+  `export_sessions` y recibió 404 de PostgREST; no se interpretó como fallo de la app.
+  La consulta corregida a `patient_export_sessions` respondió 200 con cero sesiones activas,
+  y las relecturas de turnos/auditoría también devolvieron cero marcadores conocidos.
+- [x] `pnpm audit --prod --audit-level high`: `No known vulnerabilities found`.
+- [x] `git diff --check`, `HEAD`, rama remota y tag se verificaron después de publicar;
+  los cambios de tests, capturas, backup y el documento siguen sin entrar al commit de
+  producción.
+
+### Backup/restauración y base aislada — estado actual
+
+> **Corte conservado como antecedente:** las casillas de este bloque que dicen que el
+> dump remoto no estaba demostrado describen el estado anterior a la captura ampliada
+> del 31-08-2026. No se borran porque documentan intentos, límites y fallos reales; la
+> actualización vigente y sus condiciones de cierre están al final de este documento.
+
+- [x] En el stack Cita local se creó una fixture aislada con negocio, profesional,
+  paciente con acentos/ñ, turno y usuario Auth sintético. El dump custom completo tuvo
+  956.458 bytes, SHA `e2baeb6400949d68e004f6ea3fca388a41bb6c81fa3030a07c21f077cdc5049c`;
+  el schema-only tuvo SHA
+  `f928dfd5bbf789df1a57d27480df65926dd4b16c7f89674623c82014c8ce5060`.
+- [x] Se detectó y corrigió un primer intento inválido que apuntaba al puerto 54322 de
+  otro proyecto local PG17.4; el dump de ese intento no cuenta y quedó separado. El
+  stack Cita válido usa el puerto 55422.
+- [x] El restore completo en la base aislada `cita_audit_restore`, excluyendo sólo las
+  líneas de objetos `cron` incompatibles con el contenedor, terminó status 0 en 3.220 ms.
+  Se restauraron Auth, esquema público, tablas Storage y metadata dentro del proyecto
+  aislado; no se tocó producción.
+- [x] Conteos fuente/restaurado: negocio 1/1, profesional 1/1, paciente 1/1, Auth 1/1,
+  objetos Storage 0/0, migraciones 76/76 y relaciones públicas 234/234. Los 46 cuadros
+  públicos, 23 Auth y 10 Storage tuvieron conteos por tabla iguales.
+- [x] El checksum semántico de datos (INSERT/setval normalizados, sin tokens aleatorios
+  de `pg_dump`) coincidió en ambos lados:
+  `ab66205c7c7d878c269f668acc8a00cec8c994ebc0219201254b2dd196baf948`.
+- [x] El dump truncado a la mitad (478.229 bytes) falló tanto al listar como al
+  restaurar con `could not read from input file: end of file`; la base destino conservó
+  sus conteos y luego fue eliminada de forma explícita.
+- [x] El reset local posterior se ejecutó con `supabase db reset --local --no-seed --yes`
+  y reveló drift de infraestructura: el contenedor terminó en PG17.6.1.054 aunque
+  `supabase/config.toml` declara `major_version=15`, y la primera corrida dejó el
+  esquema público sin tablas. Se detuvo y reinició el stack con los parámetros válidos;
+  las 76 migraciones volvieron a aplicar y pgTAP quedó verde. No se presenta esta base
+  como paridad exacta PG15.
+- [x] `pnpm exec supabase test db --local`: 19 archivos, 22 tests pgTAP, todos PASS.
+- [ ] El backup completo **remoto de producción** sigue sin demostrarse: `pg_dump` por
+  el pooler 6543 y variantes schema-only/internal file agotaron 60–180 s, produjeron
+  cero bytes o fueron terminadas; el host directo IPv6 y pooler 5432 cerraron la sesión.
+  Psql puntual sí funciona y confirmó servidor PG17.6 y DB de 26 MB, pero eso no equivale
+  a un backup. No se afirma RPO/RTO remoto ni restore de radiografías en producción.
+- [ ] Falta abrir en la aplicación un entorno aislado restaurado con pacientes, historias,
+  turnos y radiografías; el restore SQL/semántico no sustituye ese E2E. El bloqueo de
+  `pg_dump` y la diferencia PG15/PG17 mantienen G1 parcial.
+
+### Relectura actual de gates (precedencia sobre el snapshot histórico)
+
+El snapshot inicial de G0/G1/G3/G6/G9 se conserva arriba como antecedente. Esta tabla es
+la decisión de estado actual, basada únicamente en evidencia posterior y explícita:
+
+| Gate | Estado actual | Evidencia suficiente | Pendiente que impide un cierre total |
+|---|---|---|---|
+| G0 — código, commit, artefacto y rollback | **APROBADO para el candidato final** | Checkout limpio, commit/tag, hashes byte a byte, manifiesto final archivado, versión etiquetada, mezcla 1/99, 100 %, rollback real del artefacto post-rotación, tail con `scriptVersion` de la versión de prueba y restauración final 100 %; la relectura más reciente correlaciona `1d5fa13…` con la versión `9c48ac8f…` | Mantener esta trazabilidad en cada cambio posterior; el RTO de borde observado es de esta corrida y no sustituye un runbook de incidente |
+| G1 — backup y recuperación | **PARCIAL** | Dump SQL remoto oficial de public/auth/storage (y esquema private), restore aislado completo, conteos, hashes semánticos, integridad de 149 FKs, bytes de Storage descargados y re-subidos secuencialmente con 32/32 verificaciones | Retención durable/cifrada fuera de esta PC, restore integrado en un único stack Supabase aislado, E2E de aplicación restaurada y medición RPO/RTO |
+| G2 — código/dependencias/build | **APROBADO para el commit** | check 0/0, Vitest 107 archivos/819 tests, cliente 7/71, audit limpio, build reproducible | No sustituye gates de datos, UX, backup ni observabilidad |
+| G3 — datos/RLS/roles/concurrencia | **PARCIAL** | pgTAP 22/22, matriz HTTP de cinco roles y dos consultorios (0 filtraciones/5xx), IDOR sintético cross-tenant, concurrencia local y 50 reservas, carrera pública corregida y repetida | Revocación ordinaria durante sesión y enumeración completa de rutas/RPC ofensivas |
+| G5 — UX humana/accesibilidad | **PARCIAL** | E2E desktop/móvil, iPhone BrowserStack, Samsung físico y flujos diarios automatizados | Profesionales participantes para SEQ/SUS/errores humanos, WCAG/TalkBack completo, WebKit local |
+| G6 — observabilidad/operación | **PARCIAL/BLOQUEADO** | Tail efímero correlacionado con versión/cf-ray, headers y métricas puntuales | Logs persistentes, dashboard/alertas, p95/p99, synthetic 6 h y soak 24 h |
+| G7 — proveedores externos incluidos | **FUERA DE ALCANCE** | Google sólo en los casos autorizados; WhatsApp y Mercado Pago excluidos por instrucción | No bloquear el alcance actual, pero no declarar integraciones excluidas como certificadas |
+| G9 — scheduler/rollback | **PARCIAL** | cron-job.org autenticado, 50 ejecuciones históricas OK, dos ejecuciones periódicas posteriores a la rotación con HTTP 200, disparo Worker real, rotación validada, rollback real (incluido el artefacto final con el binding de secreto vigente) y política de alertas activada | Probar entrega humana de la alerta, runbook y soak |
+
+**Decisión vigente: NO-GO.** La corrección de la carrera pública está verificada en el
+Worker actual y G0 tiene evidencia material nueva, pero no se convierte en GO mientras G1,
+G3, G5, G6 y G9 mantengan los pendientes explícitos. Ningún antecedente histórico se
+borra ni se cuenta dos veces como evidencia del artefacto actual.
+
+### Índice de esta continuación y errores que no se deben reinterpretar
+
+- [x] Commit y tag: `034ecbdd…`, `prelaunch-cloudflare-034ecbd`, rama remota al mismo SHA.
+- [x] Builds A/B y hashes: 105 archivos, manifiesto `9af9…40d3`, `_worker.js` `cf4056…d484`,
+  `version.json` `4e0abf…7b40`; manifiesto archivado en `audit-evidence/cloudflare/`.
+- [x] Wrangler: raíz rechazada por entrypoint; `apps/web` válida; versión inicial `f26efcfc…`;
+  versión final post-rotación `3ed7a7a7…`; deployment actual `890a9863…`.
+- [x] Cloudflare: mezcla `87d94b10…`, 4/196; promoción `75046ed0…`; rollback
+  `c7f6c381…`; restore `b3473377…`; rollback post-rotación mediante la versión de prueba
+  `aad0111e…` y restauración final `3ed7a7a7…` con tail de borde; secretos automáticos sin
+  tag registrados.
+- [x] Carrera pública: tres rondas más una ronda post-rotación; los errores de preparación
+  (suscripción duplicada, `owner_id` nulo y cleanup append-only) quedaron diferenciados de
+  los resultados funcionales.
+- [x] E2E dirigido: skip inicial por variables no inyectadas; Chromium 1/1 y Firefox 1/1
+  con lanzador seguro; cero fixtures activos.
+- [x] Scheduler: lectura completa inicial que expuso un secreto (incidente rotado),
+  documentación oficial de PATCH, rotación final, probes nuevo 200/anterior 401 e historial
+  50; el primer intento de transición fue 401 y las dos ejecuciones periódicas posteriores
+  fueron 200 con el header nuevo. La alerta histórica `onFailure=false` fue activada después;
+  su entrega humana controlada sigue explícitamente pendiente. No se imprimen credenciales
+  en este documento.
+- [x] Backup: intento de puerto equivocado descartado, dump/restore local aislado,
+  checksum, corrupción y drift PG17.6/PG15 registrados. La actualización posterior añade
+  el dump SQL remoto completo, restore `full3`, RTO SQL medido y manifiesto/verificación de
+  los 32 bytes de Storage; las limitaciones de integración, retención y RPO/RTO productivos
+  siguen explícitas.
+- [x] La regla de memoria/CPU se respetó: cada test/build pesado se ejecutó secuencialmente,
+  con un solo worker; el muestreo de 200 versiones usó un único proceso Node secuencial.
+
+## Actualización posterior — rollback del artefacto final con secreto vigente — 2026-08-31
+
+- [x] Se cargó `aad0111e-d22b-49df-8d50-6b3f2edc95c5` con el mismo output Cloudflare de
+  105 archivos y el tag `034ecbdd-rollback-binding-probe`; Wrangler lo desplegó al 100 %
+  sin cambiar el código ni el manifiesto. El endpoint `/login` respondió 200 y
+  `/_app/version.json` mantuvo el commit `034ecbdd…`.
+- [x] Se observó tráfico real durante el cambio con `wrangler tail` (0,99 de sampling):
+  9 eventos `outcome=ok`, `exceptions=[]`, `truncated=false`, todos con
+  `scriptVersion.id=aad0111e…`; el primer evento ocurrió a las 09:15:17.720 UTC,
+  aproximadamente 6,4 s después del inicio del deploy de la versión de prueba. A los
+  4 s exactos de un intento anterior aún se observaba la versión final, por lo que no se
+  confundió aceptación del control plane con propagación instantánea en el borde.
+- [x] Se ejecutó el rollback real a `3ed7a7a7-3cfb-4444-9516-5b92fbd334e7`, la versión
+  final post-rotación con tag `034ecbdd…-secret-rotated`; Wrangler lo aceptó a 100 % en
+  0,95 s de operación (la medición envolvente de CLI fue 5,508 s). Un tail posterior
+  observó `scriptVersion.id=3ed7a7a7…`, HTTP 200, `outcome=ok` y `exceptions=[]`.
+- [x] La lista de deployments posterior confirmó como último deployment
+  `e9426b31-a7e4-41d6-bc4d-ba842f80a773`, 100 % en `3ed7a7a7…`; `version.json` y `/login`
+  volvieron a responder correctamente. La versión de prueba quedó sólo como antecedente
+  de rollback, no recibe tráfico.
+- [x] Esta secuencia demuestra que el artefacto etiquetado sigue desplegable después de
+  rotar el secreto y que el retorno desde una versión compatible es operacionalmente
+  posible. No se mezclan sus tiempos con el rollback histórico de `f26efcfc…` ni se
+  presentan como un RTO contractual de producción.
+
+## Actualización posterior — backup remoto ampliado y Storage binario — 2026-08-31
+
+Esta sección tiene precedencia para el **estado actual** de G1. Los bloques anteriores
+siguen siendo antecedentes y no se reinterpretan como si hubieran ocurrido después.
+
+### Captura oficial de Supabase
+
+- [x] El dump de datos remoto se obtuvo con `supabase db dump` desde un `--workdir /tmp`
+  aislado, incluyendo `public,auth,storage`. El archivo no se copia al repositorio porque
+  contiene PII, material de Auth y metadata; se conservan sus propiedades verificables:
+  1.509.998 bytes, 6.870 líneas, SHA-256
+  `f4b874207fc2ee21d16994a7629452ca288508f3b2a2f28c1e0607a268e2e434`, 84 secciones
+  `COPY`, 6.158 filas totales y marcador `PostgreSQL database dump complete`.
+- [x] La primera corrida con el `config.toml` del proyecto falló antes de conectar por la
+  clave local obsoleta `local_smtp`; se conserva como error del procedimiento. La misma
+  captura, repetida en `/tmp`, terminó correctamente y no se contó el primer archivo vacío.
+- [x] El schema-only ampliado incluyó explícitamente `private` (dependencia de las
+  restricciones de reseñas), además de `public,auth,storage`: 705.548 bytes, 19.260 líneas,
+  SHA-256 `afe86d317c13de30dc06dfc30ac533038607edfa3ebdd31310cb4e3935e6e082`, 86 tablas
+  y 196 funciones declaradas. El CLI informó `Dumped schema to ...`; su wrapper agrega
+  `RESET ALL` y no emite el marcador estándar de `pg_dump`, por lo que se registra el
+  mensaje de éxito del CLI y el hash, no un marcador que no existe.
+- [x] Para restaurar en una base local realmente vacía se pre-crearon únicamente las
+  extensiones compatibles que el dump referencia (`pgcrypto`, `pg_trgm`, `btree_gist`)
+  dentro de `extensions`; no se ejecutó DDL sobre producción. El restore se hizo en
+  `cita_audit_remote_restore_full3_20260831`, otra base aislada.
+- [x] El schema restore creó 86 tablas, 196 funciones, 323 índices, 80 políticas y
+  47 triggers; las únicas 6 líneas con `ERROR` fueron `permission denied to change default
+  privileges` al intentar ACL de roles internos en la base local. No faltó ninguna tabla
+  ni función de aplicación; `google_review_requests` y `google_review_settings` existen;
+  todas las constraints quedaron `convalidated=true`.
+- [x] La carga de datos se aplicó con `ON_ERROR_STOP=1`, status 0, sin errores y con 84/84
+  secciones `COPY`. Un parser independiente contó 6.158 filas en el archivo y cada una de
+  las 84 tablas tuvo exactamente el mismo conteo después del restore (0 discrepancias).
+- [x] Conteos de control después del restore: Auth `users=35`, `identities=36`; Storage
+  metadata `objects=32`, `buckets=1`; public `businesses=18`, `patients=106`,
+  `appointments=97`, `clinical_entries=62`, `patient_radiographs=45`,
+  `public_booking_attempts=176`, `google_review_requests=0` y
+  `google_review_settings=0`. Son conteos del snapshot y no autorizan borrar producción.
+- [x] Se comprobaron 149 relaciones FK con consultas generadas desde `pg_constraint`;
+  el restore tuvo 0 filas huérfanas. Doce hashes semánticos deterministas de tablas clave
+  (`businesses`, `patients`, `appointments`, `clinical_entries`, `patient_radiographs`,
+  `professionals`, `services`, `business_users`, `google_review_requests`, `auth.users`,
+  `auth.identities`, `storage.objects`) coincidieron con una lectura directa de producción
+  en el corte de verificación (12/12). No se imprimieron filas.
+- [x] Se midió un segundo restore limpio desde los mismos artefactos en
+  `cita_audit_remote_rto_20260831`: schema 4.993 ms (6 errores ACL esperados), datos
+  491 ms, total SQL 5.484 ms; status 0, 86 tablas, 270 filas de las tablas de control y
+  `invalid_constraints=0`. Es un RTO de laboratorio PG17.6 en esta PC, no un RTO de
+  producción ni una promesa de recuperación frente a una caída real.
+
+### Bytes reales de Storage
+
+- [x] Se recorrió recursivamente el bucket privado `patient-clinical-files` sin mostrar
+  nombres de rutas: topología 3/8/16/32 y 32 objetos hoja (6 PNG, 16 WebP, 10 JPEG),
+  15.675.483 bytes. Cada objeto fue descargado secuencialmente con la service key sólo en
+  memoria, y se verificó su SHA-256. El manifiesto sin nombres de pacientes quedó en
+  `audit-evidence/backup/20260831-storage-bytes-manifest.txt`; su hash combinado ordenado es
+  `fd6c4a424b92bc9d891745e9d4e5deb07c7f6c9236eb9b8623948fc83ee99be7`.
+- [x] Los 32 bytes se subieron uno por uno al Storage local aislado (bucket privado ya
+  existente) usando `x-upsert=true`; una segunda caminata y descarga verificó 32/32 tamaños
+  y hashes idénticos, 0 discrepancias. La repetición cronometrada tardó 1.033 ms para
+  re-subir 15.675.483 bytes; la primera descarga completa fue secuencial y sus hashes
+  quedaron en el manifiesto. Esto demuestra backup y restauración de bytes y metadata de
+  Storage como operaciones separadas, sin tocar el Worker ni la producción.
+- [ ] Todavía no se demostró un **único** stack aislado donde el Postgres restaurado
+  `cita_audit_remote_restore_full3_20260831`, el servicio Storage y la aplicación apunten
+  simultáneamente a los mismos datos; el servicio local usado para la verificación de bytes
+  pertenece al stack local activo y no fue reconfigurado para esa base, precisamente para
+  no alterar otras pruebas. Falta el E2E de aplicación restaurada (paciente, historia,
+  turno y radiografía), retención durable/cifrada fuera de `/tmp`, y medir RPO/RTO reales.
+- [ ] La primera restauración del schema acotado (`public,auth,storage`) falló de forma
+  reproducible porque omitía `private` y dejó 55 errores dependientes; otra restauración
+  sin extensiones dejó 129 errores. Ambas bases son sólo antecedentes aislados y no se
+  mezclan con el restore válido `full3`.
+
+### Seguridad y trazabilidad del procedimiento
+
+- [x] No se ejecutó DDL destructivo contra Supabase productivo. Las bases locales de
+  restauración fueron nombres explícitos y separados; el schema se adaptó sólo en el
+  stream de importación para reemplazar propietarios internos por `postgres`.
+- [ ] Durante un diagnóstico de procesos, una URL de conexión de base de datos apareció
+  transitoriamente en la lista de procesos de la terminal. No se copió a este documento,
+  no se volvió a imprimir ni se incluyó en Git; por tratarse de una credencial de conexión,
+  la rotación administrativa y la invalidación de la URL histórica quedan como requisito
+  antes del GO. Esta observación se registra como incidente de procedimiento, no como
+  evidencia de una fuga de datos clínicos.
+
+### Relectura de G1 después de la captura
+
+- **Estado actual: PARCIAL, ya no BLOQUEADO por ausencia de dump SQL.** Hay evidencia de
+  datos, esquema, Auth, metadata de Storage, bytes binarios, conteos, hashes y relaciones.
+- **No convertir en APROBADO:** faltan un stack aislado integrado para abrir la aplicación
+  restaurada, retención durable/cifrada, RPO/RTO medidos, y la rotación de la credencial de
+  conexión expuesta durante el diagnóstico. La decisión global permanece **NO-GO**.
+
+## Actualización posterior — revocación durante sesión y ayuda maestra — 2026-08-31
+
+- [x] Una corrida inicial de `account-assistance.spec.ts` quedó en skip porque el arnés se
+  lanzó desde el worktree aislado sin localizar el `.env` raíz; se conserva como error de
+  preparación, no como evidencia funcional.
+- [x] Repetida con las variables leídas por ruta absoluta y sólo en el proceso hijo,
+  `account-assistance.spec.ts` contra el Worker final pasó **1/1 en 35,8 s**, con un único
+  worker y cero reintentos. El owner activó la ayuda, el maestro abrió el consultorio,
+  configuró un servicio, el owner detuvo la ayuda y la sesión maestra perdió el acceso a
+  ese consultorio inmediatamente; el estado revocado y la interfaz sin datos laterales
+  fueron verificados.
+- [x] Relectura posterior con service role, por prefijos exactos del fixture, devolvió
+  `businesses=0` y `allowed_emails=0`; no quedaron usuarios ni datos de la matriz.
+- [x] Esta corrida cubre una revocación de asistencia durante sesiones activas y la
+  experiencia del panel maestro; no reemplaza revocar una membresía ordinaria durante una
+  mutación clínica en cada rol, que permanece pendiente en G3.
+- [x] Un intento separado de revocar una membresía ordinaria desde una sesión sintética
+  llegó a `/odonto/pendiente?reason=rate_limited` durante el bootstrap de ese usuario antes
+  de poder abrir la Agenda; no se contó como prueba positiva ni como bug de autorización.
+  La membresía, consultorio, email y usuario de ese intento se eliminaron por IDs exactos
+  (`revocationRows=1`, `businessesLeft=0`, `emailsLeft=0`). El límite de alta alcanzado por
+  la repetición de fixtures es un bloqueo operativo del arnés y requiere una ventana o
+  identidad preautorizada para probar esa variante sin falsear el resultado.
+
+## Actualización posterior — CSRF autenticado en Cloudflare — 2026-08-31
+
+- [x] Se inició sesión con la cuenta sintética de prueba contra el Worker final y se
+  comprobó una navegación normal a `/odonto/agenda`: HTTP 200 y `cache-control:
+  private, no-store`.
+- [x] Un POST de formulario a `?/update_status` con `Origin` y `Referer` de
+  `https://evil.example`, campos de turno inválidos y sin intención de modificar una fila,
+  fue rechazado por SvelteKit con HTTP 403 y el texto `Cross-site POST form submissions are
+  forbidden`. No hubo mutación ni exposición de datos.
+- [x] Un primer intento auxiliar con cuerpo `text/plain` recibió 404 porque no era una
+  solicitud de formulario; se conserva como error de método y se repitió con
+  `application/x-www-form-urlencoded`, que produjo el 403 esperado. El cliente de pruebas
+  sin `Origin` también recibió 403, coherente con una política que exige origen de formulario
+  verificable; no se interpretó como bypass.
+
+## Actualización posterior — scheduler y alertas cron-job.org — 2026-08-31
+
+Esta sección corrige sólo la lectura del **estado actual** del scheduler. Las líneas
+anteriores que conservan `onFailure=false` describen el estado histórico antes del PATCH
+de alertas y no se eliminan porque explican el fallo de coordinación observado.
+
+- [x] El job `7795525` continúa habilitado, con POST cada diez minutos en UTC, timeout de
+  30 segundos, URL del Worker y header secreto coordinado después de la rotación. La
+  lectura de configuración posterior al cambio confirmó `onFailure=true`,
+  `onFailureCount=1`, `onSuccess=true` y `onDisable=true`; ya no es correcto describir la
+  política vigente como `onFailure=false`.
+- [x] La configuración de alerta se activó mediante PATCH autenticado y se volvió a leer
+  sin imprimir el header ni ningún secreto. Los dos intentos posteriores de prueba
+  controlada de entrega no mutaron el job: la API respondió `429` antes de aceptar un
+  cambio, y se dejó de reintentar para no convertir la prueba en presión sobre el límite
+  de la API.
+- [ ] Falta provocar una falla controlada con un job/endpoint de prueba y demostrar que
+  cron-job.org entrega la alerta a una persona, que el aviso contiene contexto accionable
+  y que el job se recupera sin duplicar trabajo. Hasta esa entrega observada, G9 sigue
+  parcial aunque la política ya esté activada.
+- [x] Se conservan como antecedentes separados el `401` de la transición de secreto y
+  las ejecuciones periódicas posteriores `status=1`/HTTP 200; no se mezclan con una alerta
+  que todavía no fue observada de punta a punta.
+
+## Actualización posterior — XSS almacenado y reflejado en superficies clínicas — 2026-08-31
+
+- [x] Se hizo una inspección estática de los sinks de mayor riesgo (`{@html}`, `innerHTML`,
+  `outerHTML`, `insertAdjacentHTML`, `document.write`, `srcdoc` y esquemas
+  `javascript:`) en el código de la aplicación; no se encontraron usos en las rutas y
+  librerías revisadas.
+- [x] Se creó un paciente sintético descartable con un payload HTML/JS en el nombre y se
+  insertó el mismo payload en descripción y nota interna de una entrada clínica. El
+  registro se abrió en `Datos`, `Historial` y en los resultados de búsqueda de Pacientes
+  contra el Worker final, incluyendo el query de búsqueda reflejado.
+- [x] En todas esas superficies el payload se mostró como texto escapado: no apareció el
+  HTML crudo en el documento, no se creó ninguna imagen con el atributo de prueba y una
+  bandera de ejecución permaneció en `false`. No hubo ejecución de script almacenado ni
+  reflejado.
+- [x] Se eliminaron por IDs exactos la entrada clínica y el paciente sintéticos y se
+  verificó que no quedaran filas del fixture. No se imprimieron nombres, tokens ni rutas
+  de Storage.
+- [ ] Esta prueba dinámica no sustituye un DAST autenticado completo, CSP report-only,
+  pruebas de otros navegadores/dispositivos ni una revisión manual de cada campo nuevo;
+  esas variantes siguen siendo una condición de cierre de seguridad antes del GO.
+
+## Actualización posterior — revisión de URLs, redirects, SSRF y logo remoto — 2026-08-31
+
+- [x] No se encontraron sinks de navegación server-side construidos directamente desde
+  parámetros de usuario en las rutas revisadas. Los callbacks OAuth retornan siempre a
+  rutas internas; `safeAssistanceReturnTo` sólo permite paths locales bajo `/odonto` y
+  `/r/{token}` valida formato, HTTPS y host de Google antes de emitir un `303`.
+- [x] `resolveMapsUrl` acepta únicamente HTTPS y los hosts/rutas de Google Maps
+  explícitamente permitidos; ante un valor inválido genera un enlace de búsqueda de
+  Google desde la dirección o devuelve `null`. Las pruebas unitarias cubren hosts
+  externos, HTTP, shorteners ambiguos, basura y ausencia de dirección.
+- [x] Las comprobaciones de archivos clínicos fijan bucket/path al bucket privado de
+  imágenes, generan URLs firmadas desde Supabase y hacen `fetch` server-side con
+  `redirect: 'manual'`, timeout y validación de MIME/magic bytes. No siguen una URL de
+  redirección controlada por un registro clínico.
+- [x] La prueba de open redirect/SSRF de reseñas contra el Worker rechazó un destino
+  persistido en `example.com` con 404 y no devolvió `Location`; un destino Google válido
+  produjo 303. No se imprimieron tokens ni destinos clínicos.
+- [ ] **Hallazgo de UX/CSP reproducible:** el formulario de negocio acepta cualquier
+  `https://` para `logo_url`, y el HTML público lo incluye literalmente, pero la CSP
+  vigente declara `img-src 'self' data: blob: https://*.supabase.co`. Con un logo sintético
+  `https://example.com/logo-test.png`, el navegador Chromium recibió `naturalWidth=0`,
+  `requestfailed: csp` y el mensaje de bloqueo de CSP, aunque la respuesta HTML fue 200.
+  El valor original `null` se restauró y la relectura confirmó la restauración. Esto no es
+  SSRF server-side, pero sí una contradicción entre validación, configuración y experiencia
+  del profesional/paciente. Antes del GO hay que elegir y probar una solución coherente:
+  restringir/normalizar logos a orígenes autorizados con mensaje claro, o ampliar la CSP
+  con una revisión explícita de privacidad y fallback visual; no se marca como corregido.
+
+## Actualización posterior — matriz HTTP de roles y aislamiento entre consultorios — 2026-08-31
+
+- [x] Se levantó una matriz sintética con cinco membresías activas en el consultorio A
+  (`owner`, `admin`, `reception`, `professional` vinculado y `readonly`) y un consultorio B
+  con paciente, profesional, servicio y turno deliberadamente parecidos. La preparación
+  fue hecha con usuarios confirmados y suscripciones temporales de prueba; no se ejecutó
+  DDL ni se reutilizaron datos comerciales.
+- [x] La primera corrida amplia quedó fuera de evidencia porque el arnés se bloqueó al
+  volver a autenticar en cada solicitud. Se detuvo con un PID explícito; una consulta
+  posterior comprobó cero negocios, pacientes y profesionales `role-matrix` antes de
+  repetir. También se conserva como error de preparación un intento inicial que chocó con
+  el constraint de suscripciones al usar una combinación inválida de estado/permanencia.
+- [x] La corrida válida ejecutó secuencialmente 20 solicitudes autenticadas al Worker:
+  Agenda, Equipo y tres rutas con IDs del consultorio B por cada uno de los cinco roles.
+  Hubo 0 respuestas 5xx y 0 cuerpos que contuvieran el marcador clínico del consultorio B;
+  paciente y turno ajenos respondieron 404 para los cinco roles.
+- [x] En la ruta de Equipo sólo `owner` y `admin` recibieron 200; `reception`,
+  `professional` y `readonly` fueron redirigidos, sin shell administrativo. El resultado
+  coincide con la política de permisos de la aplicación y no depende sólo de ocultar
+  botones.
+- [x] Una segunda matriz de mutación, con fecha y disponibilidad válidas, demostró que
+  `reception` puede crear exactamente un turno (delta de filas `+1`), mientras que
+  `professional` y `readonly` recibieron el mensaje de permisos y el delta total no
+  aumentó. Las respuestas de acciones SvelteKit fueron HTTP 200 por el contrato de
+  `fail()`; se verificó el cuerpo y la base, no se interpretó el estado HTTP aislado como
+  éxito.
+- [x] Todos los negocios, filas clínicas y usuarios de la matriz se eliminaron por IDs
+  registrados; la relectura final no encontró residuos con esos marcadores. No se tocó el
+  consultorio real ni se usaron borrados amplios sobre producción.
+- [ ] Esta matriz cubre una muestra controlada de rutas/roles y no reemplaza la revocación
+  ordinaria durante una sesión ya abierta, la enumeración completa de RPC/Storage ni las
+  pruebas de cada mutación clínica; esos puntos siguen abiertos en G3.
+
+## Actualización posterior — revisión ofensiva de endpoints Web Push — 2026-08-31
+
+- [x] La inspección de `isValidSubscriptionPayload` confirmó que las claves Web Push se
+  validaban por forma, HTTPS, tamaño y ausencia de IP/hosts locales, pero aceptaban un
+  hostname público arbitrario. Como ese valor termina en `webpush.sendNotification`
+  server-side, la condición era insuficiente para cerrar SSRF: un endpoint con DNS
+  controlado por un atacante podía convertirse en un proxy de salida o cambiar de destino
+  después de guardarse.
+- [x] El riesgo se reprodujo de forma no destructiva con las claves criptográficas efímeras
+  del arnés y `https://example.com/push`: la validación anterior devolvía `true`; no se
+  envió ninguna notificación real ni se escribió ese endpoint en producción.
+- [x] Se agregó una allowlist estricta de hosts de servicios Web Push soportados (FCM,
+  Mozilla, Apple y subdominios WNS), manteniendo HTTPS, sin credenciales, sin puertos
+  alternativos, sin IP literal, sin hosts locales y con validación de claves. Los tests
+  nuevos cubren cada familia permitida, host arbitrario y look-alike controlado.
+- [x] La suite focalizada de push pasó **34/34** en un worker después del cambio. La
+  publicación del fix y la verificación contra el Worker final quedan registradas en la
+  relectura de trazabilidad posterior; hasta entonces esta casilla no se usa para aprobar
+  el artefacto en producción.
+
+## Relectura actual posterior al fix de Web Push y smoke HTTP — 2026-08-31
+
+Esta sección tiene precedencia sobre los estados actuales anteriores. No reescribe ni
+borra sus antecedentes: el cambio de código, el nuevo build y el nuevo deployment
+invalidan cualquier afirmación de que la versión `034ecbdd…` sea la que se está
+certificando ahora.
+
+### Trazabilidad reproducible y publicación
+
+- [x] El commit actual es `4f4b28f5d6918f37d4de592b3fdfccc009b0f93b`, con el fix de
+  validación de destinos Web Push y sus tests. El checkout aislado
+  `/tmp/cita-suite-audit-4f4b28f` quedó limpio, y el branch remoto
+  `prelaunch/cloudflare-20260830` fue verificado con el mismo SHA. Las modificaciones
+  de E2E, capturas y este documento quedaron fuera de ese commit.
+- [x] Se instalaron dependencias con `pnpm install --frozen-lockfile` en ese checkout y
+  se ejecutó `pnpm --filter web build:cloudflare` dos veces, siempre con
+  `NODE_ENV=production`, `CITA_BUILD_VERSION=4f4b28f5…`, `GIT_COMMIT_SHA=4f4b28f5…` y
+  `SOURCE_DATE_EPOCH=0`. Los dos directorios `.svelte-kit/cloudflare` fueron idénticos
+  mediante comparación recursiva y manifiesto ordenado de **105 archivos**; el
+  manifiesto archivado es
+  [4f4b28f5-build-manifest.txt](</home/usuario/CascadeProjects/Base de Datos Sabrina/audit-evidence/cloudflare/4f4b28f-build-manifest.txt>)
+  y su SHA-256 es `d0f21b65991bb4ce8140dbda6f0f9d053a2f345be7b772307b3a565c2991fa62`.
+- [x] El `_worker.js` de ambos builds tiene SHA-256
+  `cf4056f946ba2822fb93035da445ea2b74c918e9bbbb7d646dffcc8db657d484`; el
+  `/_app/version.json` generado contiene exactamente
+  `{"version":"4f4b28f5d6918f37d4de592b3fdfccc009b0f93b"}`. No se confundió igualdad
+  de comportamiento con igualdad byte a byte del output de Cloudflare.
+- [x] Wrangler cargó ese output como versión
+  `f713a7d7-afc1-4132-8982-fc2e31a0de66`, con tag
+  `4f4b28f5d6918f37d4de592b3fdfccc009b0f93b-manifest-d0f21b65` y mensaje
+  `prelaunch push SSRF hardening 4f4b28f5`. La vista de versión confirmó handler
+  `fetch`, `nodejs_compat`, `PUBLIC_SITE_URL` de Cloudflare y sólo nombres de secretos,
+  nunca sus valores.
+- [x] Esa versión fue desplegada al **100 %** en el deployment de
+  `2026-08-31T10:01:38.025Z`. La lista de deployments la mostró como la última versión
+  activa; no se dejó una mezcla residual con `034ecbdd…`.
+
+### Smoke de borde, caché y tail correlacionado
+
+- [x] El Worker real devolvió `/_app/version.json` con el SHA exacto; `/login` HTTP 200
+  con `private, no-store`; la reserva pública HTTP 200 con `no-store`; y una ruta
+  autenticada sin sesión HTTP 303 hacia `/login`. El cuerpo no expuso claves privadas,
+  `service_role`, `VAPID_PRIVATE`, `MASTER_EMAIL`, `INTERNAL_JOB_SECRET`, tokens de
+  sesión ni stack traces. La clave anon pública que SvelteKit embebe en el cliente se
+  distingue de esos secretos y no se contabiliza como fuga privada.
+- [x] `/login` mantuvo HSTS, CSP con nonce, `Permissions-Policy` restrictiva,
+  `Referrer-Policy: strict-origin-when-cross-origin`, `X-Content-Type-Options: nosniff`
+  y `X-Frame-Options: DENY`. La ruta `404` devolvió una página humana con
+  `no-store, max-age=0`; no se mostró un error crudo.
+- [x] Un `wrangler tail --format json` durante las solicitudes al nuevo Worker observó
+  `scriptVersion.id=f713a7d7-afc1-4132-8982-fc2e31a0de66`, `outcome=ok`, HTTP 200,
+  `truncated=false` y `exceptions=[]`. Un POST de validación maliciosa al endpoint de
+  push observó el mismo `scriptVersion`, HTTP 400 y ninguna excepción.
+- [x] La matriz HTTP anónima secuencial cubrió `/`, login, recuperación, términos,
+  privacidad, reserva válida/inexistente, turno inválido, enlace de reseña inválido,
+  Agenda y Pacientes privados, ambos jobs internos por GET y el endpoint de webhook.
+  Los resultados fueron: `/` 302 a `/login`; páginas públicas 200; reserva y turno
+  inválidos 200 humanos y `no-store`; `/r/invalido` 404 humano; `/odonto/*` 303 a login;
+  jobs por GET 405; webhook no habilitado en GET 404. No apareció ningún secreto privado,
+  stack trace ni marcador de error de servidor en los cuerpos. Los jobs responden 405
+  sin `cache-control` explícito, pero no entregan datos sensibles; el POST autenticado
+  del scheduler sigue siendo el camino operativo y está cubierto por su sección propia.
+
+### Prueba dinámica del límite de destinos Web Push
+
+- [x] Con un turno reservado real de prueba, se enviaron tres payloads efímeros al
+  endpoint productivo: `https://example.com/push`, el look-alike
+  `https://fcm.googleapis.com.evil.example/push` y una variante HTTP. Los tres
+  recibieron HTTP 400 y el mensaje humano de que no se pudo preparar el recordatorio.
+- [x] La lectura independiente de Supabase mostró `push_devices` en 18 filas antes y
+  después, y cero filas con el endpoint arbitrario. No hubo llamada de envío ni escritura
+  de suscripción; el token del turno y las claves sólo vivieron en memoria del proceso y
+  no se imprimieron.
+- [x] La suite focalizada de push quedó en **34/34** y la suite completa posterior al
+  cambio en **106 archivos/816 tests**, todos verdes con un worker. La prueba confirma
+  que el código publicado rechaza destinos HTTPS arbitrarios sin romper los hosts
+  soportados por el arnés.
+
+### Decisión posterior al despliegue
+
+- [x] La trazabilidad G0 y el código G2 se actualizan al commit/versiones de esta
+  sección. Las evidencias de `034ecbdd…` quedan como antecedentes, no como sustituto de
+  la certificación actual.
+- [ ] El hallazgo de UX/CSP de logos externos continúa abierto y no se altera por este
+  fix: la validación de `logo_url` todavía acepta `https://` arbitrario mientras la CSP
+  permite sólo `self`, `data:`, `blob:` y `*.supabase.co`; por eso un logo externo probado
+  siguió bloqueándose en el navegador. No se marca como resuelto por el mero hecho de que
+  el nuevo Worker esté sano. La decisión global permanece **NO-GO** hasta resolverlo o
+  aprobar explícitamente una política de orígenes y privacidad con una nueva medición.
+
+## Relectura actual — cierre del hallazgo de logo/CSP — 2026-08-31
+
+Esta sección supersede únicamente el hallazgo de logo/CSP de la sección anterior. El
+hallazgo original y su reproducción permanecen intactos como antecedente; no se
+reinterpreta como si nunca hubiera existido.
+
+- [x] Se eligió la alternativa de menor exposición: no se amplió `img-src` a cualquier
+  HTTPS. `isAllowedPublicImageUrl` acepta rutas relativas del mismo origen, el host
+  público configurado/fallback y el host exacto de Supabase configurado, y rechaza
+  terceros, look-alikes, credenciales, puertos alternativos y protocolos inseguros.
+  `getPublicBusinessBySlug`, la vista pública de turnos y los profesionales sanitizados
+  aplican la misma regla al renderizar; un valor heredado no autorizado se convierte en
+  ausencia de imagen antes de llegar al navegador. El formulario de negocio lo rechaza
+  con una explicación accionable y conserva los valores escritos.
+- [x] El commit de la corrección es `1d5fa13eb35b6fda3c6c947110e8f1e97b49fa02`, ya
+  publicado en `prelaunch/cloudflare-20260830` con el mismo SHA. `pnpm check` quedó en
+  0/0, la suite completa en **107 archivos/819 tests**, la suite cliente en **7/71** y
+  la focalizada de imágenes en **42/42**.
+- [x] La comparación byte a byte del output que Wrangler consume incluyó el wrapper y
+  el SSR: **105 archivos** de `.svelte-kit/cloudflare` más **267 archivos** de
+  `.svelte-kit/output/server`, 372 entradas idénticas en dos builds con
+  `SOURCE_DATE_EPOCH=0`. El manifiesto combinado archivado es
+  [1d5fa13-cloudflare-server-manifest.txt](</home/usuario/CascadeProjects/Base de Datos Sabrina/audit-evidence/cloudflare/1d5fa13-cloudflare-server-manifest.txt>)
+  y su SHA-256 es `dd962a9c61c8eee7b1a54f219fc249531a588882de2405e0861db2f6a94748f6`.
+  `_worker.js` conserva SHA `cf4056f946ba2822fb93035da445ea2b74c918e9bbbb7d646dffcc8db657d484`;
+  el `version.json` generado contiene exactamente el commit `1d5fa13…`.
+- [x] Wrangler cargó la versión `9c48ac8f-4804-44b0-9d56-abbd6c492b59` con tag
+  `1d5fa13eb35b6fda3c6c947110e8f1e97b49fa02-manifest-dd962a9c` y la desplegó al 100 %
+  en el deployment `abf97a4a-c326-4c84-a062-449d7a4d3c57` (`2026-08-31T10:21:25.422585Z`).
+  `/_app/version.json`, `/login` y la reserva pública respondieron desde Cloudflare;
+  el tail correlacionó `scriptVersion.id=9c48ac8f…`, HTTP 200, `outcome=ok`,
+  `truncated=false` y `exceptions=[]`.
+- [x] Reproducción productiva del caso permitido: se asignó temporalmente el logo
+  propio `https://app.cita-suite.workers.dev/logo-cita-suite.png` al negocio de prueba.
+  La reserva devolvió HTTP 200, mostró una imagen (`naturalWidth=1254`), tuvo cero
+  errores de consola y cero requests fallidos; el valor original se restauró y se
+  verificó por lectura independiente.
+- [x] Reproducción productiva del caso bloqueado: se asignó temporalmente
+  `https://example.com/logo-test.png`. El HTML no incluyó el valor externo, no hubo
+  imagen externa ni request a `example.com`, y el navegador terminó con cero errores
+  de consola o requests fallidos. El valor original se restauró (`restored=true`).
+- [x] E2E autenticado de configuración: el owner de prueba ingresó el logo externo y
+  envió el formulario. La aplicación permaneció en `/odonto/configuracion/negocio`,
+  mostró el mensaje accionable y conservó el texto escrito; una lectura de Supabase
+  confirmó que la fila no cambió. El único mensaje de consola observado en esa
+  navegación fue el `400` esperado de la respuesta de validación (no un `pageerror` ni
+  una excepción JavaScript); una navegación de control sin envío tuvo 0 errores y 0
+  requests fallidos.
+- [x] **Estado actual del hallazgo:** cerrado para el candidato `1d5fa13…`; la
+  contradicción validación/CSP ya no se reproduce y no se amplió la política de
+  privacidad. La decisión global continúa **NO-GO** por los gates independientes que
+  siguen parciales/bloqueados (backup integrado y retención, revocación ordinaria,
+  UX humana/WCAG/TalkBack, observabilidad persistente, alertas entregadas, runbook y
+  soak), no por este hallazgo ya corregido.
+
+## Incidentes de procedimiento que conservan precedencia operativa — 2026-08-31
+
+- [x] Durante una enumeración diagnóstica de archivos de configuración de Wrangler se
+  encontró material de autenticación en un log local histórico. No se copió ningún valor
+  a este documento, al repositorio ni a los artefactos de evidencia; las búsquedas futuras
+  de credenciales quedan prohibidas y los logs no vuelven a exponerse en salidas.
+- [ ] Antes del GO, el operador debe revocar/rotar la sesión OAuth de Wrangler y confirmar
+  que los tokens de URLs firmadas históricas estén expirados o revocados. Es un requisito
+  de higiene de secretos del procedimiento, separado de la funcionalidad del Worker.
+- [ ] También permanece pendiente la rotación administrativa de la credencial de conexión
+  de base que apareció transitoriamente en una lista de procesos, ya registrada en la
+  actualización de backup. No se imprime ni se reutiliza aquí.
+
+## Matriz anónima completa de endpoints y métodos — 2026-08-31 — estado actual
+
+- [x] Se derivaron **51 rutas** reales de todos los `+server.ts`, sustituyendo cada
+  parámetro dinámico por un valor inválido controlado. Las solicitudes fueron
+  secuenciales, sin cookies, sin seguir redirects y con timeout por ruta. En GET se
+  observaron sólo estados 302/303/400/401/403/404/405, **0 timeouts, 0 errores 5xx y 0
+  cuerpos sensibles**; 28 respuestas redirigieron a `/login`.
+- [x] Se repitieron las mismas 51 rutas por POST sin `Origin`: **51/51 HTTP 403** por la
+  protección CSRF, sin mutaciones, errores 5xx ni cuerpos sensibles. No se interpretó el
+  bloqueo de origen ausente como fallo de una ruta de negocio.
+- [x] Se repitieron por POST con `Origin` y `Referer` del Worker: estados agregados
+  `204=2`, `303=26`, `401=8`, `404=1`, `405=14`; **0 errores 5xx, 0 timeouts y 0
+  cuerpos sensibles**. Las 26 redirecciones fueron a `/login` y las respuestas 401/405
+  no revelaron detalles internos.
+- [x] Se probaron además PUT, PATCH, DELETE y OPTIONS sobre las mismas 51 rutas, con
+  origen del Worker y cuerpo vacío. Por método se observó: PUT `303=26/405=25`, PATCH
+  `303=26/400=1/405=24`, DELETE `303=26/401=1/405=24`, OPTIONS `303=26/405=25`; **0
+  errores 5xx, 0 timeouts y 0 cuerpos sensibles**. No hubo sesión autenticada que
+  pudiera convertir DELETE en una mutación real.
+- [x] La clasificación de fugas excluyó deliberadamente la configuración pública
+  esperada (clave anon y URL públicas); se buscó por separado `service_role`, claves
+  privadas, secretos de jobs, tokens de sesión, stack traces y errores internos. Ninguno
+  apareció en los 204 cuerpos examinados.
+- [x] **Lectura actual:** esta matriz cierra el perímetro anónimo de método/origen para
+  las rutas HTTP inventariadas, pero no sustituye la matriz autenticada por rol/tenant ni
+  las mutaciones clínicas positivas ya registradas; esas requieren IDs válidos y siguen
+  gobernadas por G3.
+
+## Relectura actual — atributos de sesión, logout remoto y tokens inválidos — 2026-08-31
+
+Esta sección agrega evidencia de autenticación obtenida después de las matrices anónimas.
+Los resultados de login, cookies y logout que figuran en bloques anteriores siguen siendo
+antecedentes; esta relectura es la referencia vigente para los atributos observados en el
+Worker `1d5fa13…`. No se escribieron cookies, tokens ni credenciales en el documento.
+
+- [x] Un login exitoso con la cuenta sintética autorizada produjo únicamente cookies del
+  dominio `app.cita-suite.workers.dev`: `sb-module`, `sb-access-token`,
+  `sb-refresh-token` y `active-business-id`. En la inspección se registraron sólo sus
+  nombres y atributos: `path=/`, `Secure=true`, `HttpOnly=true`, `SameSite=Lax` y
+  expiración futura. Nunca se imprimieron sus valores.
+- [x] **Antecedente conservado:** una corrida anterior había interpretado que dos contextos
+  terminaban en `/login` después de `/logout`; esa lectura se conserva como historial, pero
+  no gobierna el estado actual porque la repetición controlada de abajo la contradijo.
+- [x] **Estado actual reproducido:** dos contextos independientes compartieron una sesión
+  válida y ambos abrieron Agenda. Después de ejecutar `/logout` en el primero, ese contexto
+  quedó sin cookies y volvió a `/login`, pero el segundo siguió entrando a Agenda con HTTP
+  200. Con el refresh token capturado antes del logout, un tercer contexto también pudo
+  renovar la sesión y abrir Agenda. Esto demuestra que el endpoint actual sólo revoca la
+  sesión local del navegador y no una sesión remota ni los refresh tokens del servidor.
+- [x] Con cookies efímeras de acceso y refresh deliberadamente manipuladas, la navegación
+  directa a `/odonto/agenda` terminó en `/login` con HTTP 200 y el Worker eliminó las
+  cookies de autenticación inválidas; sólo permaneció el identificador de negocio sin
+  privilegios. No hubo acceso al shell clínico ni mutación. Esto cubre el rechazo de
+  credenciales adulteradas sin imprimir sus valores.
+- [ ] Queda por repetir con un refresh token real vencido/reutilizado cuando el rate limiter
+  de login permita obtener una sesión nueva. El intento inmediato posterior fue rechazado
+  por el límite de ingreso (`HTTP 429`, mensaje humano de esperar menos de un minuto); no
+  se lo contó como una prueba de token vencido ni se insistió para no castigar el control
+  de abuso.
+- [x] La navegación externa, el prefetch y el crawler no se usaron como mecanismo de
+  logout: las pruebas de rutas sin sesión y el logout explícito conservaron la distinción
+  entre una redirección de autenticación y una revocación. No se observaron cookies con
+  dominio amplio, `SameSite=None` ni atributos inseguros en la sesión inspeccionada.
+- [ ] El rate limiter no queda certificado contra una caída de su dependencia ni contra
+  falsos bloqueos durante una indisponibilidad de Supabase Auth. Ese ensayo requiere una
+  falla inyectable en staging o un mecanismo de fault-injection aislado; no se simula
+  apagando componentes protegidos de producción.
+
+**Lectura actual:** los atributos de cookies y el rechazo de tokens adulterados quedaron
+demostrados, pero el logout remoto/global y la revocación inmediata **fallaron** en la
+repetición actual: `apps/web/src/routes/logout/+server.ts` sólo borra tres cookies y no
+revoca la sesión en Supabase. Además, Supabase documenta que un JWT de acceso no puede
+revocarse hasta su expiración; una corrección que prometa inmediatez debe incorporar una
+estrategia explícita de invalidación de access tokens, no sólo borrar cookies. El gate de
+autenticación permanece **BLOQUEADO/NO-GO** hasta corregir y repetir este caso, además de
+probar refresh real vencido/reutilizado y fault-injection de Auth. El `HTTP 429` es
+evidencia del rate limiter activo, no un falso éxito ni un fallo de aplicación.
+
+## Hallazgo crítico — logout sólo local y riesgo de prefetch — 2026-08-31 — estado actual
+
+Esta sección registra la reproducción y la remediación posterior sin borrar la evidencia
+del fallo. El resultado de producción que sigue corresponde al Worker `1d5fa13…` **antes**
+de publicar la corrección; no se debe mezclar con la versión corregida hasta repetir el
+smoke y la prueba multi-contexto sobre una versión etiquetada nueva.
+
+- [x] Reproducción exacta contra `https://app.cita-suite.workers.dev`: se inició sesión
+  con la cuenta sintética, se copiaron las cookies a un segundo contexto y ambos abrieron
+  `/odonto/agenda` con HTTP 200. Se ejecutó el `/logout` histórico en el primer contexto;
+  éste terminó en `/login` y perdió sus cookies, pero el segundo siguió en Agenda con HTTP
+  200. Un tercer contexto con el refresh token capturado antes del logout también renovó
+  el access token y abrió Agenda. No se alteraron pacientes, turnos ni configuración.
+- [x] La causa está confirmada en el código histórico: `GET /logout` sólo borraba
+  `sb-module`, `sb-access-token` y `sb-refresh-token` del navegador. No llamaba a Supabase
+  Auth, no invalidaba refresh tokens y tampoco eliminaba `active-business-id`.
+- [x] La semántica del proveedor se verificó en un cliente aislado con la cuenta de
+  prueba: `auth.signOut({ scope: 'global' })` devolvió éxito y después el refresh token
+  devolvió HTTP 400; `getUser` con el access token revocado devolvió HTTP 400. La operación
+  fue sólo sobre la cuenta sintética y se reingresó después para no dejarla bloqueada.
+- [x] Corrección preparada en el worktree: el cierre pasa a `POST /logout`, revoca
+  globalmente mediante `supabase.auth.admin.signOut(access_token, 'global')`, borra las
+  cuatro cookies incluida `active-business-id` y comunica un fallo remoto en
+  `/login?auth_error=logout_failed` en lugar de afirmar éxito. `GET /logout` responde 405,
+  `Allow: POST`, `no-store` y no toca cookies, impidiendo que un prefetch, crawler o enlace
+  externo cierre una sesión por accidente. Los tres layouts reemplazaron los enlaces GET
+  por formularios POST nativos.
+- [x] Regresión automatizada nueva: `logout.server.test.ts` **4/4**, incluyendo revocación
+  global, GET inofensivo, error remoto y sesión ausente. `pnpm --filter web check` quedó en
+  **0 errores/0 warnings** y la suite completa secuencial posterior al cambio en
+  **108 archivos/823 tests**.
+- [ ] Pendiente crítico: publicar esta corrección como un nuevo commit/artefacto etiquetado,
+  confirmar `version.json` y `scriptVersion` en Cloudflare, repetir dos contextos y el
+  refresh posterior al logout, y demostrar que un fallo de Auth muestra el mensaje humano
+  sin falso éxito. Hasta esa repetición el Worker productivo conserva el comportamiento
+  histórico y el gate de autenticación sigue **BLOQUEADO**.
+
+**Riesgo residual explícito:** la revocación global de Supabase invalida refresh tokens y,
+en la configuración observada, hace que `getUser` rechace el access token; aun así, la
+documentación del proveedor advierte que los JWT pueden conservar validez hasta expirar.
+El Worker debe seguir validando cada solicitud y no confiar sólo en que el navegador borró
+sus cookies. Si una futura configuración vuelve a aceptar JWT ya emitidos, se necesitará
+una estrategia adicional de invalidación de access tokens antes de afirmar revocación
+inmediata.
+
+## Relectura final — candidato `fba21de`, trazabilidad byte a byte, Cloudflare y autenticación — 2026-08-31 — ESTADO ACTUAL
+
+Esta sección es la relectura vigente para la decisión de lanzamiento. Las secciones
+anteriores que describen `1d5fa13`, `35349a5` u otros candidatos, incluidos sus
+fallos de logout, quedan conservadas como antecedentes históricos y no se borran. Los
+pendientes escritos antes de esta sección se interpretan como antecedentes cuando aquí
+exista una medición posterior sobre el mismo comportamiento; no se convierten en
+aprobaciones implícitas de los demás gates. La versión vigente del código es
+`fba21de079706f9674a85303a3ec68b589b90f70`.
+
+### Candidato, checkout y reproducibilidad del artefacto que consume Cloudflare
+
+- [x] El checkout aislado de certificación `/tmp/cita-suite-audit-edf9a9f` quedó sin
+  cambios y su `HEAD` fue `fba21de079706f9674a85303a3ec68b589b90f70`. El checkout
+  principal y `origin/prelaunch/cloudflare-20260830` devolvieron el mismo SHA. La
+  comprobación `git ls-remote` también devolvió ese SHA; no se imprimieron secretos.
+- [x] Se ejecutaron dos builds independientes desde un `.svelte-kit` completamente
+  retirado entre corridas, con `NODE_ENV=production`,
+  `CLOUDFLARE_WORKERS=1`, `CITA_BUILD_VERSION=fba21de…`,
+  `GIT_COMMIT_SHA=fba21de…` y `SOURCE_DATE_EPOCH=0`. Se compararon los outputs
+  completos que consume Wrangler (`cloudflare`, `cloudflare-tmp` y
+  `output/server`), no sólo el comportamiento del navegador: **373 archivos,
+  byte a byte idénticos** en A/B.
+- [x] El manifiesto de hashes completo está archivado en
+  [audit-evidence/cloudflare/fba21de-cloudflare-tmp-server-manifest.txt](</home/usuario/CascadeProjects/Base de Datos Sabrina/audit-evidence/cloudflare/fba21de-cloudflare-tmp-server-manifest.txt>).
+  Tiene 373 líneas y su SHA-256 es
+  `2324f2e253b33f44eedbec04708a2aaf5d7c775e448bf5ce422cfafdac5f371b`. El
+  `cloudflare-tmp/manifest.js` del build final no arrastra los hashes de la corrida
+  anterior; las entradas nuevas observadas fueron `app.DcejDFCW.js` y
+  `start.Dy6CZm__.js`.
+- [x] La primera publicación se hizo con Wrangler desde `apps/web`, con tag
+  `fba21de079706f9674a85303a3ec68b589b90f70-clean-2324f2` y mensaje
+  `prelaunch complete auth cleanup fba21de`. La versión creada fue
+  `9f8be05a-b003-42a8-bc00-18e87eff0c54` (número 48), con preview
+  [9f8be05a-app.cita-suite.workers.dev](https://9f8be05a-app.cita-suite.workers.dev).
+- [x] `wrangler versions view` confirmó para esa versión sólo el handler `fetch`,
+  `nodejs_compat`, assets servidos directamente, reglas de caché de Svelte
+  inmutables, placement targeted `aws:sa-east-1` y 28 nombres de bindings. Los
+  valores de secretos no se mostraron; `PUBLIC_SITE_URL` fue exactamente
+  `https://app.cita-suite.workers.dev`.
+- [x] La promoción controlada mostró mezcla real: con 1 % de la versión nueva y 99 %
+  de la anterior, 100 muestras HTML secuenciales observaron 98 respuestas con
+  `CDBtQGV7/BVZxq4-T` (versión anterior) y 2 con `DcejDFCW/Dy6CZm__` (candidato
+  actual). Después se promovió al 100 % sin error. El deployment final de Cloudflare
+  es `9c33abf2-6c5c-4b5a-9ca5-12be37cdcefe`, estrategia `percentage`, con la
+  versión `9f8be05a…` al 100 % y mensaje operativo
+  `prelaunch complete auth cleanup full rollout`.
+- [x] El endpoint de versión del artefacto es `/_app/version.json` (no
+  `/version.json`; ese último 404 fue una consulta de arnés a una ruta inexistente,
+  no un fallo del Worker). El Worker actual devolvió HTTP 200 y
+  `{"version":"fba21de079706f9674a85303a3ec68b589b90f70"}`; la respuesta declaró
+  `cache-control: no-cache`, `x-robots-tag: noindex` y el `cf-ray` fue registrado
+  sin asociarlo a datos clínicos.
+- [x] El smoke de navegador contra el Worker actual cargó `/login` con HTTP 200,
+  detectó 20 referencias a recursos `/_app/immutable`, **0 respuestas 4xx/5xx** y
+  **0 errores de consola**. No se encontraron hashes antiguos ni assets 404 en esa
+  carga. El smoke se ejecutó de forma secuencial y no se imprimieron cookies ni
+  tokens.
+
+### Autenticación, logout remoto y revocación — estado actual
+
+- [x] Login real mediante el formulario del Worker actual: GET `/login` HTTP 200,
+  POST de credenciales HTTP 303 a `/odonto/agenda`, Agenda HTTP 200. El navegador
+  observó sólo `sb-module`, `sb-access-token`, `sb-refresh-token` y
+  `active-business-id`, todos con `Secure=true`, `HttpOnly=true`,
+  `SameSite=Lax`, dominio del Worker y `path=/`. Nunca se registraron sus valores.
+- [x] En la misma sesión real, el menú de usuario mostró exactamente un formulario de
+  logout y un botón `Salir`. El click emitió POST `/logout` HTTP 303, terminó en
+  `/login` y el contexto quedó con **cero cookies**. Esto cubre la interacción
+  visible del profesional, no sólo una llamada HTTP.
+- [x] Repetición HTTP aislada con una sesión sintética autorizada: GET `/logout`
+  respondió 405, `Allow: POST`, `Cache-Control: no-store`, sin `Set-Cookie`;
+  no revocó ni borró nada. Un POST de formulario real con `Origin` y `Referer`
+  externos devolvió 403 y el mensaje `Cross-site POST form submissions are
+  forbidden`, sin cookies modificadas.
+- [x] El POST de formulario same-origin devolvió 303 a `/login` y envió expiración
+  para las cuatro cookies (`sb-module`, `sb-access-token`,
+  `sb-refresh-token`, `active-business-id`) con `Max-Age=0`, `HttpOnly`,
+  `Secure` y `SameSite=Lax`. La inspección posterior del contexto confirmó que
+  no quedó ninguna.
+- [x] La relectura independiente de Supabase después del logout remoto rechazó el
+  access token anterior con HTTP 403 y el refresh token anterior con HTTP 400. Un
+  segundo contexto que conservaba las cookies previas recibió 303 a `/login` y el
+  Worker emitió las limpiezas correspondientes. Esto contradice y supersede la
+  reproducción histórica de “logout sólo local” conservada arriba.
+- [x] Se ejecutaron 30 solicitudes autenticadas secuenciales a Agenda contra este
+  Worker; **30/30 HTTP 200**, sin 401, 429 ni 5xx. El `Server-Timing` de Auth tuvo
+  p50 18 ms, p95 22 ms, p99 25 ms y máximo 39 ms. Es una medición puntual, no un
+  presupuesto de rendimiento de lanzamiento.
+- [ ] Siguen sin certificarse por esta corrida la inyección de caída de Supabase Auth,
+  el refresh por expiración natural, la revocación ordinaria de una membresía durante
+  cada flujo clínico y la matriz completa de roles/tenants. El logout global actual
+  quedó probado; esos casos no deben marcarse automáticamente como verdes.
+
+### Cambios de código y regresión ejecutada
+
+- [x] En `apps/web/src/hooks.server.ts` se eliminó la caché en memoria de 30 segundos
+  de claims: los access tokens no expirados se validan con
+  `supabase.auth.getUser(access_token)` en cada request. Cuando la sesión es inválida,
+  ahora se limpian también las cuatro cookies, incluida
+  `active-business-id`. La corrección evita que otro isolate de Cloudflare acepte
+  una sesión globalmente revocada o conserve un consultorio obsoleto.
+- [x] En los layouts de `odonto` se quitó el `onclick` que cerraba el menú y removía
+  el formulario antes de que el submit nativo pudiera salir. El botón visual `Salir`
+  quedó probado con el navegador real del Worker actual.
+- [x] Las pruebas unitarias de hooks/logout cubren validación por request, limpieza de
+  negocio activo, revocación global, GET inofensivo, error remoto y sesión ausente:
+  logout focal **4/4** y hooks incluidos en la suite completa.
+- [x] `pnpm check` terminó con `svelte-check found 0 errors and 0 warnings`.
+  La suite Vitest completa, secuencial y con un worker, terminó en **108 archivos y
+  824 tests pasados**, sin fallos. Este resultado corresponde al commit actual y no
+  reemplaza las pruebas E2E omitidas por credenciales, proveedores o participantes.
+- [x] La auditoría de dependencias del candidato continuó limpia en el último ciclo;
+  las 15 vulnerabilidades transitivas históricas están documentadas como antecedente
+  y fueron resueltas mediante overrides. No se volvió a introducir un secreto en el
+  código o en el manifiesto final.
+
+### Cloudflare, headers y tail de borde
+
+- [x] La respuesta pública actual de `/login` declaró `private, no-store`, CSP con
+  nonce, HSTS de un año, `X-Content-Type-Options: nosniff`,
+  `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`,
+  Permissions Policy sin cámara/micrófono/geolocalización y `Server-Timing`.
+  `/logout` conservó el método permitido y `no-store`.
+- [x] Se abrió un `wrangler tail --format json --sampling-rate 0.01` después de la
+  promoción final. Una solicitud al Worker observó
+  `scriptVersion.id=9f8be05a-b003-42a8-bc00-18e87eff0c54`, HTTP 200,
+  `outcome=ok`, `truncated=false` y `exceptions=[]`. El tail es evidencia
+  efímera de esta ventana, no un sistema de retención ni un dashboard; se detuvo al
+  terminar la observación y no se imprimieron cookies (Wrangler las redactó).
+- [ ] La ausencia de excepciones en ese tail no demuestra logs persistentes, alertas
+  entregadas a una persona, métricas p95/p99, synthetic de seis horas ni soak de 24
+  horas. G6 permanece parcial/bloqueado hasta realizar esas pruebas.
+
+### Scheduler externo y separación histórica
+
+- [x] La evidencia vigente del scheduler externo conserva el job cron-job.org
+  `7795525`, habilitado como POST al Worker cada 10 minutos UTC, con timeout de
+  30 segundos. La configuración autenticada, la rotación de secreto y el historial de
+  50 ejecuciones (incluidas las posteriores a la rotación) están registrados en
+  las secciones anteriores; la invocación real devolvió HTTP 200 con
+  `ok=true`, `claimed=0`, `sent=0`, `failed=0` y `deadEndpoints=0`.
+  No se volvió a exponer ningún secreto.
+- [ ] El job no se considera un sistema de observabilidad cerrado: falta demostrar
+  entrega humana de la alerta de fallo, reintentos idempotentes bajo dos invocaciones
+  simultáneas, ventana exacta de dos horas, endpoints 410/429/5xx, estados
+  `accepted/received/displayed` y un runbook ensayado. El scheduler sí está
+  identificado y tuvo ejecución real; esas carencias no se ocultan detrás de la
+  casilla histórica.
+
+### Incidentes de método y diagnósticos conservados
+
+- [x] Una publicación inicial desde una raíz sin entrypoint fue rechazada por Wrangler
+  (`Missing entry-point to Worker script or to assets directory`); se repitió desde
+  `apps/web` y se dejó sólo la versión válida.
+- [x] Una versión intermedia reutilizó un `.svelte-kit` sucio y sirvió un manifest de
+  servidor con hashes de cliente antiguos; el navegador detectó assets 404. Esa
+  publicación no se contó como certificada. Se retiró el output completo, se hicieron
+  dos builds limpios y se verificó el manifiesto de 373 archivos antes del candidato
+  actual.
+- [x] El primer comando de Playwright en el checkout temporal intentó `require` en
+  un módulo ESM; el segundo usó top-level await en CommonJS; otro buscó `playwright`
+  cuando el paquete disponible era `@playwright/test`. Fueron errores del arnés, no
+  de la aplicación; se corrigieron y se repitieron los casos.
+- [x] Un despliegue Wrangler inicial entró en el selector interactivo por usar
+  argumentos posicionales; se repitió con `--version-id`, porcentajes explícitos y
+  `--yes`. No se cuenta el intento interactivo como evidencia de promoción.
+- [x] Un selector inicial de UI hizo click en el botón de Configuración, no en el menú
+  de usuario; terminó sin formulario de logout. El selector se corrigió a la última
+  instancia visible de `button[aria-haspopup="menu"]` y la prueba real pasó.
+- [x] Una lectura intermedia informó una cookie de negocio restante porque se examinó
+  el contexto antes de completar la redirección; la repetición esperó la navegación,
+  capturó los cuatro `Set-Cookie` y confirmó cero cookies. Se conserva el episodio
+  como diagnóstico de sincronización del arnés, no como defecto actual.
+- [x] Varios intentos de login repetidos recibieron HTTP 429 del rate limiter con el
+  mensaje humano de esperar. No se contaron como login válido ni se forzó el límite;
+  después de la ventana de enfriamiento el login real del candidato actual pasó
+  200/303 y logout 303.
+- [x] Una consulta a `/version.json` devolvió 404 por no incluir el prefijo
+  `/_app`; se corrigió la ruta de verificación y el artefacto devolvió el SHA exacto.
+  Ninguno de estos errores de procedimiento se presenta como un fallo funcional
+  solucionado por casualidad.
+
+### Reevaluación vigente de gates (sólo para el candidato `fba21de`)
+
+| Gate | Estado actual | Evidencia nueva que se admite | Pendiente que impide el cierre |
+|---|---|---|---|
+| G0 — trazabilidad de código/artefacto | **APROBADO para identidad y promoción** | SHA local/remoto, checkout limpio, dos outputs byte a byte, manifiesto 373, tag, versión `9f8be05a…`, deployment `9c33abf2…`, mezcla 1/99, promoción 100 %, `/_app/version.json` y tail con `scriptVersion` | Un rollback operativo posterior de este exacto candidato sigue perteneciendo a G9/runbook; cada cambio futuro exige repetir esta cadena |
+| G1 — backup/restauración | **PARCIAL** | Restore aislado histórico, conteos, relaciones y checksum semántico documentados | Backup remoto durable fuera de esta PC, restore integrado con aplicación, radiografías, RPO/RTO y retención |
+| G2 — código/dependencias | **APROBADO para `fba21de`** | check 0/0, Vitest 108/824, auditoría de dependencias limpia, build reproducible | No sustituye pruebas de datos, UX, proveedores ni operación |
+| G3 — aislamiento/datos/concurrencia | **PARCIAL** | pgTAP, concurrencia e IDOR históricos; logout global y validación por request nuevos | Matriz completa de roles/tenants, revocación de membresías durante sesión y todos los RPC/rutas autenticados |
+| G4 — funcional E2E | **PARCIAL** | Login/logout, assets y smoke Cloudflare actuales; suites históricas con resultados y skips explícitos | Casos omitidos por proveedor/credenciales, escenarios de error completos y recorridos no repetidos sobre el candidato exacto |
+| G5 — UX/accesibilidad | **PARCIAL** | BrowserStack iPhone, Samsung físico y automatización histórica; logout visual actual | Profesionales representativos, SEQ/SUS, WCAG/TalkBack completo, Safari físico y pruebas de interrupción/offline |
+| G6 — Cloudflare/observabilidad | **PARCIAL/BLOQUEADO** | Versión exacta, placement, headers, caché/asset smoke, canary, tail efímero y stress auth 30/30 | Logs persistentes, dashboard, alertas humanas, límites p95/p99, synthetic 6 h, soak 24 h y CSP iPhone |
+| G7 — proveedores | **FUERA DE ALCANCE explícito** | WhatsApp y Mercado Pago excluidos por instrucción; Google sólo donde fue autorizado | No declarar las integraciones excluidas como certificadas si vuelven al alcance |
+| G8 — producción exacta | **PARCIAL** | Worker actual al 100 %, versión/commit correlacionados y pruebas autenticadas actuales | Skips de cobertura y recorridos productivos restantes |
+| G9 — scheduler/rollback/operación | **PARCIAL** | cron-job.org identificado y ejecutado, rotación e historial previos, promoción controlada y rollback histórico de la línea | Rollback del candidato exacto con medición, alerta humana, reintentos y runbook ensayado |
+
+**Decisión vigente: NO-GO.** El candidato `fba21de` está correlacionado con el
+artefacto que atiende Cloudflare, sus assets son coherentes y la corrección crítica de
+logout/revocación pasó en producción. Eso no cierra G1, G3, G5, G6 ni G9, ni convierte
+los proveedores excluidos o los skips en evidencia positiva. La aplicación no debe
+declararse lista para venderse al sector de salud hasta cerrar los pendientes explícitos
+o documentar una aceptación formal de cada riesgo residual por el responsable del
+lanzamiento.
+
+### Lista de reanudación sin repetir verdes
+
+- [ ] No repetir el smoke de assets ni el logout básico sin cambio de versión/hipótesis:
+  ya están verdes en este candidato. Priorizar backup remoto/restauración integrada,
+  matriz autenticada por rol/consultorio, alertas de cron, rollback medido y pruebas
+  humanas de UX/accesibilidad.
+- [ ] Mantener la REGLA CENTRAL: cualquier fixture de paciente, turno, profesional,
+  consultorio, email o archivo puede limpiarse con manifiesto exacto; código,
+  migraciones, funciones, triggers, RLS, grants, constraints, Storage, secretos,
+  configuración Cloudflare y capacidad futura quedan protegidos. No ejecutar DDL
+  destructivo directo sobre producción.
+- [ ] Cada futura publicación autorizada debe repetir antes del deploy: checkout y diff
+  revisados, secretos fuera del artefacto, `pnpm check`, tests secuenciales, build A/B
+  byte a byte del output de Cloudflare, hash/manifiesto, smoke de preview, canary,
+  promoción, `/_app/version.json`, tail correlacionado y registro histórico/actual.
