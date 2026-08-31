@@ -4741,3 +4741,10 @@ antecedente y aquí se valida el cambio de tráfico con `/login`, cuyo HTML decl
   al 100 %. Este ensayo dinámico confirma el RTO de borde del artefacto bajo una
   hipótesis de caché más estricta; el runbook humano, las alertas y el rollback de
   datos siguen pendientes.
+- [x] Después de la restauración se abrió un tail nuevo con sampling 0,01 y se generaron
+  solicitudes públicas y autenticadas. Los eventos observados declararon
+  `scriptVersion.id=9f8be05a-b003-42a8-bc00-18e87eff0c54`, `outcome=ok`,
+  `truncated=false`, `exceptions=[]` y estados HTTP 200/303; los headers de cookies
+  aparecieron redactados por Wrangler. Los `cf-ray` de muestra se conservaron sólo como
+  correladores (`a33c139608c92ced`, `a33c13e409cbae29`, `a33c148aca4ada16`). El tail se
+  detuvo al finalizar y sigue siendo evidencia efímera, no retención operativa.
