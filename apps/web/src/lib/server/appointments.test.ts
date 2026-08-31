@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('./audit', () => ({ writeAuditLog: vi.fn(async () => undefined) }));
 import {
 	APPOINTMENT_STATUSES,
 	assertCanTransitionAppointment,
@@ -6,11 +8,16 @@ import {
 	createManualAppointment,
 	findAppointmentCreationReplay,
 	getHumanAppointmentErrorMessage,
-	rescheduleAppointment
+	rescheduleAppointment,
+	updateAppointmentStatus
 } from './appointments';
+import { writeAuditLog } from './audit';
 
 // Mock mínimo de supabase para rescheduleAppointment: captura el payload del update.
-const createRescheduleMock = (appointmentRow: Record<string, unknown>) => {
+const createRescheduleMock = (
+	appointmentRow: Record<string, unknown>,
+	options: { updateData?: Record<string, unknown> | null } = {}
+) => {
 	const updates: Record<string, unknown>[] = [];
 	const supabase = {
 		from: (table: string) => {
@@ -18,18 +25,26 @@ const createRescheduleMock = (appointmentRow: Record<string, unknown>) => {
 				return {
 					select: () => ({
 						eq: () => ({
-							eq: () => ({
-								maybeSingle: async () => ({
-									data: appointmentRow,
-									error: null
-								})
-							})
+							eq: () => ({ maybeSingle: async () => ({ data: appointmentRow, error: null }) })
 						})
 					}),
 					update: (payload: Record<string, unknown>) => {
 						updates.push(payload);
 						return {
-							eq: () => ({ eq: () => Promise.resolve({ error: null }) })
+							eq: () => ({
+								eq: () => ({
+										eq: () => ({
+										select: () => ({
+											maybeSingle: async () => ({
+												data: Object.hasOwn(options, 'updateData')
+													? options.updateData
+													: { id: appointmentRow.id },
+												error: null
+											})
+										})
+									})
+								})
+							})
 						};
 					}
 				};
@@ -52,6 +67,50 @@ const createRescheduleMock = (appointmentRow: Record<string, unknown>) => {
 		}
 	};
 	return { supabase: supabase as any, updates };
+};
+
+const createStatusMock = (
+	appointmentRow: Record<string, unknown>,
+	options: { updateData?: Record<string, unknown> | null } = {}
+) => {
+	const auditRows: Record<string, unknown>[] = [];
+	const updateFilters: Array<[string, unknown]> = [];
+	const makeEqChain = (terminal: () => Promise<unknown>) => {
+		const chain: any = {
+			eq: (column: string, value: unknown) => {
+				updateFilters.push([column, value]);
+				return chain;
+			},
+			maybeSingle: terminal,
+			select: () => makeEqChain(terminal)
+		};
+		return chain;
+	};
+	const supabase = {
+		from: (table: string) => {
+			if (table === 'appointments') {
+				return {
+					select: () =>
+						makeEqChain(async () => ({ data: appointmentRow, error: null })),
+					update: () =>
+						makeEqChain(async () => ({
+							data: Object.hasOwn(options, 'updateData') ? options.updateData : { id: appointmentRow.id },
+							error: null
+						}))
+				};
+			}
+			if (table === 'audit_logs') {
+				return { insert: async (row: Record<string, unknown>) => { auditRows.push(row); return { error: null }; } };
+			}
+			if (table === 'services') {
+				return {
+					select: () => makeEqChain(async () => ({ data: { duration_minutes: 30, is_active: true }, error: null }))
+				};
+			}
+			throw new Error(`unexpected table ${table}`);
+		}
+	};
+	return { supabase: supabase as any, auditRows, updateFilters };
 };
 
 const pastStart = new Date('2026-05-13T10:00:00.000Z');
@@ -463,5 +522,75 @@ describe('rescheduleAppointment y versionado de calendario', () => {
 				now
 			})
 		).rejects.toThrow('APPOINTMENT_CANNOT_RESCHEDULE');
+	});
+
+	it('no resucita una cancelación concurrente y devuelve conflicto', async () => {
+		const { supabase, updates } = createRescheduleMock(
+			{ ...baseRow, calendar_sequence: 0, calendar_action_count: 0 },
+			{ updateData: null }
+		);
+		await expect(
+			rescheduleAppointment(supabase, {
+				businessId: 'biz-1',
+				appointmentId: 'apt-1',
+				userId: 'user-1',
+				startsAt: newStart,
+				now
+			})
+		).rejects.toThrow('APPOINTMENT_STATUS_CONFLICT');
+		expect(updates).toHaveLength(1);
+	});
+});
+
+describe('transiciones autenticadas concurrentes', () => {
+	it('no sobrescribe un cambio de estado que ganó la carrera', async () => {
+		vi.mocked(writeAuditLog).mockClear();
+		const { supabase, auditRows, updateFilters } = createStatusMock(
+			{
+				id: 'apt-1',
+				starts_at: '2026-06-15T17:30:00.000Z',
+				ends_at: '2026-06-15T18:00:00.000Z',
+				status: 'reserved'
+			},
+			{ updateData: null }
+		);
+		await expect(
+			updateAppointmentStatus(supabase, {
+				businessId: 'biz-1',
+				appointmentId: 'apt-1',
+				status: 'cancelled',
+				userId: 'user-1',
+				now
+			})
+		).rejects.toThrow('APPOINTMENT_STATUS_CONFLICT');
+		expect(updateFilters).toContainEqual(['status', 'reserved']);
+		expect(auditRows).toHaveLength(0);
+		expect(writeAuditLog).not.toHaveBeenCalled();
+	});
+
+	it('registra auditoría sólo después de una transición atómica exitosa', async () => {
+		vi.mocked(writeAuditLog).mockClear();
+		const { supabase, auditRows, updateFilters } = createStatusMock(
+			{
+				id: 'apt-1',
+				starts_at: '2026-06-15T17:30:00.000Z',
+				ends_at: '2026-06-15T18:00:00.000Z',
+				status: 'reserved'
+			}
+		);
+		await updateAppointmentStatus(supabase, {
+			businessId: 'biz-1',
+			appointmentId: 'apt-1',
+			status: 'cancelled',
+			userId: 'user-1',
+			now
+		});
+		expect(updateFilters).toContainEqual(['status', 'reserved']);
+		expect(auditRows).toHaveLength(0);
+		expect(writeAuditLog).toHaveBeenCalledOnce();
+		expect(writeAuditLog).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.objectContaining({ action: 'appointment.cancelled', entityId: 'apt-1' })
+		);
 	});
 });

@@ -5069,10 +5069,19 @@ mutación inválida fue rechazada por la restricción y no modificó datos.
   HTTP `401 permission denied for function is_email_enabled`; la consulta dejó de
   ser posible desde clientes públicos. El contrato quedó protegido por un test
   secuencial de Vitest.
-- [ ] Este cambio todavía requiere el nuevo build reproducible y la publicación del
-  Worker candidato; hasta completar ese ciclo el estado de despliegue de esta
-  corrección es **PENDIENTE** y no se debe confundir con la versión b927178 ya
-  certificada.
+- [x] El nuevo build reproducible produjo dos veces 105 archivos con hash ordenado
+  `27996308d3781de1be64623a49cc42ec3b76ed38e5e2f3896e269b3596bdf19e`; el manifiesto
+  queda en `audit-evidence/cloudflare/4f59797-build-metadata.txt`. Wrangler leyó 112
+  assets (3946.83 KiB, 807.15 KiB gzip) con `PUBLIC_SITE_URL` del Worker.
+- [x] Se publicó el candidato exacto `4f59797378e1b086f55f9009722c88ad475ffe4e`
+  con tag `4f59797-clean-27996308`, mensaje `prelaunch revoke public email probe
+  4f59797`, versión Cloudflare `3f095e6f-bfc3-41af-97c3-0a9ddc9d1838` y 100 % de
+  tráfico. `/_app/version.json` devolvió el SHA completo y el smoke de reserva pública
+  siguió en HTTP 200 con `no-store`, HSTS, CSP, `nosniff`, `DENY` y
+  `strict-origin-when-cross-origin`.
+- [x] La sonda anónima post-deploy contra Supabase siguió recibiendo HTTP 401 para
+  `is_email_enabled`; no se reabrió la enumeración. La migración y el contrato de
+  privacidad están, por tanto, presentes en base y código del candidato publicado.
 
 ### Scheduler cron-job.org — evidencia y limitación operativa actual
 

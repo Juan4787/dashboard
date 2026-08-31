@@ -198,6 +198,9 @@ export const getHumanAppointmentErrorMessage = (error: unknown) => {
 	if (raw.includes('APPOINTMENT_STATUS_UNCHANGED')) {
 		return 'El turno ya tiene ese estado. No hace falta guardar ningún cambio.';
 	}
+	if (raw.includes('APPOINTMENT_STATUS_CONFLICT')) {
+		return 'El turno cambió mientras lo estabas actualizando y no sobrescribimos ese cambio. Recargá la agenda para ver el estado actual.';
+	}
 	if (raw.includes('APPOINTMENT_CANNOT_RESCHEDULE')) {
 		return 'Este turno ya está cerrado y no puede reprogramarse. Si necesitás una nueva atención, creá un turno nuevo desde la agenda.';
 	}
@@ -435,12 +438,19 @@ export const updateAppointmentStatus = async (
 	}
 	if (input.status === 'reschedule_requested') updates.reschedule_requested_at = now.toISOString();
 
-	const { error } = await supabase
+	const { data: changedAppointment, error } = await supabase
 		.from('appointments')
 		.update(updates)
 		.eq('business_id', input.businessId)
-		.eq('id', input.appointmentId);
+		.eq('id', input.appointmentId)
+		// Serialize competing transitions at the state observed above. Without
+		// this predicate, two professionals can both pass the local transition
+		// check and the last request can overwrite the first one.
+		.eq('status', appointment.status)
+		.select('id')
+		.maybeSingle();
 	if (error) throw error;
+	if (!changedAppointment) throw new Error('APPOINTMENT_STATUS_CONFLICT');
 
 	await writeAuditLog(supabase, {
 		businessId: input.businessId,
@@ -496,7 +506,7 @@ export const rescheduleAppointment = async (
 	// incrementado, y si el paciente ya había registrado una acción de calendario el
 	// turno queda "pendiente de actualizar" (banner en /turno + sección Recordatorios).
 	const hadCalendarAction = Number((appointment as any).calendar_action_count ?? 0) > 0;
-	const { error } = await supabase
+	const { data: changedAppointment, error } = await supabase
 		.from('appointments')
 		.update({
 			starts_at: input.startsAt.toISOString(),
@@ -514,8 +524,14 @@ export const rescheduleAppointment = async (
 			updated_at: now.toISOString()
 		})
 		.eq('business_id', input.businessId)
-		.eq('id', input.appointmentId);
+		.eq('id', input.appointmentId)
+		// Do not resurrect a cancellation (or overwrite another transition)
+		// that happened after the initial read.
+		.eq('status', appointment.status)
+		.select('id')
+		.maybeSingle();
 	if (error) throw error;
+	if (!changedAppointment) throw new Error('APPOINTMENT_STATUS_CONFLICT');
 
 	await writeAuditLog(supabase, {
 		businessId: input.businessId,
