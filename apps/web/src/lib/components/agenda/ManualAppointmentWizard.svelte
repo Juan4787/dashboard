@@ -620,14 +620,14 @@
 			if (request !== patientSearchRequest) return;
 			if (!response.ok) {
 				remotePatients = [];
-				patientSearchError = payload?.message ?? 'No se pudo buscar pacientes.';
+					patientSearchError = payload?.message ?? 'No pudimos buscar pacientes para crear el turno. Revisá tu conexión y volvé a intentar.';
 				return;
 			}
 			remotePatients = Array.isArray(payload?.patients) ? payload.patients : [];
 		} catch {
 			if (request !== patientSearchRequest) return;
 			remotePatients = [];
-			patientSearchError = 'No se pudo buscar pacientes.';
+			patientSearchError = 'No pudimos buscar pacientes para crear el turno. Revisá tu conexión y volvé a intentar.';
 		} finally {
 			if (request === patientSearchRequest) patientSearchLoading = false;
 		}

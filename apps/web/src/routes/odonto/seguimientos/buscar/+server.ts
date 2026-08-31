@@ -28,6 +28,6 @@ export const GET: RequestHandler = async ({ url, locals, fetch, cookies }) => {
 		return json({ patients });
 	} catch (err) {
 		console.error('Error buscando pacientes para seguimiento', err);
-		return json({ message: 'No se pudo buscar pacientes.' }, { status: 500 });
+		return json({ message: 'No pudimos buscar pacientes para el seguimiento. Revisá tu conexión y volvé a intentar.' }, { status: 500 });
 	}
 };

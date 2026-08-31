@@ -64,7 +64,7 @@ export const getFollowUpErrorMessage = (code: string): string => {
 		case 'FOLLOWUP_STATUS_CONFLICT':
 			return 'El seguimiento cambió mientras lo estabas actualizando y no sobrescribimos ese cambio. Recargá la lista para ver el estado actual.';
 		default:
-			return 'No se pudo completar la acción.';
+			return 'No pudimos completar este seguimiento. Recargá la lista y volvé a intentar.';
 	}
 };
 

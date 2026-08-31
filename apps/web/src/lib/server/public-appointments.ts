@@ -353,5 +353,5 @@ export const getPublicTokenErrorMessage = (error: unknown) => {
 	if (raw.includes('PUBLIC_TOKEN_ACTION_CONFLICT')) {
 		return 'Este turno cambió mientras lo actualizábamos. Volvé a abrir el enlace y revisá su estado.';
 	}
-	return 'No se pudo completar la acción.';
+	return 'No pudimos actualizar este turno desde el enlace. Volvé a abrirlo y revisá su estado antes de intentar de nuevo.';
 };

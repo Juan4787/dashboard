@@ -310,7 +310,7 @@ const clinicalEntryRpcError = (error: { message?: string; code?: string } | null
 		return { status: 404, message: 'Entrada no encontrada o sin permiso de edicion.' };
 	}
 
-	return { status: 500, message: 'No se pudo guardar la entrada.' };
+	return { status: 500, message: 'No pudimos guardar la entrada clínica. Revisá los datos y volvé a intentar.' };
 };
 
 const patientArchiveRpcError = (error: { message?: string; code?: string } | null | undefined) => {
@@ -1031,7 +1031,7 @@ export const actions: Actions = {
 				dni
 			});
 			if (duplicateResult) return duplicateResult;
-			return fail(500, { message: 'No se pudo actualizar la ficha.' });
+			return fail(500, { message: 'No pudimos actualizar la ficha del paciente. Revisá los datos y volvé a intentar.' });
 		}
 		const savedAtomicUpdate = Array.isArray(atomicUpdate) ? atomicUpdate[0] : atomicUpdate;
 		if (!savedAtomicUpdate || typeof savedAtomicUpdate !== 'object' || !(savedAtomicUpdate as any).patient_id) {

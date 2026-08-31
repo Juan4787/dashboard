@@ -302,7 +302,7 @@
 			if (!response.ok) {
 				liveResults = { upcoming: [], past: [] };
 				liveResolvedQuery = query;
-				liveError = payload?.message ?? 'No se pudo buscar. Probá de nuevo.';
+				liveError = payload?.message ?? 'No pudimos buscar turnos ahora. Revisá tu conexión y volvé a intentar.';
 				return;
 			}
 			const serverAppointments = [
@@ -316,7 +316,7 @@
 			if (request !== liveRequest) return;
 			liveResults = { upcoming: [], past: [] };
 			liveResolvedQuery = query;
-			liveError = 'No se pudo buscar. Probá de nuevo.';
+			liveError = 'No pudimos buscar turnos ahora. Revisá tu conexión y volvé a intentar.';
 		} finally {
 			if (request === liveRequest) {
 				if (liveController === controller) liveController = null;

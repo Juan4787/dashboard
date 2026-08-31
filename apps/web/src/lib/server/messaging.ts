@@ -276,7 +276,7 @@ export const humanMessagingError = (error: unknown) => {
 	if (message.includes('PATIENT_PHONE_MISSING')) return 'El paciente no tiene un teléfono válido.';
 	if (message.includes('APPOINTMENT_NOT_REMINDABLE')) return 'El turno ya no corresponde para recordatorio.';
 	if (message.includes('MESSAGING_PROVIDER_NOT_IMPLEMENTED')) return 'Ese proveedor de mensajes todavía no está implementado.';
-	return 'No se pudo enviar el mensaje.';
+	return 'No pudimos enviar el mensaje. Revisá la configuración de mensajería y volvé a intentar.';
 };
 
 export const formatReminderDateTime = (startsAt: string, timeZone: string) => {

@@ -50,7 +50,7 @@ export const GET: RequestHandler = async ({ url, locals, fetch, cookies }) => {
 
 	if (error) {
 		console.error('Error buscando pacientes', error);
-		return json({ message: 'No se pudo buscar pacientes.' }, { status: 500 });
+		return json({ message: 'No pudimos buscar pacientes ahora. Revisá tu conexión y volvé a intentar.' }, { status: 500 });
 	}
 
 	return json({ patients: data ?? [] });

@@ -43,7 +43,7 @@ export const GET: RequestHandler = async ({ locals, fetch, cookies, setHeaders }
 			return json({ message: 'No tenés permisos para buscar en la agenda.' }, { status: 403 });
 		}
 		console.error('Error preparando la búsqueda de turnos en la agenda', error);
-		return json({ message: 'No se pudo preparar la búsqueda.' }, { status: 500 });
+		return json({ message: 'No pudimos preparar la búsqueda de turnos. Recargá la agenda y volvé a intentar.' }, { status: 500 });
 	}
 
 	return json({ appointments: Array.isArray(data) ? data : [] });

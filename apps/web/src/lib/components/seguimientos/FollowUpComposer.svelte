@@ -160,7 +160,7 @@
 				const res = await fetch(`/odonto/seguimientos/buscar?q=${encodeURIComponent(q)}`, {
 					signal: controller.signal
 				});
-				if (!res.ok) throw new Error('No se pudo buscar pacientes.');
+				if (!res.ok) throw new Error('No pudimos buscar pacientes para el seguimiento. Revisá tu conexión y volvé a intentar.');
 				const data = await res.json();
 				if (requestId !== searchRequest) return;
 				const next = Array.isArray(data?.patients) ? data.patients : [];

@@ -48,7 +48,7 @@ export const GET: RequestHandler = async ({ url, locals, fetch, cookies, setHead
 			return json({ message: 'No tenés permisos para buscar en la agenda.' }, { status: 403 });
 		}
 		console.error('Error buscando turnos en la agenda', error);
-		return json({ message: 'No se pudo buscar. Probá de nuevo.' }, { status: 500 });
+		return json({ message: 'No pudimos buscar turnos ahora. Revisá tu conexión y volvé a intentar.' }, { status: 500 });
 	}
 
 	return json(splitActiveAppointmentGroups(Array.isArray(data) ? data : []));

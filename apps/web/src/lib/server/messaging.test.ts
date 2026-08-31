@@ -91,6 +91,10 @@ describe('messaging helpers', () => {
 		expect(humanMessagingError(new Error('PATIENT_PHONE_MISSING'))).toBe(
 			'El paciente no tiene un teléfono válido.'
 		);
+		const fallback = humanMessagingError(new Error('PROVIDER_UNKNOWN'));
+		expect(fallback).toContain('mensaje');
+		expect(fallback).toContain('configuración');
+		expect(fallback).not.toMatch(/PROVIDER_|SQL|HTTP|RPC/);
 	});
 
 	it('usa una URL HTTPS pública para callbacks externos aunque el entorno local sea localhost', () => {

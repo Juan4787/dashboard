@@ -181,4 +181,11 @@ describe('getPublicTokenErrorMessage', () => {
 			'Este turno cambió mientras lo actualizábamos. Volvé a abrir el enlace y revisá su estado.'
 		);
 	});
+
+	it('da contexto y siguiente paso para un error de token inesperado', () => {
+		const message = getPublicTokenErrorMessage(new Error('UNKNOWN'));
+		expect(message).toContain('turno');
+		expect(message).toContain('Volvé a abrirlo');
+		expect(message).not.toMatch(/PUBLIC_TOKEN_|SQL|HTTP|RPC/);
+	});
 });

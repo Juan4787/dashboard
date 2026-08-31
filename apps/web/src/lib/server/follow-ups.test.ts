@@ -3,6 +3,7 @@ import {
 	addDaysISO,
 	buildNotice,
 	businessTodayISO,
+	getFollowUpErrorMessage,
 	isExecuting,
 	isValidISODate,
 	mergeAssignableProfessionals,
@@ -115,5 +116,14 @@ describe('buildNotice', () => {
 		expect(many.count).toBe(3);
 		expect(many.single).toBeNull();
 		expect(many.dismissalKey).not.toBe(one.dismissalKey);
+	});
+});
+
+describe('mensajes de error', () => {
+	it('explica el objeto y el siguiente paso incluso para un código inesperado', () => {
+		const message = getFollowUpErrorMessage('UNKNOWN');
+		expect(message).toContain('seguimiento');
+		expect(message).toContain('Recargá');
+		expect(message).not.toMatch(/FOLLOWUP_|SQL|HTTP|RPC/);
 	});
 });

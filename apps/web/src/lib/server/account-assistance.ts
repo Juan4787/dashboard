@@ -352,7 +352,7 @@ export const accountAssistanceErrorMessage = (error: unknown) => {
 	if (message.includes('ACCOUNT_ASSISTANCE_STILL_ACTIVE')) {
 		return 'La ayuda sigue activa. Podés detenerla cuando quieras.';
 	}
-	return 'No pudimos actualizar la ayuda para configurar.';
+	return 'No pudimos actualizar la ayuda para configurar. Recargá la página y volvé a intentar; si continúa, contactá a Cita Suite.';
 };
 
 export const safeAssistanceReturnTo = (value: FormDataEntryValue | null) => {
