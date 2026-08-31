@@ -185,6 +185,23 @@ export const handle: Handle = async ({ event, resolve }) => {
 	}
 
 	const response = await resolve(event);
+	const securityHeaders: Record<string, string> = {
+		'strict-transport-security': 'max-age=31536000',
+		'x-content-type-options': 'nosniff',
+		'x-frame-options': 'DENY',
+		'referrer-policy': 'strict-origin-when-cross-origin',
+		'permissions-policy': 'camera=(), microphone=(), geolocation=()'
+	};
+	for (const [name, value] of Object.entries(securityHeaders)) {
+		if (!response.headers.has(name)) response.headers.set(name, value);
+	}
+
+	const contentType = response.headers.get('content-type')?.toLowerCase() ?? '';
+	const isServerRenderedPage = response.headers.get('x-sveltekit-page') === 'true' || contentType.startsWith('text/html');
+	if ((event.locals.auth || isServerRenderedPage) && !response.headers.has('cache-control')) {
+		response.headers.set('cache-control', 'private, no-store');
+	}
+
 	const totalMs = performance.now() - startedAt;
 	const loadMs = Math.max(totalMs - authMs, 0);
 	const runtimeRegion = String(env.AWS_REGION ?? 'unknown').replace(

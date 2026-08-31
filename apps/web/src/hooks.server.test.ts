@@ -107,4 +107,42 @@ describe('hooks auth validation', () => {
 		expect(getClaims).toHaveBeenCalledTimes(1);
 		expect(resolve).toHaveBeenCalledTimes(2);
 	});
+
+	it('aplica headers de seguridad y cache privado sin pisar contratos de rutas', async () => {
+		const event = makeEvent();
+		event.url = new URL('https://app.test/login');
+		(event.cookies.get as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
+		const response = new Response('<html></html>', {
+			headers: {
+				'content-type': 'text/html',
+				'x-sveltekit-page': 'true',
+				'referrer-policy': 'no-referrer',
+				'cache-control': 'no-store'
+			}
+		});
+		const resolve = vi.fn(async () => response);
+
+		await handle({ event, resolve } as never);
+
+		expect(response.headers.get('strict-transport-security')).toBe('max-age=31536000');
+		expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+		expect(response.headers.get('x-frame-options')).toBe('DENY');
+		expect(response.headers.get('referrer-policy')).toBe('no-referrer');
+		expect(response.headers.get('permissions-policy')).toBe('camera=(), microphone=(), geolocation=()');
+		expect(response.headers.get('cache-control')).toBe('no-store');
+	});
+
+	it('no deja HTML SSR sin cache-control aunque no tenga sesión', async () => {
+		const event = makeEvent();
+		event.url = new URL('https://app.test/login');
+		(event.cookies.get as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
+		const response = new Response('<html></html>', {
+			headers: { 'content-type': 'text/html', 'x-sveltekit-page': 'true' }
+		});
+		const resolve = vi.fn(async () => response);
+
+		await handle({ event, resolve } as never);
+
+		expect(response.headers.get('cache-control')).toBe('private, no-store');
+	});
 });

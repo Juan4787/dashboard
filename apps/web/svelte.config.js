@@ -1,8 +1,22 @@
+import { execSync } from 'node:child_process';
 import cloudflareAdapter from '@sveltejs/adapter-cloudflare';
 import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 
 /** @type {import('@sveltejs/kit').Config} */
 const isProd = process.env.NODE_ENV === 'production';
+const gitRevision = (() => {
+	try {
+		return execSync('git rev-parse HEAD', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+	} catch {
+		return '';
+	}
+})();
+const buildVersion = process.env.CITA_BUILD_VERSION?.trim() || process.env.GIT_COMMIT_SHA?.trim() || gitRevision;
+
+if (isProd && !buildVersion) {
+	throw new Error('CITA_BUILD_VERSION o GIT_COMMIT_SHA es obligatorio para un build de producción reproducible.');
+}
+
 // Cloudflare Workers es el único destino de publicación del candidato comercial.
 const adapter = cloudflareAdapter();
 
@@ -16,6 +30,10 @@ const config = {
 			dir: '../..'
 		},
 		adapter,
+		version: {
+			name: buildVersion || 'development',
+			pollInterval: 0
+		},
 		csp: isProd
 			? {
 					mode: 'auto',
