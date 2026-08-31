@@ -773,7 +773,6 @@
 							<button
 								type="submit"
 								class="block w-full rounded-xl bg-neutral-900 px-4 py-3 text-center text-sm font-semibold text-white dark:bg-white dark:text-neutral-900"
-								onclick={() => (mobileMenuOpen = false)}
 							>
 								Salir
 							</button>
@@ -979,7 +978,6 @@
 								type="submit"
 								class="block w-full rounded-xl px-4 py-3 text-left text-sm font-semibold text-red-700 transition hover:bg-red-50 dark:text-red-200 dark:hover:bg-red-500/10"
 								role="menuitem"
-								onclick={closeMenus}
 							>
 								Salir
 							</button>
