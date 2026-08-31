@@ -46,6 +46,12 @@
   `apps/web` ni la versión Cloudflare. La cadena documental posterior conserva el
   `HEAD` remoto actual sin sustituir al candidato de runtime `fba21de…`.
 
+- [x] **Commit documental vigente (no desplegado):** `ed2568fc508b9a551367183bd664ba8bda6a447f`
+  sólo separa snapshots históricos de estado actual, incorpora la precedencia editorial
+  de `b1a35ff`, actualiza el deployment vigente `9c794bbb…` y deja explícita la evidencia
+  del scheduler. No modifica `apps/web`, migraciones ni el artefacto publicado; el
+  runtime de Cloudflare continúa siendo `fba21de…`.
+
 - [x] Enlace al informe y artefactos: este archivo; resultados Playwright en [apps/web/test-results](</home/usuario/CascadeProjects/Base de Datos Sabrina/apps/web/test-results) y [apps/web/output/playwright](</home/usuario/CascadeProjects/Base de Datos Sabrina/apps/web/output/playwright). Los artefactos contienen capturas/traces de fallos y no se consideran evidencia de aprobación.
 
 ## Alcance y principio de aceptación
