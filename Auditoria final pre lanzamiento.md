@@ -4620,3 +4620,51 @@ lanzamiento.
   revisados, secretos fuera del artefacto, `pnpm check`, tests secuenciales, build A/B
   byte a byte del output de Cloudflare, hash/manifiesto, smoke de preview, canary,
   promoción, `/_app/version.json`, tail correlacionado y registro histórico/actual.
++
+## Relectura E2E final sobre el Worker actual — 2026-08-31 — ESTADO ACTUAL
+
+Esta sección actualiza únicamente la ejecución E2E posterior al deployment
+`9f8be05a-b003-42a8-bc00-18e87eff0c54`. No borra las corridas anteriores: los números
+anteriores quedan como antecedentes y esta relectura explica cada diferencia, cada fallo
+y cada skip.
+
+- [x] La orden completa se ejecutó contra `https://app.cita-suite.workers.dev` con
+  `CI=1`, `E2E_ALLOW_DESTRUCTIVE=true`, credenciales provistas por variables y
+  `--workers=1 --retries=0`. Resultado bruto: **27 tests, 11 pasados, 5 fallidos y
+  11 skipped**. Los fallos no se ocultaron ni se transformaron en skips.
+- [x] El primer fallo de ayuda maestra no fue un estado clínico incorrecto: el panel
+  mostró correctamente la región `2 consultorios pidieron ayuda para configurar`,
+  con las dos solicitudes sintéticas visibles. La aserción esperaba exactamente una
+  solicitud porque una corrida abortada anterior había dejado un fixture
+  `E2E Ayuda` activo. Se eliminaron exclusivamente ese negocio, sus dos usuarios
+  Auth y sus dos emails de prueba; la relectura confirmó cero negocios, pacientes,
+  profesionales e invitaciones `E2E` restantes. La prueba se repitió y pasó **1/1
+  en 30,4 s**.
+- [x] Los dos fallos de navegación móvil no fueron ausencia del control: los specs
+  esperaban un enlace `Salir`, mientras la implementación segura actual usa un
+  formulario POST con botón `Salir` para impedir logout por prefetch/crawler. El
+  botón estuvo visible y en viewport en ambos escenarios; se corrigieron sólo los
+  selectores de los specs a `button[name="Salir"]` y se repitieron
+  `mobile-navigation-ux.spec.ts` y `commercial-lock.spec.ts`: **3/3 pasados en
+  25,5 s**.
+- [x] Los dos fallos de `roles-agenda-regression.spec.ts` ocurrieron al crear cuentas
+  sintéticas pendientes: el Worker respondió
+  `/odonto/pendiente?reason=rate_limited`, consistente con el límite operativo de
+  registros por IP después de la batería larga. No se interpretó ese 429 como éxito ni
+  se intentó eludirlo borrando el contador. El límite y el mensaje humano quedaron
+  demostrados; la aceptación de altas nuevas requiere repetir desde otro runner/IP o
+  después de la ventana de una hora. El cleanup de la suite y la consulta posterior no
+  dejaron fixtures sintéticos.
+- [x] La higiene de fixtures se verificó con consultas de service role de sólo lectura
+  después de la corrida: negocios, pacientes, profesionales e invitaciones con
+  prefijos E2E devolvieron cero. Las 23 filas de `account_assistance_grants`
+  existentes no se eliminaron indiscriminadamente: sólo se retiró el negocio/usuarios
+  sintéticos identificados; no se tocó información clínica real ni el esquema.
+- [x] El archivo E2E móvil conserva el ajuste previo `hasTouch=true` porque Firefox no
+  implementa `isMobile`; el cambio adicional de esta relectura sólo adapta la semántica
+  de logout de enlace a botón/formulario. No se stagearon capturas, videos ni otros
+  cambios del worktree.
+- [ ] La batería completa queda **parcial**, no verde: persisten los dos casos de
+  roles bloqueados por rate limit y los 11 skips declarados por sus precondiciones.
+  No se debe afirmar cobertura E2E total hasta repetir esos casos desde un runner
+  externo con IP limpia y ejecutar cada skip justificadamente.

@@ -12,7 +12,10 @@ test.describe('Odontología mobile - navegación', () => {
 
 	test.use({
 		viewport: { width: 390, height: 844 },
-		isMobile: true
+		// `isMobile` is not implemented by Firefox. The responsive contract under
+		// test is driven by the viewport, so keep this context portable across
+		// Chromium, Firefox and WebKit.
+		hasTouch: true
 	});
 
 	test('menú vertical muestra opciones y cerrar sesión sin rotar el teléfono', async ({ page }) => {
@@ -37,8 +40,8 @@ test.describe('Odontología mobile - navegación', () => {
 		const dialog = page.getByRole('dialog', { name: 'Menú de navegación' });
 		await expect(dialog).toBeVisible();
 		await expect(dialog.getByText('Cuenta')).toBeVisible();
-		await expect(dialog.getByRole('link', { name: 'Salir' })).toBeVisible();
-		await expect(dialog.getByRole('link', { name: 'Salir' })).toBeInViewport();
+		await expect(dialog.getByRole('button', { name: 'Salir', exact: true })).toBeVisible();
+		await expect(dialog.getByRole('button', { name: 'Salir', exact: true })).toBeInViewport();
 		await page.screenshot({ path: 'output/playwright/mobile-menu-open.png', fullPage: false });
 	});
 });

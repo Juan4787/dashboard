@@ -186,7 +186,7 @@ test.describe('Acceso comercial bloqueado', () => {
 			await menuButton.click();
 			await expect(dialog).toBeVisible({ timeout: 1_000 });
 		}).toPass({ timeout: 10_000 });
-		const logout = dialog.getByRole('link', { name: 'Salir' });
+		const logout = dialog.getByRole('button', { name: 'Salir', exact: true });
 		await expect(logout).toBeVisible();
 		await expect(logout).toBeInViewport();
 		await page.screenshot({ path: 'output/playwright/commercial-lock-mobile-menu.png', fullPage: false });
