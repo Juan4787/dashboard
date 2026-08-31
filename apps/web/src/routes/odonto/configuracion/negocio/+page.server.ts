@@ -6,6 +6,7 @@ import {
 } from '$lib/server/business';
 import { createSupabaseAdminClient, createSupabaseServerClient } from '$lib/server/supabase';
 import { isValidMapsUrl } from '$lib/server/location';
+import { isAllowedPublicImageUrl } from '$lib/server/public-image';
 import { env } from '$env/dynamic/private';
 import { error as kitError, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
@@ -169,10 +170,13 @@ export const actions: Actions = {
 		if (logo_url) {
 			try {
 				const logo = new URL(logo_url);
-				if (logo.protocol !== 'https:') throw new Error('INVALID_PROTOCOL');
+				if (logo.protocol !== 'https:' || !isAllowedPublicImageUrl(logo_url)) {
+					throw new Error('INVALID_ORIGIN');
+				}
 			} catch {
 				return fail(400, {
-					message: 'El logo debe ser una URL segura que empiece con https://.',
+					message:
+						'El logo debe ser una URL HTTPS del dominio público configurado o del proyecto de datos del consultorio.',
 					values: Object.fromEntries(form)
 				});
 			}

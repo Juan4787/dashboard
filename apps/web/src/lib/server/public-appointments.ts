@@ -14,6 +14,7 @@ import {
 	publicHash,
 	recordPublicBookingAttempt
 } from './public-booking';
+import { sanitizePublicImageUrl } from './public-image';
 
 export type PublicAppointmentAction = 'confirm' | 'cancel' | 'reschedule';
 
@@ -176,7 +177,7 @@ export const loadPublicAppointmentByToken = async (
 				address: business.address ?? null,
 				maps_url: business.maps_url ?? null
 			}),
-			logo_url: business.logo_url ?? null,
+			logo_url: sanitizePublicImageUrl(business.logo_url),
 			timezone: String(business.timezone),
 			is_active: Boolean(business.is_active),
 			cancellation_policy: business.cancellation_policy ?? null

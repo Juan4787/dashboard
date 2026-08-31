@@ -190,6 +190,9 @@
 			<label class="md:col-span-2">
 				<span class="ux-label">Logo (opcional)</span>
 				<input name="logo_url" value={valueOf('logo_url')} disabled={!canManage} class="ux-input" />
+				<span class="mt-1 block text-xs text-white/45">
+					Usá una URL HTTPS del dominio público configurado o del proyecto de datos del consultorio para que el logo se vea también en la reserva online.
+				</span>
 			</label>
 			<label class="md:col-span-2">
 				<span class="ux-label">Mostrar horarios hasta</span>

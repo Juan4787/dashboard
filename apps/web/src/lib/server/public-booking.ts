@@ -29,6 +29,7 @@ import {
 	type BusinessSubscriptionRow
 } from './commercial-access';
 import { isLikelyPhoneE164, normalizePhoneE164 } from './phone';
+import { sanitizePublicImageUrl } from './public-image';
 
 export type PublicService = {
 	id: string;
@@ -214,7 +215,11 @@ export const getPublicBusinessBySlug = async (
 		.eq(isBusinessId ? 'id' : 'slug', slug)
 		.maybeSingle();
 	if (error) throw error;
-	return (data as PublicBookingBusiness | null) ?? null;
+	if (!data) return null;
+	return {
+		...(data as PublicBookingBusiness),
+		logo_url: sanitizePublicImageUrl((data as PublicBookingBusiness).logo_url)
+	};
 };
 
 export const canUsePublicBusiness = async (
@@ -381,7 +386,7 @@ export const getReservableProfessionals = async (
 			id: String(professional.id),
 			name: String(professional.name).trim(),
 			specialty: professional.specialty ?? null,
-			avatar_url: professional.avatar_url ?? null
+			avatar_url: sanitizePublicImageUrl(professional.avatar_url)
 		}));
 };
 
