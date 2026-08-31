@@ -2,7 +2,7 @@ import { env } from '$env/dynamic/private';
 import type { Cookies } from '@sveltejs/kit';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createHash } from 'node:crypto';
-import { createSupabaseAdminClient, getAuthUserId } from './supabase';
+import { createSupabaseAdminClient, getAuthUserId, getEmailFromAccessToken } from './supabase';
 import {
 	getBusinessAccessState,
 	type BusinessAccessState,
@@ -535,6 +535,43 @@ const isRecoverableDefaultBusinessBootstrapRace = (error: unknown) =>
 	isDefaultBusinessPendingManualSetupError(error) ||
 	isEmailAlreadyAssociatedWithOtherBusinessError(error);
 
+/**
+ * Invitaciones pendientes no crean un consultorio nuevo y no deben consumir el
+ * límite anti-abuso de altas por IP. La consulta se hace con el cliente de
+ * servicio y sólo devuelve un booleano; si no se puede comprobar, se conserva
+ * el límite (fail closed).
+ */
+const hasPendingBusinessInvite = async ({
+	userId,
+	accessToken,
+	fetch
+}: {
+	userId: string;
+	accessToken?: string | null;
+	fetch?: typeof globalThis.fetch;
+}): Promise<boolean> => {
+	const email = getEmailFromAccessToken(accessToken)?.trim().toLowerCase();
+	if (!email) return false;
+	try {
+		const admin = await createSupabaseAdminClient('odonto', fetch);
+		const { data, error } = await admin
+			.from('business_user_invites')
+			.select('id')
+			.eq('email', email)
+			.eq('status', 'pending')
+			.limit(1)
+			.maybeSingle();
+		if (error) {
+			console.error('No se pudo comprobar la invitación pendiente antes del alta', error);
+			return false;
+		}
+		return Boolean(data?.id);
+	} catch (error) {
+		console.error('No se pudo comprobar la invitación pendiente antes del alta', error);
+		return false;
+	}
+};
+
 const reloadMembershipsAfterBootstrap = async (
 	supabase: SupabaseClient,
 	userId: string,
@@ -552,11 +589,13 @@ const reloadMembershipsAfterBootstrap = async (
 const ensureDefaultBusinessOnce = ({
 	supabase,
 	userId,
+	accessToken,
 	ip,
 	fetch
 }: {
 	supabase: SupabaseClient;
 	userId: string;
+	accessToken?: string | null;
 	ip?: string | null;
 	fetch?: typeof globalThis.fetch;
 }) => {
@@ -564,13 +603,16 @@ const ensureDefaultBusinessOnce = ({
 	if (existing) return existing;
 
 	const pending = (async () => {
-		try {
-			// Crear un consultorio sí consume recursos: si este control no se puede
-			// comprobar, la operación se detiene con un estado específico.
-			await enforceRateLimits(pendingBusinessCreationRateLimitRules(userId, ip), fetch);
-		} catch (error) {
-			if (error instanceof RateLimitExceededError) throw error;
-			throw new DefaultBusinessSetupUnavailableError(error);
+		const invited = await hasPendingBusinessInvite({ userId, accessToken, fetch });
+		if (!invited) {
+			try {
+				// Crear un consultorio sí consume recursos: si este control no se puede
+				// comprobar, la operación se detiene con un estado específico.
+				await enforceRateLimits(pendingBusinessCreationRateLimitRules(userId, ip), fetch);
+			} catch (error) {
+				if (error instanceof RateLimitExceededError) throw error;
+				throw new DefaultBusinessSetupUnavailableError(error);
+			}
 		}
 
 		try {
@@ -626,6 +668,7 @@ export const resolveActiveBusiness = async ({
 			({ error } = await ensureDefaultBusinessOnce({
 				supabase,
 				userId,
+				accessToken,
 				ip: defaultBusinessCreationIp,
 				fetch
 			}));

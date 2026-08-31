@@ -8,13 +8,17 @@ const rateLimitMocks = vi.hoisted(() => ({
 	])
 }));
 
+const supabaseMocks = vi.hoisted(() => ({
+	createSupabaseAdminClient: vi.fn(async () => {
+		throw new Error('admin no disponible en test unitario');
+	})
+}));
+
 vi.mock('./supabase', async () => {
 	const actual = await vi.importActual<typeof import('./supabase')>('./supabase');
 	return {
 		...actual,
-		createSupabaseAdminClient: vi.fn(async () => {
-			throw new Error('admin no disponible en test unitario');
-		})
+		createSupabaseAdminClient: supabaseMocks.createSupabaseAdminClient
 	};
 });
 
@@ -34,8 +38,8 @@ import {
 } from './business';
 import { RateLimitUnavailableError } from './rate-limits';
 
-const accessTokenFor = (userId: string) => {
-	const payload = Buffer.from(JSON.stringify({ sub: userId })).toString('base64url');
+const accessTokenFor = (userId: string, email?: string) => {
+	const payload = Buffer.from(JSON.stringify({ sub: userId, ...(email ? { email } : {}) })).toString('base64url');
 	return `test.${payload}.signature`;
 };
 
@@ -103,9 +107,11 @@ const missingContextsRpc = () =>
 describe('resolveActiveBusiness', () => {
 	beforeEach(() => {
 		clearBusinessMembershipReadCache();
-		rateLimitMocks.enforceRateLimits.mockReset();
+	rateLimitMocks.enforceRateLimits.mockReset();
 		rateLimitMocks.enforceRateLimits.mockResolvedValue(undefined);
 		rateLimitMocks.pendingBusinessCreationRateLimitRules.mockClear();
+		supabaseMocks.createSupabaseAdminClient.mockReset();
+		supabaseMocks.createSupabaseAdminClient.mockRejectedValue(new Error('admin no disponible en test unitario'));
 	});
 
 	it('loads the auto-created owner business after allowed-email bootstrap', async () => {
@@ -188,6 +194,47 @@ describe('resolveActiveBusiness', () => {
 			})
 		).rejects.toBeInstanceOf(DefaultBusinessSetupUnavailableError);
 		expect(supabase.rpc).not.toHaveBeenCalledWith('ensure_user_default_business', expect.anything());
+	});
+
+	it('las invitaciones pendientes no consumen el límite de altas por IP', async () => {
+		const inviteQuery = {
+			select: vi.fn(() => inviteQuery),
+			eq: vi.fn(() => inviteQuery),
+			limit: vi.fn(() => inviteQuery),
+			maybeSingle: vi.fn(async () => ({ data: { id: 'invite-1' }, error: null }))
+		};
+		supabaseMocks.createSupabaseAdminClient.mockResolvedValue({ from: vi.fn(() => inviteQuery) } as any);
+		const userId = 'user-invited';
+		const email = 'invited@example.com';
+		let contextReads = 0;
+		const supabase = {
+			from: vi.fn(),
+			rpc: vi.fn(async (name: string) => {
+				if (name === 'list_user_business_contexts') {
+					contextReads += 1;
+					return contextReads === 1
+						? { data: [], error: null }
+						: { data: [{ role: 'owner', business: businessRow, subscription: subscriptionRow }], error: null };
+				}
+				if (name === 'ensure_user_default_business') return { data: [], error: null };
+				throw new Error(`Unexpected RPC ${name}`);
+			})
+		} as any;
+
+		const context = await resolveActiveBusiness({
+			supabase,
+			userId,
+			accessToken: accessTokenFor(userId, email),
+			defaultBusinessCreationIp: '203.0.113.10'
+		} as any);
+
+		expect(context?.business.id).toBe('business-1');
+		expect(rateLimitMocks.enforceRateLimits).not.toHaveBeenCalled();
+		expect(rateLimitMocks.pendingBusinessCreationRateLimitRules).not.toHaveBeenCalled();
+		expect(supabase.rpc).toHaveBeenCalledWith('ensure_user_default_business', {
+			p_name: 'Consultorio',
+			p_industry: 'odontology'
+		});
 	});
 
 	it('no devuelve null silenciosamente si el alta terminó pero la membresía no aparece', async () => {
