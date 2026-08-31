@@ -236,10 +236,11 @@ export const canUsePublicBusiness = async (
 		.maybeSingle();
 
 	if (error) {
-		// Compatibility-first fallback: if the migration is not applied yet, do
-		// not break existing public booking links.
+		// No se puede habilitar una mutación pública cuando el estado comercial es
+		// desconocido. Un fallback afirmativo convertiría un timeout de Supabase en
+		// una reserva o una acción sobre un turno que debería estar bloqueado.
 		console.error('Error cargando acceso comercial público', error);
-		return true;
+		return false;
 	}
 
 	return getBusinessAccessState((data as BusinessSubscriptionRow | null) ?? null, {
@@ -259,8 +260,9 @@ const getPublicBusinessSubscription = async (
 		.eq('business_id', businessId)
 		.maybeSingle();
 	if (error) {
-		// Mismo fallback de compatibilidad que canUsePublicBusiness: una migración
-		// comercial pendiente no debe romper links que ya funcionaban.
+		// El estado comercial desconocido debe bloquear la reserva pública. La
+		// ausencia de una fila, en cambio, sigue usando el fallback histórico por
+		// fecha de creación en getBusinessAccessState.
 		console.error('Error cargando acceso comercial público', error);
 		return { subscription: null, lookupFailed: true };
 	}
@@ -766,7 +768,7 @@ export const loadPublicBookingState = async (
 		Math.min(Math.max(business.max_booking_days_ahead, 1), 90)
 	);
 	const commerciallyUsable = Boolean(
-		accessLookup?.lookupFailed ||
+		!accessLookup?.lookupFailed &&
 			getBusinessAccessState(accessLookup?.subscription ?? null, {
 				businessCreatedAt: business.created_at
 			}).allowedCapabilities.canUsePublicBooking

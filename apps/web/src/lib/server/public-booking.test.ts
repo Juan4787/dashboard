@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	assertPublicBookingPatientPolicy,
 	addDaysToDateString,
+	canUsePublicBusiness,
 	clearPublicBookingScanCache,
 	createPublicBooking,
 	getPublicBookingErrorCode,
@@ -36,6 +37,23 @@ vi.mock('./appointments', () => ({
 }));
 
 describe('public booking UX helpers', () => {
+	it('bloquea reservas si no puede leer el estado comercial', async () => {
+		const supabase = {
+			from: (table: string) => {
+				expect(table).toBe('business_subscriptions');
+				return {
+					select: () => ({
+						eq: () => ({
+							maybeSingle: async () => ({ data: null, error: { message: 'timeout' } })
+						})
+					})
+				};
+			}
+		};
+
+		expect(await canUsePublicBusiness(supabase as never, 'biz-1')).toBe(false);
+	});
+
 	it('usa un mensaje claro cuando el horario público ya no está disponible', () => {
 		expect(getPublicBookingErrorMessage(new Error('PUBLIC_SLOT_UNAVAILABLE'))).toBe(
 			'Ese horario acaba de ser ocupado. Elegí otro de los horarios disponibles.'
