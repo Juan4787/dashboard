@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('$app/environment', () => ({ dev: false }));
 vi.mock('$env/dynamic/private', () => ({ env: envState.privateEnv }));
+vi.mock('$lib/server/business', () => ({ ACTIVE_BUSINESS_COOKIE: 'active-business-id' }));
 vi.mock('$lib/server/supabase', () => ({
 	createSupabaseServerClient: mocks.createSupabaseServerClient,
 	getEmailFromAccessToken: mocks.getEmailFromAccessToken,
@@ -71,6 +72,7 @@ describe('hooks auth validation', () => {
 		expect(event.cookies.delete).toHaveBeenCalledWith('sb-module', { path: '/' });
 		expect(event.cookies.delete).toHaveBeenCalledWith('sb-access-token', { path: '/' });
 		expect(event.cookies.delete).toHaveBeenCalledWith('sb-refresh-token', { path: '/' });
+		expect(event.cookies.delete).toHaveBeenCalledWith('active-business-id', { path: '/' });
 	});
 
 	it('vuelve a validar Auth en cada request para respetar la revocación inmediata', async () => {

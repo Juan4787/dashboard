@@ -7,6 +7,7 @@ import {
 	isMasterEmail,
 	type Module
 } from '$lib/server/supabase';
+import { ACTIVE_BUSINESS_COOKIE } from '$lib/server/business';
 import { redirect, type Handle } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 
@@ -75,6 +76,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 		event.cookies.delete('sb-module', options);
 		event.cookies.delete('sb-access-token', options);
 		event.cookies.delete('sb-refresh-token', options);
+		event.cookies.delete(ACTIVE_BUSINESS_COOKIE, options);
 	};
 
 	const isDemo = env.DEMO_MODE === 'true';
