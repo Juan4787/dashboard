@@ -4820,3 +4820,215 @@ identificados como antecedentes y separa lo que ahora gobierna la decisión.
   alertas recibidas por una persona, p95/p99 de recursos, synthetic de seis horas, soak
   de 24 horas y el cierre del aviso CSP de iPhone. G9 permanece **PARCIAL** por la
   alerta humana, reintentos y runbook pendientes. La decisión global continúa **NO-GO**.
+
+## Matriz autenticada multi-tenant y revocación — 2026-08-31 — ESTADO ACTUAL
+
+Esta ejecución reemplaza metodológicamente la sonda anterior de dos consultorios que
+había usado un prefijo común para A y B y, por eso, confundía el marcador propio con
+una filtración lateral. La sonda anterior queda conservada como **incidente del arnés**;
+no se cuenta como evidencia de fallo de la aplicación. También se corrigió el intento
+de revocación: `business_users` admite `active`/`disabled`, no `revoked`; la primera
+mutación inválida fue rechazada por la restricción y no modificó datos.
+
+- [x] Se crearon dos consultorios sintéticos con marcadores independientes
+  `TENANTA_<suffix>` y `TENANTB_<suffix>`, seis cuentas en A (owner, admin, recepción,
+  readonly y dos profesionales, uno vinculado y otro no vinculado) y un owner en B.
+  Cada cuenta tuvo contraseña temporal aleatoria, membresía activa, servicio,
+  profesional, agenda y paciente; el profesional vinculado tuvo además relación
+  profesional-paciente. Nunca se imprimieron credenciales, tokens ni cookies.
+- [x] La ejecución válida se hizo contra `https://app.cita-suite.workers.dev`, con un
+  único Chromium, contextos secuenciales y cliente Supabase con WebSocket explícito.
+  Se verificaron login y ruta inicial por rol, presencia del contexto A y ausencia del
+  marcador B en la Agenda, referencias, lista y búsqueda de pacientes, búsqueda de
+  Agenda, Equipo, ficha/historial/radiografías de un paciente B, dependencias de un
+  profesional B y consultas directas RLS a `patients` de B.
+- [x] Para owner y admin, Equipo mostró el marcador A y nunca B; recepción, readonly y
+  profesionales fueron redirigidos fuera de Equipo. Los profesionales quedaron
+  limitados a Mis turnos y sus endpoints de agenda devolvieron 403 cuando correspondía.
+  No se observó HTTP 5xx ni contenido del tenant B en ninguna de las 80 aserciones.
+- [x] Se intercambió deliberadamente la cookie `active-business-id` por el UUID de B
+  dentro de una sesión perteneciente sólo a A. La aplicación mantuvo el contexto A,
+  no mostró B y siguió en Agenda.
+- [x] Se deshabilitó la membresía de recepción durante una sesión ya iniciada usando el
+  estado válido `disabled` y se recargó Agenda. La sesión terminó en
+  `/odonto/pendiente`, sin marcador A ni acceso clínico; después se restauró exactamente
+  la fila a `active` y se comprobó cleanup.
+- [x] Resultado: **80/80 PASS, 0 FAIL**. La limpieza por UUID/email dejó
+  `businesses A=0`, `businesses B=0`; no quedaron pacientes, profesionales,
+  membresías, usuarios Auth ni emails sintéticos. La consulta RLS de cada rol devolvió
+  cero filas de B sin error.
+- [ ] Esto cierra una matriz representativa de aislamiento y revocación de lectura, pero
+  no convierte G3 en verde: todavía faltan atacar exhaustivamente todas las mutaciones,
+  todos los RPC y carreras de revocación/edición con datos clínicos concurrentes.
+
+## Alta de owner y membresía aceptada — 2026-08-31 — HALLAZGO, CORRECCIÓN Y ESTADO ACTUAL
+
+### Antecedente reproducido antes de la corrección
+
+- [x] Se construyó un consultorio sintético y una cuenta Auth descartable, se insertó
+  deliberadamente una membresía `active` con `accepted_at = null` y se inició sesión
+  contra el Worker público. El RPC `list_user_business_contexts` devolvió el
+  consultorio y la Agenda mostró su shell, pero la consulta RLS a `services` devolvió
+  cero filas. Resultado del arnés: **3/3 PASS en la reproducción**. Esto era un bug
+  real de consistencia: el profesional podía ver el consultorio pero no sus datos.
+- [x] La causa quedó localizada en dos puntos: el alta `create_business` del panel
+  maestro insertaba el owner sin `status`/`accepted_at`, y el RPC de contexto aceptaba
+  membresías activas sin aceptación aunque `user_has_business_access` y las políticas
+  RLS exigían `accepted_at`. El fixture fue eliminado por UUID y la cuenta Auth
+  descartable fue eliminada; no se tocaron consultorios reales.
+
+### Corrección aplicada y filtrada
+
+- [x] El commit aislado `4f5ac66c4a58ee28128d6a1a8cee310f817c8d15` hace que el alta del
+  owner ya registrado escriba `status = active`, `accepted_at`, `created_by` y
+  `updated_by`; agrega prueba unitaria del camino; actualiza
+  `add_business_user_by_email`; filtra el RPC a membresías activas aceptadas; y
+  agrega la restricción `business_users_active_requires_accepted_at`.
+- [x] La migración `20260831042000_require_accepted_active_memberships.sql` fue
+  revisada antes de aplicarse. El conteo remoto previo era `active_null_accepted=0`,
+  `all_null_accepted=0`, por lo que el backfill ejecutó `UPDATE 0`; no hubo datos
+  actuales que cambiar. Se aplicó con `psql --single-transaction -v ON_ERROR_STOP=1`
+  a la base remota y se registró en `supabase_migrations.schema_migrations`.
+  La verificación posterior dio `convalidated=true`, filtro `accepted_at` presente
+  en la función, `active_null_accepted=0` y migración vigente
+  `20260831042000:require_accepted_active_memberships`.
+- [x] El CLI global antiguo falló sólo al parsear la clave no soportada
+  `local_smtp`; el CLI del proyecto (`pnpm exec supabase 2.115.0`) confirmó después,
+  mediante un workdir de migraciones limpio, `db push --dry-run` **up to date**. Este
+  incidente de herramienta no es un fallo de la aplicación.
+
+### Verificación de código, batería y Worker actual
+
+- [x] `pnpm --dir apps/web exec vitest run --maxWorkers=1`: **108 archivos, 827
+  tests PASS**. Un intento previo con `--minWorkers=1` fue rechazado por Vitest 4
+  como opción inexistente; se corrigió inmediatamente y no se contó como test.
+- [x] `pnpm --dir apps/web check`: **0 errores, 0 advertencias**.
+- [x] Dos builds de producción con el SHA completo produjeron exactamente el output
+  `.svelte-kit/cloudflare`: **105 archivos**, hash ordenado de rutas+contenido
+  `a0e54fda608d657342d6493b1412335165b415c89043c229dde0e25332fdb50f` en A y B,
+  comparación **BYTE_A_BYTE PASS**. Wrangler leyó 112 assets (3946.83 KiB, 807.15
+  KiB gzip); el detalle queda en
+  `audit-evidence/cloudflare/4f5ac66-build-metadata.txt`.
+- [x] Se publicó únicamente después de pasar tests, check, migración y hash. La
+  versión Cloudflare actual es `8b06737b-b651-481e-9eda-a4af396e646b`, 100 % del
+  tráfico, tag `4f5ac66-clean-a0e54fda`, mensaje `prelaunch accepted membership
+  integrity 4f5ac66`. `/_app/version.json` respondió el SHA completo esperado;
+  `/login` respondió `cache-control: private, no-store`.
+- [x] La rama `prelaunch/cloudflare-20260830` fue subida de forma fast-forward y
+  `git ls-remote` coincide exactamente con el checkout local en
+  `4f5ac66c4a58ee28128d6a1a8cee310f817c8d15`. Los cambios no relacionados del
+  worktree no fueron incluidos.
+- [x] El arnés vigente
+  `audit-evidence/current-null-accepted-membership-test.mjs` intentó insertar de
+  nuevo una membresía activa sin aceptación: la base la rechazó por la restricción;
+  luego creó una membresía aceptada, verificó el RPC, RLS y la Agenda en
+  `https://app.cita-suite.workers.dev`. Resultado: **4/4 PASS** y cleanup exacto.
+
+### Concurrencia ejecutada en el mismo candidato
+
+- [x] `current-booking-concurrency-test.mjs`: **8/8 PASS** en la función atómica:
+  50 reservas concurrentes del mismo horario dejaron exactamente un ganador y 49
+  conflictos; 10 solicitudes con la misma clave dejaron un único turno/paciente y
+  9 respuestas replay idempotentes.
+- [x] `current-admin-create-action-concurrency.mjs`: **5/5 PASS** contra el Worker
+  actual con diez POST autenticados simultáneos, sin HTTP 5xx, un solo turno, un
+  solo paciente y datos/horario/clave coherentes. La primera ejecución histórica
+  devolvió conflictos porque el fixture carecía de `accepted_at`; se clasificó como
+  error del arnés, se corrigió el fixture y se repitió con resultado válido.
+- [x] `current-idor-mutation-test.mjs`: **14/14 PASS** contra la versión etiquetada;
+  owner A atacó IDs B en pacientes, historia, archivo, turno y reprogramación. Las
+  respuestas fueron fallos humanos 404/403/400, las filas B quedaron byte a byte
+  iguales y la limpieza por UUID no dejó usuarios ni consultorios sintéticos.
+
+### Estado de gate tras esta evidencia
+
+- [ ] El defecto de alta/membresía queda **corregido y demostrado en producción**;
+  no se marca G3 global verde porque aún faltan la matriz de mutaciones/RPC completa,
+  carreras de revocación y edición clínica, restauración integrada, observabilidad
+  persistente, p95/p99, synthetic/soak y pruebas humanas de accesibilidad indicadas
+  en los gates superiores.
+- [ ] La decisión global permanece **NO-GO** hasta cerrar esos bloqueos críticos;
+  esta sección no borra ni reemplaza los antecedentes anteriores.
+
+## Acciones públicas concurrentes — 2026-08-31 — ESTADO ACTUAL
+
+- [x] Se ejecutaron contra el Worker etiquetado ocho cancelaciones públicas
+  simultáneas para el mismo turno, ocho solicitudes de reprogramación y ocho
+  confirmaciones. Cada lote envió `Origin` y `Referer` del Worker para distinguir
+  correctamente una carrera válida de un rechazo CSRF. El primer intento sin esos
+  encabezados devolvió `Cross-site POST form submissions are forbidden` en las 24
+  solicitudes: queda registrado como **antecedente del arnés**, no como fallo del
+  producto; se corrigió el arnés y se repitió.
+- [x] Cancelación: exactamente un éxito, siete conflictos esperables, cero 5xx,
+  estado final `cancelled`, motivo persistido, un solo `appointment.public_cancelled`
+  y la reprogramación posterior rechazada.
+- [x] Reprogramación: exactamente un éxito, siete conflictos esperables, cero 5xx,
+  estado final `reschedule_requested`, un solo `appointment.reschedule_requested` y
+  el segundo pedido rechazado.
+- [x] Confirmación: cero 5xx, al menos un éxito y el resto replay/idempotencia, estado
+  final `confirmed` y un solo `appointment.public_confirmed`.
+- [x] Resultado actual: **11/11 PASS, 0 FAIL**, cleanup por UUID completo. La
+  comparación de estado/auditoría posterior confirmó que no hay doble transición ni
+  doble registro. Este resultado cubre la carrera pública; no reemplaza las pruebas
+  humanas de UX ni la observabilidad persistente.
+
+## Matriz ofensiva RLS/RPC — hallazgo y cierre — 2026-08-31
+
+### Antecedente reproducido antes del cierre
+
+- [x] La sonda creó dos consultorios sintéticos independientes, tres usuarios por
+  fixture y datos de agenda, pacientes e historia deliberadamente parecidos. Un owner
+  de A, sin membresía en B, atacó B por PostgREST/RPC, incluyendo lecturas, updates,
+  inserts y deletes. El resultado bruto fue **10 PASS y 12 FAIL de 22**.
+- [x] El primer fallo real fue inequívoco: `user_can_manage_users(B)` devolvía `NULL`
+  en lugar de `false` y `list_business_users(B)` devolvía las membresías y emails de
+  B al usuario A. La causa fue `IF NOT <expresión NULL>` en PL/pgSQL: el rechazo no
+  se ejecutaba cuando el rol era inexistente. `list_business_role_access(B)` tenía el
+  mismo guard indirecto.
+- [x] La misma condición permitía mutaciones SECURITY DEFINER de alto impacto en el
+  fixture: archivar un paciente B, cambiar su ficha clínica, crear el vínculo
+  profesional-paciente y modificar roles/invitaciones. Los casos de
+  `remove_business_role_access` y `update_business_role_access` quedaron además
+  marcados con contaminación de estado del arnés al encadenarlos después de la prueba
+  de disable; la inspección del código mostró el mismo guard nullable y se incluyeron
+  en la corrección, sin presentarlos como una medición aislada limpia.
+- [x] Las lecturas y mutaciones directas de tablas protegidas por RLS sí quedaron
+  aisladas en esa ejecución (15/15 lecturas y 9/9 updates más insert/delete), lo que
+  permitió separar el problema de las políticas de tabla del problema de RPC
+  SECURITY DEFINER. Los fixtures y usuarios fueron eliminados por IDs exactos.
+
+### Corrección y verificación actual
+
+- [x] La migración `20260831043000_harden_nullable_authorization.sql` conserva el
+  contrato de `user_business_role()` (ausencia = `NULL`) pero hace `coalesce(...,
+  false)` en `user_can_manage_business`, `user_can_manage_users`,
+  `user_can_operate_business`, `user_can_configure_business`, `user_can_view_costs` y
+  `user_can_read_clinical_patient`. Un bloque transaccional reescribió además todos
+  los guards efectivos `role NOT IN (...)` de funciones públicas, incluidos perfiles,
+  archivo/Drive, roles, vínculos y papelera radiográfica; la migración falla si queda
+  algún patrón nullable en el catálogo.
+- [x] Se validó primero con `BEGIN ... ROLLBACK` en la base local y en la remota. La
+  aplicación remota fue una única transacción `ON_ERROR_STOP=1`; la fila de historial
+  `20260831043000:harden_nullable_authorization` quedó registrada. La restricción de
+  membresías aceptadas siguió `convalidated=true`.
+- [x] La repetición contra `https://app.cita-suite.workers.dev` produjo **22/22 PASS,
+  0 FAIL**: rol/acceso/gestión ausente ahora es `false`; ambos listados de miembros
+  rechazan; archivo, ficha, Drive, vínculos y las cuatro mutaciones de roles rechazan
+  sin cambios; no se crean invitaciones; RLS de 15 lecturas, 9 updates, insert y
+  delete permanece aislado. No quedaron usuarios, consultorios, membresías,
+  invitaciones, emails ni vínculos sintéticos.
+- [x] Verificación directa del catálogo remoto: migración vigente como última fila,
+  `business_users_active_requires_accepted_at` validada, **0 guards nullable
+  residuales** y los cinco helpers de autorización devuelven `false` para un UUID sin
+  membresía.
+- [x] Filtros posteriores: `svelte-check` 0/0, Vitest secuencial **108 archivos y
+  827 tests PASS**, `pnpm audit --audit-level=high` sin vulnerabilidades. La migración
+  queda aplicada en la base remota; falta todavía publicar el nuevo candidato de
+  aplicación y repetir el acceso por HTTP después de esa publicación.
+
+### Estado de gate
+
+- [ ] Este hallazgo crítico de autorización queda **corregido y demostrado en la
+  base remota**, pero G3 sigue parcial hasta repetir la matriz con el Worker publicado,
+  cubrir revocación durante sesión y cerrar las restantes pruebas de datos clínicos,
+  restauración, observabilidad y rendimiento. La decisión global continúa **NO-GO**.
