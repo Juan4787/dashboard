@@ -177,5 +177,8 @@ describe('getPublicTokenErrorMessage', () => {
 		expect(getPublicTokenErrorMessage(new Error('PUBLIC_TOKEN_COMMERCIAL_UNAVAILABLE'))).toBe(
 			'Este enlace no está disponible en este momento. Contactá al consultorio.'
 		);
+		expect(getPublicTokenErrorMessage(new Error('PUBLIC_TOKEN_ACTION_CONFLICT'))).toBe(
+			'Este turno cambió mientras lo actualizábamos. Volvé a abrir el enlace y revisá su estado.'
+		);
 	});
 });

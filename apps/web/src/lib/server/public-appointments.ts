@@ -287,12 +287,19 @@ export const applyPublicAppointmentAction = async (
 			metadata.to_status = 'reschedule_requested';
 		}
 
-		const { error } = await supabase
+		const { data: changedAppointment, error } = await supabase
 			.from('appointments')
 			.update(updates)
 			.eq('id', appointment.id)
-			.eq('business_id', appointment.business.id);
+			.eq('business_id', appointment.business.id)
+			// Serialize competing public actions at the row's observed state. Without
+			// this predicate, confirm/cancel/reschedule requests could all read the
+			// same status and report success even though only the last write survived.
+			.eq('status', appointment.status)
+			.select('id')
+			.maybeSingle();
 		if (error) throw error;
+		if (!changedAppointment) throw new Error('PUBLIC_TOKEN_ACTION_CONFLICT');
 
 		await writeAuditLog(supabase, {
 			businessId: appointment.business.id,
@@ -341,6 +348,9 @@ export const getPublicTokenErrorMessage = (error: unknown) => {
 	if (raw.includes('PUBLIC_TOKEN_CANCEL_DENIED')) return 'Este turno no se puede cancelar desde este enlace.';
 	if (raw.includes('PUBLIC_TOKEN_RESCHEDULE_DENIED')) {
 		return 'Este turno no puede pedir reprogramación desde este enlace.';
+	}
+	if (raw.includes('PUBLIC_TOKEN_ACTION_CONFLICT')) {
+		return 'Este turno cambió mientras lo actualizábamos. Volvé a abrir el enlace y revisá su estado.';
 	}
 	return 'No se pudo completar la acción.';
 };
