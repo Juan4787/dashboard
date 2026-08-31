@@ -5023,12 +5023,69 @@ mutación inválida fue rechazada por la restricción y no modificó datos.
   membresía.
 - [x] Filtros posteriores: `svelte-check` 0/0, Vitest secuencial **108 archivos y
   827 tests PASS**, `pnpm audit --audit-level=high` sin vulnerabilidades. La migración
-  queda aplicada en la base remota; falta todavía publicar el nuevo candidato de
-  aplicación y repetir el acceso por HTTP después de esa publicación.
+  queda aplicada en la base remota.
+- [x] El commit `b9271784060d2c271297cbe953fd0f3291df7e79` fue publicado por fast-forward
+  en `prelaunch/cloudflare-20260830`. Dos builds con el SHA completo produjeron el
+  output `.svelte-kit/cloudflare` byte a byte idéntico: 105 archivos, hash ordenado
+  `e44bf9a86f8240adcdc62434c6cba3118a3d19fbca78ae263295283e10f3d63f`; Wrangler dry-run
+  leyó 112 archivos (3946.83 KiB, 807.15 KiB gzip). El detalle queda en
+  `audit-evidence/cloudflare/b927178-build-metadata.txt`.
+- [x] El Worker fue desplegado después de ese filtro con tag
+  `b927178-clean-e44bf9a`, mensaje `prelaunch nullable authorization hardening
+  b927178`, y quedó al 100 % en la versión `790d330a-54f6-448f-af93-645152ba1570`.
+  `/_app/version.json` respondió el SHA completo esperado; `/login` respondió 200,
+  `private, no-store`, HSTS y CSP. La lista de deployments de Wrangler muestra el
+  mismo tag, SHA y 100 % de tráfico.
+- [x] La repetición post-deploy por HTTP/Cloudflare no dejó sólo una prueba de base:
+  alta/membresía aceptada **4/4**, acciones públicas concurrentes **11/11**,
+  reservas/idempotencia **8/8**, creación administrativa concurrente **5/5** e
+  IDOR autenticado **14/14**. En todas las ejecuciones hubo cleanup exacto y cero
+  HTTP 5xx inesperados.
 
 ### Estado de gate
 
-- [ ] Este hallazgo crítico de autorización queda **corregido y demostrado en la
-  base remota**, pero G3 sigue parcial hasta repetir la matriz con el Worker publicado,
-  cubrir revocación durante sesión y cerrar las restantes pruebas de datos clínicos,
-  restauración, observabilidad y rendimiento. La decisión global continúa **NO-GO**.
+- [x] El hallazgo crítico de autorización queda **corregido y demostrado en la base
+  remota y en el Worker publicado**. G3 sigue parcial por los frentes no equivalentes
+  aún pendientes (revocación durante sesión bajo carrera, restauración integrada,
+  observabilidad y rendimiento); no se considera que esta corrección por sí sola
+  autorice el lanzamiento. La decisión global continúa **NO-GO**.
+
+## Actualización posterior — cierre de enumeración de correos y límite de API del scheduler — 2026-08-31
+
+### Estado actual
+
+- [x] La auditoría de privilegios remota detectó que la función legada
+  `public.is_email_enabled(text)` conservaba `EXECUTE` heredado de `public` y, por
+  tanto, podía ser consultada por un cliente anónimo para confirmar si un correo
+  pertenecía a la lista interna `allowed_emails`. La aplicación actual no la invoca;
+  la sonda anónima obtuvo `200 false` antes del cambio.
+- [x] Se creó la migración mínima
+  `20260831050000_revoke_email_probe.sql`, que revoca `EXECUTE` de `public`, `anon` y
+  `authenticated` sin borrar la función ni tocar datos, tablas, políticas o Storage.
+  La prueba transaccional local dio `anon=false`, `authenticated=false` y
+  `service_role=true`; la migración remota se aplicó en una única transacción
+  `ON_ERROR_STOP=1` y quedó registrada en `supabase_migrations.schema_migrations`.
+- [x] La repetición contra el endpoint REST de Supabase con la clave anónima recibió
+  HTTP `401 permission denied for function is_email_enabled`; la consulta dejó de
+  ser posible desde clientes públicos. El contrato quedó protegido por un test
+  secuencial de Vitest.
+- [ ] Este cambio todavía requiere el nuevo build reproducible y la publicación del
+  Worker candidato; hasta completar ese ciclo el estado de despliegue de esta
+  corrección es **PENDIENTE** y no se debe confundir con la versión b927178 ya
+  certificada.
+
+### Scheduler cron-job.org — evidencia y limitación operativa actual
+
+- [x] Se intentó una lectura autenticada, sin mutación, del job productivo `7795525`
+  usando la API oficial. La API respondió HTTP `429` incluso después de una espera
+  de 20 segundos y sin header `Retry-After`; se detuvo el reintento para no agotar ni
+  presionar el límite diario. No se modificó el job productivo ni se creó un job de
+  prueba.
+- [x] La configuración y las ejecuciones reales exitosas que ya figuran en las
+  secciones históricas/actuales (POST cada diez minutos, HTTP 200 y política de
+  alertas activada) siguen siendo evidencia válida; esta respuesta `429` es un
+  antecedente operativo nuevo de la API, no una falla del endpoint del Worker.
+- [ ] Sigue sin demostrarse la entrega humana de una alerta de fallo, el reintento
+  observable y la recuperación de un job controlado. Para cerrarlo se necesita una
+  ventana en la que la API permita una consulta/creación controlada o evidencia de
+  la bandeja de correo configurada; no se marcará G9 verde por inferencia.
