@@ -5244,3 +5244,125 @@ mutación inválida fue rechazada por la restricción y no modificó datos.
 - [ ] Falta incluir la migración en un build/deploy del Worker y repetir el smoke
   de superficie desde Cloudflare. El cierre de base es válido, pero la promoción
   sigue **NO-GO** hasta verificar la versión publicada.
+
+## Estado actual — cierre de incidente Pako, contexto de paciente y fecha clínica — 2026-08-31
+
+Esta sección es el estado actual de esta corrida. Las secciones anteriores no se
+eliminan ni se reescriben: quedan como antecedentes históricos. La Regla Central
+sigue vigente: los pacientes, turnos, profesionales, consultorios, emails y
+archivos de prueba son descartables; el código, las migraciones, funciones,
+triggers, RLS, grants, constraints, Storage, secretos, configuración de Cloudflare
+y la capacidad futura de operar con pacientes reales permanecen protegidos. No se
+ejecutó DDL destructivo sobre producción.
+
+### Incidente informado por la cuenta maestra
+
+- [x] Se investigó el caso de prueba **Pako Helmbold** en el consultorio de la
+  cuenta maestra. La evidencia persistente de `patient_profile_change_events`
+  muestra dos commits reales para ese paciente durante la ventana informada:
+  `2026-08-31T21:54:36.646782Z`, con el campo `obra social`, y
+  `2026-08-31T21:55:08.959676Z`, con `fecha de nacimiento`, `plan de la obra
+  social`, `alergias`, `medicación` y `antecedentes`. Por lo tanto, el primer
+  intento no fue demostrado como “no guardado”: alcanzó la base; el segundo
+  también alcanzó la base. No se imprimieron secretos ni datos ajenos al fixture.
+- [x] La revisión del código confirmó que la acción `update_patient` ejecuta el
+  RPC atómico de actualización clínica, valida las versiones observadas y sólo
+  responde después del commit. La ruta de éxito redirige a `?tab=datos`.
+- [x] Se reprodujo el defecto determinista que explicaba la parte de UX: antes
+  de la corrección, clicar **Datos** cambiaba sólo el estado local y dejaba la
+  URL sin `tab`; al recargar esa URL, la carga por defecto era **Historial**. La
+  secuencia observada fue: Datos visible antes de recargar, URL sin `?tab=datos`,
+  y luego Historial visible después de recargar.
+- [ ] No existe un trace persistente del Worker correspondiente al primer clic
+  informado por la persona usuaria. Por eso no es posible atribuir con certeza
+  histórica si la navegación inicial se perdió por red, navegador, respuesta de
+  borde o una interrupción posterior al commit. No se presenta esa hipótesis como
+  hecho. El tail histórico se habilitó recién durante la verificación actual.
+
+### Defectos corregidos y estado actual
+
+- [x] `selectTab` ahora refleja siempre `historial`, `datos` o `radiografias` en
+  la query mediante `replaceState`; el refresco y los enlaces conservan el
+  contexto exacto de la pestaña.
+- [x] `formatDate` distingue una fecha de calendario `YYYY-MM-DD` de un instante
+  UTC. La fecha almacenada `2004-02-03` ya no aparece como 2 de febrero en
+  Argentina: la ficha muestra **3 de febrero de 2004** y el editor conserva el
+  día `03`. Se agregó prueba unitaria específica en zona argentina.
+- [x] El formulario de datos usa `enhance`, impide doble envío mientras guarda,
+  muestra **Guardando…**, y ante un fallo de transporte conserva el modal y lo
+  escrito con el mensaje accionable: “No pudimos guardar los cambios. Revisá tu
+  conexión y volvé a intentar; tus datos siguen en el formulario.”
+- [x] La prueba de red interrumpida abortó exactamente un POST de actualización;
+  confirmó modal visible, mensaje anterior, dirección escrita conservada y URL
+  aún en `?tab=datos`. Tras cancelar y recargar, la dirección de prueba no quedó
+  persistida y la ficha continuó en Datos. Esto demuestra ausencia de falso éxito
+  y ausencia de pérdida de trabajo local.
+- [x] El guardado normal posterior en el Worker nuevo terminó con el modal
+  cerrado, URL `?tab=datos`, ficha Datos visible y la fecha correcta. El POST
+  mejorado fue observado como HTTP 200 (respuesta de acción SvelteKit seguida de
+  invalidación de datos); no se confundió ese 200 con el 303 de un formulario
+  nativo anterior.
+
+### Candidato, reproducibilidad y publicación verificada
+
+- [x] El commit de runtime es
+  `64031a356a7b972ac6aaa61aaf1fb60a51dc7c57`, mensaje `fix: preserve patient
+  context and date-only display`. `origin/prelaunch/cloudflare-20260830`
+  coincide exactamente con ese SHA. Las capturas y scripts de evidencia que ya
+  estaban en el árbol no se agregaron al commit ni se eliminaron.
+- [x] Dos builds consecutivos y secuenciales consumibles por Cloudflare
+  produjeron 105 archivos idénticos. El manifiesto ordenado de contenido fue
+  `58e4de88c97be81f8740c3a74a56f7b06070064bd54c6a90d6ea3038bef67189` en ambos
+  builds; `_worker.js` fue
+  `cf4056f946ba2822fb93035da445ea2b74c918e9bbbb7d646dffcc8db657d484` en ambos.
+  El `version.json` de ambos contiene exactamente el SHA de runtime. No se
+  trató la coincidencia de comportamiento como prueba byte a byte: se comparó
+  el output de `.svelte-kit/cloudflare` que consume Wrangler.
+- [x] Cloudflare publicó el Worker con mensaje `prelaunch patient context date
+  UX 64031a3`, tag `prelaunch-64031a3` y versión
+  `3a749972-149f-474d-bdfa-e097f1e10c00` al **100 %**. La lista de deployments
+  remota confirmó esa relación versión/tag/tráfico.
+- [x] `GET https://app.cita-suite.workers.dev/_app/version.json` respondió HTTP
+  200 y `{"version":"64031a356a7b972ac6aaa61aaf1fb60a51dc7c57"}`. No se consideró
+  suficiente un build local: también se comprobó la respuesta remota.
+- [x] Un tail del guardado normal mostró `scriptVersion.id` igual a
+  `3a749972-149f-474d-bdfa-e097f1e10c00`, POST al Worker, `outcome: ok`,
+  respuesta HTTP 200 y `exceptions: []`. Las cookies y el identificador del
+  paciente fueron redactados por el propio tail; no se conservaron secretos.
+
+### Verificación automatizada posterior a la publicación
+
+- [x] `pnpm --dir apps/web check`: 0 errores y 0 advertencias.
+- [x] Vitest completo: 120 archivos y 860 tests, todos PASS, en un solo worker.
+- [x] Suite E2E completa contra el Worker versionado, con un solo worker:
+  27 casos descubiertos, **18 PASS, 0 FAIL** y 9 skips condicionados. Los skips
+  quedaron identificados: cinco de Seguimientos y uno de auditoría UX por no
+  tener `CITA_SUITE_TEST_BUSINESS_ID` en el archivo de entorno de esa corrida,
+  dos casos de reserva demo porque producción tiene `DEMO_MODE=false`, y un caso
+  de Google real porque no había cuenta/credenciales/2FA operables.
+- [x] Los seis casos que se habían omitido por el ID ausente se repitieron luego
+  con el `CITA_SUITE_TEST_BUSINESS_ID` de prueba autorizado: auditoría UX de la
+  cuenta real y los cinco casos de Seguimientos, **6/6 PASS**. La búsqueda local
+  de pacientes se renderizó en 26 ms. La cobertura efectiva combinada quedó en
+  **24 PASS, 0 FAIL**; sólo permanecen los dos demo intencionalmente apagados y
+  Google real fuera de alcance operativo.
+- [x] El caso que había quedado intermitente, “confirmar sin teléfono registra la
+  decisión y no vuelve a molestar”, pasó una vez en Cloudflare y luego **2/2**
+  repeticiones adicionales, siempre con un solo worker.
+- [x] El test de archivos clínicos dejó de depender de una espera fija de 650 ms
+  y espera la request exacta; la suite publicada lo ejecutó sin fallo. La
+  modificación del arnés no cambia el runtime clínico.
+
+### Dictamen del incidente y decisión de lanzamiento
+
+- [x] El incidente Pako queda **cerrado en el candidato publicado**: el primer
+  commit está demostrado en base, el contexto de pestaña ahora es persistente,
+  las fechas de calendario no se corren un día y un fallo de red conserva el
+  trabajo del profesional. La reproducción posterior no generó cambios clínicos
+  no deseados ni basura persistente.
+- [ ] Este cierre no convierte la auditoría global en GO. Siguen siendo gates
+  independientes los frentes históricos aún marcados como parciales o NO-GO
+  (entre otros: matriz interna completa en dispositivos reales/BrowserStack,
+  observabilidad y alertas persistentes, rollback y mezcla de versiones,
+  recuperación desde fallos controlados, capacidad/soak y métricas con
+  profesionales). Esos límites no se borran por haber cerrado Pako.
