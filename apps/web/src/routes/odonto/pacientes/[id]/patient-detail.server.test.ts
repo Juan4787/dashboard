@@ -410,8 +410,8 @@ describe('patient detail migrated actions', () => {
 
 	it('lets a linked professional edit patient data and records a visible change event', async () => {
 		makeProfessionalContext();
-		const patientUpdateBuilder = makeQueryBuilder({ result: { error: null } });
-		const profileUpsertBuilder = makeQueryBuilder({ result: { error: null } });
+		const patientUpdateBuilder = makeQueryBuilder({ result: { data: { id: patientId }, error: null } });
+		const profileUpdateBuilder = makeQueryBuilder({ result: { data: { id: 'profile-1' }, error: null } });
 		const eventInsertBuilder = makeQueryBuilder({ result: { error: null } });
 		mockAdminBuilders([
 			makeQueryBuilder({
@@ -433,19 +433,25 @@ describe('patient detail migrated actions', () => {
 						birth_date: null,
 						address: null,
 						insurance: null,
-						insurance_plan: null
+						insurance_plan: null,
+						updated_at: '2026-08-31T12:00:00.000Z'
 					},
 					error: null
 				}
 			}),
 			makeQueryBuilder({
 				maybeSingleResult: {
-					data: { allergies: null, medication: null, background: null },
+					data: {
+						allergies: null,
+						medication: null,
+						background: null,
+						updated_at: '2026-08-31T12:00:00.000Z'
+					},
 					error: null
 				}
 			}),
 			patientUpdateBuilder,
-			profileUpsertBuilder,
+			profileUpdateBuilder,
 			eventInsertBuilder
 		]);
 
@@ -461,13 +467,10 @@ describe('patient detail migrated actions', () => {
 				phone: '112233'
 			})
 		);
-		expect(profileUpsertBuilder.upsert).toHaveBeenCalledWith(
+		expect(profileUpdateBuilder.update).toHaveBeenCalledWith(
 			expect.objectContaining({
-				business_id: businessId,
-				patient_id: patientId,
 				updated_by: ownerId
-			}),
-			{ onConflict: 'business_id,patient_id' }
+			})
 		);
 		expect(eventInsertBuilder.insert).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -480,5 +483,114 @@ describe('patient detail migrated actions', () => {
 				summary: 'Se modificó: nombre y teléfono.'
 			})
 		);
+	});
+
+	it('does not report success when the patient disappeared between read and update', async () => {
+		const patientUpdateBuilder = makeQueryBuilder({ result: { data: null, error: null } });
+		mockAdminBuilders([
+			makeQueryBuilder({
+				maybeSingleResult: {
+					data: {
+						full_name: 'Paciente Original',
+						dni: null,
+						phone: null,
+						email: null,
+						birth_date: null,
+						address: null,
+						insurance: null,
+						insurance_plan: null,
+						updated_at: '2026-08-31T12:00:00.000Z'
+					},
+					error: null
+				}
+			}),
+			makeQueryBuilder({
+				maybeSingleResult: {
+					data: { allergies: null, medication: null, background: null, updated_at: '2026-08-31T12:00:00.000Z' },
+					error: null
+				}
+			}),
+			patientUpdateBuilder
+		]);
+
+		const form = new FormData();
+		form.set('full_name', 'Paciente Nuevo');
+		const result = (await actions.update_patient!(makeEvent(form))) as any;
+
+		expect(result.status).toBe(409);
+		expect(result.data.message).toContain('cambió mientras la editabas');
+		expect(patientUpdateBuilder.update).toHaveBeenCalled();
+	});
+
+	it('rejects a form based on a stale patient version before mutating either record', async () => {
+		const patientUpdateBuilder = makeQueryBuilder({ result: { data: { id: patientId }, error: null } });
+		mockAdminBuilders([
+			makeQueryBuilder({
+				maybeSingleResult: {
+					data: {
+						full_name: 'Paciente Original',
+						dni: null,
+						phone: null,
+						email: null,
+						birth_date: null,
+						address: null,
+						insurance: null,
+						insurance_plan: null,
+						updated_at: '2026-08-31T12:00:00.000Z'
+					},
+					error: null
+				}
+			}),
+			makeQueryBuilder({ maybeSingleResult: { data: null, error: null } }),
+			patientUpdateBuilder
+		]);
+
+		const form = new FormData();
+		form.set('full_name', 'Paciente Nuevo');
+		form.set('expected_patient_updated_at', '2026-08-31T11:00:00.000Z');
+		const result = (await actions.update_patient!(makeEvent(form))) as any;
+
+		expect(result.status).toBe(409);
+		expect(result.data.message).toContain('cambió mientras la editabas');
+		expect(patientUpdateBuilder.update).not.toHaveBeenCalled();
+	});
+
+	it('does not report success when the clinical profile loses its optimistic race', async () => {
+		const patientUpdateBuilder = makeQueryBuilder({ result: { data: { id: patientId }, error: null } });
+		const profileUpdateBuilder = makeQueryBuilder({ result: { data: null, error: null } });
+		mockAdminBuilders([
+			makeQueryBuilder({
+				maybeSingleResult: {
+					data: {
+						full_name: 'Paciente Original',
+						dni: null,
+						phone: null,
+						email: null,
+						birth_date: null,
+						address: null,
+						insurance: null,
+						insurance_plan: null,
+						updated_at: '2026-08-31T12:00:00.000Z'
+					},
+					error: null
+				}
+			}),
+			makeQueryBuilder({
+				maybeSingleResult: {
+					data: { allergies: null, medication: null, background: null, updated_at: '2026-08-31T12:00:00.000Z' },
+					error: null
+				}
+			}),
+			patientUpdateBuilder,
+			profileUpdateBuilder
+		]);
+
+		const form = new FormData();
+		form.set('full_name', 'Paciente Nuevo');
+		form.set('allergies', 'Penicilina');
+		const result = (await actions.update_patient!(makeEvent(form))) as any;
+
+		expect(result.status).toBe(409);
+		expect(result.data.message).toContain('cambió mientras la editabas');
 	});
 });

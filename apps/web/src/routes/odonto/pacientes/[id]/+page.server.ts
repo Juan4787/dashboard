@@ -36,6 +36,8 @@ const COMMERCIAL_RESTRICTED_MESSAGE =
 	'Tu acceso a Cita Suite venció. Activá tu suscripción para volver a usar la plataforma.';
 const PROFESSIONAL_DELETE_PATIENT_MESSAGE =
 	'Para eliminar un paciente, consultá al dueño del consultorio.';
+const PATIENT_UPDATE_CONFLICT_MESSAGE =
+	'La ficha cambió mientras la editabas. Recargá la ficha, revisá los datos y volvé a guardar.';
 
 const cleanText = (value: unknown) => {
 	const text = String(value ?? '').trim();
@@ -438,7 +440,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, dep
 		permissions.canReadClinicalProfile
 			? supabase
 					.from('patient_clinical_profiles')
-					.select('allergies, medication, background, custom_fields')
+					.select('allergies, medication, background, custom_fields, updated_at')
 					.eq('patient_id', params.id)
 					.eq('business_id', context.business.id)
 					.maybeSingle()
@@ -516,6 +518,7 @@ export const load: PageServerLoad = async ({ params, locals, fetch, cookies, dep
 			medication: clinicalProfile?.medication ?? null,
 			background: clinicalProfile?.background ?? null,
 			custom_fields: clinicalProfile?.custom_fields ?? null,
+			clinical_profile_updated_at: clinicalProfile?.updated_at ?? null,
 			professional_archived_at:
 				context.role === 'professional' ? ((professionalLink as any)?.archived_at ?? null) : null
 		},
@@ -790,6 +793,10 @@ export const actions: Actions = {
 		const phoneInput = String(form.get('phone') ?? '');
 		const phone = normalizePhone(phoneInput);
 		const birthDateRaw = String(form.get('birth_date') ?? '').trim();
+		const expectedPatientUpdatedAt = String(form.get('expected_patient_updated_at') ?? '').trim();
+		const expectedClinicalProfileUpdatedAt = String(
+			form.get('expected_clinical_profile_updated_at') ?? ''
+		).trim();
 
 		if (!full_name) {
 			return fail(400, { message: 'Ingresá el nombre del paciente.' });
@@ -923,14 +930,14 @@ export const actions: Actions = {
 				admin
 					.from('patients')
 					.select(
-						'full_name, dni, phone, email, birth_date, address, insurance, insurance_plan'
+						'full_name, dni, phone, email, birth_date, address, insurance, insurance_plan, updated_at'
 					)
 					.eq('id', params.id)
 					.eq('business_id', context.business.id)
 					.maybeSingle(),
 				admin
 					.from('patient_clinical_profiles')
-					.select('allergies, medication, background')
+					.select('allergies, medication, background, updated_at')
 					.eq('patient_id', params.id)
 					.eq('business_id', context.business.id)
 					.maybeSingle()
@@ -943,15 +950,36 @@ export const actions: Actions = {
 		if (!currentPatient) {
 			return fail(404, { message: 'Paciente no encontrado.' });
 		}
+		if (
+			expectedPatientUpdatedAt &&
+			expectedPatientUpdatedAt !== String((currentPatient as any).updated_at ?? '')
+		) {
+			return fail(409, { message: PATIENT_UPDATE_CONFLICT_MESSAGE });
+		}
 		if (currentProfileError) {
 			console.error('Error cargando perfil clínico antes de editar', currentProfileError);
+			if (permissions.canEditClinicalProfile) {
+				return fail(500, {
+					message: 'No se pudo cargar la información clínica antes de guardar. Intentá de nuevo.'
+				});
+			}
+		}
+		if (
+			permissions.canEditClinicalProfile &&
+			expectedClinicalProfileUpdatedAt &&
+			expectedClinicalProfileUpdatedAt !== String((currentProfile as any)?.updated_at ?? '')
+		) {
+			return fail(409, { message: PATIENT_UPDATE_CONFLICT_MESSAGE });
 		}
 
-		const { error } = await admin
+		const { data: updatedPatient, error } = await admin
 			.from('patients')
 			.update(updates)
 			.eq('id', params.id)
-			.eq('business_id', context.business.id);
+			.eq('business_id', context.business.id)
+			.eq('updated_at', String((currentPatient as any).updated_at ?? ''))
+			.select('id')
+			.maybeSingle();
 
 		if (error) {
 			console.error('Error actualizando paciente', error);
@@ -965,26 +993,47 @@ export const actions: Actions = {
 			if (duplicateResult) return duplicateResult;
 			return fail(500, { message: 'No se pudo actualizar la ficha.' });
 		}
+		if (!updatedPatient) {
+			return fail(409, { message: PATIENT_UPDATE_CONFLICT_MESSAGE });
+		}
 
 		if (permissions.canEditClinicalProfile) {
-			const { error: profileError } = await admin
-				.from('patient_clinical_profiles')
-				.upsert(
-					{
-						business_id: context.business.id,
-						patient_id: params.id,
-						allergies: clinicalUpdates.allergies,
-						medication: clinicalUpdates.medication,
-						background: clinicalUpdates.background,
-						updated_by: ownerId,
-						updated_at: new Date().toISOString()
-					},
-					{ onConflict: 'business_id,patient_id' }
-				);
+			const profilePayload = {
+				allergies: clinicalUpdates.allergies,
+				medication: clinicalUpdates.medication,
+				background: clinicalUpdates.background,
+				updated_by: ownerId,
+				updated_at: new Date().toISOString()
+			};
+			const profileWrite = currentProfile
+				? await admin
+						.from('patient_clinical_profiles')
+						.update(profilePayload)
+						.eq('business_id', context.business.id)
+						.eq('patient_id', params.id)
+						.eq('updated_at', String((currentProfile as any).updated_at ?? ''))
+						.select('id')
+						.maybeSingle()
+				: await admin
+						.from('patient_clinical_profiles')
+						.insert({
+							business_id: context.business.id,
+							patient_id: params.id,
+							...profilePayload
+						})
+						.select('id')
+						.maybeSingle();
+			const { data: updatedProfile, error: profileError } = profileWrite;
 
 			if (profileError) {
 				console.error('Error actualizando perfil clinico del paciente', profileError);
+				if (profileError.code === '23505') {
+					return fail(409, { message: PATIENT_UPDATE_CONFLICT_MESSAGE });
+				}
 				return fail(500, { message: 'No se pudo actualizar la información clínica.' });
+			}
+			if (!updatedProfile) {
+				return fail(409, { message: PATIENT_UPDATE_CONFLICT_MESSAGE });
 			}
 		}
 

@@ -1381,6 +1381,12 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 <Modal open={showEditModal} title="Editar datos" on:close={() => (showEditModal = false)}>
 	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 	<form method="post" action="?/update_patient" class="space-y-3" onkeydown={preventEnterSubmit} onsubmit={handleEditSubmit}>
+		<input type="hidden" name="expected_patient_updated_at" value={data.patient.updated_at ?? ''} />
+		<input
+			type="hidden"
+			name="expected_clinical_profile_updated_at"
+			value={data.patient.clinical_profile_updated_at ?? ''}
+		/>
 		<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
 			<div class="space-y-1">
 				<label class="text-sm font-semibold text-neutral-800 dark:text-white" for="full_name">Nombre del paciente *</label>
