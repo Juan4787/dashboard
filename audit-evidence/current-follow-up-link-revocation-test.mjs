@@ -26,6 +26,7 @@ const password = `Ll!${randomUUID()}z`;
 const ownerEmail = `audit-follow-link-owner-${marker.toLowerCase()}@example.invalid`;
 const professionalEmail = `audit-follow-link-prof-${marker.toLowerCase()}@example.invalid`;
 const baseUrl = 'https://app.cita-suite.workers.dev';
+const followUpMessage = `${marker} Seguimiento`;
 const checks = [];
 const pass = (name, detail = '') => { checks.push(true); console.log(`PASS ${name}${detail ? ` — ${detail}` : ''}`); };
 const fail = (name, detail = '') => { checks.push(false); console.log(`FAIL ${name}${detail ? ` — ${detail}` : ''}`); };
@@ -67,8 +68,8 @@ try {
 	await insertOne('professional_users', { business_id: businessId, professional_id: professionalId, user_id: professionalUserId });
 	const patient = await insertOne('patients', { business_id: businessId, owner_id: ownerId, full_name: `${marker} Paciente`, phone: '+5491100000000', phone_raw: '+54 9 11 0000-0000', phone_e164: '+5491100000000' });
 	patientId = patient.id;
-	await insertOne('professional_patient_links', { business_id: businessId, professional_id: professionalId, patient_id: patientId, is_active: true, created_by: ownerId });
-	const followUp = await insertOne('follow_ups', { business_id: businessId, patient_id: patientId, assigned_professional_id: professionalId, remind_on: '2099-01-02', message: `${marker} Seguimiento`, status: 'pending', created_by: ownerId });
+	await insertOne('professional_patient_links', { business_id: businessId, professional_id: professionalId, patient_id: patientId, source: 'manual', is_active: true, created_by: ownerId });
+	const followUp = await insertOne('follow_ups', { business_id: businessId, patient_id: patientId, assigned_professional_id: professionalId, remind_on: '2099-01-02', message: followUpMessage, status: 'pending', created_by: ownerId });
 	followUpId = followUp.id;
 
 	const userClient = createClient(env.ODONTO_SUPABASE_URL, env.ODONTO_SUPABASE_ANON_KEY, { auth: { autoRefreshToken: false, persistSession: false }, realtime: { transport: WebSocket } });
@@ -84,14 +85,14 @@ try {
 	const page = await context.newPage();
 	await page.goto('/odonto/seguimientos', { waitUntil: 'domcontentloaded' });
 	const initialBody = await page.locator('body').innerText();
-	if (initialBody.includes(marker)) pass('profesional ve el seguimiento mientras el vínculo está activo');
+	if (initialBody.includes(followUpMessage)) pass('profesional ve el seguimiento mientras el vínculo está activo');
 	else fail('profesional ve el seguimiento mientras el vínculo está activo', page.url());
 
 	const { data: deactivated, error: deactivateError } = await admin.from('professional_patient_links').update({ is_active: false, archived_at: new Date().toISOString() }).eq('business_id', businessId).eq('professional_id', professionalId).eq('patient_id', patientId).select('id').maybeSingle();
 	if (deactivateError || !deactivated) throw deactivateError ?? new Error('link deactivation did not affect a row');
 	await page.reload({ waitUntil: 'domcontentloaded' });
 	const revokedBody = await page.locator('body').innerText();
-	if (!revokedBody.includes(marker) && page.url().includes('/odonto/seguimientos')) pass('tras revocar el vínculo, el seguimiento deja de aparecer');
+	if (!revokedBody.includes(followUpMessage) && page.url().includes('/odonto/seguimientos')) pass('tras revocar el vínculo, el seguimiento deja de aparecer');
 	else fail('tras revocar el vínculo, el seguimiento deja de aparecer', `${page.url()} ${revokedBody.slice(0, 600)}`);
 	const latest = await admin.from('follow_ups').select('updated_at').eq('id', followUpId).single();
 	const response = await page.evaluate(async ({ id, updatedAt }) => {
