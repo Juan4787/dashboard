@@ -546,7 +546,11 @@ export const actions: Actions = {
 			const { error: membershipError } = await admin.from('business_users').insert({
 				business_id: business.id,
 				user_id: ownerUserId,
-				role: 'owner'
+				role: 'owner',
+				status: 'active',
+				accepted_at: new Date().toISOString(),
+				created_by: master.userId,
+				updated_by: master.userId
 			});
 
 			if (membershipError) {

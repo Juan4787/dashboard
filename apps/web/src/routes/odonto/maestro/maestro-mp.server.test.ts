@@ -191,6 +191,45 @@ describe('action mp_reconcile_now (maestro)', () => {
 });
 
 describe('action create_business (maestro)', () => {
+	it('crea owner ya registrado como membresía aceptada y activa', async () => {
+		const ownerUserId = 'owner-user-id';
+		const admin = createDbMock(
+			{
+				business_users: [{ data: [], error: null }],
+				allowed_emails: [{ data: null, error: null }, { error: null }],
+				businesses: [{ data: null, error: null }, { data: { id: BUSINESS_ID }, error: null }]
+			},
+			{ authUsers: [{ id: ownerUserId, email: 'cliente@example.com' }] }
+		);
+		mocks.createSupabaseAdminClient.mockResolvedValue(admin.client);
+		const { fetchMock } = createMpFetch([]);
+
+		const result = (await actions.create_business(
+			makeEvent({
+				fetchMock,
+				formEntries: {
+					name: 'Consultorio Existente',
+					owner_email: 'cliente@example.com',
+					duration: 'month_1'
+				}
+			}) as never
+		)) as { success?: boolean };
+
+		expect(result.success).toBe(true);
+		const membershipInsert = admin.calls.find(
+			(c) => c.table === 'business_users' && c.method === 'insert'
+		);
+		expect(membershipInsert?.args[0]).toMatchObject({
+			business_id: BUSINESS_ID,
+			user_id: ownerUserId,
+			role: 'owner',
+			status: 'active',
+			created_by: 'master-user-id',
+			updated_by: 'master-user-id'
+		});
+		expect((membershipInsert?.args[0] as { accepted_at?: unknown })?.accepted_at).toEqual(expect.any(String));
+	});
+
 	it('crea consultorio manual con owner pendiente si el usuario Auth todavía no existe', async () => {
 		const admin = createDbMock(
 			{
