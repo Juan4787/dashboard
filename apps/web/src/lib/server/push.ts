@@ -64,6 +64,19 @@ export type PushSubscriptionPayload = {
 	keys: { p256dh: string; auth: string };
 };
 
+// El endpoint llega desde un navegador público y luego se usa como destino de un
+// request server-side firmado por VAPID. No alcanza con exigir HTTPS: un host
+// arbitrario permitiría usar la activación de recordatorios como proxy hacia
+// servicios ajenos (incluidos destinos internos resueltos por DNS). Estos son los
+// dominios publicados por los servicios Web Push soportados por la aplicación.
+const isKnownPushServiceHost = (hostname: string) =>
+	hostname === 'fcm.googleapis.com' ||
+	hostname === 'updates.push.services.mozilla.com' ||
+	hostname === 'push.services.mozilla.com' ||
+	hostname === 'web.push.apple.com' ||
+	hostname.endsWith('.notify.windows.com') ||
+	hostname.endsWith('.wns.windows.com');
+
 export const isValidPushDeliveryId = (value: string) =>
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
 		value
@@ -96,6 +109,7 @@ export const isValidSubscriptionPayload = (raw: unknown): raw is PushSubscriptio
 		return (
 			endpoint.protocol === 'https:' &&
 			Boolean(hostname) &&
+			isKnownPushServiceHost(hostname) &&
 			!endpoint.username &&
 			!endpoint.password &&
 			(!endpoint.port || endpoint.port === '443') &&

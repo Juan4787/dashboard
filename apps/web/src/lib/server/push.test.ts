@@ -127,7 +127,7 @@ describe('isValidSubscriptionPayload', () => {
 	it('acepta una suscripción válida', () => {
 		expect(
 			isValidSubscriptionPayload({
-				endpoint: 'https://push.example/ep',
+				endpoint: 'https://fcm.googleapis.com/ep',
 				keys: validSubscriptionKeys
 			})
 		).toBe(true);
@@ -139,7 +139,7 @@ describe('isValidSubscriptionPayload', () => {
 		).toBe(false);
 		expect(
 			isValidSubscriptionPayload({
-				endpoint: 'https://x',
+				endpoint: 'https://example.com/ep',
 				keys: { ...validSubscriptionKeys, p256dh: '' }
 			})
 		).toBe(false);
@@ -150,13 +150,13 @@ describe('isValidSubscriptionPayload', () => {
 	it('rechaza valores sobredimensionados', () => {
 		expect(
 			isValidSubscriptionPayload({
-				endpoint: `https://push.example/${'x'.repeat(2048)}`,
+				endpoint: `https://fcm.googleapis.com/${'x'.repeat(2048)}`,
 				keys: validSubscriptionKeys
 			})
 		).toBe(false);
 		expect(
 			isValidSubscriptionPayload({
-				endpoint: 'https://push.example/ep',
+				endpoint: 'https://fcm.googleapis.com/ep',
 				keys: { p256dh: 'x'.repeat(513), auth: 'b' }
 			})
 		).toBe(false);
@@ -171,9 +171,27 @@ describe('isValidSubscriptionPayload', () => {
 		).toBe(false);
 		expect(
 			isValidSubscriptionPayload({
-				endpoint: 'https://push.example/ep',
+				endpoint: 'https://example.com/ep',
 				keys: { p256dh: 'a', auth: 'b' }
 			})
+		).toBe(false);
+	});
+
+	it('acepta sólo hosts conocidos de Web Push y rechaza hosts HTTPS arbitrarios', () => {
+		for (const endpoint of [
+			'https://fcm.googleapis.com/fcm/send/demo',
+			'https://updates.push.services.mozilla.com/wpush/v2/demo',
+			'https://web.push.apple.com/QwErTy',
+			'https://abc.notify.windows.com/wpush/v1/demo',
+			'https://abc.wns.windows.com/wpush/v1/demo'
+		]) {
+			expect(isValidSubscriptionPayload({ endpoint, keys: validSubscriptionKeys }), endpoint).toBe(true);
+		}
+		expect(
+			isValidSubscriptionPayload({ endpoint: 'https://example.com/push', keys: validSubscriptionKeys })
+		).toBe(false);
+		expect(
+			isValidSubscriptionPayload({ endpoint: 'https://fcm.googleapis.com.evil.example/push', keys: validSubscriptionKeys })
 		).toBe(false);
 	});
 });
