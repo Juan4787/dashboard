@@ -47,7 +47,9 @@ export const POST: RequestHandler = async ({ params, request, locals, fetch, coo
 			assignToProfessionalId: body.assigned_professional_id
 				? String(body.assigned_professional_id).trim()
 				: null,
-			timezone: scope.timezone
+			timezone: scope.timezone,
+			expectedUpdatedAt:
+				typeof body.expected_updated_at === 'string' ? body.expected_updated_at.trim() : null
 		});
 		return json({ ok: true });
 	} catch (err) {

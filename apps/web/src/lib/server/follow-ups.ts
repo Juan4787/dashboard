@@ -14,6 +14,8 @@ export type FollowUpListItem = {
 	message: string | null;
 	remind_on: string; // YYYY-MM-DD
 	assigned_professional_id: string | null;
+	/** Versión de fila para que una acción no pueda sobrescribir una edición concurrente. */
+	updated_at: string;
 };
 
 export type FollowUpNotice = {
@@ -171,7 +173,7 @@ export type RoleScope = {
 export type TzScope = RoleScope & { timezone: string };
 
 const FOLLOWUP_SELECT =
-	'id, patient_id, message, remind_on, assigned_professional_id, patients(full_name)';
+	'id, patient_id, message, remind_on, assigned_professional_id, updated_at, patients(full_name)';
 
 const mapRow = (row: any): FollowUpListItem => ({
 	id: String(row.id),
@@ -179,7 +181,8 @@ const mapRow = (row: any): FollowUpListItem => ({
 	patient_name: String(row?.patients?.full_name ?? 'Paciente'),
 	message: row.message ?? null,
 	remind_on: String(row.remind_on),
-	assigned_professional_id: row.assigned_professional_id ? String(row.assigned_professional_id) : null
+	assigned_professional_id: row.assigned_professional_id ? String(row.assigned_professional_id) : null,
+	updated_at: String(row.updated_at)
 });
 
 /** professional_id del usuario actuante (rol Profesional). Mirror de pacientes/+page.server.ts. */
@@ -548,7 +551,7 @@ export const createFollowUp = async (
 const loadScopedPendingFollowUp = async (admin: SupabaseClient, scope: RoleScope, id: string) => {
 	const { data, error } = await admin
 		.from('follow_ups')
-		.select('id, patient_id, assigned_professional_id, status, updated_at')
+		.select('id, patient_id, assigned_professional_id, status, remind_on, updated_at')
 		.eq('business_id', scope.businessId)
 		.eq('id', id)
 		.eq('status', 'pending')
@@ -562,11 +565,18 @@ const loadScopedPendingFollowUp = async (admin: SupabaseClient, scope: RoleScope
 	return data;
 };
 
+const assertExpectedFollowUpVersion = (expectedUpdatedAt: string | null | undefined, existing: any) => {
+	const expected = typeof expectedUpdatedAt === 'string' ? expectedUpdatedAt.trim() : '';
+	if (!expected || expected !== String(existing.updated_at))
+		throw new FollowUpError('FOLLOWUP_STATUS_CONFLICT');
+};
+
 export const markFollowUpDone = async (
 	admin: SupabaseClient,
-	args: RoleScope & { id: string }
+	args: RoleScope & { id: string; expectedUpdatedAt: string | null }
 ): Promise<void> => {
 	const existing = await loadScopedPendingFollowUp(admin, args, args.id);
+	assertExpectedFollowUpVersion(args.expectedUpdatedAt, existing);
 	const { data: changed, error } = await admin
 		.from('follow_ups')
 		.update({ status: 'done', done_at: new Date().toISOString() })
@@ -582,13 +592,19 @@ export const markFollowUpDone = async (
 
 export const snoozeFollowUp = async (
 	admin: SupabaseClient,
-	args: RoleScope & { id: string; newRemindOn: string; timezone: string }
+	args: RoleScope & {
+		id: string;
+		newRemindOn: string;
+		timezone: string;
+		expectedUpdatedAt: string | null;
+	}
 ): Promise<void> => {
 	const today = businessTodayISO(args.timezone);
 	const remindOn = (args.newRemindOn ?? '').trim();
 	// Snooze siempre a FUTURO (sale de "ejecutándose").
 	if (!isValidISODate(remindOn) || remindOn <= today) throw new FollowUpError('FOLLOWUP_INVALID_DATE');
 	const existing = await loadScopedPendingFollowUp(admin, args, args.id);
+	assertExpectedFollowUpVersion(args.expectedUpdatedAt, existing);
 	const { data: changed, error } = await admin
 		.from('follow_ups')
 		.update({ remind_on: remindOn })
@@ -611,9 +627,11 @@ export const updateFollowUp = async (
 		message: string | null;
 		assignToProfessionalId: string | null;
 		timezone: string;
+		expectedUpdatedAt: string | null;
 	}
 ): Promise<void> => {
 	const existing = await loadScopedPendingFollowUp(admin, args, args.id);
+	assertExpectedFollowUpVersion(args.expectedUpdatedAt, existing);
 
 	const today = businessTodayISO(args.timezone);
 	const remindOn = (args.remindOn ?? '').trim();

@@ -18,7 +18,8 @@ const item = (id: string, remind_on = '2026-06-15'): FollowUpListItem => ({
 	patient_name: `Paciente ${id}`,
 	message: null,
 	remind_on,
-	assigned_professional_id: null
+	assigned_professional_id: null,
+	updated_at: '2026-06-14T12:00:00.000Z'
 });
 
 describe('businessTodayISO', () => {

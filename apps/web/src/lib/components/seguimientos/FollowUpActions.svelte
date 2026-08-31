@@ -3,7 +3,14 @@
 	import Modal from '$lib/components/Modal.svelte';
 	import FollowUpDatePicker from './FollowUpDatePicker.svelte';
 
-	type Item = { id: string; patient_id: string; patient_name: string; message: string | null };
+	type Item = {
+		id: string;
+		patient_id: string;
+		patient_name: string;
+		message: string | null;
+		remind_on: string;
+		updated_at: string;
+	};
 
 	let { item, todayISO } = $props<{ item: Item; todayISO: string }>();
 
@@ -26,7 +33,7 @@
 			const res = await fetch(`/odonto/seguimientos/${item.id}/posponer`, {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify(payload)
+				body: JSON.stringify({ ...payload, expected_updated_at: item.updated_at })
 			});
 			const data = await res.json().catch(() => ({}));
 			if (!res.ok) {
@@ -48,7 +55,11 @@
 		busy = true;
 		actionError = '';
 		try {
-			const res = await fetch(`/odonto/seguimientos/${item.id}/gestionar`, { method: 'POST' });
+			const res = await fetch(`/odonto/seguimientos/${item.id}/gestionar`, {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ expected_updated_at: item.updated_at })
+			});
 			const data = await res.json().catch(() => ({}));
 			if (!res.ok) {
 				actionError = data?.message ?? 'No se pudo gestionar.';

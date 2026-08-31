@@ -56,7 +56,7 @@ describe('mutaciones de seguimientos', () => {
 			{ data: null, error: null }
 		]);
 
-		await expect(markFollowUpDone(admin, { ...scope, id: 'follow-up-1' })).rejects.toMatchObject({
+		await expect(markFollowUpDone(admin, { ...scope, id: 'follow-up-1', expectedUpdatedAt: '2026-08-31T12:00:00.000000Z' })).rejects.toMatchObject({
 			code: 'FOLLOWUP_STATUS_CONFLICT'
 		});
 		expect(calls.filter((call) => call.operation === 'eq').map((call) => call.column)).toContain(
@@ -80,7 +80,32 @@ describe('mutaciones de seguimientos', () => {
 		]);
 
 		await expect(
-			snoozeFollowUp(admin, { ...scope, id: 'follow-up-2', newRemindOn: '2099-01-01', timezone: 'UTC' })
+			snoozeFollowUp(admin, { ...scope, id: 'follow-up-2', newRemindOn: '2099-01-01', timezone: 'UTC', expectedUpdatedAt: '2026-08-31T12:00:00.000000Z' })
+		).rejects.toMatchObject({ code: 'FOLLOWUP_STATUS_CONFLICT' });
+	});
+
+	it('rechaza una mutación sin versión observada, aunque la fila siga pendiente', async () => {
+		const { admin } = fakeAdmin([
+			{
+				data: {
+					id: 'follow-up-3',
+					patient_id: 'patient-3',
+					assigned_professional_id: null,
+					status: 'pending',
+					updated_at: '2026-08-31T12:00:00.000000Z'
+				},
+				error: null
+			}
+		]);
+
+		await expect(
+			snoozeFollowUp(admin, {
+				...scope,
+				id: 'follow-up-3',
+				newRemindOn: '2099-01-01',
+				timezone: 'UTC',
+				expectedUpdatedAt: null
+			})
 		).rejects.toMatchObject({ code: 'FOLLOWUP_STATUS_CONFLICT' });
 	});
 

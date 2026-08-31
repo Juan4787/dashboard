@@ -101,7 +101,20 @@ try {
 	if (page.url().includes('/odonto/seguimientos')) pass('sesión autenticada y Seguimientos cargado en el Worker');
 	else throw new Error(`session bootstrap failed: ${page.url()}`);
 
-	const doneResponses = await Promise.all(Array.from({ length: 8 }, () => post(page, `/odonto/seguimientos/${doneId}/gestionar`)));
+	const { data: doneBefore, error: doneBeforeError } = await admin
+		.from('follow_ups')
+		.select('updated_at')
+		.eq('id', doneId)
+		.single();
+	if (doneBeforeError || !doneBefore?.updated_at) throw doneBeforeError ?? new Error('done version missing');
+	const doneExpectedUpdatedAt = String(doneBefore.updated_at);
+	const doneResponses = await Promise.all(
+		Array.from({ length: 8 }, () =>
+			post(page, `/odonto/seguimientos/${doneId}/gestionar`, {
+				expected_updated_at: doneExpectedUpdatedAt
+			})
+		)
+	);
 	const doneSuccesses = doneResponses.filter((result) => result.status === 200);
 	const done5xx = doneResponses.filter((result) => result.status >= 500);
 	const { data: doneRow, error: doneError } = await admin.from('follow_ups').select('status,done_at,updated_at').eq('id', doneId).single();
@@ -111,7 +124,21 @@ try {
 	else fail('completar seguimiento: estado final', doneError?.message ?? JSON.stringify(doneRow));
 
 	const snoozeDates = ['2099-01-01', '2099-01-02', '2099-01-03', '2099-01-04', '2099-01-05', '2099-01-06', '2099-01-07', '2099-01-08'];
-	const snoozeResponses = await Promise.all(snoozeDates.map((date) => post(page, `/odonto/seguimientos/${snoozeId}/posponer`, { date })));
+	const { data: snoozeBefore, error: snoozeBeforeError } = await admin
+		.from('follow_ups')
+		.select('updated_at')
+		.eq('id', snoozeId)
+		.single();
+	if (snoozeBeforeError || !snoozeBefore?.updated_at) throw snoozeBeforeError ?? new Error('snooze version missing');
+	const expectedUpdatedAt = String(snoozeBefore.updated_at);
+	const snoozeResponses = await Promise.all(
+		snoozeDates.map((date) =>
+			post(page, `/odonto/seguimientos/${snoozeId}/posponer`, {
+				date,
+				expected_updated_at: expectedUpdatedAt
+			})
+		)
+	);
 	const snoozeSuccesses = snoozeResponses.filter((result) => result.status === 200);
 	const snooze5xx = snoozeResponses.filter((result) => result.status >= 500);
 	const { data: snoozeRow, error: snoozeError } = await admin.from('follow_ups').select('status,remind_on,updated_at').eq('id', snoozeId).single();

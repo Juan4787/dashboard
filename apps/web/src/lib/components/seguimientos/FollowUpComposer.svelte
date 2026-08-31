@@ -14,6 +14,7 @@
 		remindOn: string;
 		message: string | null;
 		assignedProfessionalId: string | null;
+		expectedUpdatedAt?: string;
 	};
 
 	let {
@@ -290,7 +291,10 @@
 			const base = {
 				remind_on: remindOn,
 				message: message.trim() || null,
-				assigned_professional_id: canAssign ? selectedProfessionalId : null
+				assigned_professional_id: canAssign ? selectedProfessionalId : null,
+				...(mode === 'edit' && existing?.expectedUpdatedAt
+					? { expected_updated_at: existing.expectedUpdatedAt }
+					: {})
 			};
 			const body =
 				mode === 'edit' ? base : { ...base, patient_id: selectedPatient.id };

@@ -59,7 +59,9 @@ export const POST: RequestHandler = async ({ params, request, locals, fetch, coo
 			professionalId: scope.professionalId,
 			id: params.id,
 			newRemindOn,
-			timezone: scope.timezone
+			timezone: scope.timezone,
+			expectedUpdatedAt:
+				typeof body.expected_updated_at === 'string' ? body.expected_updated_at.trim() : null
 		});
 		return json({ ok: true });
 	} catch (err) {

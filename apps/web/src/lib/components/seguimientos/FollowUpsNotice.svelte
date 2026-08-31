@@ -2,7 +2,14 @@
 	import DismissibleNotice from '$lib/components/notices/DismissibleNotice.svelte';
 	import FollowUpActions from './FollowUpActions.svelte';
 
-	type Item = { id: string; patient_id: string; patient_name: string; message: string | null };
+	type Item = {
+		id: string;
+		patient_id: string;
+		patient_name: string;
+		message: string | null;
+		remind_on: string;
+		updated_at: string;
+	};
 	type Notice = { count: number; single: Item | null; dismissalKey: string };
 
 	let { notice, todayISO, storageKeyPrefix } = $props<{

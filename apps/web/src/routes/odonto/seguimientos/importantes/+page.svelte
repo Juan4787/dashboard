@@ -13,6 +13,7 @@
 		message: string | null;
 		remind_on: string;
 		assigned_professional_id: string | null;
+		updated_at: string;
 	};
 
 	let { data } = $props<{
@@ -65,7 +66,8 @@
 				patient: { id: editingItem.patient_id, full_name: editingItem.patient_name },
 				remindOn: editingItem.remind_on,
 				message: editingItem.message,
-				assignedProfessionalId: editingItem.assigned_professional_id
+				assignedProfessionalId: editingItem.assigned_professional_id,
+				expectedUpdatedAt: editingItem.updated_at
 			}}
 			canAssign={data.canAssign}
 			todayISO={data.todayISO}
