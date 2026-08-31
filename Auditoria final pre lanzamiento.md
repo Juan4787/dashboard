@@ -39,6 +39,11 @@
 
 - [x] **Commit posterior de documentación (no desplegado):** `035f3d823580a48aa8a49dd494672ddb718c34a2` sólo agrega esta relectura y el manifiesto archivado; no modifica `apps/web` ni el artefacto que atiende Cloudflare. Por eso la versión productiva continúa correlacionada deliberadamente con el commit de runtime `fba21de…`, mientras `HEAD`/`origin/prelaunch/cloudflare-20260830` ahora apuntan a este commit documental.
 
+- [x] **Aclaración editorial posterior (no desplegada):** `16b71f9` sólo corrige la
+  descripción de la relación entre el commit documental y el runtime; tampoco modifica
+  `apps/web` ni la versión Cloudflare. Es el `HEAD` documental actual y no sustituye al
+  candidato de runtime `fba21de…`.
+
 - [x] Enlace al informe y artefactos: este archivo; resultados Playwright en [apps/web/test-results](</home/usuario/CascadeProjects/Base de Datos Sabrina/apps/web/test-results) y [apps/web/output/playwright](</home/usuario/CascadeProjects/Base de Datos Sabrina/apps/web/output/playwright). Los artefactos contienen capturas/traces de fallos y no se consideran evidencia de aprobación.
 
 ## Alcance y principio de aceptación
