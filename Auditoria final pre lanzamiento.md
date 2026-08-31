@@ -4661,6 +4661,10 @@ y cada skip.
   prefijos E2E devolvieron cero. Las 23 filas de `account_assistance_grants`
   existentes no se eliminaron indiscriminadamente: sólo se retiró el negocio/usuarios
   sintéticos identificados; no se tocó información clínica real ni el esquema.
+- [x] Una primera sonda de esa higiene pidió por error la columna `name` en
+  `business_user_invites`, que no existe; Supabase devolvió el error de esquema sin
+  mutar nada. Se corrigió inmediatamente a la columna `email`, la consulta devolvió
+  cero invitaciones E2E y el error quedó registrado como diagnóstico del arnés.
 - [x] El archivo E2E móvil conserva el ajuste previo `hasTouch=true` porque Firefox no
   implementa `isMobile`; el cambio adicional de esta relectura sólo adapta la semántica
   de logout de enlace a botón/formulario. No se stagearon capturas, videos ni otros
