@@ -92,6 +92,14 @@ Al elaborar el contenido original de este plan no se modificó código ni se eje
 
 Ningún resultado aislado equivale a “producto validado”. La aprobación requiere que pasen todos estos gates. Si falla uno, es NO-GO.
 
+### Snapshot histórico de gates al elaborar el plan — ANTECEDENTE — 2026-08-30
+
+Las filas siguientes son el estado que existía cuando se creó el plan y se conservan
+sin reescritura. No gobiernan la decisión vigente cuando una relectura posterior de este
+archivo aporta una medición nueva; sirven para mostrar qué estaba bloqueado, qué se había
+demostrado y qué cambió. La tabla de precedencia actual aparece en la última relectura
+fechada como **ESTADO ACTUAL**.
+
 - [ ] **G0 — Trazabilidad:** commit, migraciones, artefacto y versión Cloudflare identificados inequívocamente. **Parcial/bloqueado:** la candidata activa `9ed2e958-697c-46b6-90ea-5b3bd01c9adf` identifica en tag/mensaje el commit local `7c25b12` y el Worker SHA, pero el branch no fue publicado en GitHub ni existe checkout remoto limpio que cierre la correlación.
 
 - [ ] **G1 — Recuperación:** backup restaurado realmente en un entorno aislado. **Bloqueado:** no se ejecutó backup/restore aislado.
@@ -3185,9 +3193,9 @@ Se repitieron cancelar y pedir reprogramación con dos turnos sintéticos en el 
 - [x] Esto demuestra que `wrangler tail` puede observar en vivo la versión que atiende tráfico y que la respuesta controlada no produjo una excepción Worker.
 - [ ] El gate de observabilidad no queda totalmente cerrado: `wrangler.jsonc` aún no declara `observability`, no se configuró sampling 100 % persistente durante una ventana completa y no existe un dashboard/alerta de 5xx, CPU, memoria y p99 documentado. El evento aislado es evidencia parcial, no una certificación operativa global.
 
-## Índice de trazabilidad — ejecuciones realizadas y dónde quedó cada evidencia
+## Índice de trazabilidad — ejecuciones realizadas y dónde quedó cada evidencia — ANTECEDENTE (snapshot al 2026-08-30)
 
-Este índice existe para que ninguna hora de pruebas quede separada de su registro. Cada fila apunta a la sección narrativa correspondiente de este mismo archivo; los skips, errores de método, abortos esperados, rate limits y gates pendientes se conservaron como estado, no se ocultaron.
+Este índice existe para que ninguna hora de pruebas quede separada de su registro. Cada fila apunta a la sección narrativa correspondiente de este mismo archivo; los skips, errores de método, abortos esperados, rate limits y gates pendientes se conservaron como estado, no se ocultaron. La línea de scheduler refleja el snapshot anterior al PATCH de alertas; el estado vigente está en “Actualización posterior — scheduler y alertas cron-job.org” y en la relectura editorial final.
 
 - [x] Preparación y congelamiento: versiones de Node/pnpm/Supabase CLI/Wrangler/Playwright, SHA de código, lockfile, migraciones, build Cloudflare, dry-run de assets, `pnpm check`, auditoría de dependencias y `git diff --check` — registrados en `Control de ejecución`, `1. Congelar el candidato` y `2. Validación local secuencial`.
 - [x] Base de datos: reset local, pgTAP, scripts de concurrencia (asociación, identidad, cupo público, límite clínico, exportación/lock y resolución pública) — registrados en `3. Base de datos y recuperación` y `Registro de ejecución — 2026-08-30`.
@@ -3199,7 +3207,7 @@ Este índice existe para que ninguna hora de pruebas quede separada de su regist
 - [x] Cuenta real de profesionales: los dos profesionales de la cuenta, los siete servicios públicos y 14 asignaciones, disponibilidad y causa del falso hallazgo del arnés — registrados en `cuenta profesional y BrowserStack iPhone`.
 - [x] BrowserStack: iPhone 15 Pro Max/iOS 17 con Playwright, reserva pública completa, recarga del portal, red, consola y cleanup; el mensaje CSP iOS quedó como residuo abierto — registrado en `cuenta profesional y BrowserStack iPhone`.
 - [x] Samsung físico: ADB inalámbrico, Chrome 151, enlace público, permiso y service worker, receipt de prueba, notificación real, recordatorio de dos horas, confirmación humana, base de datos, cleanup y defensas 401/405 — registrado en `Samsung físico — prueba de push y recordatorio de dos horas en producción`.
-- [x] Scheduler externo: configuración de cron-job.org, cadencia de diez minutos, 50 ejecuciones históricas, cinco últimas exitosas, invocación real autenticada y resultado `claimed/sent/failed/deadEndpoints` — registrado en la misma sección de Samsung; la alerta `onFailure=false` permanece pendiente.
+- [x] Scheduler externo (snapshot histórico): configuración de cron-job.org, cadencia de diez minutos, 50 ejecuciones históricas, cinco últimas exitosas, invocación real autenticada y resultado `claimed/sent/failed/deadEndpoints` — registrado en la misma sección de Samsung; la alerta figuraba entonces como `onFailure=false`. La política vigente y su pendiente de entrega humana se registran en la actualización posterior.
 - [x] Acciones públicas: pedido de reprogramación y cancelación en portal sin sesión interna, HTTP 200, mensajes, estados persistidos, timestamps, motivos, auditoría, desaparición de acciones terminales y cleanup — registrado en `acciones públicas contra la versión actualmente activa`.
 - [x] Relecturas y residuos: filtros exactos de pacientes, turnos, negocios, allowlist, invitaciones, seguimientos, negocios clínicos, usuarios Auth, sesiones de exportación y marcadores de esta continuación — registrados en cada sección de cleanup y en `Verificación local posterior a la corrida`.
 - [x] Seguridad de registro: no se imprimieron credenciales, cookies, tokens, claves ni URLs firmadas; los registros conservan sólo valores sanitizados — indicado en cada sección y en `Evidencia y reporte`.
@@ -3464,7 +3472,7 @@ evidencia verificable.
 - [x] Cada bloque se actualizará con evidencia concreta y se mantendrá la decisión global NO-GO hasta que los gates críticos estén demostrados.
 - [x] Los datos sintéticos pueden eliminarse; los cambios en código, esquema, funciones, permisos, secretos o configuración requieren revisión explícita y verificación posterior.
 
-## Registro de ejecución continuada — 2026-08-31 — estado actual separado de antecedentes
+## Registro de ejecución continuada — 2026-08-31 — ANTECEDENTE del candidato `fba21de` (estado separado de antecedentes anteriores)
 
 Esta sección es la referencia de estado actual de la auditoría. Los bloques anteriores
 siguen siendo antecedentes históricos y no se borran ni se reescriben, aunque mencionen
@@ -3779,7 +3787,7 @@ resultado de abajo supersede sólo esa afirmación operativa para la decisión v
   turnos y radiografías; el restore SQL/semántico no sustituye ese E2E. El bloqueo de
   `pg_dump` y la diferencia PG15/PG17 mantienen G1 parcial.
 
-### Relectura actual de gates (precedencia sobre el snapshot histórico)
+### Relectura de gates al corte `1d5fa13` — ANTECEDENTE (supersedida por `fba21de`)
 
 El snapshot inicial de G0/G1/G3/G6/G9 se conserva arriba como antecedente. Esta tabla es
 la decisión de estado actual, basada únicamente en evidencia posterior y explícita:
@@ -4588,7 +4596,7 @@ aprobaciones implícitas de los demás gates. La versión vigente del código es
 
 | Gate | Estado actual | Evidencia nueva que se admite | Pendiente que impide el cierre |
 |---|---|---|---|
-| G0 — trazabilidad de código/artefacto | **APROBADO para identidad y promoción** | SHA local/remoto, checkout limpio, dos outputs byte a byte, manifiesto 373, tag, versión `9f8be05a…`, deployment `9c33abf2…`, mezcla 1/99, promoción 100 %, `/_app/version.json` y tail con `scriptVersion` | Un rollback operativo posterior de este exacto candidato sigue perteneciendo a G9/runbook; cada cambio futuro exige repetir esta cadena |
+| G0 — trazabilidad de código/artefacto | **APROBADO para identidad y promoción** | SHA local/remoto, checkout limpio, dos outputs byte a byte, manifiesto 373, tag, versión `9f8be05a…`, deployment vigente `9c794bbb-1902-431a-beb2-b9e266c6047e`, mezcla 1/99, promoción 100 %, `/_app/version.json` y tail con `scriptVersion` | La identidad del runtime actual quedó confirmada; cada cambio futuro exige repetir esta cadena. El rollback operativo exacto se registra en G9 y no se convierte en un RTO contractual |
 | G1 — backup/restauración | **PARCIAL** | Restore aislado histórico, conteos, relaciones y checksum semántico documentados | Backup remoto durable fuera de esta PC, restore integrado con aplicación, radiografías, RPO/RTO y retención |
 | G2 — código/dependencias | **APROBADO para `fba21de`** | check 0/0, Vitest 108/824, auditoría de dependencias limpia, build reproducible | No sustituye pruebas de datos, UX, proveedores ni operación |
 | G3 — aislamiento/datos/concurrencia | **PARCIAL** | pgTAP, concurrencia e IDOR históricos; logout global y validación por request nuevos | Matriz completa de roles/tenants, revocación de membresías durante sesión y todos los RPC/rutas autenticados |
@@ -4597,7 +4605,7 @@ aprobaciones implícitas de los demás gates. La versión vigente del código es
 | G6 — Cloudflare/observabilidad | **PARCIAL/BLOQUEADO** | Versión exacta, placement, headers, caché/asset smoke, canary, tail efímero y stress auth 30/30 | Logs persistentes, dashboard, alertas humanas, límites p95/p99, synthetic 6 h, soak 24 h y CSP iPhone |
 | G7 — proveedores | **FUERA DE ALCANCE explícito** | WhatsApp y Mercado Pago excluidos por instrucción; Google sólo donde fue autorizado | No declarar las integraciones excluidas como certificadas si vuelven al alcance |
 | G8 — producción exacta | **PARCIAL** | Worker actual al 100 %, versión/commit correlacionados y pruebas autenticadas actuales | Skips de cobertura y recorridos productivos restantes |
-| G9 — scheduler/rollback/operación | **PARCIAL** | cron-job.org identificado y ejecutado, rotación e historial previos, promoción controlada y rollback histórico de la línea | Rollback del candidato exacto con medición, alerta humana, reintentos y runbook ensayado |
+| G9 — scheduler/rollback/operación | **PARCIAL** | cron-job.org identificado y ejecutado, rotación e historial previos, promoción controlada y rollback medido del candidato exacto `fba21de` (incluida la restauración dinámica en `9c794bbb…`) | Entrega humana de la alerta, reintentos idempotentes, runbook ensayado y soak |
 
 **Decisión vigente: NO-GO.** El candidato `fba21de` está correlacionado con el
 artefacto que atiende Cloudflare, sus assets son coherentes y la corrección crítica de
@@ -4611,8 +4619,9 @@ lanzamiento.
 
 - [ ] No repetir el smoke de assets ni el logout básico sin cambio de versión/hipótesis:
   ya están verdes en este candidato. Priorizar backup remoto/restauración integrada,
-  matriz autenticada por rol/consultorio, alertas de cron, rollback medido y pruebas
-  humanas de UX/accesibilidad.
+  matriz autenticada por rol/consultorio, entrega humana de alertas de cron, reintentos
+  idempotentes, runbook y pruebas humanas de UX/accesibilidad. El rollback del candidato
+  exacto ya fue medido y no debe repetirse salvo que cambie la versión o la hipótesis.
 - [ ] Mantener la REGLA CENTRAL: cualquier fixture de paciente, turno, profesional,
   consultorio, email o archivo puede limpiarse con manifiesto exacto; código,
   migraciones, funciones, triggers, RLS, grants, constraints, Storage, secretos,
@@ -4748,3 +4757,58 @@ antecedente y aquí se valida el cambio de tráfico con `/login`, cuyo HTML decl
   aparecieron redactados por Wrangler. Los `cf-ray` de muestra se conservaron sólo como
   correladores (`a33c139608c92ced`, `a33c13e409cbae29`, `a33c148aca4ada16`). El tail se
   detuvo al finalizar y sigue siendo evidencia efímera, no retención operativa.
+
+## Relectura editorial de antecedentes y estado actual — 2026-08-31 — ESTADO ACTUAL
+
+Esta sección fija la precedencia de las evidencias que motivaron la actualización
+solicitada. No elimina ni corrige retroactivamente los snapshots anteriores: los deja
+identificados como antecedentes y separa lo que ahora gobierna la decisión.
+
+### Antecedente de Git y hardening de privilegios — candidato `b1a35ff`
+
+- [x] El candidato histórico de hardening quedó identificado inequívocamente como el
+  commit completo `b1a35ff519442b42fb95b99a4f0978f947f1660b`, con tag
+  `prelaunch-cloudflare-b1a35ff`, padre `7e5fb7c8c205ee53caa9571c7b25394aa5a9ed1f`
+  y árbol `4c752301e1630aada0167bb5e7be7b03ea3b1892`. El checkout limpio y la
+  reproducibilidad del artefacto de ese corte se conservan como **antecedente**; no se
+  presentan como la versión que atiende hoy al Worker, que es `fba21de…`.
+- [x] Ese commit contiene el test de privilegios y las migraciones que revocan `TRUNCATE`
+  a `anon` y `authenticated` y validan la restricción de invitaciones. La medición
+  histórica registrada fue **0 grants TRUNCATE indebidos** para ambos roles, todas las
+  restricciones restauradas con `convalidated=true` y **22/22 tests pgTAP PASS**. Esto
+  demuestra una propiedad de privilegios/integridad del corte; no cierra por sí solo la
+  matriz autenticada multi-tenant ni el gate G3 completo.
+
+### Scheduler externo — estado vigente
+
+- [x] El job `cron-job.org/7795525` está identificado, autenticado y habilitado como
+  POST al Worker `app.cita-suite.workers.dev` cada diez minutos UTC, con timeout de 30 s.
+  La lectura posterior a la rotación confirmó ejecución real exitosa (HTTP 200,
+  `ok=true`, `claimed=0`, `sent=0`, `failed=0`, `deadEndpoints=0`) y el historial de
+  50 ejecuciones conserva las cinco últimas exitosas. Los registros antiguos que dicen
+  `onFailure=false` son **antecedentes**; la política vigente quedó en
+  `onFailure=true`, `onFailureCount=1`, `onSuccess=true` y `onDisable=true`.
+- [ ] Sigue faltando provocar una falla controlada y demostrar entrega humana de la
+  alerta, recuperación sin duplicados y reintentos idempotentes. Por eso la existencia y
+  ejecución del scheduler ya no son un bloqueo de identificación, pero G9 no se marca
+  verde hasta observar la alerta de punta a punta.
+
+### Correlación Cloudflare ↔ artefacto — estado vigente
+
+- [x] La versión desplegada quedó correlacionada con el output exacto que consume
+  Wrangler: runtime `fba21de079706f9674a85303a3ec68b589b90f70`, tag
+  `fba21de…-clean-2324f2`, manifiesto de 373 archivos con SHA
+  `2324f2e253b33f44eedbec04708a2aaf5d7c775e448bf5ce422cfafdac5f371b`, versión
+  `9f8be05a-b003-42a8-bc00-18e87eff0c54` y deployment vigente
+  `9c794bbb-1902-431a-beb2-b9e266c6047e` al 100 %. `/_app/version.json`, los assets y
+  el tail observaron ese mismo identificador; la comparación A/B fue byte a byte sobre
+  `cloudflare`, `cloudflare-tmp` y `output/server`, no sólo sobre el comportamiento.
+- [x] El rollback dinámico se ejecutó contra HTML `private, no-store`: versión anterior
+  observada en 1.011 ms y restauración de `fba21de` en 860 ms, seguida por tail con
+  `scriptVersion.id=9f8be05a…`, `outcome=ok` y `exceptions=[]`. Esta evidencia cierra
+  la identidad/promoción de G0 y aporta un RTO de borde observado a G9; no prueba por sí
+  sola rollback de datos, runbook humano ni observabilidad persistente.
+- [ ] G6 permanece **PARCIAL/BLOQUEADO**: todavía faltan logs persistentes, dashboard,
+  alertas recibidas por una persona, p95/p99 de recursos, synthetic de seis horas, soak
+  de 24 horas y el cierre del aviso CSP de iPhone. G9 permanece **PARCIAL** por la
+  alerta humana, reintentos y runbook pendientes. La decisión global continúa **NO-GO**.
