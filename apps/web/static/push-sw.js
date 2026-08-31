@@ -121,10 +121,23 @@ self.addEventListener('notificationclick', (event) => {
 		event.waitUntil(clickReceipt);
 		return;
 	}
+	// La URL viaja dentro del payload firmado por el servidor, pero se vuelve a
+	// validar antes de entregarla al navegador. Un dato alterado nunca debe
+	// convertir el clic de una notificación en una navegación externa.
+	let targetUrl;
+	try {
+		targetUrl = new URL(url, self.location.origin);
+	} catch {
+		event.waitUntil(clickReceipt);
+		return;
+	}
+	if (targetUrl.origin !== self.location.origin) {
+		event.waitUntil(clickReceipt);
+		return;
+	}
 	const navigation = clients
 		.matchAll({ type: 'window', includeUncontrolled: true })
 		.then((windowClients) => {
-			const targetUrl = new URL(url, self.location.origin);
 			// Algunos navegadores Android (Samsung Browser incluido) consideran
 			// `navigate()` a la misma URL una navegación vacía y conservan el HTML
 			// anterior. Un parámetro efímero fuerza una nueva lectura del turno al

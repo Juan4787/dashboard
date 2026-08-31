@@ -9,7 +9,7 @@ max_rows = 1000
 
 [db]
 port = 55422
-major_version = 15
+major_version = 17
 
 [studio]
 enabled = true
@@ -23,7 +23,7 @@ file_size_limit = "25MiB"
 enabled = true
 port = 55427
 
-[local_smtp]
+[inbucket]
 enabled = true
 port = 55424
 smtp_port = 55425

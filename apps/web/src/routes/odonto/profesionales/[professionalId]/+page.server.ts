@@ -68,7 +68,7 @@ const redirectToProfessional = (professionalId: string, tab = 'perfil') => {
 
 type SaveResult<T = unknown> =
 	| { ok: true; data?: T }
-	| { ok: false; status: 400 | 403 | 500; message: string };
+	| { ok: false; status: 400 | 403 | 404 | 409 | 500; message: string };
 
 const failSave = (result: Extract<SaveResult, { ok: false }>) =>
 	fail(result.status, { message: result.message });
@@ -108,7 +108,7 @@ const saveProfessionalProfile = async (
 		return { ok: false, status: 400, message: humanProfessionalEmailConflict(existingProfessional) };
 	}
 
-	const { error } = await supabase
+	const { data: updatedProfessional, error } = await supabase
 		.from('professionals')
 		.update({
 			name,
@@ -121,7 +121,9 @@ const saveProfessionalProfile = async (
 			updated_at: new Date().toISOString()
 		})
 		.eq('business_id', businessId)
-		.eq('id', professionalId);
+		.eq('id', professionalId)
+		.select('id')
+		.maybeSingle();
 
 	if (error) {
 		console.error('Error actualizando profesional', error);
@@ -131,6 +133,13 @@ const saveProfessionalProfile = async (
 			message: error.message?.includes('PROFESSIONAL_EMAIL_ALREADY_EXISTS')
 				? 'Ese correo ya está cargado en otro profesional.'
 				: 'No se pudo actualizar el profesional.'
+		};
+	}
+	if (!updatedProfessional) {
+		return {
+			ok: false,
+			status: 409,
+			message: 'El perfil profesional cambió o ya no está disponible. Recargá la página y volvé a intentar.'
 		};
 	}
 
@@ -760,14 +769,19 @@ export const actions: Actions = {
 			return fail(403, { message: 'Solo el dueño o un administrador puede archivar profesionales.' });
 		}
 
-		const { error } = await supabase
+		const { data: updatedProfessional, error } = await supabase
 			.from('professionals')
 			.update({ is_active: false, is_public: false, updated_at: new Date().toISOString() })
 			.eq('business_id', business.business.id)
-			.eq('id', params.professionalId);
+			.eq('id', params.professionalId)
+			.select('id')
+			.maybeSingle();
 		if (error) {
 			console.error('Error archivando profesional', error);
 			return fail(500, { message: 'No se pudo archivar el profesional.' });
+		}
+		if (!updatedProfessional) {
+			return fail(404, { message: 'El profesional ya no está disponible. Recargá la página.' });
 		}
 
 		await writeAuditLog(supabase, {
@@ -794,7 +808,7 @@ export const actions: Actions = {
 			params.professionalId
 		);
 
-		const { error } = await supabase
+		const { data: updatedProfessional, error } = await supabase
 			.from('professionals')
 			.update({
 				is_active: true,
@@ -802,10 +816,15 @@ export const actions: Actions = {
 				updated_at: new Date().toISOString()
 			})
 			.eq('business_id', business.business.id)
-			.eq('id', params.professionalId);
+			.eq('id', params.professionalId)
+			.select('id')
+			.maybeSingle();
 		if (error) {
 			console.error('Error restaurando profesional', error);
 			return fail(500, { message: 'No se pudo restaurar el profesional.' });
+		}
+		if (!updatedProfessional) {
+			return fail(404, { message: 'El profesional ya no está disponible. Recargá la página.' });
 		}
 
 		await writeAuditLog(supabase, {

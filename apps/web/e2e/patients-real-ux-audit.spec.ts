@@ -95,7 +95,6 @@ test.describe('Auditoría UX sobre la cuenta de prueba real', () => {
 		const mobileContext = await browser.newContext({
 			storageState,
 			viewport: { width: 390, height: 844 },
-			isMobile: true,
 			hasTouch: true
 		});
 		try {

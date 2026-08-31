@@ -200,6 +200,9 @@ const roleAccessErrorMessage = (error: { code?: string; message?: string } | nul
 		return 'Solo un profesional, administrador o dueño puede tener perfil profesional.';
 	}
 	if (raw.includes('PROFESSIONAL_NOT_FOUND')) return 'No se encontró el profesional asociado.';
+	if (raw.includes('BUSINESS_USER_NOT_FOUND') || raw.includes('BUSINESS_INVITE_NOT_FOUND')) {
+		return 'El acceso del equipo cambió. Recargá la lista y volvé a intentar.';
+	}
 	if (raw.includes('PROFESSIONAL_ALREADY_LINKED_TO_USER')) {
 		return 'Ese profesional ya está vinculado a otro usuario.';
 	}
@@ -215,8 +218,11 @@ const roleAccessErrorMessage = (error: { code?: string; message?: string } | nul
 	return 'No se pudo guardar el rol.';
 };
 
-const roleAccessErrorStatus = (error: { code?: string; message?: string } | null | undefined) =>
-	businessEmailAssociationErrorStatus(error);
+const roleAccessErrorStatus = (error: { code?: string; message?: string } | null | undefined) => {
+	const raw = error?.message ?? '';
+	if (raw.includes('BUSINESS_USER_NOT_FOUND') || raw.includes('BUSINESS_INVITE_NOT_FOUND')) return 409;
+	return businessEmailAssociationErrorStatus(error);
+};
 
 const roleLabel = (role: BusinessRole) => {
 	const labels: Record<BusinessRole, string> = {
@@ -305,7 +311,7 @@ const saveRoleAccessDirect = async ({
 		}
 
 		if (existing) {
-			const { error } = await admin
+			const { data: updatedMembership, error } = await admin
 				.from('business_users')
 				.update({
 					role,
@@ -316,8 +322,11 @@ const saveRoleAccessDirect = async ({
 					updated_at: new Date().toISOString()
 				})
 				.eq('id', existing.id)
-				.eq('business_id', businessId);
+				.eq('business_id', businessId)
+				.select('id')
+				.maybeSingle();
 			if (error) throw error;
+			if (!updatedMembership) throw new Error('BUSINESS_USER_NOT_FOUND');
 		} else {
 			const { error } = await admin.from('business_users').insert({
 				business_id: businessId,
@@ -384,7 +393,7 @@ const saveRoleAccessDirect = async ({
 		(item) => item.status === 'pending' && item.email.toLowerCase() === email
 	);
 	if (existingPending) {
-		const { error } = await admin
+		const { data: updatedInvite, error } = await admin
 			.from('business_user_invites')
 			.update({
 				role,
@@ -393,8 +402,11 @@ const saveRoleAccessDirect = async ({
 				updated_at: new Date().toISOString()
 			})
 			.eq('id', existingPending.id)
-			.eq('business_id', businessId);
+			.eq('business_id', businessId)
+			.select('id')
+			.maybeSingle();
 		if (error) throw error;
+		if (!updatedInvite) throw new Error('BUSINESS_INVITE_NOT_FOUND');
 		return {
 			status:
 				existingPending.role === role &&
@@ -754,13 +766,16 @@ export const actions: Actions = {
 					};
 				}
 
-				const { error: publishError } = await admin
+				const { data: publishedProfessional, error: publishError } = await admin
 					.from('professionals')
 					.update({ is_public: true, updated_at: new Date().toISOString() })
 					.eq('business_id', businessId)
 					.eq('id', professionalId)
-					.eq('is_active', true);
+					.eq('is_active', true)
+					.select('id')
+					.maybeSingle();
 				if (publishError) throw publishError;
+				if (!publishedProfessional) throw new Error('PROFESSIONAL_NOT_FOUND');
 
 				return {
 					success: true,

@@ -58,7 +58,7 @@ const restHeaders = (key: string) => ({
 const cleanupFollowUps = async () => {
 	const { url, key } = restEnv();
 	if (!url || !key) return;
-	const res = await fetch(`${url}/rest/v1/follow_ups?message=ilike.*${E2E_TAG}*`, {
+	const res = await fetch(`${url}/rest/v1/follow_ups?message=ilike.%25${E2E_TAG}%25`, {
 		method: 'DELETE',
 		headers: { ...restHeaders(key), prefer: 'return=minimal' }
 	});

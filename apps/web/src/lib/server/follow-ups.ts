@@ -224,6 +224,33 @@ export const buildFollowUpScope = async (
 const applyRoleScope = (query: any, scope: RoleScope) =>
 	roleSeesAllFollowUps(scope.role) ? query : query.eq('assigned_professional_id', scope.professionalId);
 
+/**
+ * La asignación de un seguimiento no conserva acceso si el vínculo del
+ * profesional con el paciente fue archivado. Las consultas usan el cliente
+ * backend, por lo que esta segunda comprobación es necesaria además del scope
+ * por assigned_professional_id.
+ */
+const filterActiveProfessionalPatientLinks = async (
+	admin: SupabaseClient,
+	scope: RoleScope,
+	rows: any[]
+) => {
+	if (roleSeesAllFollowUps(scope.role)) return rows;
+	if (!scope.professionalId || rows.length === 0) return [];
+	const patientIds = [...new Set(rows.map((row) => String(row.patient_id)).filter(Boolean))];
+	if (patientIds.length === 0) return [];
+	const { data, error } = await admin
+		.from('professional_patient_links')
+		.select('patient_id')
+		.eq('business_id', scope.businessId)
+		.eq('professional_id', scope.professionalId)
+		.eq('is_active', true)
+		.in('patient_id', patientIds);
+	if (error) throw error;
+	const linkedPatientIds = new Set((data ?? []).map((row: any) => String(row.patient_id)));
+	return rows.filter((row) => linkedPatientIds.has(String(row.patient_id)));
+};
+
 export const listExecutingFollowUps = async (
 	admin: SupabaseClient,
 	scope: TzScope
@@ -242,7 +269,8 @@ export const listExecutingFollowUps = async (
 		scope
 	);
 	if (error) throw error;
-	return (data ?? []).map(mapRow);
+	const visibleRows = await filterActiveProfessionalPatientLinks(admin, scope, data ?? []);
+	return visibleRows.map(mapRow);
 };
 
 export const listProgrammedFollowUps = async (
@@ -263,7 +291,8 @@ export const listProgrammedFollowUps = async (
 		scope
 	);
 	if (error) throw error;
-	return (data ?? []).map(mapRow);
+	const visibleRows = await filterActiveProfessionalPatientLinks(admin, scope, data ?? []);
+	return visibleRows.map(mapRow);
 };
 
 export const getNoticeSummary = async (
@@ -275,7 +304,7 @@ export const getNoticeSummary = async (
 	const { data: identityRows, count, error } = await applyRoleScope(
 		admin
 			.from('follow_ups')
-			.select('id', { count: 'exact' })
+			.select('id, patient_id', { count: 'exact' })
 			.eq('business_id', scope.businessId)
 			.eq('status', 'pending')
 			.lte('remind_on', today)
@@ -285,8 +314,12 @@ export const getNoticeSummary = async (
 		scope
 	);
 	if (error) throw error;
-	const identityIds = (identityRows ?? []).map((row: any) => String(row.id));
-	const total = count ?? 0;
+	const visibleIdentityRows = await filterActiveProfessionalPatientLinks(admin, scope, identityRows ?? []);
+	const identityIds = visibleIdentityRows.map((row: any) => String(row.id));
+	// Si se filtró un vínculo archivado, el count de PostgREST ya no representa
+	// lo que puede ver el profesional. En ese caso usamos sólo las filas visibles
+	// para no mostrar un aviso huérfano ni filtrar un paciente por accidente.
+	const total = visibleIdentityRows.length === (identityRows ?? []).length ? (count ?? 0) : visibleIdentityRows.length;
 	if (total !== 1 || identityIds.length !== 1) return buildNotice([], total, identityIds);
 
 	const { data: singleRow, error: singleError } = await admin
@@ -296,6 +329,12 @@ export const getNoticeSummary = async (
 		.eq('id', identityIds[0])
 		.maybeSingle();
 	if (singleError) throw singleError;
+	if (
+		!roleSeesAllFollowUps(scope.role) &&
+		!(await filterActiveProfessionalPatientLinks(admin, scope, singleRow ? [singleRow] : [])).length
+	) {
+		return buildNotice([], 0);
+	}
 	return buildNotice(singleRow ? [mapRow(singleRow)] : [], total, identityIds);
 };
 
@@ -560,6 +599,8 @@ const loadScopedPendingFollowUp = async (admin: SupabaseClient, scope: RoleScope
 	if (!data) throw new FollowUpError('FOLLOWUP_NOT_FOUND');
 	if (!roleSeesAllFollowUps(scope.role)) {
 		if (!scope.professionalId || String(data.assigned_professional_id ?? '') !== scope.professionalId)
+			throw new FollowUpError('FOLLOWUP_FORBIDDEN');
+		if (!(await professionalLinkedToPatient(admin, scope.businessId, scope.professionalId, String(data.patient_id))))
 			throw new FollowUpError('FOLLOWUP_FORBIDDEN');
 	}
 	return data;

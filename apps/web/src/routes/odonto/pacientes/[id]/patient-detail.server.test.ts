@@ -10,7 +10,8 @@ const mocks = vi.hoisted(() => ({
 		rpc: vi.fn()
 	},
 	admin: {
-		from: vi.fn()
+		from: vi.fn(),
+		rpc: vi.fn()
 	}
 }));
 
@@ -159,6 +160,7 @@ describe('patient detail migrated actions', () => {
 		mocks.createSupabaseServerClient.mockResolvedValue(mocks.supabase);
 		mocks.createSupabaseAdminClient.mockResolvedValue(mocks.admin);
 		mocks.getAuthUserId.mockResolvedValue(ownerId);
+		mocks.admin.rpc.mockResolvedValue({ data: [{ patient_id: patientId }], error: null });
 		mocks.resolveActiveBusiness.mockResolvedValue({
 			business: { id: businessId },
 			role: 'owner',
@@ -362,7 +364,7 @@ describe('patient detail migrated actions', () => {
 
 	it('archives a professional patient only on the professional link', async () => {
 		makeProfessionalContext();
-		const updateBuilder = makeQueryBuilder({ result: { error: null } });
+		const updateBuilder = makeQueryBuilder({ result: { data: { id: 'link-1' }, error: null } });
 		mockAdminBuilders([
 			makeQueryBuilder({
 				maybeSingleResult: {
@@ -410,8 +412,6 @@ describe('patient detail migrated actions', () => {
 
 	it('lets a linked professional edit patient data and records a visible change event', async () => {
 		makeProfessionalContext();
-		const patientUpdateBuilder = makeQueryBuilder({ result: { data: { id: patientId }, error: null } });
-		const profileUpdateBuilder = makeQueryBuilder({ result: { data: { id: 'profile-1' }, error: null } });
 		const eventInsertBuilder = makeQueryBuilder({ result: { error: null } });
 		mockAdminBuilders([
 			makeQueryBuilder({
@@ -450,8 +450,6 @@ describe('patient detail migrated actions', () => {
 					error: null
 				}
 			}),
-			patientUpdateBuilder,
-			profileUpdateBuilder,
 			eventInsertBuilder
 		]);
 
@@ -461,16 +459,18 @@ describe('patient detail migrated actions', () => {
 
 		await expectRedirectToPatient(actions.update_patient!(makeEvent(form)), 'datos');
 
-		expect(patientUpdateBuilder.update).toHaveBeenCalledWith(
+		expect(mocks.admin.rpc).toHaveBeenCalledWith(
+			'update_patient_with_clinical_profile_safely',
 			expect.objectContaining({
-				full_name: 'Paciente Nuevo',
-				phone: '112233'
-			})
-		);
-		expect(profileUpdateBuilder.update).toHaveBeenCalledWith(
-			expect.objectContaining({
-				updated_by: ownerId
-			})
+			p_actor_id: ownerId,
+			p_business_id: businessId,
+			p_patient_id: patientId,
+			p_full_name: 'Paciente Nuevo',
+			p_phone: '112233',
+			p_update_clinical_profile: true,
+			p_expected_patient_updated_at: '2026-08-31T12:00:00.000Z',
+			p_expected_clinical_profile_updated_at: '2026-08-31T12:00:00.000Z'
+		})
 		);
 		expect(eventInsertBuilder.insert).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -486,7 +486,7 @@ describe('patient detail migrated actions', () => {
 	});
 
 	it('does not report success when the patient disappeared between read and update', async () => {
-		const patientUpdateBuilder = makeQueryBuilder({ result: { data: null, error: null } });
+		mocks.admin.rpc.mockResolvedValue({ data: null, error: { message: 'PATIENT_UPDATE_CONFLICT' } });
 		mockAdminBuilders([
 			makeQueryBuilder({
 				maybeSingleResult: {
@@ -509,8 +509,7 @@ describe('patient detail migrated actions', () => {
 					data: { allergies: null, medication: null, background: null, updated_at: '2026-08-31T12:00:00.000Z' },
 					error: null
 				}
-			}),
-			patientUpdateBuilder
+			})
 		]);
 
 		const form = new FormData();
@@ -519,11 +518,13 @@ describe('patient detail migrated actions', () => {
 
 		expect(result.status).toBe(409);
 		expect(result.data.message).toContain('cambió mientras la editabas');
-		expect(patientUpdateBuilder.update).toHaveBeenCalled();
+		expect(mocks.admin.rpc).toHaveBeenCalledWith(
+			'update_patient_with_clinical_profile_safely',
+			expect.any(Object)
+		);
 	});
 
 	it('rejects a form based on a stale patient version before mutating either record', async () => {
-		const patientUpdateBuilder = makeQueryBuilder({ result: { data: { id: patientId }, error: null } });
 		mockAdminBuilders([
 			makeQueryBuilder({
 				maybeSingleResult: {
@@ -541,8 +542,7 @@ describe('patient detail migrated actions', () => {
 					error: null
 				}
 			}),
-			makeQueryBuilder({ maybeSingleResult: { data: null, error: null } }),
-			patientUpdateBuilder
+			makeQueryBuilder({ maybeSingleResult: { data: null, error: null } })
 		]);
 
 		const form = new FormData();
@@ -552,12 +552,11 @@ describe('patient detail migrated actions', () => {
 
 		expect(result.status).toBe(409);
 		expect(result.data.message).toContain('cambió mientras la editabas');
-		expect(patientUpdateBuilder.update).not.toHaveBeenCalled();
+		expect(mocks.admin.rpc).not.toHaveBeenCalled();
 	});
 
 	it('does not report success when the clinical profile loses its optimistic race', async () => {
-		const patientUpdateBuilder = makeQueryBuilder({ result: { data: { id: patientId }, error: null } });
-		const profileUpdateBuilder = makeQueryBuilder({ result: { data: null, error: null } });
+		mocks.admin.rpc.mockResolvedValue({ data: null, error: { message: 'PATIENT_UPDATE_CONFLICT' } });
 		mockAdminBuilders([
 			makeQueryBuilder({
 				maybeSingleResult: {
@@ -580,9 +579,7 @@ describe('patient detail migrated actions', () => {
 					data: { allergies: null, medication: null, background: null, updated_at: '2026-08-31T12:00:00.000Z' },
 					error: null
 				}
-			}),
-			patientUpdateBuilder,
-			profileUpdateBuilder
+			})
 		]);
 
 		const form = new FormData();

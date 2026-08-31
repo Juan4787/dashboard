@@ -151,4 +151,8 @@ export const setProfessionalServices = async (
 		relatedColumn: 'service_id',
 		relatedIds: serviceIds
 	});
+	// La validación previa evita IDs ajenos; repetirla después de la sincronización
+	// evita informar guardado si otra pestaña eliminó el profesional durante la
+	// operación y las escrituras afectaron cero filas.
+	await assertTargetExists(supabase, 'professionals', businessId, professionalId, 'PROFESSIONAL_NOT_FOUND');
 };

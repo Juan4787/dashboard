@@ -260,4 +260,33 @@ describe('push service worker', () => {
 		expect(focus).toHaveBeenCalledTimes(1);
 		expect(clients.openWindow).not.toHaveBeenCalled();
 	});
+
+	it('rechaza destinos externos de una notificación sin abrirlos', async () => {
+		const { listeners, clients, fetchMock } = loadWorker();
+		let work: Promise<unknown> | null = null;
+		listeners.notificationclick?.({
+			notification: {
+				data: {
+					url: 'https://evil.example/phishing',
+					delivery: {
+						id: '8ccf23d7-5ae3-4b87-9268-d40a05d9a475',
+						token: 'a'.repeat(43),
+						receiptUrl: '/turno/token/push/receipt'
+					}
+				},
+				close: vi.fn()
+			},
+			waitUntil: (promise: Promise<unknown>) => {
+				work = promise;
+			}
+		});
+		await work;
+
+		expect(clients.matchAll).not.toHaveBeenCalled();
+		expect(clients.openWindow).not.toHaveBeenCalled();
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
+			stage: 'clicked'
+		});
+	});
 });

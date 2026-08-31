@@ -28,12 +28,15 @@ export const ensureDefaultServices = async (
 		);
 		if (existing?.id) {
 			if (!existing.is_active || !existing.is_public) {
-				const { error: updateError } = await supabase
+				const { data: updated, error: updateError } = await supabase
 					.from('services')
 					.update({ is_active: true, is_public: true, updated_at: new Date().toISOString() })
 					.eq('business_id', businessId)
-					.eq('id', existing.id);
+					.eq('id', existing.id)
+					.select('id')
+					.maybeSingle();
 				if (updateError) throw updateError;
+				if (!updated) throw new Error('DEFAULT_SERVICE_NOT_FOUND');
 			}
 			ids.push(String(existing.id));
 			continue;

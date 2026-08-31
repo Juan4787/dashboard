@@ -11,6 +11,10 @@ const uniqueSuffix = () => `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 const publicPatientMarker = (value: string) =>
 	value.replace(/\d/g, (digit) => 'abcdefghij'[Number(digit)]).replaceAll('-', '');
 const PUBLIC_PATIENT_E2E_PREFIX = 'Pruebaautomatizada';
+// PostgREST recibe el comodín SQL como `%25` en la URL. El `*` no es un
+// comodín para estos filtros y podía dejar profesionales sintéticos huérfanos
+// después de una corrida completa.
+const E2E_LIKE = 'E2E%25';
 
 const readEnvFile = () => {
 	let current = process.cwd();
@@ -52,7 +56,7 @@ const cleanupRecentHeadlessBookingAttempts = async () => {
 	if (!url || !key) return;
 	const since = encodeURIComponent(new Date(Date.now() - 15 * 60_000).toISOString());
 	const response = await fetch(
-		`${url}/rest/v1/public_booking_attempts?action=eq.booking_create&created_at=gte.${since}&user_agent=ilike.*HeadlessChrome*`,
+		`${url}/rest/v1/public_booking_attempts?action=eq.booking_create&created_at=gte.${since}&user_agent=ilike.%25HeadlessChrome%25`,
 		{
 			method: 'DELETE',
 			headers: {
@@ -112,11 +116,11 @@ const restDelete = async (path: string, { optional = false } = {}) => {
 // servicios, reglas, asignaciones, vínculos, turnos y pacientes). Idempotente: limpia
 // también corridas previas. La service_role se usa sólo dentro de este proceso.
 const cleanupE2EFixtures = async () => {
-	const profs = await restGetMany<{ id: string }>('professionals?name=like.E2E*&select=id');
+	const profs = await restGetMany<{ id: string }>(`professionals?name=ilike.${E2E_LIKE}&select=id`);
 	const patients = [
-		...(await restGetMany<{ id: string }>('patients?full_name=like.E2E*&select=id')),
+		...(await restGetMany<{ id: string }>(`patients?full_name=ilike.${E2E_LIKE}&select=id`)),
 		...(await restGetMany<{ id: string }>(
-			`patients?full_name=like.${PUBLIC_PATIENT_E2E_PREFIX}*&select=id`
+			`patients?full_name=ilike.${PUBLIC_PATIENT_E2E_PREFIX}%25&select=id`
 		))
 	];
 	const profIds = profs.map((p) => p.id);
@@ -128,10 +132,10 @@ const cleanupE2EFixtures = async () => {
 	if (profIds.length) await restDelete(`professional_services?professional_id=in.${inList(profIds)}`, { optional: true });
 	if (patientIds.length) await restDelete(`professional_patient_links?patient_id=in.${inList(patientIds)}`, { optional: true });
 	if (profIds.length) await restDelete(`professional_patient_links?professional_id=in.${inList(profIds)}`, { optional: true });
-	await restDelete('services?name=like.E2E*', { optional: true });
-	await restDelete('professionals?name=like.E2E*', { optional: true });
-	await restDelete('patients?full_name=like.E2E*', { optional: true });
-	await restDelete(`patients?full_name=like.${PUBLIC_PATIENT_E2E_PREFIX}*`, { optional: true });
+	await restDelete(`services?name=ilike.${E2E_LIKE}`, { optional: true });
+	await restDelete(`professionals?name=ilike.${E2E_LIKE}`, { optional: true });
+	await restDelete(`patients?full_name=ilike.${E2E_LIKE}`, { optional: true });
+	await restDelete(`patients?full_name=ilike.${PUBLIC_PATIENT_E2E_PREFIX}%25`, { optional: true });
 };
 
 const restInsertSingle = async <T>(table: string, row: Record<string, unknown>, select = 'id'): Promise<T> => {

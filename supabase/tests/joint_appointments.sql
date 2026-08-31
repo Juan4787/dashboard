@@ -237,6 +237,11 @@ begin
 		raise exception 'TEST_JOINT_RATE_LIMIT_EXPECTED_1_GOT_%', v_count;
 	end if;
 
+	-- El resto de esta sección valida invariantes transaccionales desde el rol
+	-- de backend. No debe heredar el JWT del usuario ajeno usado para probar la
+	-- lectura anterior, porque el trigger de defensa de roles debe bloquearlo.
+	perform set_config('request.jwt.claims', '{}', true);
+
 	-- Cualquier profesional del equipo bloquea el horario completo.
 	begin
 		insert into public.appointments (

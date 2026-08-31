@@ -55,11 +55,14 @@ const del = async (p) => {
 };
 
 const inList = (ids) => `(${ids.join(',')})`;
+// PostgREST espera el comodín SQL codificado como `%25`; `*` se interpreta como
+// texto literal y deja residuos aunque el script termine sin error.
+const E2E_LIKE = 'E2E%25';
 
 const run = async () => {
-	const profs = await get('professionals?name=like.E2E*&select=id,name');
-	const services = await get('services?name=like.E2E*&select=id,name');
-	const patients = await get('patients?full_name=like.E2E*&select=id,full_name');
+	const profs = await get(`professionals?name=ilike.${E2E_LIKE}&select=id,name`);
+	const services = await get(`services?name=ilike.${E2E_LIKE}&select=id,name`);
+	const patients = await get(`patients?full_name=ilike.${E2E_LIKE}&select=id,full_name`);
 	const profIds = profs.map((p) => p.id);
 	const patientIds = patients.map((p) => p.id);
 
@@ -79,9 +82,9 @@ const run = async () => {
 	if (profIds.length) await del(`professional_services?professional_id=in.${inList(profIds)}`);
 	if (patientIds.length) await del(`professional_patient_links?patient_id=in.${inList(patientIds)}`);
 	if (profIds.length) await del(`professional_patient_links?professional_id=in.${inList(profIds)}`);
-	await del('services?name=like.E2E*');
-	await del('professionals?name=like.E2E*');
-	await del('patients?full_name=like.E2E*');
+	await del(`services?name=ilike.${E2E_LIKE}`);
+	await del(`professionals?name=ilike.${E2E_LIKE}`);
+	await del(`patients?full_name=ilike.${E2E_LIKE}`);
 	console.log(`\n✅ Limpieza aplicada.\n`);
 };
 

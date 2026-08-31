@@ -224,6 +224,26 @@ const mapDuplicatePatientError = async ({
 	return conflictMessage ? fail(409, { message: conflictMessage }) : null;
 };
 
+const patientUpdateRpcError = (error: { message?: string; code?: string } | null | undefined) => {
+	const message = `${error?.message ?? ''} ${error?.code ?? ''}`;
+	if (message.includes('BUSINESS_ACCESS_RESTRICTED')) {
+		return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
+	}
+	if (message.includes('PATIENT_NOT_FOUND')) {
+		return fail(404, { message: 'Paciente no encontrado.' });
+	}
+	if (message.includes('PATIENT_ACCESS_DENIED') || message.includes('PATIENT_UPDATE_DENIED')) {
+		return fail(403, { message: 'No tenés permiso para editar esta ficha.' });
+	}
+	if (message.includes('PATIENT_NAME_REQUIRED')) {
+		return fail(400, { message: 'Ingresá el nombre del paciente.' });
+	}
+	if (message.includes('PATIENT_UPDATE_CONFLICT')) {
+		return fail(409, { message: PATIENT_UPDATE_CONFLICT_MESSAGE });
+	}
+	return null;
+};
+
 const getActorName = (role: BusinessActionSession['context']['role'], professionalName?: string | null) => {
 	if (professionalName) return professionalName;
 	if (role === 'owner') return 'Dueño';
@@ -972,17 +992,37 @@ export const actions: Actions = {
 			return fail(409, { message: PATIENT_UPDATE_CONFLICT_MESSAGE });
 		}
 
-		const { data: updatedPatient, error } = await admin
-			.from('patients')
-			.update(updates)
-			.eq('id', params.id)
-			.eq('business_id', context.business.id)
-			.eq('updated_at', String((currentPatient as any).updated_at ?? ''))
-			.select('id')
-			.maybeSingle();
+		const { data: atomicUpdate, error } = await admin.rpc(
+			'update_patient_with_clinical_profile_safely' as never,
+			{
+				p_actor_id: ownerId,
+				p_business_id: context.business.id,
+				p_patient_id: params.id,
+				p_full_name: updates.full_name,
+				p_dni: updates.dni,
+				p_phone: updates.phone,
+				p_phone_raw: updates.phone_raw,
+				p_phone_e164: updates.phone_e164,
+				p_email: updates.email,
+				p_birth_date: updates.birth_date,
+				p_address: updates.address,
+				p_insurance: updates.insurance,
+				p_insurance_plan: updates.insurance_plan,
+				p_update_clinical_profile: permissions.canEditClinicalProfile,
+				p_allergies: permissions.canEditClinicalProfile ? clinicalUpdates.allergies : null,
+				p_medication: permissions.canEditClinicalProfile ? clinicalUpdates.medication : null,
+				p_background: permissions.canEditClinicalProfile ? clinicalUpdates.background : null,
+				p_expected_patient_updated_at: (currentPatient as any).updated_at ?? null,
+				p_expected_clinical_profile_updated_at: permissions.canEditClinicalProfile
+					? ((currentProfile as any)?.updated_at ?? null)
+					: null
+			} as never
+		);
 
 		if (error) {
-			console.error('Error actualizando paciente', error);
+			console.error('Error actualizando ficha y perfil clínico del paciente', error);
+			const mapped = patientUpdateRpcError(error);
+			if (mapped) return mapped;
 			const duplicateResult = await mapDuplicatePatientError({
 				error,
 				admin,
@@ -993,48 +1033,10 @@ export const actions: Actions = {
 			if (duplicateResult) return duplicateResult;
 			return fail(500, { message: 'No se pudo actualizar la ficha.' });
 		}
-		if (!updatedPatient) {
-			return fail(409, { message: PATIENT_UPDATE_CONFLICT_MESSAGE });
-		}
-
-		if (permissions.canEditClinicalProfile) {
-			const profilePayload = {
-				allergies: clinicalUpdates.allergies,
-				medication: clinicalUpdates.medication,
-				background: clinicalUpdates.background,
-				updated_by: ownerId,
-				updated_at: new Date().toISOString()
-			};
-			const profileWrite = currentProfile
-				? await admin
-						.from('patient_clinical_profiles')
-						.update(profilePayload)
-						.eq('business_id', context.business.id)
-						.eq('patient_id', params.id)
-						.eq('updated_at', String((currentProfile as any).updated_at ?? ''))
-						.select('id')
-						.maybeSingle()
-				: await admin
-						.from('patient_clinical_profiles')
-						.insert({
-							business_id: context.business.id,
-							patient_id: params.id,
-							...profilePayload
-						})
-						.select('id')
-						.maybeSingle();
-			const { data: updatedProfile, error: profileError } = profileWrite;
-
-			if (profileError) {
-				console.error('Error actualizando perfil clinico del paciente', profileError);
-				if (profileError.code === '23505') {
-					return fail(409, { message: PATIENT_UPDATE_CONFLICT_MESSAGE });
-				}
-				return fail(500, { message: 'No se pudo actualizar la información clínica.' });
-			}
-			if (!updatedProfile) {
-				return fail(409, { message: PATIENT_UPDATE_CONFLICT_MESSAGE });
-			}
+		const savedAtomicUpdate = Array.isArray(atomicUpdate) ? atomicUpdate[0] : atomicUpdate;
+		if (!savedAtomicUpdate || typeof savedAtomicUpdate !== 'object' || !(savedAtomicUpdate as any).patient_id) {
+			console.error('La actualización de paciente no devolvió una ficha confirmada');
+			return fail(500, { message: 'No se pudo confirmar la actualización de la ficha.' });
 		}
 
 		const changedFields = changedFieldsForPatientUpdate({
@@ -1116,18 +1118,23 @@ export const actions: Actions = {
 			if (!link) {
 				return fail(403, { message: 'Este paciente no está asignado a tu perfil profesional.' });
 			}
-			const { error } = await admin
+			const { data: updatedLink, error } = await admin
 				.from('professional_patient_links')
 				.update({
 					archived_at: new Date().toISOString(),
 					archived_by: ownerId,
 					updated_at: new Date().toISOString()
 				})
-				.eq('id', link.id);
+				.eq('id', link.id)
+				.select('id')
+				.maybeSingle();
 
 			if (error) {
 				console.error('Error archivando paciente para profesional', error);
 				return fail(500, { message: 'No se pudo archivar el paciente.' });
+			}
+			if (!updatedLink) {
+				return fail(409, { message: 'El vínculo con el paciente cambió. Recargá la lista y volvé a intentar.' });
 			}
 
 			throw redirect(303, '/odonto/pacientes?estado=archivados');
@@ -1198,18 +1205,23 @@ export const actions: Actions = {
 			if (!link) {
 				return fail(403, { message: 'Este paciente no está asignado a tu perfil profesional.' });
 			}
-			const { error } = await admin
+			const { data: updatedLink, error } = await admin
 				.from('professional_patient_links')
 				.update({
 					archived_at: null,
 					archived_by: null,
 					updated_at: new Date().toISOString()
 				})
-				.eq('id', link.id);
+				.eq('id', link.id)
+				.select('id')
+				.maybeSingle();
 
 			if (error) {
 				console.error('Error desarchivando paciente para profesional', error);
 				return fail(500, { message: 'No se pudo desarchivar el paciente.' });
+			}
+			if (!updatedLink) {
+				return fail(409, { message: 'El vínculo con el paciente cambió. Recargá la lista y volvé a intentar.' });
 			}
 
 			throw redirect(303, '/odonto/pacientes');

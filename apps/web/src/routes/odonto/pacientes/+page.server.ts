@@ -152,7 +152,7 @@ const ensureProfessionalPatientLink = async ({
 	if (existingLinkError) throw existingLinkError;
 
 	if (existingLink?.id) {
-		const { error } = await admin
+		const { data: updatedLink, error } = await admin
 			.from('professional_patient_links')
 			.update({
 				is_active: true,
@@ -162,8 +162,11 @@ const ensureProfessionalPatientLink = async ({
 				disabled_reason: null,
 				updated_at: new Date().toISOString()
 			})
-			.eq('id', existingLink.id);
+			.eq('id', existingLink.id)
+			.select('id')
+			.maybeSingle();
 		if (error) throw error;
+		if (!updatedLink) throw new Error('PROFESSIONAL_PATIENT_LINK_NOT_FOUND');
 		return;
 	}
 
@@ -178,7 +181,7 @@ const ensureProfessionalPatientLink = async ({
 	if (!insertError) return;
 	if (insertError.code !== '23505') throw insertError;
 
-	const { error: activateError } = await admin
+	const { data: activatedLink, error: activateError } = await admin
 		.from('professional_patient_links')
 		.update({
 			is_active: true,
@@ -190,8 +193,11 @@ const ensureProfessionalPatientLink = async ({
 		})
 		.eq('business_id', businessId)
 		.eq('professional_id', professionalId)
-		.eq('patient_id', patientId);
+		.eq('patient_id', patientId)
+		.select('id')
+		.maybeSingle();
 	if (activateError) throw activateError;
+	if (!activatedLink) throw new Error('PROFESSIONAL_PATIENT_LINK_NOT_FOUND');
 };
 
 const handleCreatePatient = async ({

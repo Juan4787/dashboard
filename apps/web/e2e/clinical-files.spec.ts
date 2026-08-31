@@ -1,9 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import WebSocket from 'ws';
+import { spawnSync } from 'node:child_process';
 
 const supabaseUrl = process.env.ODONTO_SUPABASE_URL;
 const serviceRoleKey = process.env.ODONTO_SUPABASE_SERVICE_ROLE_KEY;
+const databaseUrl = process.env.SUPABASE_DB_URL;
 const isLocalSupabase = Boolean(
 	supabaseUrl?.startsWith('http://127.0.0.1') || supabaseUrl?.startsWith('http://localhost')
 );
@@ -41,6 +43,19 @@ const must = async <T>(operation: PromiseLike<{ data: T; error: unknown }>) => {
 	const { data, error } = await operation;
 	if (error) throw error;
 	return data;
+};
+
+const psqlEnvironment = (connectionString: string) => {
+	const parsed = new URL(connectionString);
+	return {
+		...process.env,
+		PGHOST: parsed.hostname,
+		PGPORT: parsed.port || '5432',
+		PGUSER: decodeURIComponent(parsed.username),
+		PGPASSWORD: decodeURIComponent(parsed.password),
+		PGDATABASE: parsed.pathname.replace(/^\//, '') || 'postgres',
+		PGSSLMODE: 'require'
+	};
 };
 
 const createFixture = async (admin: SupabaseClient): Promise<Fixture> => {
@@ -248,8 +263,47 @@ const cleanupFixture = async (admin: SupabaseClient, target: Fixture | null) => 
 			if (error) throw error;
 		}
 	}
-	await must(admin.from('patient_radiographs').delete().eq('business_id', target.businessId));
-	await must(admin.from('businesses').delete().eq('id', target.businessId));
+	// patient_radiographs deliberately grants service_role only SELECT: production
+	// mutations go through the audited RPCs.  E2E cleanup therefore uses the
+	// privileged database connection for this disposable fixture, never the app
+	// client and never a production DDL operation.
+	if (!databaseUrl) throw new Error('SUPABASE_DB_URL es necesario para limpiar el fixture de archivos.');
+	const businessId = target.businessId;
+	const sql = `begin;
+delete from public.push_delivery_attempts where business_id='${businessId}';
+delete from public.push_subscriptions where business_id='${businessId}';
+delete from public.appointment_google_calendar_events where business_id='${businessId}';
+delete from public.appointments where business_id='${businessId}';
+delete from public.patient_radiographs where business_id='${businessId}';
+delete from public.clinical_entries where business_id='${businessId}';
+delete from public.patient_clinical_profiles where business_id='${businessId}';
+delete from public.professional_patient_links where business_id='${businessId}';
+delete from public.professional_users where business_id='${businessId}';
+delete from public.professional_services where business_id='${businessId}';
+delete from public.availability_rules where business_id='${businessId}';
+delete from public.availability_exceptions where business_id='${businessId}';
+delete from public.patients where business_id='${businessId}';
+delete from public.professionals where business_id='${businessId}';
+delete from public.services where business_id='${businessId}';
+delete from public.patient_export_sessions where business_id='${businessId}';
+delete from public.business_user_invites where business_id='${businessId}';
+delete from public.business_users where business_id='${businessId}';
+delete from public.business_subscriptions where business_id='${businessId}';
+delete from public.business_limits where business_id='${businessId}';
+delete from public.business_data_revisions where business_id='${businessId}';
+delete from public.audit_event_counters where business_id='${businessId}';
+delete from public.audit_logs where business_id='${businessId}';
+delete from public.businesses where id='${businessId}';
+commit;`;
+	const result = spawnSync('psql', ['-X', '-v', 'ON_ERROR_STOP=1', '-q', '-c', sql], {
+		// No poner la URL completa (y su contraseña) en argv: así no queda
+		// expuesta en process listings ni en diagnósticos del runner.
+		env: psqlEnvironment(databaseUrl),
+		encoding: 'utf8'
+	});
+	if (result.status !== 0) {
+		throw new Error(`No se pudo limpiar el fixture en la base aislada: ${result.stderr || 'psql falló.'}`);
+	}
 	await must(admin
 		.from('allowed_emails')
 		.delete()
@@ -274,8 +328,8 @@ const login = async (page: Page, email: string) => {
 test.describe('Archivos clínicos privados', () => {
 	test.setTimeout(120_000);
 	test.skip(
-		!isLocalSupabase || !serviceRoleKey,
-		'Requiere ODONTO_SUPABASE_URL y ODONTO_SUPABASE_SERVICE_ROLE_KEY de Supabase local.'
+		(!isLocalSupabase && process.env.E2E_ALLOW_PRODUCTION_CLINICAL !== 'true') || !serviceRoleKey || !databaseUrl,
+		'Requiere ODONTO_SUPABASE_URL, ODONTO_SUPABASE_SERVICE_ROLE_KEY y SUPABASE_DB_URL; para Worker real, E2E_ALLOW_PRODUCTION_CLINICAL=true.'
 	);
 
 	test.beforeAll(async () => {

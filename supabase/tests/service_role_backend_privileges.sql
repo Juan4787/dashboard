@@ -121,7 +121,6 @@ begin
 				('public.clinical_entries', 'SELECT'),
 				('public.services', 'SELECT'),
 				('public.patients', 'SELECT, INSERT, UPDATE, DELETE'),
-				('public.follow_ups', 'SELECT, INSERT, UPDATE, DELETE'),
 				('public.patient_radiographs', 'SELECT')
 		) as expected(table_name, operations)
 	loop
@@ -131,6 +130,14 @@ begin
 				v_contract.operations;
 		end if;
 	end loop;
+
+	if has_table_privilege(
+		'authenticated',
+		'public.follow_ups',
+		'SELECT, INSERT, UPDATE, DELETE'
+	) then
+		raise exception 'TEST_AUTHENTICATED_CAN_BYPASS_FOLLOW_UP_BACKEND_CONTROL_PLANE';
+	end if;
 
 	if has_table_privilege(
 		'authenticated',
