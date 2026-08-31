@@ -9,32 +9,6 @@ import {
 } from '$lib/server/supabase';
 import { redirect, type Handle } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
-import { createHash } from 'node:crypto';
-
-const AUTH_VALIDATION_CACHE_TTL_MS = 30_000;
-const AUTH_VALIDATION_CACHE_MAX_ENTRIES = 500;
-const validatedAccessTokens = new Map<string, number>();
-
-const accessTokenCacheKey = (accessToken: string) =>
-	createHash('sha256').update(accessToken).digest('base64url');
-
-const hasFreshAuthValidation = (accessToken: string, now = Date.now()) => {
-	const key = accessTokenCacheKey(accessToken);
-	const expiresAt = validatedAccessTokens.get(key) ?? 0;
-	if (expiresAt <= now) {
-		validatedAccessTokens.delete(key);
-		return false;
-	}
-	return true;
-};
-
-const rememberAuthValidation = (accessToken: string, now = Date.now()) => {
-	if (validatedAccessTokens.size >= AUTH_VALIDATION_CACHE_MAX_ENTRIES) {
-		const oldestKey = validatedAccessTokens.keys().next().value;
-		if (typeof oldestKey === 'string') validatedAccessTokens.delete(oldestKey);
-	}
-	validatedAccessTokens.set(accessTokenCacheKey(accessToken), now + AUTH_VALIDATION_CACHE_TTL_MS);
-};
 
 const moduleHome = (module: Module) => getModuleEntryRoute(module);
 const toHost = (value?: string | null) => {
@@ -136,16 +110,15 @@ export const handle: Handle = async ({ event, resolve }) => {
 					access_token: session.access_token,
 					refresh_token: session.refresh_token
 				};
-				// refreshSession ya validó el refresh token y emitió este access token.
-				rememberAuthValidation(session.access_token);
-			} else if (!hasFreshAuthValidation(event.locals.auth.access_token)) {
-				const { data, error } = await supabase.auth.getClaims(
-					event.locals.auth.access_token
-				);
-				if (error || !data?.claims?.sub) {
+			} else {
+				// getClaims puede validar la firma localmente y una caché en memoria
+				// permite que un token revocado siga funcionando en otro request. La
+				// revocación global de logout debe ser efectiva inmediatamente, también
+				// entre isolates de Cloudflare, por eso consultamos Auth en cada request.
+				const { data, error } = await supabase.auth.getUser(event.locals.auth.access_token);
+				if (error || !data?.user?.id) {
 					throw error ?? new Error('Sesión inválida');
 				}
-				rememberAuthValidation(event.locals.auth.access_token);
 			}
 		} catch (err) {
 			clearAuthCookies();
