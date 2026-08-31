@@ -318,18 +318,18 @@ test.describe('Ayuda para configurar', () => {
 
 		await login(masterPage, masterEmail, masterPassword);
 		await expect(masterPage.getByRole('heading', { name: 'Consultorios y accesos' })).toBeVisible();
-		await expect(
-			masterPage.getByRole('heading', { name: '1 consultorio pidió ayuda para configurar' })
-		).toBeVisible();
+		const assistanceHeading = masterPage.getByRole('heading', {
+			name: /^\d+ consultorios? (?:pidió|pidieron) ayuda para configurar$/
+		});
+		await expect(assistanceHeading).toBeVisible();
+		const assistanceLabel = (await assistanceHeading.innerText()).trim();
 		const assistanceNotice = masterPage.getByRole('region', {
-			name: '1 consultorio pidió ayuda para configurar'
+			name: /^\d+ consultorios? (?:pidió|pidieron) ayuda para configurar$/
 		});
 		await expect(assistanceNotice.getByText(fixture.businessName, { exact: true })).toBeVisible();
 		await assistanceNotice.getByRole('button', { name: 'Abrir', exact: true }).click();
 		await expect(masterPage).toHaveURL(/\/odonto\/configuracion\/usuarios/);
-		await expect(
-			masterPage.getByRole('heading', { name: '1 consultorio pidió ayuda para configurar' })
-		).toBeVisible();
+		await expect(assistanceHeading).toBeVisible();
 		await expect(
 			masterPage.getByRole('heading', { name: 'Falta la dirección del consultorio.' })
 		).toBeVisible();
@@ -337,7 +337,7 @@ test.describe('Ayuda para configurar', () => {
 			masterPage.getByRole('heading', { name: `Configurando ${fixture.businessName}` })
 		).toBeVisible();
 		for (const label of [
-			'1 consultorio pidió ayuda para configurar',
+			assistanceLabel,
 			'Falta la dirección del consultorio.',
 			`Configurando ${fixture.businessName}`
 		]) {

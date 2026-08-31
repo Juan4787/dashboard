@@ -4703,3 +4703,12 @@ desde el candidato `fba21de` actualmente certificado y su restauración inmediat
   pero no sustituye un runbook de incidente ensayado por una persona, alertas humanas,
   observabilidad persistente, rollback de datos/migraciones ni un soak posterior. G9
   sigue parcial por esos puntos.
+## Relectura de robustez del arnés de ayuda maestra — 2026-08-31 — ESTADO ACTUAL
+
+- [x] La aserción del panel maestro se hizo independiente del número incidental de
+  solicitudes sintéticas: acepta singular/plural, conserva el texto visible real para
+  cerrar el aviso y sigue exigiendo que el consultorio fixture correcto esté presente.
+  Esto evita que un fixture huérfano convierta una UI válida en falso fallo.
+- [x] El spec actualizado se ejecutó nuevamente contra la versión Cloudflare actual con
+  un worker y sin reintentos: **1/1 pasó en 33,5 s**. La modificación es sólo de
+  robustez del test; no modifica la aplicación ni el deployment fba21de.
