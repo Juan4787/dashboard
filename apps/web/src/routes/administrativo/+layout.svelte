@@ -38,14 +38,16 @@
 						</span>
 					</a>
 				{/each}
-				<a
-					href="/logout"
-					class="group text-neutral-500 transition hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white"
-				>
-					<span class="inline-block transition-colors duration-200 group-hover:text-[#7c3aed] dark:group-hover:text-[#c084fc]">
-						Salir
-					</span>
-				</a>
+				<form method="POST" action="/logout">
+					<button
+						type="submit"
+						class="group text-neutral-500 transition hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white"
+					>
+						<span class="inline-block transition-colors duration-200 group-hover:text-[#7c3aed] dark:group-hover:text-[#c084fc]">
+							Salir
+						</span>
+					</button>
+				</form>
 			</nav>
 		</div>
 	</header>

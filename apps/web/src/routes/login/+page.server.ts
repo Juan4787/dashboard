@@ -49,6 +49,9 @@ const authErrorMessage = (value?: string | null) => {
 	if (value === 'google_rate_limited') {
 		return 'Hay demasiados intentos con Google desde esta conexión. Probá de nuevo más tarde.';
 	}
+	if (value === 'logout_failed') {
+		return 'Cerramos esta sesión en este dispositivo, pero no pudimos confirmar el cierre en los demás. Volvé a intentar antes de continuar.';
+	}
 	return null;
 };
 

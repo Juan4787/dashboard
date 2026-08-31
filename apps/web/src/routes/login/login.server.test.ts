@@ -39,7 +39,7 @@ vi.mock('$lib/server/rate-limits', () => ({
 	RateLimitExceededError: mocks.RateLimitExceededError
 }));
 
-const { actions } = await import('./+page.server');
+const { actions, load } = await import('./+page.server');
 
 const makeEvent = (entries: Record<string, string>) => ({
 	request: new Request('https://app.test/login', {
@@ -61,6 +61,18 @@ beforeEach(() => {
 });
 
 describe('login/register server actions', () => {
+	it('explica cuando el cierre remoto no pudo confirmarse', () => {
+		const result = load({
+			locals: { auth: null },
+			url: new URL('https://app.test/login?auth_error=logout_failed')
+		} as never);
+
+		expect(result).toEqual({
+			message:
+				'Cerramos esta sesión en este dispositivo, pero no pudimos confirmar el cierre en los demás. Volvé a intentar antes de continuar.'
+		});
+	});
+
 	it('registra email/password libremente sin consultar allowed_emails', async () => {
 		const auth = {
 			signUp: vi.fn(async () => ({

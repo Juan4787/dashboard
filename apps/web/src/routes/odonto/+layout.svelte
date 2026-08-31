@@ -769,13 +769,15 @@
 								</p>
 							</div>
 						{/if}
-						<a
-							href="/logout"
-							class="mt-3 block w-full rounded-xl bg-neutral-900 px-4 py-3 text-center text-sm font-semibold text-white dark:bg-white dark:text-neutral-900"
-							onclick={() => (mobileMenuOpen = false)}
-						>
-							Salir
-						</a>
+						<form method="POST" action="/logout" class="mt-3">
+							<button
+								type="submit"
+								class="block w-full rounded-xl bg-neutral-900 px-4 py-3 text-center text-sm font-semibold text-white dark:bg-white dark:text-neutral-900"
+								onclick={() => (mobileMenuOpen = false)}
+							>
+								Salir
+							</button>
+						</form>
 					</div>
 				</div>
 				<button
@@ -972,14 +974,16 @@
 							</a>
 						{/if}
 						<div class="my-2 border-t border-neutral-200 dark:border-white/10"></div>
-						<a
-							href="/logout"
-							class="block rounded-xl px-4 py-3 text-sm font-semibold text-red-700 transition hover:bg-red-50 dark:text-red-200 dark:hover:bg-red-500/10"
-							role="menuitem"
-							onclick={closeMenus}
-						>
-							Salir
-						</a>
+						<form method="POST" action="/logout">
+							<button
+								type="submit"
+								class="block w-full rounded-xl px-4 py-3 text-left text-sm font-semibold text-red-700 transition hover:bg-red-50 dark:text-red-200 dark:hover:bg-red-500/10"
+								role="menuitem"
+								onclick={closeMenus}
+							>
+								Salir
+							</button>
+						</form>
 					</div>
 				{/if}
 			</div>
