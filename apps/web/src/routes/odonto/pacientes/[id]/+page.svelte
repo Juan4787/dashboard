@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { page } from '$app/stores';
-	import { invalidate } from '$app/navigation';
+	import { invalidate, replaceState } from '$app/navigation';
 	import { onDestroy } from 'svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import FollowUpComposer from '$lib/components/seguimientos/FollowUpComposer.svelte';
@@ -29,6 +29,7 @@
 			role?: string;
 			currentUserId?: string | null;
 			clinicalTodayISO: string;
+			businessTimeZone?: string;
 			hasMoreEntries?: boolean;
 			permissions: {
 				canReadClinicalProfile: boolean;
@@ -178,7 +179,7 @@
 				lastVisit
 					? {
 							label: 'Última visita',
-							value: formatDate(lastVisit),
+							value: formatDate(lastVisit, data.businessTimeZone),
 							intent: 'neutral' as const
 					  }
 					: null,
@@ -205,7 +206,7 @@
 		if (onlyWithNote && !entry.internal_note) return false;
 		if (timelineSearch.trim()) {
 			const q = timelineSearch.toLowerCase();
-			const dateText = formatDate(entry.created_at);
+			const dateText = formatDate(entry.created_at, data.businessTimeZone);
 			const haystack = `${entry.entry_type} ${entry.description ?? ''} ${entry.internal_note ?? ''} ${entry.teeth ?? ''} ${dateText} ${entry.created_at}`.toLowerCase();
 			if (!haystack.includes(q)) return false;
 		}
@@ -280,6 +281,13 @@
 
 	const selectTab = (nextTab: 'historial' | 'datos' | 'radiografias') => {
 		tab = nextTab;
+		const url = new URL($page.url);
+		if (nextTab === 'historial') url.searchParams.delete('tab');
+		else url.searchParams.set('tab', nextTab);
+		const nextUrl = `${url.pathname}${url.search}${url.hash}`;
+		if (nextUrl !== `${$page.url.pathname}${$page.url.search}${$page.url.hash}`) {
+			replaceState(nextUrl, $page.state);
+		}
 		if (nextTab === 'datos') void loadChangeEvents();
 	};
 
@@ -315,8 +323,21 @@ let amountRaw = $state('');
 let editAmountDisplay = $state('');
 let editAmountRaw = $state('');
 let savingEntry = $state(false);
+let savingPatient = $state(false);
+let patientUpdateError = $state('');
 let archiveForm: HTMLFormElement | null = $state(null);
 let unarchiveForm: HTMLFormElement | null = $state(null);
+
+const openEditPatient = () => {
+	patientUpdateError = '';
+	showEditErrors = false;
+	showEditModal = true;
+};
+
+const closeEditPatient = () => {
+	patientUpdateError = '';
+	showEditModal = false;
+};
 	const isArchived = $derived(
 		Boolean(isProfessional ? data.patient.professional_archived_at : data.patient.archived_at)
 	);
@@ -409,6 +430,34 @@ const handleEditSubmit = (event: SubmitEvent) => {
 	if (birthHidden && birthHidden.value === '__invalid__') {
 		event.preventDefault();
 	}
+};
+
+const enhancePatientUpdate: SubmitFunction = ({ cancel, formElement }) => {
+	showEditErrors = true;
+	patientUpdateError = '';
+	const birthHidden = formElement.querySelector<HTMLInputElement>('input[name="birth_date"]');
+	if (birthHidden && birthHidden.value === '__invalid__') {
+		cancel();
+		return;
+	}
+	if (savingPatient) {
+		cancel();
+		return;
+	}
+	savingPatient = true;
+	return async ({ result, update }) => {
+		try {
+			if (result.type === 'error') {
+				patientUpdateError =
+					'No pudimos guardar los cambios. Revisá tu conexión y volvé a intentar; tus datos siguen en el formulario.';
+				return;
+			}
+			if (result.type === 'redirect') markPatientRevisionUnverified();
+			await update({ reset: false, invalidateAll: false });
+		} finally {
+			savingPatient = false;
+		}
+	};
 };
 
 const handleEditEntrySubmit = (event: SubmitEvent) => {
@@ -713,7 +762,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 												</p>
 											{/if}
 											<div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-neutral-500 dark:text-neutral-300">
-												<span>{formatDate(entry.created_at)}</span>
+												<span>{formatDate(entry.created_at, data.businessTimeZone)}</span>
 												<span>·</span>
 												<span>{fmtTime(entry.created_at)}</span>
 												{#if entry.teeth}
@@ -766,7 +815,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 					<button
 						type="button"
 						class="w-full rounded-full border border-neutral-200 bg-white px-4 py-2 text-sm font-semibold text-neutral-900 shadow-sm transition hover:-translate-y-0.5 hover:shadow-card dark:border-[#1f3554] dark:bg-[#0f1f36] dark:text-white sm:w-auto"
-						onclick={() => (showEditModal = true)}
+						onclick={openEditPatient}
 					>
 						{hasPatientData ? 'Editar datos del paciente' : 'Agregar datos del paciente'}
 					</button>
@@ -780,7 +829,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 							<button
 								type="button"
 								class="rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-50 dark:hover:bg-[#122641]"
-								onclick={() => (showEditModal = true)}
+								onclick={openEditPatient}
 							>
 								Editar
 							</button>
@@ -800,7 +849,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 								<button
 									type="button"
 									class="rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-50 dark:hover:bg-[#122641]"
-									onclick={() => (showEditModal = true)}
+									onclick={openEditPatient}
 								>
 									Editar
 								</button>
@@ -863,7 +912,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 								<button
 									type="button"
 									class="rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-50 dark:hover:bg-[#122641]"
-									onclick={() => (showEditModal = true)}
+									onclick={openEditPatient}
 								>
 									Editar
 								</button>
@@ -934,7 +983,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 								<button
 									type="button"
 									class="rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:border-[#1f3554] dark:text-neutral-50 dark:hover:bg-[#122641]"
-									onclick={() => (showEditModal = true)}
+									onclick={openEditPatient}
 								>
 									Editar
 								</button>
@@ -956,7 +1005,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 						<div class="space-y-1">
 							<p class="text-xs font-semibold text-neutral-500 dark:text-neutral-300">Nacimiento</p>
 							<p class={`text-[15px] font-semibold ${data.patient.birth_date ? 'text-neutral-800 dark:text-white' : 'text-neutral-400 dark:text-neutral-500'}`}>
-								{data.patient.birth_date ? formatDate(data.patient.birth_date) : 'Sin registrar'}
+								{data.patient.birth_date ? formatDate(data.patient.birth_date, data.businessTimeZone) : 'Sin registrar'}
 							</p>
 						</div>
 					</div>
@@ -989,7 +1038,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 			<details class="mt-4 text-[11px] text-[#65738d] dark:text-[#7b8aa5]">
 				<summary class="cursor-pointer text-neutral-600 dark:text-neutral-200">Ver detalles</summary>
 				<p class="mt-1">
-					Creado: {formatDate(data.patient.created_at)} • Última actualización: {formatDateTime(data.patient.updated_at)}
+					Creado: {formatDate(data.patient.created_at, data.businessTimeZone)} • Última actualización: {formatDateTime(data.patient.updated_at, data.businessTimeZone)}
 				</p>
 			</details>
 		</div>
@@ -1378,9 +1427,17 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 	</form>
 </Modal>
 
-<Modal open={showEditModal} title="Editar datos" on:close={() => (showEditModal = false)}>
+<Modal open={showEditModal} title="Editar datos" on:close={closeEditPatient}>
 	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-	<form method="post" action="?/update_patient" class="space-y-3" onkeydown={preventEnterSubmit} onsubmit={handleEditSubmit}>
+	<form
+		method="post"
+		action="?/update_patient"
+		class="space-y-3"
+		onkeydown={preventEnterSubmit}
+		onsubmit={handleEditSubmit}
+		use:enhance={enhancePatientUpdate}
+		aria-busy={savingPatient}
+	>
 		<input type="hidden" name="expected_patient_updated_at" value={data.patient.updated_at ?? ''} />
 		<input
 			type="hidden"
@@ -1522,20 +1579,29 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				{/if}
 			</div>
 		{/if}
+		{#if patientUpdateError}
+			<div
+				class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 dark:border-red-400/50 dark:bg-red-500/15 dark:text-red-100"
+				role="alert"
+			>
+				{patientUpdateError}
+			</div>
+		{/if}
 		<p class="text-xs text-neutral-500 dark:text-neutral-300">Todos los datos son opcionales.</p>
 		<div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
 			<button
 				type="button"
 				class="w-full rounded-xl px-4 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 dark:text-white dark:hover:bg-[#1b2d4b] sm:w-auto"
-				onclick={() => (showEditModal = false)}
+				onclick={closeEditPatient}
 			>
 				Cancelar
 			</button>
 			<button
 				type="submit"
+				disabled={savingPatient}
 				class="w-full rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 sm:w-auto"
 			>
-				Guardar cambios
+				{savingPatient ? 'Guardando…' : 'Guardar cambios'}
 			</button>
 		</div>
 	</form>

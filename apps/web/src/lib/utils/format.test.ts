@@ -22,6 +22,11 @@ describe('formatDate con timezone', () => {
 	it('respeta la fecha local del negocio', () => {
 		expect(formatDate(lateEvening, 'America/Argentina/Cordoba')).toContain('15 de junio');
 	});
+
+	it('conserva el día de las fechas sin hora', () => {
+		expect(formatDate('2004-02-03')).toContain('3 de febrero');
+		expect(formatDate('2004-02-03', 'America/Argentina/Cordoba')).toContain('3 de febrero');
+	});
 });
 
 describe('formatInTimeZone', () => {

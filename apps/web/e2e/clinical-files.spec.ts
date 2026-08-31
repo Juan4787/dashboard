@@ -638,18 +638,18 @@ test.describe('Archivos clínicos privados', () => {
 		await expect(page.getByRole('button', { name: 'Ver más pacientes' })).toBeVisible();
 
 		const search = page.getByLabel('Buscar pacientes');
-		let singleCharacterRequests = 0;
-		const countSingleCharacterRequest = (request: { url(): string }) => {
-			const requestUrl = new URL(request.url());
-			if (requestUrl.pathname.endsWith('/odonto/pacientes/lista') && requestUrl.searchParams.get('q') === 'a') {
-				singleCharacterRequests += 1;
-			}
-		};
-		page.on('request', countSingleCharacterRequest);
+		const singleCharacterRequest = page.waitForRequest(
+			(request) => {
+				const requestUrl = new URL(request.url());
+				return (
+					requestUrl.pathname.endsWith('/odonto/pacientes/lista') &&
+					requestUrl.searchParams.get('q') === 'a'
+				);
+			},
+			{ timeout: 10_000 }
+		);
 		await search.fill('a');
-		await page.waitForTimeout(650);
-		expect(singleCharacterRequests).toBeGreaterThan(0);
-		page.off('request', countSingleCharacterRequest);
+		await singleCharacterRequest;
 
 		await search.fill('unico lejano');
 		await expect(

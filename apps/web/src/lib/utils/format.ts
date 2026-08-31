@@ -21,11 +21,16 @@ const formatterFor = (
 
 export const formatDate = (value?: string | null, timeZone?: string) => {
 	if (!value) return '';
+	// A date-only value represents a calendar day, not an instant. Parsing
+	// `YYYY-MM-DD` with the browser's local zone can move it to the previous day
+	// in Argentina (for example, 2004-02-03 becomes February 2 at 21:00).
+	// Format those values in UTC so the stored calendar day is preserved.
+	const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value);
 	return formatterFor(
 		dateFormatters,
 		{ day: 'numeric', month: 'long', year: 'numeric' },
-		timeZone
-	).format(new Date(value));
+		dateOnly ? 'UTC' : timeZone
+	).format(new Date(dateOnly ? `${value}T00:00:00.000Z` : value));
 };
 
 export const formatDateTime = (value?: string | null, timeZone?: string) => {
