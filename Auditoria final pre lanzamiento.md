@@ -5098,3 +5098,34 @@ mutación inválida fue rechazada por la restricción y no modificó datos.
   observable y la recuperación de un job controlado. Para cerrarlo se necesita una
   ventana en la que la API permita una consulta/creación controlada o evidencia de
   la bandeja de correo configurada; no se marcará G9 verde por inferencia.
+
+## Actualización posterior — carrera de estados internos de turnos — 2026-08-31
+
+### Antecedente reproducido antes del arreglo
+
+- [x] Con la versión Cloudflare anterior (`4f59797…`), el arnés creó un consultorio,
+  profesional, servicio y dos turnos sintéticos, inició una sesión autenticada y
+  envió ocho acciones simultáneas contra el Worker. En la cancelación interna hubo
+  **3 respuestas de éxito y 3 registros de auditoría** para un solo turno; en la
+  carrera mixta cancelar/reprogramar también se observaron **3 éxitos** y tres
+  auditorías de cancelación. El estado final no siempre evidenciaba la pérdida porque
+  varias escrituras tenían el mismo valor, pero la trazabilidad clínica quedaba
+  duplicada y una reprogramación podía competir con una cancelación.
+- [x] La corrida dejó un error del propio arnés al intentar encadenar `.catch` sobre
+  el builder de Supabase (no era una promesa); el fixture restante fue localizado por
+  el marcador `STC_…`, eliminado por el ID exacto y la cuenta sintética fue borrada.
+  El arnés quedó corregido antes de repetirlo y este error de método se conserva como
+  antecedente, no como resultado de la aplicación.
+
+### Corrección y verificación actual
+
+- [x] `updateAppointmentStatus` y `rescheduleAppointment` ahora incluyen
+  `.eq('status', estado_observado).select('id').maybeSingle()` en la misma mutación.
+  Si otra solicitud ganó la carrera, no se escribe ni se genera auditoría y se
+  devuelve `APPOINTMENT_STATUS_CONFLICT`, con un mensaje que pide recargar la agenda.
+  Esto impide sobrescribir una transición o resucitar una cancelación.
+- [x] Se agregaron tests unitarios de conflicto, auditoría posterior al commit y
+  reprogramación concurrente; el archivo de appointments quedó en **19/19 PASS**.
+- [ ] La repetición contra el Worker de la versión `9605d56…` queda pendiente de su
+  build y despliegue reproducible; hasta observarla en Cloudflare este hallazgo no
+  se considera cerrado ni se cambia el estado global NO-GO.

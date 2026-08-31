@@ -160,7 +160,13 @@ try {
 	await context.close();
 } finally {
 	if (browser) await browser.close().catch(() => {});
-	if (businessId) await admin.from('businesses').delete().eq('id', businessId).catch(() => {});
+	if (businessId) {
+		try {
+			await admin.from('businesses').delete().eq('id', businessId);
+		} catch {
+			console.error('cleanup business failed');
+		}
+	}
 	if (userId) await admin.auth.admin.deleteUser(userId).catch(() => {});
 }
 const failed = checks.filter((ok) => !ok).length;
