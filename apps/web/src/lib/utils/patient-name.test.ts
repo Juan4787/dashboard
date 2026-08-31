@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
 	isValidPatientFullName,
 	normalizePatientFullName,
-	normalizePatientNameForComparison
+	normalizePatientNameForComparison,
+	patientFullNameErrorMessage,
+	PATIENT_FULL_NAME_INVALID_ERROR_MESSAGE,
+	PATIENT_FULL_NAME_REQUIRED_ERROR_MESSAGE
 } from './patient-name';
 
 describe('public patient full name', () => {
@@ -33,5 +36,13 @@ describe('public patient full name', () => {
 	it('keeps ñ distinct from n', () => {
 		expect(normalizePatientNameForComparison('Ana Peña')).toBe('ana peña');
 		expect(normalizePatientNameForComparison('Ana Pena')).toBe('ana pena');
+	});
+
+	it('explica si falta el nombre o si el formato es artificial', () => {
+		expect(patientFullNameErrorMessage('   ')).toBe(PATIENT_FULL_NAME_REQUIRED_ERROR_MESSAGE);
+		expect(patientFullNameErrorMessage('Auditoria Samsung 2026')).toBe(
+			PATIENT_FULL_NAME_INVALID_ERROR_MESSAGE
+		);
+		expect(patientFullNameErrorMessage('Ana Gómez')).toBe('');
 	});
 });

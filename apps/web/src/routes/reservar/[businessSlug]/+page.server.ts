@@ -4,9 +4,8 @@ import { env as publicEnv } from '$env/dynamic/public';
 import { createSupabaseAdminClient } from '$lib/server/supabase';
 import { resolveMapsUrl } from '$lib/server/location';
 import {
-	isValidPatientFullName,
 	normalizePatientFullName,
-	PATIENT_FULL_NAME_ERROR_MESSAGE
+	patientFullNameErrorMessage
 } from '$lib/utils/patient-name';
 import {
 	createPublicBooking,
@@ -163,7 +162,8 @@ export const actions: Actions = {
 			bookingMode === 'joint' ? requestedProfessionalIds : requestedProfessionalIds.slice(0, 1);
 		const professionalId = professionalIds[0] ?? '';
 		const slotStartsAt = String(form.get('slot_starts_at') ?? '').trim();
-		const patientName = normalizePatientFullName(String(form.get('patient_name') ?? ''));
+		const rawPatientName = String(form.get('patient_name') ?? '');
+		const patientName = normalizePatientFullName(rawPatientName);
 		const patientPhone = String(form.get('patient_phone') ?? '').trim();
 		const patientEmail = String(form.get('patient_email') ?? '').trim();
 		const note = String(form.get('note') ?? '').trim();
@@ -193,9 +193,10 @@ export const actions: Actions = {
 				values: valuesFromForm(form)
 			});
 		}
-		if (!isValidPatientFullName(patientName)) {
+		const patientNameError = patientFullNameErrorMessage(rawPatientName);
+		if (patientNameError) {
 			return fail(400, {
-				message: PATIENT_FULL_NAME_ERROR_MESSAGE,
+				message: patientNameError,
 				values: { ...valuesFromForm(form), patient_name: patientName }
 			});
 		}

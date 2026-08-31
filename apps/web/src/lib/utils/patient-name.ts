@@ -1,4 +1,11 @@
-export const PATIENT_FULL_NAME_ERROR_MESSAGE = 'Ingresá tu nombre y apellido para reservar.';
+export const PATIENT_FULL_NAME_REQUIRED_ERROR_MESSAGE =
+	'Ingresá tu nombre y apellido para reservar.';
+
+// No se puede verificar la identidad de una persona desde el formulario, pero sí
+// explicar con precisión qué formato acepta. Esta distinción evita que un valor
+// presente pero artificial (por ejemplo, con números) parezca un campo vacío.
+export const PATIENT_FULL_NAME_INVALID_ERROR_MESSAGE =
+	'Usá tu nombre y apellido real, sin números. Escribí al menos dos palabras con letras; podés usar guiones o apóstrofes dentro de cada palabra.';
 
 const VALID_NAME_PART = /^[\p{L}\p{M}]+(?:['’\-][\p{L}\p{M}]+)*$/u;
 
@@ -23,6 +30,21 @@ export const isValidPatientFullName = (value: string) => {
 		)
 	);
 };
+
+/**
+ * Mensaje accionable para la validación visible del nombre público.
+ * El servidor y la validación nativa del navegador comparten este contrato.
+ */
+export const patientFullNameErrorMessage = (value: string) => {
+	const normalized = normalizePatientFullName(value);
+	if (!normalized) return PATIENT_FULL_NAME_REQUIRED_ERROR_MESSAGE;
+	return isValidPatientFullName(normalized) ? '' : PATIENT_FULL_NAME_INVALID_ERROR_MESSAGE;
+};
+
+// Compatibilidad de importación para consumidores que sólo necesitan el texto
+// de campo vacío. Las rutas de reserva usan patientFullNameErrorMessage para no
+// perder la causa concreta.
+export const PATIENT_FULL_NAME_ERROR_MESSAGE = PATIENT_FULL_NAME_REQUIRED_ERROR_MESSAGE;
 
 /**
  * Mirrors the database comparison used by the public-booking capacity rule.

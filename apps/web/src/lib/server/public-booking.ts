@@ -4,7 +4,8 @@ import {
 	isValidPatientFullName,
 	normalizePatientFullName,
 	normalizePatientNameForComparison,
-	PATIENT_FULL_NAME_ERROR_MESSAGE
+	PATIENT_FULL_NAME_INVALID_ERROR_MESSAGE,
+	PATIENT_FULL_NAME_REQUIRED_ERROR_MESSAGE
 } from '$lib/utils/patient-name';
 import type { Business } from './business';
 import {
@@ -1016,6 +1017,7 @@ export const createPublicBooking = async (
 		const patientName = normalizePatientFullName(input.patientName);
 		phoneE164 = normalizePhoneE164(input.patientPhone);
 		const email = String(input.patientEmail ?? '').trim();
+		if (!patientName) throw new Error('PUBLIC_PATIENT_NAME_REQUIRED');
 		if (!isValidPatientFullName(patientName)) throw new Error('PUBLIC_PATIENT_NAME_INVALID');
 		if (!phoneE164 || !isLikelyPhoneE164(phoneE164)) throw new Error('PUBLIC_PATIENT_PHONE_INVALID');
 		if (bookingMode === 'joint' && professionalIds.length < 2) {
@@ -1139,7 +1141,8 @@ export const PUBLIC_BOOKING_ERROR_MESSAGES = {
 		'El consultorio desactivó las reservas online. Podés contactarlo para pedir el turno por otro medio.',
 	PUBLIC_BUSINESS_COMMERCIAL_UNAVAILABLE:
 		'El sistema de reservas online del consultorio está temporalmente suspendido. Mientras lo reactivan, pedí el turno por contacto directo.',
-	PUBLIC_PATIENT_NAME_INVALID: PATIENT_FULL_NAME_ERROR_MESSAGE,
+	PUBLIC_PATIENT_NAME_REQUIRED: PATIENT_FULL_NAME_REQUIRED_ERROR_MESSAGE,
+	PUBLIC_PATIENT_NAME_INVALID: PATIENT_FULL_NAME_INVALID_ERROR_MESSAGE,
 	PUBLIC_PATIENT_PHONE_INVALID:
 		'El teléfono no tiene un formato válido. Revisalo e incluí el código de área.',
 	PUBLIC_PROFESSIONAL_REQUIRED:
@@ -1183,8 +1186,9 @@ const publicBookingErrorTokenMap: ReadonlyArray<readonly [string, PublicBookingE
 	['PUBLIC_BOOKING_UNAVAILABLE', 'PUBLIC_BOOKING_UNAVAILABLE'],
 	['PUBLIC_BUSINESS_COMMERCIAL_UNAVAILABLE', 'PUBLIC_BUSINESS_COMMERCIAL_UNAVAILABLE'],
 	['BUSINESS_ACCESS_RESTRICTED', 'PUBLIC_BUSINESS_COMMERCIAL_UNAVAILABLE'],
+	['PUBLIC_PATIENT_NAME_REQUIRED', 'PUBLIC_PATIENT_NAME_REQUIRED'],
+	['PATIENT_NAME_REQUIRED', 'PUBLIC_PATIENT_NAME_REQUIRED'],
 	['PUBLIC_PATIENT_NAME_INVALID', 'PUBLIC_PATIENT_NAME_INVALID'],
-	['PATIENT_NAME_REQUIRED', 'PUBLIC_PATIENT_NAME_INVALID'],
 	['PUBLIC_PATIENT_PHONE_INVALID', 'PUBLIC_PATIENT_PHONE_INVALID'],
 	['PUBLIC_PROFESSIONAL_REQUIRED', 'PUBLIC_PROFESSIONAL_REQUIRED'],
 	['PUBLIC_JOINT_REQUIRES_TWO_PROFESSIONALS', 'PUBLIC_JOINT_REQUIRES_TWO_PROFESSIONALS'],
