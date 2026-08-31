@@ -291,6 +291,21 @@ const clinicalEntryRpcError = (error: { message?: string; code?: string } | null
 	return { status: 500, message: 'No se pudo guardar la entrada.' };
 };
 
+const patientArchiveRpcError = (error: { message?: string; code?: string } | null | undefined) => {
+	const message = `${error?.message ?? ''} ${error?.code ?? ''}`;
+
+	if (message.includes('BUSINESS_ACCESS_RESTRICTED')) {
+		return { status: 403, message: COMMERCIAL_RESTRICTED_MESSAGE };
+	}
+	if (message.includes('PATIENT_ARCHIVE_DENIED')) {
+		return { status: 403, message: 'No tenés permiso para archivar este paciente.' };
+	}
+	if (message.includes('PATIENT_NOT_FOUND')) {
+		return { status: 404, message: 'Paciente no encontrado.' };
+	}
+	return { status: 500, message: 'No se pudo actualizar el estado de la ficha. Intentá de nuevo.' };
+};
+
 type SavedClinicalEntry = {
 	id: string;
 	patient_id: string;
@@ -1077,7 +1092,8 @@ export const actions: Actions = {
 
 		if (error) {
 			console.error('Error archivando paciente', error);
-			return fail(500, { message: 'No se pudo archivar el paciente' });
+			const mapped = patientArchiveRpcError(error);
+			return fail(mapped.status, { message: mapped.message });
 		}
 
 		throw redirect(303, '/odonto/pacientes?estado=archivados');
@@ -1158,7 +1174,8 @@ export const actions: Actions = {
 
 		if (error) {
 			console.error('Error desarchivando paciente', error);
-			return fail(500, { message: 'No se pudo desarchivar el paciente' });
+			const mapped = patientArchiveRpcError(error);
+			return fail(mapped.status, { message: mapped.message });
 		}
 
 		throw redirect(303, '/odonto/pacientes');

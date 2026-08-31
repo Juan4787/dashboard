@@ -285,6 +285,24 @@ describe('patient detail migrated actions', () => {
 		expect(mocks.supabase.from).not.toHaveBeenCalled();
 	});
 
+	it('maps a stale archive target to a patient-not-found response', async () => {
+		mocks.supabase.rpc.mockResolvedValue({ error: { message: 'PATIENT_NOT_FOUND' } });
+
+		const result = (await actions.archive_patient!(makeEvent())) as any;
+
+		expect(result.status).toBe(404);
+		expect(result.data.message).toBe('Paciente no encontrado.');
+	});
+
+	it('maps archive permission failures without returning a server error', async () => {
+		mocks.supabase.rpc.mockResolvedValue({ error: { message: 'PATIENT_ARCHIVE_DENIED' } });
+
+		const result = (await actions.unarchive_patient!(makeEvent())) as any;
+
+		expect(result.status).toBe(403);
+		expect(result.data.message).toBe('No tenés permiso para archivar este paciente.');
+	});
+
 	it('updates clinical entries through the safe RPC instead of direct table writes', async () => {
 		mocks.supabase.rpc.mockResolvedValue({ data: null, error: null });
 
