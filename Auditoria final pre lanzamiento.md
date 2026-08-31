@@ -4458,10 +4458,12 @@ aprobaciones implícitas de los demás gates. La versión vigente del código es
 - [x] La promoción controlada mostró mezcla real: con 1 % de la versión nueva y 99 %
   de la anterior, 100 muestras HTML secuenciales observaron 98 respuestas con
   `CDBtQGV7/BVZxq4-T` (versión anterior) y 2 con `DcejDFCW/Dy6CZm__` (candidato
-  actual). Después se promovió al 100 % sin error. El deployment final de Cloudflare
-  es `9c33abf2-6c5c-4b5a-9ca5-12be37cdcefe`, estrategia `percentage`, con la
-  versión `9f8be05a…` al 100 % y mensaje operativo
-  `prelaunch complete auth cleanup full rollout`.
+  actual). Después se promovió al 100 % sin error. El deployment **inicial** de esa
+  promoción fue `9c33abf2-6c5c-4b5a-9ca5-12be37cdcefe`, estrategia `percentage`, con
+  la versión `9f8be05a…` al 100 % y mensaje operativo
+  `prelaunch complete auth cleanup full rollout`; los ensayos de rollback posteriores
+  lo supersedieron y el deployment vigente se registra como `9c794bbb…` en la
+  relectura dinámica final.
 - [x] El endpoint de versión del artefacto es `/_app/version.json` (no
   `/version.json`; ese último 404 fue una consulta de arnés a una ruta inexistente,
   no un fallo del Worker). El Worker actual devolvió HTTP 200 y
