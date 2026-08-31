@@ -5352,6 +5352,10 @@ ejecutó DDL destructivo sobre producción.
 - [x] El test de archivos clínicos dejó de depender de una espera fija de 650 ms
   y espera la request exacta; la suite publicada lo ejecutó sin fallo. La
   modificación del arnés no cambia el runtime clínico.
+- [x] La sonda `current-candidate-security-probe.mjs` se repitió después de la
+  publicación con el SHA esperado de este candidato: **6/6 PASS**. Confirmó
+  aislamiento de `allowed_emails`, rechazo anónimo/autenticado del RPC legado y
+  que `/_app/version.json` atiende exactamente `64031a3`.
 
 ### Dictamen del incidente y decisión de lanzamiento
 
