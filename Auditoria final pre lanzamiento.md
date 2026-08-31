@@ -35,7 +35,9 @@
 
 - [x] **Antecedente inmediato del candidato final:** commit `35349a5c702109bcc527a06133d905aee9accf62`, versión Cloudflare `10f572e4-cef3-400a-be76-32405bd6333f` al 100 %, deployment `6701db36-57ec-472b-b9ce-2c681a33bf02`; tag `35349a5c702109bcc527a06133d905aee9accf62-clean-d22ebfd`, manifiesto completo y smoke de producción documentados al final de este archivo. Se conserva como evidencia del corte anterior y queda supersedido por el candidato `fba21de` de abajo.
 
-- [x] **Estado actual del candidato final (última relectura):** commit `fba21de079706f9674a85303a3ec68b589b90f70`, versión Cloudflare `9f8be05a-b003-42a8-bc00-18e87eff0c54` al 100 %, deployment `9c33abf2-6c5c-4b5a-9ca5-12be37cdcefe`; tag `fba21de079706f9674a85303a3ec68b589b90f70-clean-2324f2`, manifiesto completo `2324f2e253b33f44eedbec04708a2aaf5d7c775e448bf5ce422cfafdac5f371b` y smoke de producción documentados al final de este archivo. Este es el único candidato que gobierna la decisión vigente.
+- [x] **Antecedente inmediato del candidato final antes del ensayo de rollback:** commit `fba21de079706f9674a85303a3ec68b589b90f70`, versión Cloudflare `9f8be05a-b003-42a8-bc00-18e87eff0c54` al 100 %, deployment `9c33abf2-6c5c-4b5a-9ca5-12be37cdcefe`; tag `fba21de079706f9674a85303a3ec68b589b90f70-clean-2324f2`, manifiesto completo `2324f2e253b33f44eedbec04708a2aaf5d7c775e448bf5ce422cfafdac5f371b` y smoke de producción documentados al final de este archivo. Se conserva como corte anterior.
+
+- [x] **Estado actual del candidato final (última relectura):** commit de runtime `fba21de079706f9674a85303a3ec68b589b90f70`, versión Cloudflare `9f8be05a-b003-42a8-bc00-18e87eff0c54` al 100 %, deployment posterior al ensayo de rollback `d49c0e7b-7520-4fb4-9e03-1d6b277ff055`; tag `fba21de079706f9674a85303a3ec68b589b90f70-clean-2324f2`, manifiesto completo `2324f2e253b33f44eedbec04708a2aaf5d7c775e448bf5ce422cfafdac5f371b` y smoke posterior documentados al final de este archivo. El `HEAD` documental puede ser posterior, pero no altera este runtime.
 
 - [x] **Commit posterior de documentación (no desplegado):** `035f3d823580a48aa8a49dd494672ddb718c34a2` sólo agrega esta relectura y el manifiesto archivado; no modifica `apps/web` ni el artefacto que atiende Cloudflare. Por eso la versión productiva continúa correlacionada deliberadamente con el commit de runtime `fba21de…`, mientras `HEAD`/`origin/prelaunch/cloudflare-20260830` ahora apuntan a este commit documental.
 
@@ -4620,7 +4622,6 @@ lanzamiento.
   revisados, secretos fuera del artefacto, `pnpm check`, tests secuenciales, build A/B
   byte a byte del output de Cloudflare, hash/manifiesto, smoke de preview, canary,
   promoción, `/_app/version.json`, tail correlacionado y registro histórico/actual.
-+
 ## Relectura E2E final sobre el Worker actual — 2026-08-31 — ESTADO ACTUAL
 
 Esta sección actualiza únicamente la ejecución E2E posterior al deployment
@@ -4668,3 +4669,37 @@ y cada skip.
   roles bloqueados por rate limit y los 11 skips declarados por sus precondiciones.
   No se debe afirmar cobertura E2E total hasta repetir esos casos desde un runner
   externo con IP limpia y ejecutar cada skip justificadamente.
+## Ensayo de rollback operativo del candidato exacto — 2026-08-31 — ESTADO ACTUAL
+
+Esta sección supersede sólo el estado de deployment escrito antes del ensayo. No elimina
+la evidencia de las promociones/rollback históricos: documenta el primer rollback medido
+desde el candidato `fba21de` actualmente certificado y su restauración inmediata.
+
+- [x] Estado inicial verificado antes de tocar tráfico: deployment
+  `9c33abf2-6c5c-4b5a-9ca5-12be37cdcefe`, versión
+  `9f8be05a-b003-42a8-bc00-18e87eff0c54` al 100 %. El destino de rollback
+  `10f572e4-cef3-400a-be76-32405bd6333f` fue inspeccionado previamente y corresponde
+  al artefacto anterior etiquetado `35349a5…-clean-d22ebfd`; no se cambiaron bindings,
+  secretos ni base de datos.
+- [x] A las 12:26:47 UTC se ejecutó con Wrangler el rollback controlado al 100 % del
+  artefacto anterior; Wrangler confirmó éxito de publicación en 1,27 s. El deployment
+  quedó registrado como `78ff851d-a4c0-437c-bed4-77a53d351f73`.
+- [x] Una sonda secuencial con query único observó
+  `/_app/version.json` del artefacto anterior con HTTP 200 en el intento 0, a los
+  **1.034 ms** de iniciar la medición, con `cf-cache-status=HIT`. No se siguieron
+  mutaciones clínicas durante el intervalo.
+- [x] Inmediatamente se restauró el candidato `fba21de` al 100 %; Wrangler confirmó
+  éxito en 0,69 s y creó el deployment
+  `d49c0e7b-7520-4fb4-9e03-1d6b277ff055` con el mensaje
+  `prelaunch rollback drill restore fba21de`.
+- [x] La sonda de restauración observó el SHA exacto de `fba21de` con HTTP 200 en
+  **883 ms** (intento 0). Un smoke de navegador posterior devolvió `/login` HTTP
+  200, cero respuestas 4xx/5xx y `/_app/version.json` HTTP 200 con el SHA esperado.
+- [x] El estado Cloudflare final volvió a quedar inequívocamente en una sola versión al
+  100 %: `9f8be05a-b003-42a8-bc00-18e87eff0c54`. El rollback fue reversible y medido
+  sin tocar pacientes, turnos, profesionales, consultorios, Storage, migraciones o
+  secretos.
+- [ ] Este ensayo demuestra el mecanismo y el tiempo de recuperación del artefacto,
+  pero no sustituye un runbook de incidente ensayado por una persona, alertas humanas,
+  observabilidad persistente, rollback de datos/migraciones ni un soak posterior. G9
+  sigue parcial por esos puntos.
