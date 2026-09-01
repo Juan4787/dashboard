@@ -22,7 +22,7 @@ const admin = createClient(env.ODONTO_SUPABASE_URL, env.ODONTO_SUPABASE_SERVICE_
 	auth: { autoRefreshToken: false, persistSession: false },
 	realtime: { transport: WebSocket }
 });
-const baseUrl = process.env.CITA_SUITE_E2E_BASE_URL?.trim() || 'https://cita.suite.workers.dev';
+const baseUrl = 'https://app.cita-suite.workers.dev';
 const marker = `STC_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 const email = `audit-status-concurrency-${marker.toLowerCase()}@example.invalid`;
 const password = `Ss!${randomUUID()}z`;
@@ -108,9 +108,9 @@ try {
 	browser = await chromium.launch({ headless: true });
 	const context = await browser.newContext({ baseURL: baseUrl });
 	await context.addCookies([
-		{ name: 'sb-module', value: 'odonto', domain: new URL(baseUrl).hostname, path: '/', secure: true, httpOnly: true },
-		{ name: 'sb-access-token', value: signIn.data.session.access_token, domain: new URL(baseUrl).hostname, path: '/', secure: true, httpOnly: true },
-		{ name: 'sb-refresh-token', value: signIn.data.session.refresh_token, domain: new URL(baseUrl).hostname, path: '/', secure: true, httpOnly: true }
+		{ name: 'sb-module', value: 'odonto', domain: 'app.cita-suite.workers.dev', path: '/', secure: true, httpOnly: true },
+		{ name: 'sb-access-token', value: signIn.data.session.access_token, domain: 'app.cita-suite.workers.dev', path: '/', secure: true, httpOnly: true },
+		{ name: 'sb-refresh-token', value: signIn.data.session.refresh_token, domain: 'app.cita-suite.workers.dev', path: '/', secure: true, httpOnly: true }
 	]);
 	const page = await context.newPage();
 	await page.goto('/odonto/agenda', { waitUntil: 'domcontentloaded' });

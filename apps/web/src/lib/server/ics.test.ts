@@ -13,13 +13,13 @@ const MINUTE = 60 * 1000;
 const now = new Date('2026-06-11T12:00:00.000Z');
 
 const baseInput = (overrides: Partial<IcsEventInput> = {}): IcsEventInput => ({
-	uid: 'appointment-abc123@cita.suite.workers.dev',
+	uid: 'appointment-abc123@app.cita-suite.workers.dev',
 	startsAt: new Date('2026-06-15T17:30:00.000Z'),
 	endsAt: new Date('2026-06-15T18:00:00.000Z'),
 	summary: 'Turno en Clínica Sabrina',
 	description: 'Tenés un turno reservado.\n\nFecha: lunes 15 de junio\nHora local del consultorio: 14:30',
 	location: 'Av. Santa Fe 1234, Piso 3, CABA',
-	url: 'https://cita.suite.workers.dev/turno/tok123',
+	url: 'https://app.cita-suite.workers.dev/turno/tok123',
 	sequence: 0,
 	status: 'CONFIRMED',
 	method: 'PUBLISH',
@@ -92,7 +92,7 @@ describe('buildIcs', () => {
 		const ics = buildIcs(baseInput());
 		expect(ics).toContain('BEGIN:VCALENDAR\r\n');
 		expect(ics).toContain('METHOD:PUBLISH\r\n');
-		expect(ics).toContain('UID:appointment-abc123@cita.suite.workers.dev\r\n');
+		expect(ics).toContain('UID:appointment-abc123@app.cita-suite.workers.dev\r\n');
 		expect(ics).toContain('DTSTART:20260615T173000Z\r\n');
 		expect(ics).toContain('DTEND:20260615T180000Z\r\n');
 		expect(ics).toContain('DTSTAMP:20260611T120000Z\r\n');

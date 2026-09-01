@@ -19,7 +19,7 @@ describe('orígenes de imágenes públicas', () => {
 
 	it('acepta recursos propios y del proyecto Supabase', () => {
 		expect(isAllowedPublicImageUrl('/logo.png')).toBe(true);
-		expect(isAllowedPublicImageUrl('https://cita.suite.workers.dev/logo.png')).toBe(true);
+		expect(isAllowedPublicImageUrl('https://app.cita-suite.workers.dev/logo.png')).toBe(true);
 		expect(isAllowedPublicImageUrl('https://yjzferwuzbtgpmdnzlcb.supabase.co/storage/v1/object/public/logo.png')).toBe(true);
 		envState.publicEnv.PUBLIC_SITE_URL = 'https://agenda.cita-suite.example/';
 		expect(isAllowedPublicImageUrl('https://agenda.cita-suite.example/logo.png')).toBe(true);
@@ -29,9 +29,9 @@ describe('orígenes de imágenes públicas', () => {
 		for (const value of [
 			'https://example.com/logo.png',
 			'https://yjzferwuzbtgpmdnzlcb.supabase.co.evil.example/logo.png',
-			'http://cita.suite.workers.dev/logo.png',
-			'https://cita.suite.workers.dev.evil.example/logo.png',
-			'https://cita.suite.workers.dev:444/logo.png',
+			'http://app.cita-suite.workers.dev/logo.png',
+			'https://app.cita-suite.workers.dev.evil.example/logo.png',
+			'https://app.cita-suite.workers.dev:444/logo.png',
 			'//example.com/logo.png',
 			'javascript:alert(1)'
 		]) {

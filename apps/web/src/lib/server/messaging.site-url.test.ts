@@ -10,7 +10,7 @@ vi.mock('$env/dynamic/public', () => ({ env: envState.publicEnv }));
 
 import { getPublicSiteUrl } from './messaging';
 
-const workerUrl = 'https://cita.suite.workers.dev';
+const workerUrl = 'https://app.cita-suite.workers.dev';
 
 describe('URL pública del sitio', () => {
 	beforeEach(() => {

@@ -50,7 +50,7 @@ Deploy command: pnpm exec wrangler deploy
 Non-production branch deploy command: pnpm exec wrangler versions upload
 ```
 
-El nombre del Worker creado en el panel debe ser exactamente `cita`, como
+El nombre del Worker creado en el panel debe ser exactamente `app`, como
 en `apps/web/wrangler.jsonc`. Para un despliegue desde una máquina autorizada:
 
 ```sh
@@ -75,13 +75,11 @@ reside Supabase. Cloudflare sigue entregando los assets estáticos desde el bord
 más cercano a cada persona; la ubicación dirigida reduce los viajes de las rutas
 server-side a la base de datos.
 
-Las variables y los secretos pertenecen al Worker, no al repositorio. El cambio
-de `app` a `cita` debe hacerse sobre el mismo Worker desde Cloudflare y
-verificarse por su identificador inmutable; no se debe crear un Worker nuevo
-porque una creación separada no copia automáticamente configuración ni secretos.
-Antes de dirigir tráfico, compará el inventario de bindings del destino con el
-inventario previo y confirmá como mínimo `ODONTO_SUPABASE_URL`,
-`ODONTO_SUPABASE_ANON_KEY` y `ODONTO_SUPABASE_SERVICE_ROLE_KEY`.
+Las variables y los secretos pertenecen al Worker, no al repositorio. Cambiar
+`name` en `wrangler.jsonc` apunta a otro Worker y **no** copia su configuración.
+Después de cualquier cambio de nombre, cargá y verificá como mínimo
+`ODONTO_SUPABASE_URL`, `ODONTO_SUPABASE_ANON_KEY` y
+`ODONTO_SUPABASE_SERVICE_ROLE_KEY` en el nuevo destino antes de dirigir tráfico.
 
 Para una vista previa de Workers desde la terminal, tras cargar secretos locales
 en un archivo no versionado `.dev.vars`, ejecutá:

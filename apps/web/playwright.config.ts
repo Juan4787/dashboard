@@ -5,7 +5,7 @@ const shouldStartServer = !process.env.E2E_BASE_URL;
 const cloudflareVersion = process.env.E2E_CLOUDFLARE_VERSION?.trim();
 const extraHTTPHeaders = cloudflareVersion
 	? {
-			'Cloudflare-Workers-Version-Overrides': `cita="${cloudflareVersion}"`
+			'Cloudflare-Workers-Version-Overrides': `app="${cloudflareVersion}"`
 		}
 	: undefined;
 

@@ -27,4 +27,4 @@ export const CASE_EVENT_TYPES = [
 	'Nota'
 ] as const;
 
-export const PUBLIC_SITE_URL_FALLBACK = 'https://cita.suite.workers.dev';
+export const PUBLIC_SITE_URL_FALLBACK = 'https://app.cita-suite.workers.dev';

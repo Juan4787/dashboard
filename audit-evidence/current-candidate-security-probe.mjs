@@ -16,7 +16,7 @@ for (const raw of fs.readFileSync(path.join(root, '.env'), 'utf8').split(/\r?\n/
 }
 Object.assign(env, process.env);
 
-const baseUrl = process.env.CITA_SUITE_E2E_BASE_URL?.trim() || 'https://cita.suite.workers.dev';
+const baseUrl = 'https://app.cita-suite.workers.dev';
 const expectedWorkerVersion = process.env.AUDIT_EXPECTED_WORKER_VERSION?.trim() || '985feee';
 const supabaseUrl = env.ODONTO_SUPABASE_URL;
 const anonKey = env.ODONTO_SUPABASE_ANON_KEY;

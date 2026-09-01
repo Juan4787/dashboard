@@ -19,7 +19,7 @@ for (const raw of fs.readFileSync(path.join(root, '.env'), 'utf8').split(/\r?\n/
 const admin = createClient(env.ODONTO_SUPABASE_URL, env.ODONTO_SUPABASE_SERVICE_ROLE_KEY, {
 	auth: { autoRefreshToken: false, persistSession: false }, realtime: { transport: WebSocket }
 });
-const baseUrl = process.env.CITA_SUITE_E2E_BASE_URL?.trim() || 'https://cita.suite.workers.dev';
+const baseUrl = 'https://app.cita-suite.workers.dev';
 const marker = `ACTC_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 const email = `audit-action-concurrency-${marker.toLowerCase()}@example.invalid`;
 const password = `Dd!${randomUUID()}z`;
