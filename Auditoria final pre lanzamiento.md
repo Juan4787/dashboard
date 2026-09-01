@@ -5447,3 +5447,19 @@ evidencia histórica anterior.
 - [ ] La auditoría global continúa NO-GO por los gates independientes ya
   enumerados; este intento de dominio no los vuelve verdes ni sustituye las
   pruebas pendientes.
+
+### Arquitectura de dominio futura confirmada por la persona propietaria — 2026-09-01
+
+- [ ] La landing deberá responder en la raíz: `https://cita-suite.com.ar/`.
+- [ ] La aplicación clínica deberá responder bajo el prefijo:
+  `https://cita-suite.com.ar/app`.
+- [ ] Esta decisión es planificación futura, no estado productivo actual. Antes
+  de activarla se deberá verificar específicamente el comportamiento del
+  prefijo `/app` en rutas SSR, assets y chunks, cookies (Path y SameSite),
+  service worker, redirects, enlaces públicos de reserva, ICS/PDF, callbacks de
+  Supabase y Google si se habilitan, cron-job.org, caché y páginas 404/500.
+- [ ] La configuración no deberá cambiarse sólo sustituyendo el dominio: habrá
+  que confirmar si SvelteKit y el Worker necesitan `paths.base`, reglas de
+  routeo o una distribución conjunta con la landing. La certificación deberá
+  demostrar que tanto `/` como `/app` funcionan sin fugas, redirecciones
+  silenciosas ni pérdida de contexto.
