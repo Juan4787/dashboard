@@ -20,7 +20,7 @@ const admin = createClient(env.ODONTO_SUPABASE_URL, env.ODONTO_SUPABASE_SERVICE_
 	auth: { autoRefreshToken: false, persistSession: false },
 	realtime: { transport: WebSocket }
 });
-const baseUrl = 'https://app.cita-suite.workers.dev';
+const baseUrl = process.env.CITA_SUITE_E2E_BASE_URL?.trim() || 'https://cita.suite.workers.dev';
 const marker = `PCA_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 const email = `audit-public-actions-${marker.toLowerCase()}@example.invalid`;
 const password = `Pp!${randomUUID()}z`;

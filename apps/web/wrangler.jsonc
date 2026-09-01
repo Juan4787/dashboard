@@ -1,6 +1,6 @@
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
-	"name": "app",
+	"name": "cita",
 	"main": ".svelte-kit/cloudflare/_worker.js",
 	"assets": {
 		"binding": "ASSETS",
@@ -12,7 +12,7 @@
 		"region": "aws:sa-east-1"
 	},
 	"vars": {
-		"PUBLIC_SITE_URL": "https://app.cita-suite.workers.dev"
+		"PUBLIC_SITE_URL": "https://cita.suite.workers.dev"
 	},
 	"keep_vars": true
 }

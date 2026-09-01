@@ -10,6 +10,8 @@ vi.mock('$env/dynamic/public', () => ({ env: envState.publicEnv }));
 
 import { getPublicSiteUrl } from './messaging';
 
+const workerUrl = 'https://cita.suite.workers.dev';
+
 describe('URL pública del sitio', () => {
 	beforeEach(() => {
 		for (const key of Object.keys(envState.privateEnv)) delete envState.privateEnv[key];
@@ -19,7 +21,7 @@ describe('URL pública del sitio', () => {
 	it('rechaza hosts históricos de Netlify y Vercel', () => {
 		for (const host of ['cita-suite.netlify.app', 'cita-suite.vercel.app']) {
 			envState.privateEnv.PUBLIC_SITE_URL = `https://${host}`;
-			expect(getPublicSiteUrl()).toBe('https://app.cita-suite.workers.dev');
+			expect(getPublicSiteUrl()).toBe(workerUrl);
 		}
 	});
 
@@ -30,12 +32,12 @@ describe('URL pública del sitio', () => {
 
 	it('usa el Worker por defecto si la configuración no es una URL', () => {
 		envState.privateEnv.PUBLIC_SITE_URL = 'no-es-una-url';
-		expect(getPublicSiteUrl()).toBe('https://app.cita-suite.workers.dev');
+		expect(getPublicSiteUrl()).toBe(workerUrl);
 	});
 
 	it('rechaza HTTP en dominios públicos pero conserva localhost para desarrollo', () => {
 		envState.privateEnv.PUBLIC_SITE_URL = 'http://agenda.cita-suite.example';
-		expect(getPublicSiteUrl()).toBe('https://app.cita-suite.workers.dev');
+		expect(getPublicSiteUrl()).toBe(workerUrl);
 		envState.privateEnv.PUBLIC_SITE_URL = 'http://localhost:5173/';
 		expect(getPublicSiteUrl()).toBe('http://localhost:5173');
 	});

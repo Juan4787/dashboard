@@ -16,7 +16,8 @@ for (const raw of fs.readFileSync(path.join(root, '.env'), 'utf8').split(/\r?\n/
 }
 Object.assign(env, process.env);
 
-const baseUrl = 'https://app.cita-suite.workers.dev';
+const baseUrl = process.env.CITA_SUITE_E2E_BASE_URL?.trim() || 'https://cita.suite.workers.dev';
+const expectedWorkerVersion = process.env.AUDIT_EXPECTED_WORKER_VERSION?.trim() || '985feee';
 const supabaseUrl = env.ODONTO_SUPABASE_URL;
 const anonKey = env.ODONTO_SUPABASE_ANON_KEY;
 if (!supabaseUrl || !anonKey || !env.CITA_SUITE_TEST_EMAIL || !env.CITA_SUITE_TEST_PASSWORD || !env.E2E_MASTER_EMAIL || !env.E2E_MASTER_PASSWORD)
@@ -81,7 +82,7 @@ else fail('RPC legado autenticado', `HTTP ${expiredTest.status}`);
 
 const versionResponse = await fetch(`${baseUrl}/_app/version.json`, { headers: { 'cache-control': 'no-cache' } });
 const versionBody = await versionResponse.json().catch(() => ({}));
-if (versionResponse.status === 200 && versionBody.version === '985feee') pass('Worker atiende el candidato esperado', `version=${versionBody.version}`);
+if (versionResponse.status === 200 && versionBody.version === expectedWorkerVersion) pass('Worker atiende el candidato esperado', `version=${versionBody.version}`);
 else fail('Worker versión candidata', `HTTP ${versionResponse.status} version=${String(versionBody.version ?? '')}`);
 
 const failed = checks.filter((ok) => !ok).length;

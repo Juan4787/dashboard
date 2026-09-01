@@ -22,9 +22,9 @@ for (const raw of fs.readFileSync(envPath, 'utf8').split(/\r?\n/)) {
 
 const supabaseUrl = env.ODONTO_SUPABASE_URL;
 const serviceKey = env.ODONTO_SUPABASE_SERVICE_ROLE_KEY;
-// El .env local conserva PUBLIC_SITE_URL=http://localhost:5173 de una corrida histórica;
-// esta certificación apunta explícitamente al Worker que el usuario fijó como producción.
-const baseUrl = 'https://app.cita-suite.workers.dev';
+// El .env local puede conservar una URL de desarrollo de una corrida histórica;
+// esta certificación apunta explícitamente al Worker de producción actual.
+const baseUrl = process.env.CITA_SUITE_E2E_BASE_URL?.trim() || 'https://cita.suite.workers.dev';
 if (!supabaseUrl || !serviceKey || !env.E2E_MASTER_EMAIL || !env.E2E_MASTER_PASSWORD) {
 	throw new Error('Missing required audit environment keys');
 }

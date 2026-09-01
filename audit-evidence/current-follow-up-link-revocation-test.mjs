@@ -25,7 +25,7 @@ const marker = `FULINK_${Date.now().toString(36)}_${Math.random().toString(36).s
 const password = `Ll!${randomUUID()}z`;
 const ownerEmail = `audit-follow-link-owner-${marker.toLowerCase()}@example.invalid`;
 const professionalEmail = `audit-follow-link-prof-${marker.toLowerCase()}@example.invalid`;
-const baseUrl = 'https://app.cita-suite.workers.dev';
+const baseUrl = process.env.CITA_SUITE_E2E_BASE_URL?.trim() || 'https://cita.suite.workers.dev';
 const followUpMessage = `${marker} Seguimiento`;
 const checks = [];
 const pass = (name, detail = '') => { checks.push(true); console.log(`PASS ${name}${detail ? ` — ${detail}` : ''}`); };
@@ -78,9 +78,9 @@ try {
 	browser = await chromium.launch({ headless: true });
 	const context = await browser.newContext({ baseURL: baseUrl });
 	await context.addCookies([
-		{ name: 'sb-module', value: 'odonto', domain: 'app.cita-suite.workers.dev', path: '/', secure: true, httpOnly: true },
-		{ name: 'sb-access-token', value: signIn.data.session.access_token, domain: 'app.cita-suite.workers.dev', path: '/', secure: true, httpOnly: true },
-		{ name: 'sb-refresh-token', value: signIn.data.session.refresh_token, domain: 'app.cita-suite.workers.dev', path: '/', secure: true, httpOnly: true }
+		{ name: 'sb-module', value: 'odonto', domain: new URL(baseUrl).hostname, path: '/', secure: true, httpOnly: true },
+		{ name: 'sb-access-token', value: signIn.data.session.access_token, domain: new URL(baseUrl).hostname, path: '/', secure: true, httpOnly: true },
+		{ name: 'sb-refresh-token', value: signIn.data.session.refresh_token, domain: new URL(baseUrl).hostname, path: '/', secure: true, httpOnly: true }
 	]);
 	const page = await context.newPage();
 	await page.goto('/odonto/seguimientos', { waitUntil: 'domcontentloaded' });
