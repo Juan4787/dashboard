@@ -5370,3 +5370,80 @@ ejecutó DDL destructivo sobre producción.
   observabilidad y alertas persistentes, rollback y mezcla de versiones,
   recuperación desde fallos controlados, capacidad/soak y métricas con
   profesionales). Esos límites no se borran por haber cerrado Pako.
+
+## Estado actual — intento de cambio de workers.dev y rollback seguro — 2026-09-01
+
+Esta sección es el registro actual de una migración solicitada y cancelada al
+comprobar una limitación real de Cloudflare. No reemplaza ni reescribe la
+evidencia histórica anterior.
+
+### Antecedente verificado antes de la migración
+
+- [x] El Worker productivo era `app`, con el identificador inmutable
+  `621733096ca44e35b51cbd1995bc530c`, y el subdominio de cuenta que Cloudflare
+  devuelve por API era `cita-suite`. El endpoint efectivo era
+  `https://app.cita-suite.workers.dev`.
+- [x] El host solicitado `https://cita.suite.workers.dev` resolvía en DNS, pero
+  respondía HTTP 404 con código de borde 1042; no estaba asociado al Worker.
+- [x] El inventario previo del Worker tenía 27 secretos y un binding de texto
+  `PUBLIC_SITE_URL`; no se creó un Worker paralelo ni se copiaron secretos a un
+  destino distinto.
+- [x] El scheduler de cron-job.org (job `7795525`) estaba habilitado, pero en
+  la configuración real consultada apuntaba al endpoint controlado
+  `__cron_audit_controlled_failure_20260831`, con POST, minuto 16 de cada hora,
+  y último estado HTTP fallido. Las afirmaciones históricas de un endpoint
+  productivo cada diez minutos quedan como antecedente, no como estado actual.
+
+### Cambios intentados y evidencia
+
+- [x] Se creó el commit de candidato `d7716c4` con las referencias activas al
+  host solicitado, dos builds consecutivos del output consumido por Wrangler y
+  comparación byte a byte: `_worker.js` fue
+  `cf4056f946ba2822fb93035da445ea2b74c918e9bbbb7d646dffcc8db657d484` en ambos
+  y el árbol ordenado fue
+  `d0efc819b087f9d862797e29b0baa294198e7777817eccc6c9d990030b48636c` en ambos.
+- [x] Se renombró temporalmente el mismo Worker por su ID inmutable de `app` a
+  `cita`. Cloudflare confirmó que el host resultante era
+  `https://cita.cita-suite.workers.dev`, no `cita.suite.workers.dev`, y que
+  conservaba el mismo ID.
+- [x] El `PUT` directo del subdominio de cuenta `suite` fue rechazado porque la
+  cuenta ya tenía asociado `cita-suite`. Se retiró el subdominio sólo después de
+  conservar el snapshot; el intento de crearlo como `suite` respondió HTTP 403
+  indicando que `suite` no está disponible. No se publicó código durante esa
+  ventana.
+- [x] Se restauró el subdominio de cuenta `cita-suite` y se renombró el mismo
+  Worker nuevamente a `app`. El host anterior volvió a responder HTTP 200 en
+  `/_app/version.json`; el Worker continuó atendiendo el runtime publicado
+  `64031a356a7b972ac6aaa61aaf1fb60a51dc7c57`.
+- [x] El código del candidato se revirtió mediante commits de trazabilidad
+  (`af30b82` y `c7ac72c`), sin tocar capturas, backups, migraciones ni datos.
+  Las referencias activas volvieron a `app.cita-suite.workers.dev`; los
+  antecedentes de esta sección no se borraron.
+
+### Incidente de secreto y estado posterior
+
+- [x] Durante una consulta de diagnóstico del job se imprimió accidentalmente
+  el valor del header secreto de cron en la salida de terminal. Se trató como
+  comprometido: se rotó `INTERNAL_JOB_SECRET` en Cloudflare a un valor nuevo no
+  registrado en texto, y el header del job se actualizó sin imprimir su valor.
+  El secreto no se agregó al repositorio ni a este documento.
+- [x] La rotación generó versiones de Worker de tipo `secret`, pero no modificó
+  el código ni la base. El job conserva actualmente su URL de fallo controlado,
+  su horario de minuto 16 y sus notificaciones; no se presenta como scheduler
+  productivo demostrado.
+- [ ] El dominio final `cita-suite.com.ar` queda pendiente de compra y de una
+  migración separada. Al disponer de la zona DNS, se deberá adjuntar el dominio
+  personalizado al mismo Worker, actualizar `PUBLIC_SITE_URL`, Supabase Auth,
+  callbacks de Google si se habilitan, cron-job.org, enlaces públicos, ICS/PDF,
+  service worker y todas las allowlists; después habrá que repetir la
+  certificación de host, cookies, caché, TLS, redirecciones y callbacks.
+
+### Decisión actual
+
+- [x] No se despliega `cita.suite.workers.dev` porque Cloudflare demostró que no
+  está disponible para esta cuenta. El estado actual canónico sigue siendo
+  `https://app.cita-suite.workers.dev` hasta la compra y configuración de
+  `cita-suite.com.ar`.
+- [ ] La auditoría global continúa NO-GO por los gates independientes ya
+  enumerados; este intento de dominio no los vuelve verdes ni sustituye las
+  pruebas pendientes.
