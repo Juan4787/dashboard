@@ -39,6 +39,20 @@ const PROFESSIONAL_DELETE_PATIENT_MESSAGE =
 const PATIENT_UPDATE_CONFLICT_MESSAGE =
 	'La ficha cambió mientras la editabas. Recargá la ficha, revisá los datos y volvé a guardar.';
 
+export const isStaleUpdatedAt = (
+	expected: string | null | undefined,
+	current: string | null | undefined
+): boolean => {
+	if (!expected || !current) return false;
+	if (expected === current) return false;
+	const expectedMs = new Date(expected).getTime();
+	const currentMs = new Date(current).getTime();
+	if (Number.isNaN(expectedMs) || Number.isNaN(currentMs)) {
+		return expected !== current;
+	}
+	return Math.abs(expectedMs - currentMs) > 1000;
+};
+
 const cleanText = (value: unknown) => {
 	const text = String(value ?? '').trim();
 	return text ? text : null;
@@ -224,7 +238,11 @@ const mapDuplicatePatientError = async ({
 	return conflictMessage ? fail(409, { message: conflictMessage }) : null;
 };
 
-const patientUpdateRpcError = (error: { message?: string; code?: string } | null | undefined) => {
+const patientUpdateRpcError = (
+	error: { message?: string; code?: string } | null | undefined,
+	currentPatientUpdatedAt?: string | null,
+	currentClinicalProfileUpdatedAt?: string | null
+) => {
 	const message = `${error?.message ?? ''} ${error?.code ?? ''}`;
 	if (message.includes('BUSINESS_ACCESS_RESTRICTED')) {
 		return fail(403, { message: COMMERCIAL_RESTRICTED_MESSAGE });
@@ -239,7 +257,11 @@ const patientUpdateRpcError = (error: { message?: string; code?: string } | null
 		return fail(400, { message: 'Ingresá el nombre del paciente.' });
 	}
 	if (message.includes('PATIENT_UPDATE_CONFLICT')) {
-		return fail(409, { message: PATIENT_UPDATE_CONFLICT_MESSAGE });
+		return fail(409, {
+			message: PATIENT_UPDATE_CONFLICT_MESSAGE,
+			currentPatientUpdatedAt: currentPatientUpdatedAt ?? '',
+			currentClinicalProfileUpdatedAt: currentClinicalProfileUpdatedAt ?? ''
+		});
 	}
 	return null;
 };
@@ -974,9 +996,13 @@ export const actions: Actions = {
 		}
 		if (
 			expectedPatientUpdatedAt &&
-			expectedPatientUpdatedAt !== String((currentPatient as any).updated_at ?? '')
+			isStaleUpdatedAt(expectedPatientUpdatedAt, (currentPatient as any).updated_at)
 		) {
-			return fail(409, { message: PATIENT_UPDATE_CONFLICT_MESSAGE });
+			return fail(409, {
+				message: PATIENT_UPDATE_CONFLICT_MESSAGE,
+				currentPatientUpdatedAt: String((currentPatient as any).updated_at ?? ''),
+				currentClinicalProfileUpdatedAt: String((currentProfile as any)?.updated_at ?? '')
+			});
 		}
 		if (currentProfileError) {
 			console.error('Error cargando perfil clínico antes de editar', currentProfileError);
@@ -989,9 +1015,13 @@ export const actions: Actions = {
 		if (
 			permissions.canEditClinicalProfile &&
 			expectedClinicalProfileUpdatedAt &&
-			expectedClinicalProfileUpdatedAt !== String((currentProfile as any)?.updated_at ?? '')
+			isStaleUpdatedAt(expectedClinicalProfileUpdatedAt, (currentProfile as any)?.updated_at)
 		) {
-			return fail(409, { message: PATIENT_UPDATE_CONFLICT_MESSAGE });
+			return fail(409, {
+				message: PATIENT_UPDATE_CONFLICT_MESSAGE,
+				currentPatientUpdatedAt: String((currentPatient as any).updated_at ?? ''),
+				currentClinicalProfileUpdatedAt: String((currentProfile as any)?.updated_at ?? '')
+			});
 		}
 
 		const { data: atomicUpdate, error } = await admin.rpc(
@@ -1023,7 +1053,11 @@ export const actions: Actions = {
 
 		if (error) {
 			console.error('Error actualizando ficha y perfil clínico del paciente', error);
-			const mapped = patientUpdateRpcError(error);
+			const mapped = patientUpdateRpcError(
+				error,
+				(currentPatient as any).updated_at,
+				(currentProfile as any)?.updated_at
+			);
 			if (mapped) return mapped;
 			const duplicateResult = await mapDuplicatePatientError({
 				error,

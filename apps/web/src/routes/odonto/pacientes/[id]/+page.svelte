@@ -53,11 +53,14 @@
 			duplicate?: boolean;
 			existingId?: string;
 			savedEntry?: Record<string, unknown>;
+			currentPatientUpdatedAt?: string;
+			currentClinicalProfileUpdatedAt?: string;
 		};
 	}>();
 
 	let showEntryModal = $state(false);
 	let showEditModal = $state(false);
+	let editPatientDismissed = $state(false);
 	let showArchiveConfirm = $state(false);
 	let showDeleteConfirm = $state($page.url.searchParams.has('eliminar'));
 	let showMobileActions = $state(false);
@@ -329,12 +332,14 @@ let archiveForm: HTMLFormElement | null = $state(null);
 let unarchiveForm: HTMLFormElement | null = $state(null);
 
 const openEditPatient = () => {
+	editPatientDismissed = false;
 	patientUpdateError = '';
 	showEditErrors = false;
 	showEditModal = true;
 };
 
 const closeEditPatient = () => {
+	editPatientDismissed = true;
 	patientUpdateError = '';
 	showEditModal = false;
 };
@@ -435,6 +440,7 @@ const handleEditSubmit = (event: SubmitEvent) => {
 const enhancePatientUpdate: SubmitFunction = ({ cancel, formElement }) => {
 	showEditErrors = true;
 	patientUpdateError = '';
+	editPatientDismissed = false;
 	const birthHidden = formElement.querySelector<HTMLInputElement>('input[name="birth_date"]');
 	if (birthHidden && birthHidden.value === '__invalid__') {
 		cancel();
@@ -452,8 +458,15 @@ const enhancePatientUpdate: SubmitFunction = ({ cancel, formElement }) => {
 					'No pudimos guardar los cambios. Revisá tu conexión y volvé a intentar; tus datos siguen en el formulario.';
 				return;
 			}
-			if (result.type === 'redirect') markPatientRevisionUnverified();
-			await update({ reset: false, invalidateAll: false });
+			if (result.type === 'redirect' || result.type === 'success') {
+				markPatientRevisionUnverified();
+				showEditModal = false;
+				showEditErrors = false;
+				patientUpdateError = '';
+				await update();
+				return;
+			}
+			await update({ reset: false });
 		} finally {
 			savingPatient = false;
 		}
@@ -1438,11 +1451,15 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 		use:enhance={enhancePatientUpdate}
 		aria-busy={savingPatient}
 	>
-		<input type="hidden" name="expected_patient_updated_at" value={data.patient.updated_at ?? ''} />
+		<input
+			type="hidden"
+			name="expected_patient_updated_at"
+			value={form?.currentPatientUpdatedAt ?? data.patient.updated_at ?? ''}
+		/>
 		<input
 			type="hidden"
 			name="expected_clinical_profile_updated_at"
-			value={data.patient.clinical_profile_updated_at ?? ''}
+			value={form?.currentClinicalProfileUpdatedAt ?? data.patient.clinical_profile_updated_at ?? ''}
 		/>
 		<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
 			<div class="space-y-1">
@@ -1565,7 +1582,7 @@ const preventEnterSubmit = (event: KeyboardEvent) => {
 				</div>
 			</div>
 		{/if}
-		{#if form?.message}
+		{#if form?.message && !editPatientDismissed}
 			<div class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 dark:border-red-400/50 dark:bg-red-500/15 dark:text-red-100">
 				<p>{form.message}</p>
 				{#if form.duplicate && form.existingId}
