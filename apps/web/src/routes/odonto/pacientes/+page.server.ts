@@ -403,9 +403,11 @@ const handleCreatePatient = async ({
 			});
 		}
 
-		let { data, error } = await supabase
+		const patientId = crypto.randomUUID();
+		let { error } = await supabase
 			.from('patients')
 			.insert({
+				id: patientId,
 				owner_id: ownerId,
 				business_id: context.business.id,
 				full_name,
@@ -413,9 +415,7 @@ const handleCreatePatient = async ({
 				phone: phone || null,
 				phone_raw,
 				phone_e164
-			})
-			.select('id')
-			.single();
+			});
 
 		if (error && isJwtExpiredError(error)) {
 			const refreshed = await refreshSessionIfNeeded();
@@ -423,6 +423,7 @@ const handleCreatePatient = async ({
 				const retry = await supabase
 					.from('patients')
 					.insert({
+						id: patientId,
 						owner_id: ownerId,
 						business_id: context.business.id,
 						full_name,
@@ -430,15 +431,12 @@ const handleCreatePatient = async ({
 						phone: phone || null,
 						phone_raw,
 						phone_e164
-					})
-					.select('id')
-					.single();
-				data = retry.data;
+					});
 				error = retry.error;
 			}
 		}
 
-		if (error || !data) {
+		if (error) {
 			const conflictField = getPatientUniqueConflictField(error ?? {});
 			if (conflictField) {
 				try {
@@ -469,7 +467,7 @@ const handleCreatePatient = async ({
 					fetch,
 					businessId: context.business.id,
 					userId: ownerId,
-					patientId: data.id
+					patientId
 				});
 			} catch (linkError) {
 				console.error('Error vinculando paciente al profesional', linkError);
@@ -478,7 +476,7 @@ const handleCreatePatient = async ({
 						.from('patients')
 						.delete()
 						.eq('business_id', context.business.id)
-						.eq('id', data.id);
+						.eq('id', patientId);
 				} catch (cleanupError) {
 					console.error('Error limpiando paciente sin vinculo profesional', cleanupError);
 				}
@@ -491,7 +489,7 @@ const handleCreatePatient = async ({
 			}
 		}
 
-		throw redirect(303, `/odonto/pacientes/${data.id}`);
+		throw redirect(303, `/odonto/pacientes/${patientId}`);
 	} catch (err) {
 		// Re-throw redirects (they use throw in SvelteKit)
 		if (err && typeof err === 'object' && 'status' in err && 'location' in err) {

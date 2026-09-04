@@ -98,12 +98,12 @@ describe('patients create action', () => {
 	});
 
 	it('links a patient created by a professional before redirecting to the patient detail', async () => {
+		let insertedPatientId: string | null = null;
 		const patientInsertBuilder = {
-			insert: vi.fn(() => ({
-				select: vi.fn(() => ({
-					single: vi.fn(async () => ({ data: { id: patientId }, error: null }))
-				}))
-			}))
+			insert: vi.fn(async (payload: { id?: string }) => {
+				insertedPatientId = payload?.id ?? null;
+				return { error: null };
+			})
 		};
 		mocks.supabase.from.mockImplementation((table: string) => {
 			if (table === 'patients') return patientInsertBuilder;
@@ -134,30 +134,30 @@ describe('patients create action', () => {
 		try {
 			await actions.create_patient!(makeEvent(form));
 			throw new Error('Expected redirect');
-		} catch (err) {
+		} catch (err: any) {
 			expect(err).toMatchObject({
 				status: 303,
-				location: `/odonto/pacientes/${patientId}`
+				location: `/odonto/pacientes/${insertedPatientId}`
 			});
 		}
 
+		expect(insertedPatientId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
 		expect(professionalPatientLinkBuilder.insert).toHaveBeenCalledWith({
 			business_id: businessId,
 			professional_id: professionalId,
-			patient_id: patientId,
+			patient_id: insertedPatientId,
 			source: 'manual',
 			created_by: professionalUserId
 		});
 	});
 
 	it('creates a different patient even when the full name is exactly the same', async () => {
-		const secondPatientId = '00000000-0000-4000-8000-000000000005';
+		let insertedPatientId: string | null = null;
 		const patientInsertBuilder = {
-			insert: vi.fn(() => ({
-				select: vi.fn(() => ({
-					single: vi.fn(async () => ({ data: { id: secondPatientId }, error: null }))
-				}))
-			}))
+			insert: vi.fn(async (payload: { id?: string }) => {
+				insertedPatientId = payload?.id ?? null;
+				return { error: null };
+			})
 		};
 		mocks.supabase.from.mockImplementation((table: string) => {
 			if (table === 'patients') return patientInsertBuilder;
@@ -188,13 +188,14 @@ describe('patients create action', () => {
 		try {
 			await actions.create_patient!(makeEvent(form));
 			throw new Error('Expected redirect');
-		} catch (err) {
+		} catch (err: any) {
 			expect(err).toMatchObject({
 				status: 303,
-				location: `/odonto/pacientes/${secondPatientId}`
+				location: `/odonto/pacientes/${insertedPatientId}`
 			});
 		}
 
+		expect(insertedPatientId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
 		expect(patientInsertBuilder.insert).toHaveBeenCalledWith(
 			expect.objectContaining({ full_name: 'Juan Carlos Ramírez' })
 		);
@@ -203,13 +204,12 @@ describe('patients create action', () => {
 	});
 
 	it('crea otra ficha cuando el teléfono ya pertenece a una persona distinta', async () => {
-		const secondPatientId = '00000000-0000-4000-8000-000000000006';
+		let insertedPatientId: string | null = null;
 		const patientInsertBuilder = {
-			insert: vi.fn(() => ({
-				select: vi.fn(() => ({
-					single: vi.fn(async () => ({ data: { id: secondPatientId }, error: null }))
-				}))
-			}))
+			insert: vi.fn(async (payload: { id?: string }) => {
+				insertedPatientId = payload?.id ?? null;
+				return { error: null };
+			})
 		};
 		mocks.supabase.from.mockImplementation((table: string) => {
 			if (table === 'patients') return patientInsertBuilder;
@@ -240,13 +240,14 @@ describe('patients create action', () => {
 		try {
 			await actions.create_patient!(makeEvent(form));
 			throw new Error('Expected redirect');
-		} catch (err) {
+		} catch (err: any) {
 			expect(err).toMatchObject({
 				status: 303,
-				location: `/odonto/pacientes/${secondPatientId}`
+				location: `/odonto/pacientes/${insertedPatientId}`
 			});
 		}
 
+		expect(insertedPatientId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
 		expect(patientInsertBuilder.insert).toHaveBeenCalledWith(
 			expect.objectContaining({
 				full_name: 'Otra persona',
@@ -256,9 +257,68 @@ describe('patients create action', () => {
 		expect(professionalPatientLinkBuilder.insert).toHaveBeenCalledWith({
 			business_id: businessId,
 			professional_id: professionalId,
-			patient_id: secondPatientId,
+			patient_id: insertedPatientId,
 			source: 'manual',
 			created_by: professionalUserId
 		});
+	});
+
+	it('crea un paciente con rol owner sin requerir vínculo profesional', async () => {
+		mocks.resolveActiveBusiness.mockResolvedValue({
+			business: { id: businessId },
+			role: 'owner',
+			access: { allowedCapabilities: { ...allCapabilities } }
+		});
+
+		let insertedPatientId: string | null = null;
+		const patientInsertBuilder = {
+			insert: vi.fn(async (payload: { id?: string }) => {
+				insertedPatientId = payload?.id ?? null;
+				return { error: null };
+			})
+		};
+		mocks.supabase.from.mockImplementation((table: string) => {
+			if (table === 'patients') return patientInsertBuilder;
+			throw new Error(`Unexpected table ${table}`);
+		});
+
+		const patientLookupBuilder = chain({
+			maybeSingle: vi.fn(async () => ({ data: null, error: null }))
+		});
+		const professionalPatientLinkBuilder = chain({
+			insert: vi.fn(async () => ({ error: null }))
+		});
+		mocks.admin.from.mockImplementation((table: string) => {
+			if (table === 'patients') return patientLookupBuilder;
+			if (table === 'professional_patient_links') return professionalPatientLinkBuilder;
+			throw new Error(`Unexpected admin table ${table}`);
+		});
+
+		const form = new FormData();
+		form.set('full_name', 'Roberto');
+		form.set('dni', '4125789');
+		form.set('phone', '3652697');
+
+		try {
+			await actions.create_patient!(makeEvent(form));
+			throw new Error('Expected redirect');
+		} catch (err: any) {
+			expect(err).toMatchObject({
+				status: 303,
+				location: `/odonto/pacientes/${insertedPatientId}`
+			});
+		}
+
+		expect(insertedPatientId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+		expect(patientInsertBuilder.insert).toHaveBeenCalledWith(
+			expect.objectContaining({
+				id: insertedPatientId,
+				full_name: 'Roberto',
+				dni: '4125789',
+				business_id: businessId
+			})
+		);
+		// Owner does not create professional patient links
+		expect(professionalPatientLinkBuilder.insert).not.toHaveBeenCalled();
 	});
 });
