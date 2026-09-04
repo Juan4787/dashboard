@@ -39,7 +39,7 @@ const PROFESSIONAL_DELETE_PATIENT_MESSAGE =
 const PATIENT_UPDATE_CONFLICT_MESSAGE =
 	'La ficha cambió mientras la editabas. Recargá la ficha, revisá los datos y volvé a guardar.';
 
-export const isStaleUpdatedAt = (
+const isStaleUpdatedAt = (
 	expected: string | null | undefined,
 	current: string | null | undefined
 ): boolean => {
