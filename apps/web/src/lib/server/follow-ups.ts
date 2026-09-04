@@ -606,10 +606,32 @@ const loadScopedPendingFollowUp = async (admin: SupabaseClient, scope: RoleScope
 	return data;
 };
 
-const assertExpectedFollowUpVersion = (expectedUpdatedAt: string | null | undefined, existing: any) => {
-	const expected = typeof expectedUpdatedAt === 'string' ? expectedUpdatedAt.trim() : '';
-	if (!expected || expected !== String(existing.updated_at))
+export const isStaleFollowUpUpdatedAt = (
+	expected: string | null | undefined,
+	current: string | null | undefined,
+	toleranceMs = 1000
+): boolean => {
+	const trimmedExpected = typeof expected === 'string' ? expected.trim() : '';
+	const trimmedCurrent = typeof current === 'string' ? current.trim() : '';
+	if (!trimmedExpected || !trimmedCurrent) return true;
+	if (trimmedExpected === trimmedCurrent) return false;
+
+	const expectedMs = Date.parse(trimmedExpected);
+	const currentMs = Date.parse(trimmedCurrent);
+	if (!Number.isFinite(expectedMs) || !Number.isFinite(currentMs)) {
+		return trimmedExpected !== trimmedCurrent;
+	}
+
+	return Math.abs(currentMs - expectedMs) > toleranceMs;
+};
+
+export const assertExpectedFollowUpVersion = (
+	expectedUpdatedAt: string | null | undefined,
+	existing: any
+) => {
+	if (isStaleFollowUpUpdatedAt(expectedUpdatedAt, existing?.updated_at)) {
 		throw new FollowUpError('FOLLOWUP_STATUS_CONFLICT');
+	}
 };
 
 export const markFollowUpDone = async (

@@ -231,18 +231,18 @@ const createAvailabilityException = async (
 	});
 	if (!interval.ok) return { ok: false, status: 400, message: interval.message };
 
-	const { data, error } = await supabase
+	const exceptionId = crypto.randomUUID();
+	const { error } = await supabase
 		.from('availability_exceptions')
 		.insert({
+			id: exceptionId,
 			business_id: businessId,
 			professional_id: targetProfessionalId,
 			type,
 			starts_at: interval.startsAt.toISOString(),
 			ends_at: interval.endsAt.toISOString(),
 			reason: String(form.get('reason') ?? '').trim() || null
-		})
-		.select('id')
-		.single();
+		});
 	if (error) {
 		console.error('Error creando excepción', error);
 		return { ok: false, status: 500, message: 'No se pudo guardar el cambio puntual.' };
@@ -251,7 +251,7 @@ const createAvailabilityException = async (
 	return {
 		ok: true,
 		data: {
-			id: data?.id ?? null,
+			id: exceptionId,
 			professionalId: targetProfessionalId,
 			type,
 			periodMode: interval.periodMode,
@@ -421,9 +421,11 @@ export const actions: Actions = {
 			return fail(400, { message: 'La duración debe estar entre 5 y 480 minutos.' });
 		}
 
-		const { data, error } = await supabase
+		const serviceId = crypto.randomUUID();
+		const { error } = await supabase
 			.from('services')
 			.insert({
+				id: serviceId,
 				business_id: business.business.id,
 				name,
 				duration_minutes: duration,
@@ -433,11 +435,9 @@ export const actions: Actions = {
 				buffer_after_minutes: 0,
 				is_public: true,
 				is_active: true
-			})
-			.select('id')
-			.single();
+			});
 
-		if (error || !data) {
+		if (error) {
 			console.error('Error creando servicio desde profesional', error);
 			return fail(500, { message: 'No se pudo crear el servicio.' });
 		}
@@ -446,7 +446,7 @@ export const actions: Actions = {
 			{
 				business_id: business.business.id,
 				professional_id: params.professionalId,
-				service_id: data.id
+				service_id: serviceId
 			},
 			{ onConflict: 'business_id,professional_id,service_id' }
 		);
@@ -460,11 +460,11 @@ export const actions: Actions = {
 			userId,
 			action: 'service.created_from_professional',
 			entityType: 'service',
-			entityId: data.id,
+			entityId: serviceId,
 			metadata: { professional_id: params.professionalId, name, duration_minutes: duration }
 		});
 
-		return { success: true, message: 'Servicio creado y asignado.', serviceId: data.id };
+		return { success: true, message: 'Servicio creado y asignado.', serviceId };
 	},
 
 	update_service: async ({ request, locals, fetch, cookies }) => {

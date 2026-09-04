@@ -42,9 +42,11 @@ export const ensureDefaultServices = async (
 			continue;
 		}
 
-		const { data: created, error: insertError } = await supabase
+		const id = crypto.randomUUID();
+		const { error: insertError } = await supabase
 			.from('services')
 			.insert({
+				id,
 				business_id: businessId,
 				name,
 				description: null,
@@ -54,13 +56,11 @@ export const ensureDefaultServices = async (
 				price_label: null,
 				is_public: true,
 				is_active: true
-			})
-			.select('id')
-			.single();
-		if (insertError || !created?.id) {
-			throw insertError ?? new Error('DEFAULT_SERVICE_CREATE_FAILED');
+			});
+		if (insertError) {
+			throw insertError;
 		}
-		ids.push(String(created.id));
+		ids.push(id);
 	}
 	return ids;
 };

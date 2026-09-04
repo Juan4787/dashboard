@@ -650,9 +650,13 @@ export const actions: Actions = {
 				return fail(400, { message: humanProfessionalEmailConflict(existingProfessional), values });
 			}
 
-			const { data: createdProfessional, error: createError } = await supabase
+			const professionalId = crypto.randomUUID();
+			createdProfessionalId = professionalId;
+
+			const { error: createError } = await supabase
 				.from('professionals')
 				.insert({
+					id: professionalId,
 					business_id: businessId,
 					name: professionalName,
 					specialty: specialty || null,
@@ -661,15 +665,11 @@ export const actions: Actions = {
 					// Se habilita para reservas sólo si la cuenta ya existe. Si queda una
 					// invitación pendiente, la vinculación de la cuenta la publica automáticamente.
 					is_public: false
-				})
-				.select('id')
-				.single();
-			if (createError || !createdProfessional?.id) {
+				});
+			if (createError) {
 				console.error('Error creando profesional', createError);
 				return fail(500, { message: 'No se pudo crear el profesional.', values });
 			}
-			professionalId = String(createdProfessional.id);
-			createdProfessionalId = professionalId;
 
 			const rollback = async (admin: SupabaseClient) => {
 				// Borrar el profesional limpia en cascada asignaciones, reglas y excepciones.
@@ -685,9 +685,11 @@ export const actions: Actions = {
 				const defaultServiceIds = await ensureDefaultServicesAssigned(supabase, businessId, professionalId);
 
 				for (const newService of newServices) {
-					const { data: createdService, error: serviceError } = await supabase
+					const serviceId = crypto.randomUUID();
+					const { error: serviceError } = await supabase
 						.from('services')
 						.insert({
+							id: serviceId,
 							business_id: businessId,
 							name: newService.name,
 							duration_minutes: newService.duration_minutes,
@@ -697,13 +699,11 @@ export const actions: Actions = {
 							buffer_after_minutes: 0,
 							is_public: true,
 							is_active: true
-						})
-						.select('id')
-						.single();
-					if (serviceError || !createdService?.id) {
-						throw serviceError ?? new Error('SERVICE_CREATE_FAILED');
+						});
+					if (serviceError) {
+						throw serviceError;
 					}
-					createdServiceIds.push(String(createdService.id));
+					createdServiceIds.push(serviceId);
 				}
 
 				await setProfessionalServices(supabase, businessId, professionalId, [
